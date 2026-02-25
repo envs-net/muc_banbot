@@ -4,6 +4,7 @@ import time
 import aiosqlite
 from slixmpp import ClientXMPP
 from slixmpp.exceptions import IqError, IqTimeout
+from slixmpp.xmlstream import ET
 
 # ================= CONFIG =================
 JID = "adminbot@domain.tld"
@@ -40,13 +41,26 @@ class BanBot(ClientXMPP):
         self.db = None
         self.protected_rooms = set()
         self.occupants = {}
+        self.jid_to_nick = {}  # for ephemeral messages
 
-        self.register_plugin("xep_0030")
-        self.register_plugin("xep_0045")
+        self.register_plugin("xep_0030")  # Service Discovery
+        self.register_plugin("xep_0045")  # Multi-User Chat
 
         self.add_event_handler("session_start", self.start)
         self.add_event_handler("groupchat_message", self.on_message)
 
+    # ---------- HELPER FOR EPHEMERAL MESSAGES ----------
+    def send_ephemeral(self, mto, mbody):
+        """Send a message hinting server not to store it (XEP-0334)."""
+        msg = self.Message()
+        msg['to'] = mto
+        msg['type'] = 'groupchat'
+        msg['body'] = mbody
+        no_store = ET.Element('{urn:xmpp:hints}no-store')
+        msg.append(no_store)
+        msg.send()
+
+    # ---------- DATABASE ----------
     async def setup_db(self):
         self.db = await aiosqlite.connect(DB_FILE)
         await self.db.execute("""
@@ -66,6 +80,7 @@ class BanBot(ClientXMPP):
             for (room,) in rows:
                 self.protected_rooms.add(room)
 
+    # ---------- SESSION ----------
     async def start(self, _):
         await self.setup_db()
         self.send_presence()
@@ -84,19 +99,25 @@ class BanBot(ClientXMPP):
 
         asyncio.create_task(self.unban_worker())
 
+    # ---------- MUC OCCUPANTS ----------
     async def muc_online(self, presence):
         room = presence['from'].bare
         nick = presence['muc']['nick']
         role = presence['muc']['role']
         affiliation = presence['muc']['affiliation']
-        self.occupants.setdefault(room, {})[nick] = {"role": role, "affiliation": affiliation}
-        log.info("Occupant online: %s, role=%s, affiliation=%s", nick, role, affiliation)
+        jid = presence['muc'].get('jid')
+        self.occupants.setdefault(room, {})[nick] = {"role": role, "affiliation": affiliation, "jid": jid}
+        if jid:
+            self.jid_to_nick[jid] = nick
+        if room == ADMIN_ROOM:
+            log.info("Occupant online: %s, role=%s, affiliation=%s", nick, role, affiliation)
 
     async def muc_offline(self, presence):
         room = presence['from'].bare
         nick = presence['muc']['nick']
         self.occupants.get(room, {}).pop(nick, None)
-        log.info("Occupant offline: %s", nick)
+        if room == ADMIN_ROOM:
+            log.info("Occupant offline: %s", nick)
 
     def is_authorized(self, msg) -> bool:
         if msg["from"].bare != ADMIN_ROOM:
@@ -105,15 +126,18 @@ class BanBot(ClientXMPP):
         user_info = self.occupants.get(ADMIN_ROOM, {}).get(nick)
         return user_info and user_info.get("affiliation") in ("owner", "admin")
 
+    # ---------- MESSAGE HANDLER ----------
     async def on_message(self, msg):
         if msg["mucnick"] == NICK:
             return
         room = msg["from"].bare
         nick = msg["mucnick"]
         body = msg["body"].strip()
-        log.info("Message from %s (room=%s): %s", nick, room, body)
 
-        if body == "!help":
+        if room == ADMIN_ROOM:
+            log.info("Message from %s (room=%s): %s", nick, room, body)
+
+        if body == "!help" and room == ADMIN_ROOM:
             self.send_message(
                 mto=room,
                 mbody=(
@@ -162,29 +186,36 @@ class BanBot(ClientXMPP):
 
     # ---------- BAN HANDLING ----------
     async def ban_all(self, jid: str, until: int | None, issuer: str):
+        nick_display = self.jid_to_nick.get(jid, jid.split('@')[0])
         for room in self.protected_rooms:
             try:
                 await self.plugin["xep_0045"].set_affiliation(jid=jid, affiliation="outcast", room=room)
                 ts = until if until else 0
                 await self.db.execute("REPLACE INTO bans VALUES (?, ?, ?)", (jid, ts, issuer))
                 await self.db.commit()
-                msg = f"✅ Banned {jid} by {issuer}"
-                self.send_message(mto=room, mbody=msg, mtype="groupchat")
+                msg = f"✅ Banned {nick_display}"
+
                 if room != ADMIN_ROOM:
-                    self.send_message(mto=ADMIN_ROOM, mbody=f"[{room}] {msg}", mtype="groupchat")
+                    self.send_ephemeral(room, msg)
+                    self.send_message(mto=ADMIN_ROOM, mbody=f"[{room}] {msg} by {issuer}", mtype="groupchat")
+                else:
+                    self.send_message(mto=room, mbody=msg, mtype="groupchat")
             except (IqError, IqTimeout) as e:
                 log.error("Ban failed in %s: %s", room, e)
 
     async def unban_all(self, jid: str, issuer: str | None = None):
+        nick_display = self.jid_to_nick.get(jid, jid.split('@')[0])
         for room in self.protected_rooms:
             try:
                 await self.plugin["xep_0045"].set_affiliation(jid=jid, affiliation="none", room=room)
                 await self.db.execute("DELETE FROM bans WHERE jid=?", (jid,))
                 await self.db.commit()
-                msg = f"♻️ Unbanned {jid}" + (f" by {issuer}" if issuer else "")
-                self.send_message(mto=room, mbody=msg, mtype="groupchat")
+                msg = f"♻️ Unbanned {nick_display}" + (f" by {issuer}" if issuer else "")
                 if room != ADMIN_ROOM:
+                    self.send_ephemeral(room, msg)
                     self.send_message(mto=ADMIN_ROOM, mbody=f"[{room}] {msg}", mtype="groupchat")
+                else:
+                    self.send_message(mto=room, mbody=msg, mtype="groupchat")
             except (IqError, IqTimeout) as e:
                 log.error("Unban failed in %s: %s", room, e)
 
