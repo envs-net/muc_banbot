@@ -9,8 +9,10 @@ It allows centralized administration from a designated admin room and protects m
 
 - Central admin room for issuing commands.  
 - Ban, temporary ban, unban, and banlist commands.  
+- Optional comments for bans (e.g., `!tempban user 10m calm down!`).  
 - Add/remove protected rooms dynamically.  
 - Auto-rejoin and auto-apply bans on restart.  
+- Auto-sync existing room bans into the database at startup.  
 - Human-readable remaining time for temporary bans.  
 - Automatic unbanning of expired bans.  
 - Logs ban/unban actions in both protected rooms and admin room.  
@@ -18,14 +20,16 @@ It allows centralized administration from a designated admin room and protects m
 ### Commands (admin only)
 
 - `!help` – Show available commands  
-- `!ban <jid|nick>` – Ban a user from all protected rooms  
-- `!tempban <jid|nick> <duration>` – Temporarily ban a user (e.g., `10m`, `2h`, `1d`)  
+- `!ban <jid|nick> [comment]` – Ban a user from all protected rooms  
+- `!tempban <jid|nick> <duration> [comment]` – Temporarily ban a user (e.g., `10m`, `2h`, `1d`)  
 - `!unban <jid>` – Unban a user from all protected rooms  
-- `!banlist` – Show all active bans with remaining time  
+- `!banlist` – Show all active bans with remaining time and comments  
 - `!room add <room>` – Add a room to the protected list  
 - `!room remove <room>` – Remove a room from the protected list  
 - `!room list` – List all protected rooms  
 - `!sync` – Rejoin all protected rooms and reapply active bans  
+- `!syncadmins` – Update admin list from the admin room  
+- `!syncbans` – Sync existing bans from protected rooms into the database and apply them  
 - `!status` – Show bot health  
 - `!whoami` – Show your role/affiliation in the admin room  
 
