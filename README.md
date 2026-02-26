@@ -16,7 +16,7 @@ It allows centralized administration from a designated admin room and protects m
 - Human-readable remaining time for temporary bans.  
 - Automatic unbanning of expired bans.  
 - Logs ban/unban actions in both protected rooms and admin room.  
-- `!why <nick|jid>` now works with nick-to-JID mapping.  
+- `!why <nick|jid>` works with nick-to-JID mapping.  
 
 ---
 
@@ -27,7 +27,6 @@ It allows centralized administration from a designated admin room and protects m
 - `!tempban <jid|nick> <duration> [comment]` – Temporarily ban a user (e.g., `10m`, `2h`, `1d`)  
 - `!unban <jid|nick>` – Unban a user from all protected rooms  
 - `!banlist` – Show all active bans with remaining time and comments  
-- `!why <jid|nick>` – Show reason and remaining time for a ban (works with nick → JID mapping)  
 - `!room add <room>` – Add a room to the protected list  
 - `!room remove <room>` – Remove a room from the protected list  
 - `!room list` – List all protected rooms  
@@ -36,6 +35,7 @@ It allows centralized administration from a designated admin room and protects m
 - `!syncbans` – Sync existing bans from protected rooms into the database and apply them  
 - `!status` – Show bot health  
 - `!whoami` – Show your role/affiliation in the admin room  
+- `!why <jid|nick>` – Show reason and remaining time for a ban (works with nick → JID mapping)  
 
 ---
 
@@ -127,6 +127,12 @@ sudo systemctl start muc_banbot
 sudo systemctl enable muc_banbot
 sudo journalctl -u muc_banbot -f  # follow logs
 ```
+
+## Security Notes
+
+- The bot account **must have moderator or admin privileges** in all protected rooms.
+- The admin room affiliation model is the **single source of truth** for authorization.
+  (Admin users need admin or owner privileges.)
 
 # Database
 
