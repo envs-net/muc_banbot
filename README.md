@@ -16,14 +16,18 @@ It allows centralized administration from a designated admin room and protects m
 - Human-readable remaining time for temporary bans.  
 - Automatic unbanning of expired bans.  
 - Logs ban/unban actions in both protected rooms and admin room.  
+- `!why <nick|jid>` now works with nick-to-JID mapping.  
 
-### Commands (admin only)
+---
+
+## Commands (admin only)
 
 - `!help` – Show available commands  
 - `!ban <jid|nick> [comment]` – Ban a user from all protected rooms  
 - `!tempban <jid|nick> <duration> [comment]` – Temporarily ban a user (e.g., `10m`, `2h`, `1d`)  
-- `!unban <jid>` – Unban a user from all protected rooms  
+- `!unban <jid|nick>` – Unban a user from all protected rooms  
 - `!banlist` – Show all active bans with remaining time and comments  
+- `!why <jid|nick>` – Show reason and remaining time for a ban (works with nick → JID mapping)  
 - `!room add <room>` – Add a room to the protected list  
 - `!room remove <room>` – Remove a room from the protected list  
 - `!room list` – List all protected rooms  
@@ -32,6 +36,14 @@ It allows centralized administration from a designated admin room and protects m
 - `!syncbans` – Sync existing bans from protected rooms into the database and apply them  
 - `!status` – Show bot health  
 - `!whoami` – Show your role/affiliation in the admin room  
+
+---
+
+## Public Commands (in protected rooms)
+
+- `!help` – Show limited help  
+- `!banlist` – Show active temporary bans  
+- `!why <nick>` – Show reason and remaining time for a ban (works with nick → JID mapping)  
 
 ---
 
@@ -115,3 +127,30 @@ sudo systemctl start muc_banbot
 sudo systemctl enable muc_banbot
 sudo journalctl -u muc_banbot -f  # follow logs
 ```
+
+# Database
+
+BanBot uses **SQLite (`bans.db`)** with two tables:
+
+## `bans`
+| Column  | Type    | Description                                      |
+|---------|---------|--------------------------------------------------|
+| `jid`   | TEXT    | User JID (optional if nick exists)              |
+| `nick`  | TEXT    | User nickname (optional if JID exists)         |
+| `until` | INTEGER | Expiration time as Unix timestamp (`0` = permanent) |
+| `issuer`| TEXT    | Who issued the ban                              |
+| `comment`| TEXT   | Optional reason/comment                          |
+
+## `rooms`
+| Column | Type | Description          |
+|--------|------|--------------------|
+| `room` | TEXT | Protected room name |
+
+---
+
+## Notes
+
+- Temporary bans expire automatically and are removed by the bot.  
+- `!why` supports looking up bans by **JID** or **nick**, including nick-to-JID mapping.  
+- Ephemeral messages are used in protected rooms and do not persist.  
+- The admin room always receives notifications about ban/unban actions.  
