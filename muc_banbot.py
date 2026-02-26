@@ -428,11 +428,30 @@ class BanBot(ClientXMPP):
         ban_jid = identifier if is_jid else None
         ban_nick = None if is_jid else identifier.lower()
 
-        async with self.db.execute(
-            "SELECT jid, nick, until, issuer, comment FROM bans WHERE jid=? OR nick=?", 
-            (ban_jid, ban_nick)
-        ) as cursor:
-            row = await cursor.fetchone()
+        row = None
+        # 1. Check direct JID
+        if ban_jid:
+            async with self.db.execute(
+                "SELECT jid, nick, until, issuer, comment FROM bans WHERE jid=?",
+                (ban_jid,)
+            ) as cursor:
+                row = await cursor.fetchone()
+
+        # 2. Check Nick
+        if not row:
+            async with self.db.execute(
+                "SELECT jid, nick, until, issuer, comment FROM bans WHERE LOWER(nick)=?",
+                (ban_nick,)
+            ) as cursor:
+                row = await cursor.fetchone()
+
+        # 3. Check Nick against JIDs in DB
+        if not row and ban_nick:
+            async with self.db.execute("SELECT jid, nick, until, issuer, comment FROM bans") as cursor:
+                async for jid_db, nick_db, until, issuer, comment in cursor:
+                    if jid_db and self.bare_jid(jid_db).split("@")[0].lower() == ban_nick:
+                        row = (jid_db, nick_db, until, issuer, comment)
+                        break
 
         if row:
             jid_db, nick_db, until, issuer, comment = row
