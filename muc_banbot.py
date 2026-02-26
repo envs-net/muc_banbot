@@ -7,9 +7,9 @@ from slixmpp.exceptions import IqError, IqTimeout
 from slixmpp.xmlstream import ET
 
 # ================= CONFIG =================
-JID = "adminbot@envs.net"
-PASSWORD = "FQEPH3KC6BtG6rr4OI0GJkq5L4R1LidD"
-ADMIN_ROOM = "admin@conference.envs.net"
+JID = "adminbot@domain.tld"
+PASSWORD = "yourpassword"
+ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
 DB_FILE = "bans.db"
 # ==========================================
