@@ -198,55 +198,51 @@ class BanBot(ClientXMPP):
     async def on_message(self, msg):
         if msg["mucnick"] == NICK:
             return
+
         room = msg["from"].bare
         nick = msg["mucnick"]
         body = msg["body"].strip()
         parts = body.split()
         cmd = parts[0] if parts else ""
 
-        # ---------- HELP ----------
         if cmd == "!help":
             if room == ADMIN_ROOM and self.is_authorized(msg):
-                self.send_message(
-                    mto=room,
-                    mbody=(
-                        "!help - show this help\n"
-                        "!ban <jid|nick> [comment] - ban user from protected rooms\n"
-                        "!tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
-                        "!unban <jid|nick> - remove ban\n"
-                        "!banlist - show current bans\n"
-                        "!room add/remove/list - manage protected rooms\n"
-                        "!sync - rejoin rooms and enforce bans\n"
-                        "!syncadmins - update admin list\n"
-                        "!syncbans - sync bans from rooms\n"
-                        "!reloadconfig - reload config.py at runtime\n"
-                        "!status - bot status\n"
-                        "!whoami - your affiliation\n"
-                        "!why <nick|jid> - show ban reason"
-                    ),
-                    mtype="groupchat"
+                text = (
+                    "!help - show this help\n"
+                    "!ban <jid|nick> [comment] - ban user from protected rooms\n"
+                    "!tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
+                    "!unban <jid|nick> - remove ban\n"
+                    "!banlist - show current bans\n"
+                    "!room add/remove/list - manage protected rooms\n"
+                    "!sync - rejoin rooms and enforce bans\n"
+                    "!syncadmins - update admin list\n"
+                    "!syncbans - sync bans from rooms\n"
+                    "!reloadconfig - reload config.py at runtime\n"
+                    "!status - bot status\n"
+                    "!whoami - your affiliation\n"
+                    "!why <nick|jid> - show ban reason"
                 )
             elif room in self.protected_rooms:
-                self.send_message(
-                    mto=room,
-                    mbody="!help - show this help\n!banlist - show temporary bans\n!why <nick> - show ban reason",
-                    mtype="groupchat"
-                )
-            return
-
-        # ---------- BANLIST ----------
-        if cmd == "!banlist":
-            if room == ADMIN_ROOM or room in self.protected_rooms:
-                await self.cmd_banlist(room)
+                text = "!help - show this help\n!banlist - show temporary bans\n!why <nick> - show ban reason"
             else:
-                self.send_message(mto=room, mbody="❌ You are not authorized.", mtype="groupchat")
+                return
+            self.send_message(mto=room, mbody=text, mtype="groupchat")
             return
 
-        # ---------- ADMIN COMMANDS ----------
-        admin_commands = ("!ban", "!tempban", "!unban", "!room", "!sync", "!syncadmins", "!syncbans", "!status", "!whoami", "!reloadconfig")
+        if cmd == "!banlist" and (room == ADMIN_ROOM or room in self.protected_rooms):
+            await self.cmd_banlist(room)
+            return
+
+        if cmd == "!why" and len(parts) >= 2 and (room == ADMIN_ROOM or room in self.protected_rooms):
+            await self.cmd_why(parts[1], room)
+            return
+
+        admin_commands = (
+            "!ban", "!tempban", "!unban", "!room", "!sync",
+            "!syncadmins", "!syncbans", "!status", "!whoami", "!reloadconfig"
+        )
         if cmd in admin_commands:
             if room != ADMIN_ROOM or not self.is_authorized(msg):
-                self.send_message(mto=room, mbody="❌ You are not authorized.", mtype="groupchat")
                 return
 
             if cmd == "!ban" and len(parts) >= 2:
@@ -281,36 +277,19 @@ class BanBot(ClientXMPP):
                     log.error("Failed to reload config: %s", e)
             elif cmd == "!status":
                 status_lines = ["✅ Bot is online and healthy."]
-
                 admin_infos = self.occupants.get(ADMIN_ROOM, {})
                 admins = [
                     f"{nick} ({info['jid']})"
                     for nick, info in admin_infos.items()
                     if info.get("affiliation") in ("owner", "admin")
                 ]
-                if admins:
-                    status_lines.append("🛡️ Admins/Owners in Admin-Room:\n" + "\n".join(admins))
-                else:
-                    status_lines.append("⚠️ No admins/owners found in Admin-Room.")
-
-                if self.protected_rooms:
-                    status_lines.append("🔒 Protected Rooms:\n" + "\n".join(self.protected_rooms))
-                else:
-                    status_lines.append("⚠️ No protected rooms configured.")
-
-                self.send_message(
-                    mto=room,
-                    mbody="\n".join(status_lines),
-                    mtype="groupchat"
-                )
+                status_lines.append("🛡️ Admins/Owners in Admin-Room:\n" + "\n".join(admins) if admins else "⚠️ No admins/owners found in Admin-Room.")
+                status_lines.append("🔒 Protected Rooms:\n" + "\n".join(self.protected_rooms) if self.protected_rooms else "⚠️ No protected rooms configured.")
+                self.send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
             elif cmd == "!whoami":
                 info = self.occupants.get(room, {}).get(nick, {})
                 self.send_message(mto=room, mbody=f"You are {info.get('affiliation', 'none')}", mtype="groupchat")
             return
-
-        # ---------- WHY ----------
-        if cmd == "!why" and len(parts) >= 2:
-            await self.cmd_why(parts[1], room)
 
     # ---------- HELPER ----------
     @staticmethod
