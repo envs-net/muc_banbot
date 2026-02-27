@@ -2,17 +2,13 @@ import asyncio
 import logging
 import time
 import aiosqlite
+import importlib
+import config
 from slixmpp import ClientXMPP
 from slixmpp.exceptions import IqError, IqTimeout
 from slixmpp.xmlstream import ET
 
-# ================= CONFIG =================
-JID = "adminbot@domain.tld"
-PASSWORD = "yourpassword"
-ADMIN_ROOM = "admin@muc.domain.tld"
-NICK = "adminbot"
-DB_FILE = "bans.db"
-# ==========================================
+from config import JID, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -44,6 +40,7 @@ class BanBot(ClientXMPP):
         self.protected_rooms = set()
         self.occupants = {}
         self.jid_to_nick = {}
+        self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", True)
 
         self.register_plugin("xep_0030")  # Service Discovery
         self.register_plugin("xep_0045")  # Multi-User Chat
@@ -70,6 +67,11 @@ class BanBot(ClientXMPP):
         no_store = ET.Element("{urn:xmpp:hints}no-store")
         msg.append(no_store)
         msg.send()
+
+    # ---------- SHOW_BAN_IN_MUC HELPER ----------
+    def notify_protected(self, room: str, message: str):
+        if self.show_ban_in_muc:
+            self.send_ephemeral(room, message)
 
     # ---------- DATABASE ----------
     async def setup_db(self):
@@ -127,7 +129,7 @@ class BanBot(ClientXMPP):
             log.info("Joined protected room %s", room)
 
         # --- Sync Admins immediately after joining admin room ---
-        await self.sync_admins()
+        await self.sync_admins(announce=False)
 
         # --- Startup ban sync only applies active bans ---
         await self.sync_bans_startup()
@@ -217,6 +219,7 @@ class BanBot(ClientXMPP):
                         "!sync - rejoin rooms and enforce bans\n"
                         "!syncadmins - update admin list\n"
                         "!syncbans - sync bans from rooms\n"
+                        "!reloadconfig - reload config.py at runtime\n"
                         "!status - bot status\n"
                         "!whoami - your affiliation\n"
                         "!why <nick|jid> - show ban reason"
@@ -240,7 +243,7 @@ class BanBot(ClientXMPP):
             return
 
         # ---------- ADMIN COMMANDS ----------
-        admin_commands = ("!ban", "!tempban", "!unban", "!room", "!sync", "!syncadmins", "!syncbans", "!status", "!whoami")
+        admin_commands = ("!ban", "!tempban", "!unban", "!room", "!sync", "!syncadmins", "!syncbans", "!status", "!whoami", "!reloadconfig")
         if cmd in admin_commands:
             if room != ADMIN_ROOM or not self.is_authorized(msg):
                 self.send_message(mto=room, mbody="❌ You are not authorized.", mtype="groupchat")
@@ -264,11 +267,42 @@ class BanBot(ClientXMPP):
             elif cmd == "!sync":
                 await self.sync_rooms()
             elif cmd == "!syncadmins":
-                await self.sync_admins()
+                await self.sync_admins(announce=True)
             elif cmd == "!syncbans":
                 await self.sync_bans()
+            elif cmd == "!reloadconfig":
+                try:
+                    importlib.reload(config)
+                    self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", True)
+                    self.send_message(mto=room, mbody="✅ Config reloaded successfully.", mtype="groupchat")
+                    log.info("Config reloaded at runtime.")
+                except Exception as e:
+                    self.send_message(mto=room, mbody=f"❌ Failed to reload config: {e}", mtype="groupchat")
+                    log.error("Failed to reload config: %s", e)
             elif cmd == "!status":
-                self.send_message(mto=room, mbody="✅ Bot is online and healthy.", mtype="groupchat")
+                status_lines = ["✅ Bot is online and healthy."]
+
+                admin_infos = self.occupants.get(ADMIN_ROOM, {})
+                admins = [
+                    f"{nick} ({info['jid']})"
+                    for nick, info in admin_infos.items()
+                    if info.get("affiliation") in ("owner", "admin")
+                ]
+                if admins:
+                    status_lines.append("🛡️ Admins/Owners in Admin-Room:\n" + "\n".join(admins))
+                else:
+                    status_lines.append("⚠️ No admins/owners found in Admin-Room.")
+
+                if self.protected_rooms:
+                    status_lines.append("🔒 Protected Rooms:\n" + "\n".join(self.protected_rooms))
+                else:
+                    status_lines.append("⚠️ No protected rooms configured.")
+
+                self.send_message(
+                    mto=room,
+                    mbody="\n".join(status_lines),
+                    mtype="groupchat"
+                )
             elif cmd == "!whoami":
                 info = self.occupants.get(room, {}).get(nick, {})
                 self.send_message(mto=room, mbody=f"You are {info.get('affiliation', 'none')}", mtype="groupchat")
@@ -355,7 +389,7 @@ class BanBot(ClientXMPP):
                 if room == ADMIN_ROOM:
                     self.send_message(mto=room, mbody=msg_admin, mtype="groupchat")
                 else:
-                    self.send_ephemeral(room, msg_protected)
+                    self.notify_protected(room, msg_protected)
                     # Admin room always receives msg_admin
                     self.send_message(mto=ADMIN_ROOM, mbody=f"[{room}] {msg_admin}", mtype="groupchat")
 
@@ -407,7 +441,7 @@ class BanBot(ClientXMPP):
             if room == ADMIN_ROOM:
                 self.send_message(mto=room, mbody=msg_admin, mtype="groupchat")
             else:
-                self.send_ephemeral(room, msg_protected)
+                self.notify_protected(room, msg_protected)
                 # Admin room always receives msg_admin
                 self.send_message(mto=ADMIN_ROOM, mbody=f"[{room}] {msg_admin}", mtype="groupchat")
 
@@ -440,7 +474,7 @@ class BanBot(ClientXMPP):
             text = "\n".join(entries) if entries else "No active temporary bans."
 
         if room != ADMIN_ROOM:
-            self.send_ephemeral(room, text)
+            self.notify_protected(room, text)
         else:
             self.send_message(mto=room, mbody=text, mtype="groupchat")
 
@@ -492,7 +526,7 @@ class BanBot(ClientXMPP):
             msg = f"No ban found for {identifier}"
 
         if room != ADMIN_ROOM:
-            self.send_ephemeral(room, msg)
+            self.notify_protected(room, msg)
         else:
             self.send_message(mto=room, mbody=msg, mtype="groupchat")
 
@@ -523,38 +557,42 @@ class BanBot(ClientXMPP):
             self.plugin["xep_0045"].join_muc(room, NICK)
         log.info("Rooms synced.")
 
-    async def sync_admins(self):
+    async def sync_admins(self, announce: bool = False):
         room = ADMIN_ROOM
         try:
             owners = await self.plugin["xep_0045"].get_users_by_affiliation(room, "owner")
             admins = await self.plugin["xep_0045"].get_users_by_affiliation(room, "admin")
 
             self.occupants[room] = self.occupants.get(room, {})
-
             admin_list = []
 
             for jid in owners + admins:
                 bare = self.bare_jid(str(jid))
                 nick = None
+
                 for n, info in self.occupants.get(room, {}).items():
                     if info.get("jid") and self.bare_jid(info["jid"]) == bare:
                         nick = n
                         break
+
                 aff = "owner" if jid in owners else "admin"
                 self.occupants[room][nick or bare] = {
                     "role": "moderator" if nick else "participant",
                     "affiliation": aff,
                     "jid": bare,
                 }
+
                 admin_list.append(f"{nick or bare} ({bare})")
 
-            if admin_list:
-                msg = "✅ Current admins/owners in Admin-Room:\n" + "\n".join(admin_list)
-            else:
-                msg = "⚠️ No admins/owners found in Admin-Room."
-
-            self.send_message(mto=ADMIN_ROOM, mbody=msg, mtype="groupchat")
             log.info("Admins synced: %s", admin_list)
+
+            if announce:
+                if admin_list:
+                    msg = "✅ Current admins/owners in Admin-Room:\n" + "\n".join(admin_list)
+                else:
+                    msg = "⚠️ No admins/owners found in Admin-Room."
+
+                self.send_message(mto=ADMIN_ROOM, mbody=msg, mtype="groupchat")
 
         except Exception as e:
             log.warning("Failed to sync admins: %s", e)
