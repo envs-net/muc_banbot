@@ -92,7 +92,13 @@ pip install -r requirements.txt
 ### 5. Configuration
 
 Copy `config_sample.py` to `config.py` and configure as needed.  
-(Changing `SHOW_BAN_IN_MUC` does **not require a bot restart**. run `!reloadconfig` in the admin room to apply changes immediately.)
+
+**The following changes do not require a bot restart:**
+(run `!reloadconfig` in the admin room to apply changes immediately.)
+
+- ANNOUNCE_STARTUP
+- SHOW_BAN_IN_MUC
+- ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS
 
 ### 6. Test the bot manually
 
