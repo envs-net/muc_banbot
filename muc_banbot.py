@@ -276,7 +276,7 @@ class BanBot(ClientXMPP):
         room_occ = self.occupants.get(room)
         if room_occ and nick in room_occ:
             info = room_occ.pop(nick)
-            log.info("⛔ %s went offline in %s (jid=%s, affiliation=%s, role=%s)",
+            log.debug("⛔ %s went offline in %s (jid=%s, affiliation=%s, role=%s)",
                      nick,
                      room,
                      info.get("jid", "unknown"),

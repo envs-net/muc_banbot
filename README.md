@@ -93,7 +93,7 @@ pip install -r requirements.txt
 
 Copy `config_sample.py` to `config.py` and configure as needed.  
 
-**The following changes do not require a bot restart:**
+**The following changes do not require a bot restart:**  
 (run `!reloadconfig` in the admin room to apply changes immediately.)
 
 - ANNOUNCE_STARTUP
@@ -198,4 +198,4 @@ sudo journalctl -u muc_banbot -f
 * `!why` supports lookup by **JID** or **nick**, including nick-to-JID mapping.
 * Ephemeral messages in protected rooms do not persist.
 * Admin room always receives full notifications about ban/unban actions.
-* Changing `SHOW_BAN_IN_MUC` or `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` can be applied **without bot restart** via `!reloadconfig`.
+* config.py changes can be applied **without bot restart** via `!reloadconfig`. see Installation Step 5. Configuration
