@@ -699,11 +699,16 @@ class BanBot(ClientXMPP):
             msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + (f" by {issuer}" if issuer else "")
             self.send_message(mto=ADMIN_ROOM, mbody=msg, mtype="groupchat")
 
-        elif room in self.protected_rooms and self.allow_user_cmds:
-            # Only nick (anonymized)
+        elif room in self.protected_rooms:
             display = ban_nick or "Unknown"
             msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "")
-            self.notify_protected(room, msg)
+
+            # ALWAYS run commands, SHOW_BAN_IN_MUC only hides the *message*
+            if self.allow_user_cmds:
+                # show ephemeral only if configured
+                if self.show_ban_in_muc:
+                    self.send_ephemeral(room, msg)
+                # otherwise only log internally / skip sending
 
     # ---------- BAN ALL ----------
     async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None):
@@ -1382,7 +1387,7 @@ class BanBot(ClientXMPP):
             text = "\n".join(entries) if entries else "No active temporary bans."
 
         if room != ADMIN_ROOM:
-            self.notify_protected(room, text)
+            self.send_ephemeral(room, text)
         else:
             self.send_message(mto=room, mbody=text, mtype="groupchat")
 
@@ -1436,7 +1441,7 @@ class BanBot(ClientXMPP):
             msg = f"No ban found for {identifier}"
 
         if room != ADMIN_ROOM:
-            self.notify_protected(room, msg)
+            self.send_ephemeral(room, msg)
         else:
             self.send_message(mto=room, mbody=msg, mtype="groupchat")
 
