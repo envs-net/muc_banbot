@@ -34,12 +34,12 @@ It provides central administration via an admin room and protects multiple chat 
 | `!room add <room>` | Adds a room to the protected list and stores it in the DB | `!room add secretroom@muc.example.com` |
 | `!room remove <room>` | Removes a room from the protected list and DB | `!room remove secretroom@muc.example.com` |
 | `!room list` | Lists all protected rooms | `!room list` |
-| `!ban <jid|nick> [comment]` | Bans a user across all protected rooms | `!ban alice@example.com spamming` |
-| `!tempban <jid|nick> <10m|2h|1d> [comment]` | Temporary ban | `!tempban bob 10m rude behavior` |
-| `!unban <jid|nick>` | Removes a ban | `!unban bob` |
+| `!ban <jid/nick> [comment]` | Bans a user across all protected rooms | `!ban alice@example.com spamming` |
+| `!tempban <jid/nick> <10m/2h/1d> [comment]` | Temporary ban | `!tempban bob 10m rude behavior` |
+| `!unban <jid/nick>` | Removes a ban | `!unban bob` |
 | `!banlist` | Shows all active bans with remaining time and comments | `!banlist` |
 | `!bansearch <query>` | Searches bans by nick, JID, or domain | `!bansearch example.com` |
-| `!why <nick|jid>` | Shows the reason and remaining time of a ban | `!why bob` |
+| `!why <nick/jid>` | Shows the reason and remaining time of a ban | `!why bob` |
 | `!sync` | Full room sync: rejoins all protected rooms, checks bot admin/owner rights, and applies all active bans | `!sync` |
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
 | `!syncbans` | Syncs bans from all rooms into the DB and applies them | `!syncbans` |
