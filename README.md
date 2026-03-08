@@ -81,6 +81,8 @@ cd muc_banbot
 ### 3. Setup Python virtual environment
 
 ```bash
+sudo apt install python3-venv python3-pip
+
 python3 -m venv venv
 source venv/bin/activate
 ```

@@ -1,12 +1,24 @@
+#!/usr/bin/env python3
+
+# muc_banbot: XMPP Multi-Room Ban Management Bot
+# Author: creme <xmpp:creme@envs.net>
+# License: MIT
+
+import os
+import config
 import asyncio
 import logging
 import time
 import aiosqlite
+import slixmpp
+import pathlib
 import importlib
-import config
+import mimetypes, hashlib, base64
 from slixmpp import ClientXMPP
 from slixmpp.exceptions import IqError, IqTimeout
 from slixmpp.xmlstream import ET
+from slixmpp.stanza.presence import Presence
+from slixmpp.plugins.xep_0054 import VCardTemp
 
 from config import JID, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
 
@@ -50,7 +62,10 @@ def human_time(seconds: int) -> str:
 class BanBot(ClientXMPP):
     def __init__(self, jid: str, password: str):
         """
-        Initialize BanBot.
+        Initialize the bot with:
+        - Connection info (jid/password)
+        - RAM caches for bans and admin state
+        - Semaphores to avoid flooding XMPP server
         Sets up DB, protected rooms, occupants dicts, and registers XMPP plugins.
         """
         super().__init__(jid, password)
@@ -60,12 +75,17 @@ class BanBot(ClientXMPP):
         # Prevents flooding the XMPP server with too many IQ stanzas at once
         self.muc_write_semaphore = asyncio.Semaphore(5)
 
+        # Ban Cache: key -> (jid_bare, nick, until, issuer, comment)
+        self.ban_cache: dict[str, tuple[str | None, str | None, int, str | None, str | None]] = {}
+
+        self.bot_admin_state: dict[str, bool] = {}
+        self.occupants: dict[str, dict] = {}
         self.protected_rooms: set[str] = set()
-        self.occupants: dict[str, dict[str, dict]] = {}
+        self.registered_rooms: set[str] = set()
         self.jid_to_nick: dict[str, str] = {}
-        self.bot_admin_state = {}
         self.room_join_time = {}
         self.reconnecting = False
+
         self.announce_startup: bool = getattr(config, "ANNOUNCE_STARTUP", True)
         self.show_ban_in_muc: bool = getattr(config, "SHOW_BAN_IN_MUC", True)
         self.allow_user_cmds: bool = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
@@ -73,11 +93,16 @@ class BanBot(ClientXMPP):
         # --- Register XMPP plugins ---
         self.register_plugin("xep_0030")  # Service Discovery
         self.register_plugin("xep_0045")  # Multi-User Chat
+        self.register_plugin('xep_0054')  # vCard
+        self.register_plugin('xep_0084')  # Moderner Avatar
+        self.register_plugin('xep_0153')  # vCard Avatar Kompatibilität
 
         # --- Event handlers ---
         self.add_event_handler("session_start", self.start)
         self.add_event_handler("groupchat_message", self.on_message)
         self.add_event_handler("groupchat_presence", self.on_muc_presence)
+        self.add_event_handler("disconnected", self.on_disconnect)
+        self.add_event_handler("connection_failed", self.on_disconnect)
 
     # ---------- ADMIN / OWNER PROTECTION ----------
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
@@ -188,13 +213,77 @@ class BanBot(ClientXMPP):
             ready = True
             for r in self.protected_rooms | {ADMIN_ROOM}:
                 occ = self.occupants.get(r)
-                if occ is None:
+                if occ is None or len(occ) == 0:
                     ready = False
                     break
             if ready:
                 return
             await asyncio.sleep(2)
         log.warning("Timeout waiting for occupants; some users may not be kicked immediately")
+
+    # ---------- AVATAR HELPER ----------
+    async def set_avatar(self):
+        """
+        Update bot avatar for all major XMPP clients.
+        Uses config.AVATAR_PATH
+        Updates:
+          - XEP-0054 (vCard photo)
+          - XEP-0084 (User Avatar / vCard4)
+          - XEP-0153 (Avatar hash in presence)
+        """
+        avatar_path = getattr(config, "AVATAR_PATH", None)
+        if not avatar_path or not pathlib.Path(avatar_path).exists():
+            logging.warning("⚠️ AVATAR_PATH not set or file does not exist")
+            return False
+
+        try:
+            with open(avatar_path, "rb") as f:
+                image_data = f.read()
+        except Exception as e:
+            logging.error("Failed to read avatar image %s: %s", avatar_path, e)
+            return False
+
+        avatar_type = f"image/{pathlib.Path(avatar_path).suffix.lstrip('.').lower()}"
+
+        # --- XEP-0054: vCard photo ---
+        try:
+            vcard = self['xep_0054'].make_vcard()
+            vcard['PHOTO']['TYPE'] = avatar_type
+            vcard['PHOTO']['BINVAL'] = image_data
+            await self['xep_0054'].publish_vcard(vcard)
+            logging.info("✅ XEP-0054 avatar updated successfully")
+        except Exception as e:
+            logging.warning("⚠️ Failed to update XEP-0054 avatar: %s", e)
+
+        # --- XEP-0084: User Avatar / vCard4 ---
+        try:
+            await self['xep_0084'].publish_avatar(image_data)
+            logging.info("✅ XEP-0084 avatar updated successfully")
+        except Exception as e:
+            logging.warning("⚠️ Failed to update XEP-0084 avatar: %s", e)
+
+        # --- XEP-0153: Avatar hash in presence ---
+        try:
+            # SHA1 hex hash (XEP-0153 requires hex)
+            sha1_hex = hashlib.sha1(image_data).hexdigest()
+
+            # Build <x xmlns='vcard-temp:x:update'><photo>HASH</photo></x>
+            x = ET.Element("{vcard-temp:x:update}x")
+            photo = ET.SubElement(x, "photo")
+            photo.text = sha1_hex
+
+            await asyncio.sleep(1)
+
+            # Build a Presence stanza and send
+            presence = Presence()
+            presence.append(x)
+            self.send(presence)
+
+            logging.info("✅ XEP-0153 avatar hash updated successfully")
+        except Exception as e:
+            logging.warning("⚠️ Failed to update XEP-0153 avatar: %s", e)
+
+        return True
 
     # ---------- SESSION START ----------
     async def start(self, _):
@@ -208,22 +297,30 @@ class BanBot(ClientXMPP):
         - Starts unban worker
         """
         await self.setup_db()
+        await self.load_bans_from_db()
+
+        if self.reconnecting:
+            log.info("🔄 Reconnected successfully")
+
         self.send_presence()
         await self.get_roster()
 
         await asyncio.sleep(3)
-        self.reconnecting = False
 
         # --- Join admin room ---
         self.plugin["xep_0045"].join_muc(ADMIN_ROOM, NICK)
+        self.room_join_time[ADMIN_ROOM] = time.time()
         self.add_event_handler(f"muc::{ADMIN_ROOM}::got_online", self.muc_online)
         self.add_event_handler(f"muc::{ADMIN_ROOM}::got_offline", self.muc_offline)
 
         # --- Join protected rooms ---
         for room in self.protected_rooms:
             self.plugin["xep_0045"].join_muc(room, NICK)
-            self.add_event_handler(f"muc::{room}::got_online", self.muc_online)
-            self.add_event_handler(f"muc::{room}::got_offline", self.muc_offline)
+            self.room_join_time[room] = time.time()
+            if room not in self.registered_rooms:
+                self.add_event_handler(f"muc::{room}::got_online", self.muc_online)
+                self.add_event_handler(f"muc::{room}::got_offline", self.muc_offline)
+                self.registered_rooms.add(room)
 
         # --- Wait for occupants to populate ---
         await self.wait_for_occupants(timeout=20)
@@ -239,6 +336,11 @@ class BanBot(ClientXMPP):
 
         # --- Start unban worker ---
         asyncio.create_task(self.unban_worker())
+
+        # --- Set Bot Avatar ---
+        await self.set_avatar()
+
+        self.reconnecting = False
 
         log.info("✅ Bot started, all rooms joined and bans applied")
 
@@ -268,19 +370,20 @@ class BanBot(ClientXMPP):
 
         # --- Fetch all bans ---
         now = int(time.time())
-        async with self.db.execute("SELECT jid, nick, until, comment FROM bans") as cursor:
-            bans = await cursor.fetchall()
+        bans = list(self.ban_cache.values())
 
         # --- Prepare tasks for relevant bans ---
         tasks = []
-        for ban_jid, ban_nick, until, comment in bans:
-            # Skip expired temporary bans
+        for ban_jid, ban_nick, until, issuer, comment in bans:
+            # skip expired
             if until > 0 and until <= now:
                 continue
 
             match_jid = ban_jid and jid_str and self.bare_jid(jid_str) == self.bare_jid(ban_jid)
-            match_nick = ban_nick and nick.lower() == ban_nick.lower()
+            match_nick = ban_nick and nick.lower() == ban_nick
+
             if match_jid or match_nick:
+                # pass full comment -> apply_ban_to_room uses comment only
                 tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
 
         # --- Run all bans in parallel ---
@@ -320,7 +423,7 @@ class BanBot(ClientXMPP):
             return
 
         # Ignore during reconnect stabilization
-        if self.reconnecting:
+        if self.reconnecting and time.time() - self.room_join_time.get(room, 0) < 5:
             return
 
         # Ignore first few seconds after join
@@ -367,6 +470,33 @@ class BanBot(ClientXMPP):
                 mbody=f"✅ Bot regained admin/owner rights in {room}",
                 mtype="groupchat"
             )
+
+    async def on_disconnect(self, _):
+        log.warning("⚠️ Disconnected from server")
+
+        self.reconnecting = True
+
+        # runtime state reset
+        self.occupants.clear()
+        self.bot_admin_state.clear()
+        self.room_join_time.clear()
+        self.jid_to_nick.clear()
+
+        delay = 5
+
+        while not self.connected:
+            try:
+                log.info("🔄 Attempting reconnect in %ds...", delay)
+                await asyncio.sleep(delay)
+
+                if self.connect():
+                    log.info("🔌 Reconnect initiated")
+                    return
+
+            except Exception as e:
+                log.error("Reconnect error: %s", e)
+
+            delay = min(delay * 2, 300)  # exponential backoff max 5min
 
     # ---------- MESSAGE HANDLER ----------
     async def on_message(self, msg):
@@ -475,9 +605,13 @@ class BanBot(ClientXMPP):
             elif cmd == "!reloadconfig":
                 try:
                     importlib.reload(config)
+
                     self.announce_startup = getattr(config, "ANNOUNCE_STARTUP", True)
                     self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", True)
                     self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
+
+                    await self.set_avatar()
+
                     self.send_message(
                         mto=room,
                         mbody="✅ Config reloaded successfully.",
@@ -535,7 +669,12 @@ class BanBot(ClientXMPP):
             # --- Initialize admin state after join ---
             self.bot_admin_state[room] = self.is_bot_admin_or_owner(room)
 
-            if not self.is_bot_admin_or_owner(room):
+            try:
+                self.bot_admin_state[room] = self.is_bot_admin_or_owner(room)
+                if not self.bot_admin_state[room]:
+                    missing.append(room)
+            except Exception as e:
+                log.warning("Error checking admin rights in %s: %s", room, e)
                 missing.append(room)
 
         if missing:
@@ -566,7 +705,8 @@ class BanBot(ClientXMPP):
         try:
             owners = await self.plugin["xep_0045"].get_users_by_affiliation(room, "owner")
             admins = await self.plugin["xep_0045"].get_users_by_affiliation(room, "admin")
-            bare_bot_jid = self.bare_jid(NICK)  # optional: use room-specific mapping if needed
+            #bare_bot_jid = self.bare_jid(NICK)  # optional: use room-specific mapping if needed
+            bare_bot_jid = self.boundjid.bare
 
             for jid in owners + admins:
                 if str(jid).split("/")[0].lower() == bare_bot_jid.lower():
@@ -574,17 +714,49 @@ class BanBot(ClientXMPP):
             return False
         except (IqError, IqTimeout) as e:
             log.warning("Server check failed for %s: %s", room, e)
-            # Bei Fehler lieber False zurückgeben → Alarm oder Retry
+            # Return False on error → Alarm or Retry
             return False
 
-    # ---------- HELPER ----------
+    # ---------- HELPER FUNCTIONS ----------
     @staticmethod
-    def bare_jid(jid: str) -> str | None:
+    def bare_jid(jid: str | None) -> str | None:
         """
-        Return the bare JID (without resource).
-        Example: 'user@server/resource' -> 'user@server'
+        Return the bare JID (without resource)
+        e.g., user@server/resource -> user@server
         """
         return jid.split("/")[0].lower() if jid else None
+
+    async def wait_for_bot_online(self, room: str, timeout: int = 10) -> bool:
+        """
+        Wait until the bot is recognized as a participant in a room.
+        Prevents race conditions after joining.
+        """
+        for _ in range(timeout):
+            occ = self.occupants.get(room, {})
+            if NICK in occ:
+                return True
+            await asyncio.sleep(1)
+        log.warning("Bot not recognized in %s after %ds", room, timeout)
+        return False
+
+    # ---------- BAN CACHE ----------
+    async def load_bans_from_db(self):
+        """
+        Load all bans from the database into RAM cache.
+        """
+        async with self.db.execute(
+            "SELECT jid, nick, until, issuer, comment FROM bans"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        # Reset cache
+        self.ban_cache.clear()
+
+        for jid, nick, until, issuer, comment in rows:
+            key = jid or nick
+            if key:
+                # store full tuple
+                self.ban_cache[key] = (jid, nick, until, issuer, comment)
 
     # ---------- APPLY BAN TO ROOM ----------
     async def apply_ban_to_room(
@@ -597,8 +769,9 @@ class BanBot(ClientXMPP):
     ):
         """
         Apply a ban to a room:
+        - Supports JID, Nick, or Domain (*.domain.tld)
         - Sets outcast (works offline)
-        - Kicks known occupants in parallel using semaphore
+        - Kicks matching occupants in parallel
         - Sends notifications:
             - Admin room: full info (JID + Nick)
             - Protected rooms: only nick (anonymized)
@@ -613,11 +786,12 @@ class BanBot(ClientXMPP):
             )
             return
 
-        ban_jid_bare = self.bare_jid(ban_jid) if ban_jid else None
+        is_domain = ban_jid and ban_jid.startswith("*.")
+        ban_jid_bare = None if is_domain else self.bare_jid(ban_jid)
         room_occupants = self.occupants.get(room, {})
 
         # --- Step 1: Set Outcast (offline ban) ---
-        if ban_jid_bare:
+        if ban_jid_bare and not is_domain:
             for attempt in range(3):
                 try:
                     async with self.muc_write_semaphore:
@@ -639,9 +813,17 @@ class BanBot(ClientXMPP):
         # --- Step 2: Kick matching occupants in parallel ---
         async def kick_nick(nick, info):
             jid_in_room = info.get("jid")
-            if ((ban_jid_bare and jid_in_room and self.bare_jid(jid_in_room) == ban_jid_bare) or
-                (ban_nick and nick.lower() == ban_nick.lower())):
+            match = False
 
+            if is_domain and jid_in_room:
+                domain = self.bare_jid(jid_in_room).split("@")[1].lower()
+                match = domain == ban_jid[2:]
+            elif ban_jid_bare and jid_in_room:
+                match = self.bare_jid(jid_in_room) == ban_jid_bare
+            elif ban_nick:
+                match = nick.lower() == ban_nick.lower()
+
+            if match:
                 # Skip admins/owners
                 if info.get("affiliation") in ("owner", "admin"):
                     log.info("❌ Skipped kick for admin/owner %s in %s", nick, room)
@@ -665,7 +847,6 @@ class BanBot(ClientXMPP):
                         log.warning("IqError kicking %s in %s: %s", nick, room, e)
                         break
 
-        # Schedule all kicks concurrently
         try:
             await asyncio.gather(*(kick_nick(n, i) for n, i in room_occupants.items()))
         except Exception as e:
@@ -687,96 +868,118 @@ class BanBot(ClientXMPP):
 
         # --- Step 4: Notifications ---
         if room == ADMIN_ROOM:
-            # Full info (JID + Nick)
-            if ban_jid_bare:
-                if ban_nick:
-                    display = f"{ban_nick} ({ban_jid_bare})"
-                else:
-                    display = ban_jid_bare
-            else:
-                display = f"{ban_nick} (unknown JID)" if ban_nick else "Unknown"
-
+            display = ban_jid or ban_nick or "Unknown"
             msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + (f" by {issuer}" if issuer else "")
             self.send_message(mto=ADMIN_ROOM, mbody=msg, mtype="groupchat")
-
         elif room in self.protected_rooms:
             display = ban_nick or "Unknown"
             msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "")
-
-            # ALWAYS run commands, SHOW_BAN_IN_MUC only hides the *message*
-            if self.allow_user_cmds:
-                # show ephemeral only if configured
-                if self.show_ban_in_muc:
-                    self.send_ephemeral(room, msg)
-                # otherwise only log internally / skip sending
+            if self.allow_user_cmds and self.show_ban_in_muc:
+                self.send_ephemeral(room, msg)
 
     # ---------- BAN ALL ----------
     async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None):
         """
-        Bans a user by JID or Nick:
+        Bans a user by JID, nick, or domain (*.domain.tld):
         - Resolves JID from current room occupants if only Nick is given
         - Resolves Nick from current room occupants if only JID is given
-        - Saves both JID and Nick in DB
+        - Supports domain bans (*.domain.tld)
+        - Saves both JID/Nick or domain in DB
         - Applies ban to all protected rooms
         """
-        is_jid = "@" in identifier
-        ban_jid = identifier if is_jid else None
-        ban_nick = None if is_jid else identifier.lower()
         ts = until if until is not None else 0
 
-        # --- Find JID if only Nick provided ---
-        if ban_nick and not ban_jid:
-            for room_occ in self.occupants.values():
-                for n, info in room_occ.items():
-                    if n.lower() == ban_nick and info.get("jid"):
-                        ban_jid = info["jid"]
-                        break
-                if ban_jid:
-                    break
+        ban_jid = None
+        ban_nick = None
+        is_domain = identifier.startswith("*.")
 
-        # --- Find Nick if only JID provided ---
-        ban_jid_bare = self.bare_jid(ban_jid) if ban_jid else None
-        if ban_jid and not ban_nick:
-            for room_occ in self.occupants.values():
-                for n, info in room_occ.items():
-                    if info.get("jid") and self.bare_jid(info["jid"]) == ban_jid_bare:
-                        ban_nick = n.lower()
+        if is_domain:
+            # Domain-ban
+            ban_jid = identifier.lower()  # store as *.domain.tld
+            ban_nick = None
+        else:
+            is_jid = "@" in identifier
+            ban_jid = identifier if is_jid else None
+            ban_nick = None if is_jid else identifier.lower()
+
+            # --- Find JID if only Nick provided ---
+            if ban_nick and not ban_jid:
+                for room_occ in self.occupants.values():
+                    for n, info in room_occ.items():
+                        if n.lower() == ban_nick and info.get("jid"):
+                            ban_jid = info["jid"]
+                            break
+                    if ban_jid:
                         break
-                if ban_nick:
-                    break
+
+            # --- Find Nick if only JID provided ---
+            ban_jid_bare = self.bare_jid(ban_jid) if ban_jid else None
+            if ban_jid and not ban_nick:
+                for room_occ in self.occupants.values():
+                    for n, info in room_occ.items():
+                        if info.get("jid") and self.bare_jid(info["jid"]) == ban_jid_bare:
+                            ban_nick = n.lower()
+                            break
+                    if ban_nick:
+                        break
 
         # --- Prevent banning admins/owners ---
         for room_occ in self.occupants.values():
             for n, info in room_occ.items():
                 info_jid_bare = self.bare_jid(info.get("jid"))
-                if ((ban_jid_bare and info_jid_bare == ban_jid_bare) or (ban_nick and n.lower() == ban_nick)):
-                    if info.get("affiliation") in ("owner", "admin"):
-                        self.send_message(
-                            mto=ADMIN_ROOM,
-                            mbody=f"❌ Refused to ban admin/owner: {n}",
-                            mtype="groupchat"
-                        )
-                        return
+                if is_domain:
+                    if info_jid_bare and info_jid_bare.split("@")[1].lower() == ban_jid[2:]:
+                        if info.get("affiliation") in ("owner", "admin"):
+                            self.send_message(
+                                mto=ADMIN_ROOM,
+                                mbody=f"❌ Refused to ban admin/owner on domain {ban_jid}: {n}",
+                                mtype="groupchat"
+                            )
+                            return
+                else:
+                    if ((ban_jid_bare and info_jid_bare == ban_jid_bare) or (ban_nick and n.lower() == ban_nick)):
+                        if info.get("affiliation") in ("owner", "admin"):
+                            self.send_message(
+                                mto=ADMIN_ROOM,
+                                mbody=f"❌ Refused to ban admin/owner: {n}",
+                                mtype="groupchat"
+                            )
+                            return
 
         # --- Save ban to DB ---
         await self.db.execute(
             "REPLACE INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, ?, ?, ?)",
-            (ban_jid_bare, ban_nick, ts, issuer, comment)
+            (ban_jid, ban_nick, ts, issuer, comment)
         )
         await self.db.commit()
 
-        log.info("Ban applied: identifier=%s, JID=%s, nick=%s, until=%s, issuer=%s",
-                 identifier, ban_jid_bare, ban_nick, ts, issuer)
+        self.ban_cache[ban_jid or ban_nick] = (
+            ban_jid,
+            ban_nick.lower() if ban_nick else None,
+            ts,
+            issuer,
+            comment
+        )
+
+        log.info("Ban applied: identifier=%s, JID/Nick=%s/%s, until=%s, issuer=%s",
+                 identifier, ban_jid, ban_nick, ts, issuer)
 
         # --- Notify Admin Room explicitly ---
-        display = ban_jid_bare or ban_nick or "Unknown"
+        display = ban_jid or ban_nick or "Unknown"
         msg_admin = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + f" by {issuer}"
         self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
 
         # --- Apply ban to all protected rooms ---
         for room in self.protected_rooms:
             try:
-                await self.apply_ban_to_room(room, ban_jid_bare, ban_nick, comment, issuer)
+                if is_domain:
+                    # Kick all current occupants from this domain
+                    for nick, info in list(self.occupants.get(room, {}).items()):
+                        jid_in_room = info.get("jid")
+                        if jid_in_room and self.bare_jid(jid_in_room).split("@")[1].lower() == ban_jid[2:]:
+                            await self.apply_ban_to_room(room, jid_in_room, nick, comment, issuer)
+                else:
+                    await self.apply_ban_to_room(room, ban_jid, ban_nick, comment, issuer)
             except (IqError, IqTimeout) as e:
                 log.warning("Failed to ban/kick %s in %s: %s", identifier, room, e)
 
@@ -795,10 +998,15 @@ class BanBot(ClientXMPP):
                 ) as cursor:
                     rows = await cursor.fetchall()
 
+                expired = []
                 for ban_jid, ban_nick in rows:
                     identifier = self.bare_jid(ban_jid) if ban_jid else ban_nick
                     log.info("⏳ Temporary ban expired: %s, auto-unbanning...", identifier)
+                    expired.append(identifier)
                     await self.unban_all(identifier, issuer="system")
+
+                if expired:
+                    await self.load_bans_from_db()
 
             except Exception as e:
                 log.warning("Error in unban_worker: %s", e)
@@ -810,7 +1018,8 @@ class BanBot(ClientXMPP):
         self,
         room: str,
         ban_jid: str | None,
-        ban_nick: str | None
+        ban_nick: str | None,
+        domain: str | None = None
     ):
         """
         Removes Outcast for a user reliably.
@@ -840,7 +1049,8 @@ class BanBot(ClientXMPP):
             for nick, info in room_occupants.items():
                 jid_in_room = info.get("jid")
                 if ((ban_jid and jid_in_room and self.bare_jid(jid_in_room) == self.bare_jid(ban_jid)) or
-                    (ban_nick and nick.lower() == ban_nick)):
+                    (ban_nick and nick.lower() == ban_nick) or
+                    (domain and jid_in_room and jid_in_room.split("@")[-1].lower() == domain)):
                     for attempt in range(2):
                         try:
                             async with self.muc_write_semaphore:
@@ -872,48 +1082,64 @@ class BanBot(ClientXMPP):
     # ---------- UNBAN HANDLING ----------
     async def unban_all(self, identifier: str, issuer: str | None = None):
         """
-        Remove a ban from a user (JID or nick) and unban in all protected rooms.
+        Remove a ban from a user (JID, nick, or domain) and unban in all protected rooms.
+        Supports domain bans (*.domain.tld)
         Admin Room: full info
-        Protected Rooms: only nick, JID anonymized
+        Protected Rooms: only nick/JID anonymized
         """
         if not identifier:
             return
 
+        is_domain_ban = identifier.startswith("*.") if identifier else False
+        domain = identifier[2:].lower() if is_domain_ban else None
+
         row = None
         is_jid = "@" in identifier
 
-        # Lookup JID in DB
-        if is_jid:
-            async with self.db.execute("SELECT jid, nick FROM bans WHERE jid=?", (identifier,)) as cur:
-                row = await cur.fetchone()
+        if not is_domain_ban:
+            # Lookup JID in DB
+            if is_jid:
+                async with self.db.execute("SELECT jid, nick FROM bans WHERE jid=?", (identifier,)) as cur:
+                    row = await cur.fetchone()
 
-        # Lookup nick in DB
-        if not row:
-            async with self.db.execute("SELECT jid, nick FROM bans WHERE LOWER(nick)=?", (identifier.lower(),)) as cur:
-                row = await cur.fetchone()
+            # Lookup nick in DB
+            if not row:
+                async with self.db.execute("SELECT jid, nick FROM bans WHERE LOWER(nick)=?", (identifier.lower(),)) as cur:
+                    row = await cur.fetchone()
 
-        # Fallback nick-only check against JIDs
-        if not row and not is_jid:
-            async with self.db.execute("SELECT jid, nick FROM bans") as cursor:
-                async for jid_db, nick_db in cursor:
-                    if jid_db and self.bare_jid(jid_db).split("@")[0].lower() == identifier.lower():
-                        row = (jid_db, nick_db)
-                        break
+            # Fallback nick-only check against JIDs
+            if not row and not is_jid:
+                async with self.db.execute("SELECT jid, nick FROM bans") as cursor:
+                    async for jid_db, nick_db in cursor:
+                        if jid_db and self.bare_jid(jid_db).split("@")[0].lower() == identifier.lower():
+                            row = (jid_db, nick_db)
+                            break
 
         ban_jid = row[0] if row and row[0] else None
         ban_nick = row[1] if row and row[1] else (None if ban_jid else identifier.lower())
 
         # Delete from DB
-        if ban_jid:
+        if is_domain_ban:
+            await self.db.execute("DELETE FROM bans WHERE jid = ?", (identifier,))
+            await self.db.execute("DELETE FROM bans WHERE jid LIKE ?", (f"%@{domain}",))
+        elif ban_jid:
             await self.db.execute("DELETE FROM bans WHERE jid=? OR LOWER(nick)=?", (ban_jid, ban_nick))
         else:
             await self.db.execute("DELETE FROM bans WHERE LOWER(nick)=?", (ban_nick,))
         await self.db.commit()
 
+        # Update in-memory cache
+        for key, ban in list(self.ban_cache.items()):
+            jid_val, nick_val, *_ = ban
+            if is_domain_ban and jid_val and jid_val.split("@")[-1].lower() == domain:
+                self.ban_cache.pop(key, None)
+            elif identifier == jid_val or identifier == nick_val:
+                self.ban_cache.pop(key, None)
+
         # Unban in all protected rooms
         for room in self.protected_rooms:
             try:
-                await self.apply_unban_to_room(room, ban_jid, ban_nick)
+                await self.apply_unban_to_room(room, ban_jid if not is_domain_ban else None, ban_nick, domain=domain if is_domain_ban else None)
             except Exception as e:
                 log.warning("Error unbanning %s in %s: %s", identifier, room, e)
 
@@ -949,8 +1175,10 @@ class BanBot(ClientXMPP):
                     self.send_message(mto=room, mbody=f"✅ Room added: {target}", mtype="groupchat")
 
                     # --- Event handler for new occupants ---
-                    self.add_event_handler(f"muc::{target}::got_online", self.muc_online)
-                    self.add_event_handler(f"muc::{target}::got_offline", self.muc_offline)
+                    if target not in self.registered_rooms:
+                        self.add_event_handler(f"muc::{target}::got_online", self.muc_online)
+                        self.add_event_handler(f"muc::{target}::got_offline", self.muc_offline)
+                        self.registered_rooms.add(target)
 
                     self.plugin["xep_0045"].join_muc(target, NICK)
 
@@ -1186,121 +1414,112 @@ class BanBot(ClientXMPP):
 
     async def sync_bans_to_rooms(self, startup: bool = False, announce_progress: bool = True):
         """
-        Generic ban sync to protected rooms.
-        - startup=True: skips expired temporary bans, issuer="sync_startup"
-        - startup=False: sync called manually, issuer="sync"
+        Sync all bans from the database to all protected rooms.
+        Skips expired temporary bans.
+        Counts only unique bans for statistics.
+
+        :param startup: If True, this is called at startup.
+        :param announce_progress: Send progress messages to ADMIN_ROOM.
         """
+        if not self.protected_rooms:
+            if announce_progress:
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody="⚠️ No protected rooms configured for ban sync.",
+                    mtype="groupchat"
+                )
+            return
+
         now = int(time.time())
-        issuer_tag = "sync_startup" if startup else "sync"
+        applied_bans_set: set[tuple[str | None, str | None]] = set()
 
         # --- Load all bans from DB ---
         async with self.db.execute("SELECT jid, nick, until, comment FROM bans") as cursor:
             db_bans = await cursor.fetchall()
 
-        total_rooms = len(self.protected_rooms)
-        if total_rooms == 0:
-            if announce_progress:
-                self.send_message(
-                    mto=ADMIN_ROOM,
-                    mbody="⚠️ No protected rooms to sync.",
-                    mtype="groupchat"
-                )
+        # --- Filter active bans ---
+        active_bans = [
+            (ban_jid, ban_nick, comment)
+            for ban_jid, ban_nick, until, comment in db_bans
+            if until == 0 or until > now
+        ]
+
+        if not active_bans and announce_progress:
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody="✅ No active bans to sync.",
+                mtype="groupchat"
+            )
             return
 
-        applied_bans = set()  # only used for startup to skip duplicates
-        startup_applied_count = 0  # count of applied bans during startup
+        # --- Apply bans to each protected room ---
+        for idx, room in enumerate(self.protected_rooms, start=1):
+            if announce_progress:
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"⏳ Syncing bans in room {room} ({idx}/{len(self.protected_rooms)})...",
+                    mtype="groupchat"
+                )
 
-        async def sync_room(idx: int, room: str):
-            nonlocal startup_applied_count
-
-            # --- Skip if bot is not admin/owner ---
+            # Skip room if bot not admin/owner
             if not self.is_bot_admin_or_owner(room):
-                log.warning("⛔ Skipping sync for %s (bot is not admin/owner)", room)
-                if announce_progress and not startup:
+                log.warning("⛔ Skipping %s — bot not admin/owner", room)
+                if announce_progress:
                     self.send_message(
                         mto=ADMIN_ROOM,
-                        mbody=f"⛔ Skipping {room} (bot has no admin/owner rights)",
+                        mbody=f"⛔ Skipping {room} — bot has no admin/owner rights",
                         mtype="groupchat"
                     )
-                return
+                continue
 
-            if announce_progress and not startup:
-                self.send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=f"⏳ Syncing bans in room {room} ({idx}/{total_rooms})...",
-                    mtype="groupchat"
-                )
-
+            # --- Fetch current outcasts ---
             try:
-                # --- Fetch current outcasts ---
                 outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
                 outcasts_bare = [self.bare_jid(str(j)) for j in outcasts]
+            except Exception as e:
+                log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
+                outcasts_bare = []
 
-                # --- Ensure DB entries exist for orphan outcasts ---
-                to_insert = []
-                for jid_bare in outcasts_bare:
-                    if not any(ban_jid and self.bare_jid(ban_jid) == jid_bare for ban_jid, _, _, _ in db_bans):
-                        to_insert.append((jid_bare, None, 0, issuer_tag, "Recovered from room"))
-                        db_bans.append((jid_bare, None, 0, issuer_tag))  # keep local list in sync
+            # --- Add orphan outcasts to DB ---
+            orphan_bans = []
+            for jid_bare in outcasts_bare:
+                if not any(ban_jid and self.bare_jid(ban_jid) == jid_bare for ban_jid, _, _ in active_bans):
+                    orphan_bans.append((jid_bare, None, "Recovered from room"))
 
-                if to_insert:
-                    await self.db.executemany(
-                        "INSERT INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, ?, ?, ?)",
-                        to_insert
-                    )
-                    await self.db.commit()
+            if orphan_bans:
+                await self.db.executemany(
+                    "INSERT INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, 0, ?, ?)",
+                    [(jid, nick, "sync_room_add", comment) for jid, nick, comment in orphan_bans]
+                )
+                await self.db.commit()
+                active_bans.extend(orphan_bans)
+                log.info("✅ Added %d orphan outcasts to DB for room %s", len(orphan_bans), room)
 
-                # --- Fetch current outcasts ---
-                outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
-                outcasts_bare = {self.bare_jid(str(j)) for j in outcasts}
+            # --- Apply all bans in parallel ---
+            tasks = []
+            for ban_jid, ban_nick, comment in active_bans:
+                tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+                applied_bans_set.add((ban_jid, ban_nick))  # unique count
 
-                # --- Prepare coroutines for all bans ---
-                tasks = []
-                for ban_jid, ban_nick, until, comment in db_bans:
-                    if until > 0 and until <= now:  # Skip expired temporary bans
-                        continue
+            if tasks:
+                await asyncio.gather(*tasks)
 
-                    ban_jid_bare = self.bare_jid(ban_jid) if ban_jid else None
-                    # Skip if already an outcast in this room
-                    if ban_jid_bare and ban_jid_bare in outcasts_bare:
-                        continue
-
-                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
-
-                # --- Run all bans in this room in parallel ---
-                if tasks:
-                    await asyncio.gather(*tasks)
-
-            except (IqError, IqTimeout) as e:
-                log.warning("Failed to sync bans in %s: %s", room, e)
-            #else:
-            #    if announce_progress:
-            #        self.send_message(
-            #            mto=ADMIN_ROOM,
-            #            mbody=f"✅ Finished syncing bans in room {room} ({idx}/{total_rooms})",
-            #            mtype="groupchat"
-            #        )
-
-        # --- Run all rooms in parallel ---
-        await asyncio.gather(*(sync_room(idx + 1, room) for idx, room in enumerate(self.protected_rooms)))
-
-        # --- Final logs ---
-        if startup:
-            log.info("✅ Startup ban sync completed: %d bans applied in %d rooms", startup_applied_count, total_rooms)
             if announce_progress:
                 self.send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"✅ Startup completed: {startup_applied_count} bans applied across {total_rooms} rooms.",
+                    mbody=f"✅ Finished syncing room {room} ({idx}/{len(self.protected_rooms)})",
                     mtype="groupchat"
                 )
-        else:
-            log.info("✅ Ban sync completed for all rooms")
-            if announce_progress:
-                self.send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=f"✅ Ban sync completed successfully for {total_rooms} rooms.",
-                    mtype="groupchat"
-                )
+
+        # --- Final statistics ---
+        if announce_progress:
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody=f"✅ Startup ban sync completed: {len(applied_bans_set)} unique bans applied in {len(self.protected_rooms)} rooms",
+                mtype="groupchat"
+            )
+
+        log.info("✅ Ban sync completed: %d unique bans applied in %d rooms", len(applied_bans_set), len(self.protected_rooms))
 
     async def sync_bans_startup(self):
         """
@@ -1318,6 +1537,7 @@ class BanBot(ClientXMPP):
     async def cmd_bansearch(self, query: str):
         """
         Searches bans by nick, JID, or domain.
+        Supports domain bans (*.domain.tld)
         Returns detailed info including remaining time and comment.
         """
         q = query.lower()
@@ -1330,16 +1550,21 @@ class BanBot(ClientXMPP):
         now = int(time.time())
 
         for jid, nick, until, issuer, comment in rows:
-            haystack = " ".join(filter(None, [jid, nick])).lower()
+            # Domain-ban check
+            if jid and jid.startswith("*."):
+                display = jid
+                domain = jid[2:].lower()
+                haystack = domain
+            else:
+                display = jid or nick or "Unknown"
+                haystack = " ".join(filter(None, [jid, nick])).lower()
+
             if q in haystack:
                 remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
                 emoji = "⏳" if until > 0 else "🔒"
-                display = jid or nick or "Unknown"
-
                 matches.append(
-                    f"{emoji} {display} ({remaining}, by {issuer}"
-                    + (f", {comment}" if comment else "")
-                    + ")"
+                    f"{emoji} {display} ({remaining}, by {issuer}" +
+                    (f", {comment}" if comment else "") + ")"
                 )
 
         if matches:
@@ -1357,8 +1582,8 @@ class BanBot(ClientXMPP):
     async def cmd_banlist(self, room):
         """
         Shows active bans.
-        Admin Room: full info (JID/nick)
-        Protected Rooms: only temporary bans, nick only
+        Admin Room: full info (JID/nick/domain)
+        Protected Rooms: only temporary bans, nick or domain only
         """
         async with self.db.execute("SELECT jid, nick, until, issuer, comment FROM bans") as cursor:
             rows = await cursor.fetchall()
@@ -1376,7 +1601,10 @@ class BanBot(ClientXMPP):
                 remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
                 emoji = "⏳" if until > 0 else "🔒"
 
-                if room == ADMIN_ROOM:
+                # Domain-ban display
+                if jid and jid.startswith("*."):
+                    display = jid
+                elif room == ADMIN_ROOM:
                     display = jid or nick or "Unknown"
                 else:
                     display = nick or (jid.split("@")[0] if jid else "Unknown")
