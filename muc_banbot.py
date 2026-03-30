@@ -352,6 +352,7 @@ class BanBot(ClientXMPP):
         Called when a user comes online in a MUC.
         - Updates occupants
         - Skips admins/owners
+        - AUTO-UPDATES JID IF NICK-ONLY BAN EXISTS
         - Applies all relevant bans from DB in parallel
         """
         room = presence["from"].bare
@@ -369,6 +370,28 @@ class BanBot(ClientXMPP):
         # --- Skip admins/owners ---
         if self.is_admin_or_owner(room, nick=nick, jid=jid_str):
             return
+
+        # --- Auto-update JID if nick-only ban exists ---
+        if jid_str and nick:
+            async with self.db.execute(
+                "SELECT jid FROM bans WHERE LOWER(nick)=? AND (jid IS NULL OR jid='')",
+                (nick.lower(),)
+            ) as cursor:
+                existing_ban = await cursor.fetchone()
+
+            if existing_ban:
+                # Found a nick-only ban, update it with the JID
+                ban_jid_bare = self.bare_jid(jid_str)
+                await self.db.execute(
+                    "UPDATE bans SET jid=? WHERE LOWER(nick)=? AND (jid IS NULL OR jid='')",
+                    (ban_jid_bare, nick.lower())
+                )
+                await self.db.commit()
+
+                # Reload ban cache
+                await self.load_bans_from_db()
+
+                log.info("✅ Auto-updated ban for nick '%s': JID set to %s", nick, ban_jid_bare)
 
         # --- Fetch all bans ---
         now = int(time.time())
