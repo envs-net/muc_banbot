@@ -66,6 +66,7 @@ class BanBot(ClientXMPP):
         - Connection info (jid/password)
         - RAM caches for bans and admin state
         - Semaphores to avoid flooding XMPP server
+        - Uptime tracking for bot and server connection
         Sets up DB, protected rooms, occupants dicts, and registers XMPP plugins.
         """
         super().__init__(jid, password)
@@ -84,6 +85,10 @@ class BanBot(ClientXMPP):
         self.registered_rooms: set[str] = set()
         self.room_join_time = {}
         self.reconnecting = False
+
+        # --- Uptime tracking (NEW) ---
+        self.bot_start_time = time.time()
+        self.server_connect_time = None
 
         self.announce_startup: bool = getattr(config, "ANNOUNCE_STARTUP", True)
         self.show_ban_in_muc: bool = getattr(config, "SHOW_BAN_IN_MUC", True)
@@ -163,7 +168,7 @@ class BanBot(ClientXMPP):
 
     # ---------- DATABASE SETUP ----------
     async def setup_db(self) -> None:
-        """Initialize SQLite DB, create tables if missing, migrate columns."""
+        """Initialize SQLite DB, create tables if missing, migrate columns, create indexes."""
         self.db = await aiosqlite.connect(DB_FILE)
 
         # --- Create bans table if missing ---
@@ -194,6 +199,13 @@ class BanBot(ClientXMPP):
             room TEXT PRIMARY KEY
         )""")
         await self.db.commit()
+
+        # --- Create indexes for performance ---
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_jid ON bans(jid)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_nick ON bans(LOWER(nick))")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_until ON bans(until)")
+        await self.db.commit()
+        log.info("✅ Database indexes created/verified")
 
         # --- Load protected rooms ---
         async with self.db.execute("SELECT room FROM rooms") as cursor:
@@ -303,11 +315,17 @@ class BanBot(ClientXMPP):
 
         if self.reconnecting:
             log.info("🔄 Reconnected successfully")
+        else:
+            # First connection (not a reconnect)
+            self.bot_start_time = time.time()
 
         self.send_presence()
         await self.get_roster()
 
         await asyncio.sleep(3)
+
+        # --- Record server connection time (NEW) ---
+        self.server_connect_time = time.time()
 
         # --- Join admin room ---
         self.plugin["xep_0045"].join_muc(ADMIN_ROOM, NICK)
@@ -501,10 +519,11 @@ class BanBot(ClientXMPP):
 
         self.reconnecting = True
 
-        # runtime state reset
+        # runtime state reset (NEW: clean up more thoroughly)
         self.occupants.clear()
         self.bot_admin_state.clear()
         self.room_join_time.clear()
+        log.info("🧹 Cleaned up occupants dictionary and states")
 
         delay = 5
 
@@ -652,10 +671,20 @@ class BanBot(ClientXMPP):
 
             elif cmd == "!status":
                 status_lines = ["✅ Bot is online and healthy."]
+
+                # Bot Uptime
+                bot_uptime = int(time.time()) - self.bot_start_time
+                status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
+
+                # Server Connection Uptime
+                if self.server_connect_time:
+                    server_uptime = int(time.time()) - self.server_connect_time
+                    status_lines.append(f"🌐 Server Connected: {human_time(server_uptime)}")
+
                 admin_infos = self.occupants.get(ADMIN_ROOM, {})
                 admins = [
-                    f"{nick} ({info['jid']})"
-                    for nick, info in admin_infos.items()
+                    f"{n} ({info['jid']})"
+                    for n, info in admin_infos.items()
                     if info.get("affiliation") in ("owner", "admin")
                 ]
                 status_lines.append(
@@ -999,10 +1028,10 @@ class BanBot(ClientXMPP):
             try:
                 if is_domain:
                     # Kick all current occupants from this domain
-                    for nick, info in list(self.occupants.get(room, {}).items()):
+                    for n, info in list(self.occupants.get(room, {}).items()):
                         jid_in_room = info.get("jid")
                         if jid_in_room and self.bare_jid(jid_in_room).split("@")[1].lower() == ban_jid[2:]:
-                            await self.apply_ban_to_room(room, jid_in_room, nick, comment, issuer)
+                            await self.apply_ban_to_room(room, jid_in_room, n, comment, issuer)
                 else:
                     await self.apply_ban_to_room(room, ban_jid, ban_nick, comment, issuer)
             except (IqError, IqTimeout) as e:
@@ -1012,7 +1041,8 @@ class BanBot(ClientXMPP):
     async def unban_worker(self) -> None:
         """
         Periodically unban users whose temporary bans have expired.
-        Runs in an infinite loop every 60 seconds.
+        Runs in an infinite loop every 60 seconds (configurable via UNBAN_CHECK_INTERVAL).
+        Improved error handling to prevent crashes.
         """
         while True:
             now = int(time.time())
@@ -1035,8 +1065,13 @@ class BanBot(ClientXMPP):
 
             except Exception as e:
                 log.warning("Error in unban_worker: %s", e)
+                # Don't crash, continue running
+                await asyncio.sleep(5)
+                continue
 
-            await asyncio.sleep(60)
+            # Configurable check interval, default 60 seconds
+            check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
+            await asyncio.sleep(check_interval)
 
     # ---------- APPLY UNBAN TO ROOM ----------
     async def apply_unban_to_room(
@@ -1074,26 +1109,26 @@ class BanBot(ClientXMPP):
 
             # --- Step 2: Restore role if online ---
             room_occupants = self.occupants.get(room, {})
-            for nick, info in room_occupants.items():
+            for n, info in room_occupants.items():
                 jid_in_room = info.get("jid")
                 if ((ban_jid and jid_in_room and self.bare_jid(jid_in_room) == self.bare_jid(ban_jid)) or
-                    (ban_nick and nick.lower() == ban_nick) or
+                    (ban_nick and n.lower() == ban_nick) or
                     (domain and jid_in_room and jid_in_room.split("@")[-1].lower() == domain)):
                     for attempt in range(2):
                         try:
                             async with self.muc_write_semaphore:
                                 await self.plugin["xep_0045"].set_role(
                                     room=room,
-                                    nick=nick,
+                                    nick=n,
                                     role="participant"
                                 )
-                            log.info("✅ Participant role restored for %s in %s", nick, room)
+                            log.info("✅ Participant role restored for %s in %s", n, room)
                             break
                         except IqTimeout:
-                            log.warning("Timeout restoring role for %s in %s, retrying...", nick, room)
+                            log.warning("Timeout restoring role for %s in %s, retrying...", n, room)
                             await asyncio.sleep(1)
                         except IqError as e:
-                            log.debug("IqError restoring role for %s in %s: %s", nick, room, e)
+                            log.debug("IqError restoring role for %s in %s: %s", n, room, e)
                             break
 
             # --- Step 3: Notifications ---
