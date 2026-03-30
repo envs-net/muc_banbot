@@ -13,7 +13,7 @@ import aiosqlite
 import slixmpp
 import pathlib
 import importlib
-import mimetypes, hashlib, base64
+import hashlib
 from slixmpp import ClientXMPP
 from slixmpp.exceptions import IqError, IqTimeout
 from slixmpp.xmlstream import ET
@@ -82,7 +82,6 @@ class BanBot(ClientXMPP):
         self.occupants: dict[str, dict] = {}
         self.protected_rooms: set[str] = set()
         self.registered_rooms: set[str] = set()
-        self.jid_to_nick: dict[str, str] = {}
         self.room_join_time = {}
         self.reconnecting = False
 
@@ -139,7 +138,7 @@ class BanBot(ClientXMPP):
         return info and info.get("affiliation") in ("owner", "admin")
 
     # ---------- EPHEMERAL MESSAGE ----------
-    def send_ephemeral(self, mto: str, mbody: str):
+    def send_ephemeral(self, mto: str, mbody: str) -> None:
         """Send a message to a room without storing it."""
         msg = self.Message()
         msg["to"] = mto
@@ -150,7 +149,7 @@ class BanBot(ClientXMPP):
         msg.send()
 
     # ---------- COMMAND HELPERS ----------
-    def notify_protected(self, room: str, message: str):
+    def notify_protected(self, room: str, message: str) -> None:
         """Notify users in protected rooms if SHOW_BAN_IN_MUC=True"""
         if self.show_ban_in_muc:
             self.send_ephemeral(room, message)
@@ -163,7 +162,7 @@ class BanBot(ClientXMPP):
         )
 
     # ---------- DATABASE SETUP ----------
-    async def setup_db(self):
+    async def setup_db(self) -> None:
         """Initialize SQLite DB, create tables if missing, migrate columns."""
         self.db = await aiosqlite.connect(DB_FILE)
 
@@ -203,7 +202,7 @@ class BanBot(ClientXMPP):
                 self.protected_rooms.add(room)
 
     # ---------- WAIT FOR OCCUPANTS ----------
-    async def wait_for_occupants(self, timeout=20):
+    async def wait_for_occupants(self, timeout: int = 20) -> None:
         """
         Wait until all protected rooms and admin room have at least one occupant loaded.
         Fallback to timeout if rooms are empty. Helps avoid race conditions at startup.
@@ -222,7 +221,7 @@ class BanBot(ClientXMPP):
         log.warning("Timeout waiting for occupants; some users may not be kicked immediately")
 
     # ---------- AVATAR HELPER ----------
-    async def set_avatar(self):
+    async def set_avatar(self) -> bool:
         """
         Update bot avatar for all major XMPP clients.
         Uses config.AVATAR_PATH
@@ -233,14 +232,17 @@ class BanBot(ClientXMPP):
         """
         avatar_path = getattr(config, "AVATAR_PATH", None)
         if not avatar_path or not pathlib.Path(avatar_path).exists():
-            logging.warning("⚠️ AVATAR_PATH not set or file does not exist")
+            log.warning("⚠️ AVATAR_PATH not set or file does not exist")
             return False
 
         try:
             with open(avatar_path, "rb") as f:
                 image_data = f.read()
-        except Exception as e:
-            logging.error("Failed to read avatar image %s: %s", avatar_path, e)
+        except FileNotFoundError:
+            log.error("Avatar file not found: %s", avatar_path)
+            return False
+        except IOError as e:
+            log.error("Failed to read avatar image %s: %s", avatar_path, e)
             return False
 
         avatar_type = f"image/{pathlib.Path(avatar_path).suffix.lstrip('.').lower()}"
@@ -251,16 +253,16 @@ class BanBot(ClientXMPP):
             vcard['PHOTO']['TYPE'] = avatar_type
             vcard['PHOTO']['BINVAL'] = image_data
             await self['xep_0054'].publish_vcard(vcard)
-            logging.info("✅ XEP-0054 avatar updated successfully")
+            log.info("✅ XEP-0054 avatar updated successfully")
         except Exception as e:
-            logging.warning("⚠️ Failed to update XEP-0054 avatar: %s", e)
+            log.warning("⚠️ Failed to update XEP-0054 avatar: %s", e)
 
         # --- XEP-0084: User Avatar / vCard4 ---
         try:
             await self['xep_0084'].publish_avatar(image_data)
-            logging.info("✅ XEP-0084 avatar updated successfully")
+            log.info("✅ XEP-0084 avatar updated successfully")
         except Exception as e:
-            logging.warning("⚠️ Failed to update XEP-0084 avatar: %s", e)
+            log.warning("⚠️ Failed to update XEP-0084 avatar: %s", e)
 
         # --- XEP-0153: Avatar hash in presence ---
         try:
@@ -279,14 +281,14 @@ class BanBot(ClientXMPP):
             presence.append(x)
             self.send(presence)
 
-            logging.info("✅ XEP-0153 avatar hash updated successfully")
+            log.info("✅ XEP-0153 avatar hash updated successfully")
         except Exception as e:
-            logging.warning("⚠️ Failed to update XEP-0153 avatar: %s", e)
+            log.warning("⚠️ Failed to update XEP-0153 avatar: %s", e)
 
         return True
 
     # ---------- SESSION START ----------
-    async def start(self, _):
+    async def start(self, _) -> None:
         """
         Called when the XMPP session starts.
         - Initializes DB
@@ -345,7 +347,7 @@ class BanBot(ClientXMPP):
         log.info("✅ Bot started, all rooms joined and bans applied")
 
     # ---------- MUC EVENT HANDLERS ----------
-    async def muc_online(self, presence):
+    async def muc_online(self, presence) -> None:
         """
         Called when a user comes online in a MUC.
         - Updates occupants
@@ -391,7 +393,7 @@ class BanBot(ClientXMPP):
             await asyncio.gather(*tasks)
 
     # ---------- MUC OFFLINE ----------
-    async def muc_offline(self, presence):
+    async def muc_offline(self, presence) -> None:
         """
         Called when a user goes offline in a MUC.
         - Removes them from self.occupants[room]
@@ -411,7 +413,7 @@ class BanBot(ClientXMPP):
                      info.get("role", "none"))
 
     # ---------- MUC PRESENCE ----------
-    async def on_muc_presence(self, presence):
+    async def on_muc_presence(self, presence) -> None:
         """
         Detect if bot loses or regains admin/owner rights.
         Spam-safe (only reacts on real state changes).
@@ -471,7 +473,7 @@ class BanBot(ClientXMPP):
                 mtype="groupchat"
             )
 
-    async def on_disconnect(self, _):
+    async def on_disconnect(self, _) -> None:
         log.warning("⚠️ Disconnected from server")
 
         self.reconnecting = True
@@ -480,7 +482,6 @@ class BanBot(ClientXMPP):
         self.occupants.clear()
         self.bot_admin_state.clear()
         self.room_join_time.clear()
-        self.jid_to_nick.clear()
 
         delay = 5
 
@@ -499,7 +500,7 @@ class BanBot(ClientXMPP):
             delay = min(delay * 2, 300)  # exponential backoff max 5min
 
     # ---------- MESSAGE HANDLER ----------
-    async def on_message(self, msg):
+    async def on_message(self, msg) -> None:
         """
         Handles incoming messages in MUCs.
         - Ignores own messages
@@ -649,7 +650,7 @@ class BanBot(ClientXMPP):
                 self.send_message(mto=room, mbody=f"You are {info.get('affiliation', 'none')}", mtype="groupchat")
 
     # ---------- CHECKS ----------
-    async def check_bot_admin_rights(self):
+    async def check_bot_admin_rights(self) -> None:
         """
         Check all protected rooms after startup and report
         where the bot lacks admin/owner rights.
@@ -666,9 +667,7 @@ class BanBot(ClientXMPP):
                     break
                 await asyncio.sleep(1)
 
-            # --- Initialize admin state after join ---
-            self.bot_admin_state[room] = self.is_bot_admin_or_owner(room)
-
+            # --- Initialize admin state after join (ONLY ONCE) ---
             try:
                 self.bot_admin_state[room] = self.is_bot_admin_or_owner(room)
                 if not self.bot_admin_state[room]:
@@ -740,7 +739,7 @@ class BanBot(ClientXMPP):
         return False
 
     # ---------- BAN CACHE ----------
-    async def load_bans_from_db(self):
+    async def load_bans_from_db(self) -> None:
         """
         Load all bans from the database into RAM cache.
         """
@@ -766,7 +765,7 @@ class BanBot(ClientXMPP):
         ban_nick: str | None,
         comment: str | None,
         issuer: str | None = None
-    ):
+    ) -> None:
         """
         Apply a ban to a room:
         - Supports JID, Nick, or Domain (*.domain.tld)
@@ -811,7 +810,8 @@ class BanBot(ClientXMPP):
                     break
 
         # --- Step 2: Kick matching occupants in parallel ---
-        async def kick_nick(nick, info):
+        async def kick_nick(nick_name: str, info: dict) -> None:
+            """Inner function to kick a single user."""
             jid_in_room = info.get("jid")
             match = False
 
@@ -821,12 +821,12 @@ class BanBot(ClientXMPP):
             elif ban_jid_bare and jid_in_room:
                 match = self.bare_jid(jid_in_room) == ban_jid_bare
             elif ban_nick:
-                match = nick.lower() == ban_nick.lower()
+                match = nick_name.lower() == ban_nick.lower()
 
             if match:
                 # Skip admins/owners
                 if info.get("affiliation") in ("owner", "admin"):
-                    log.info("❌ Skipped kick for admin/owner %s in %s", nick, room)
+                    log.info("❌ Skipped kick for admin/owner %s in %s", nick_name, room)
                     return
 
                 for attempt in range(3):
@@ -834,17 +834,17 @@ class BanBot(ClientXMPP):
                         async with self.muc_write_semaphore:
                             await self.plugin["xep_0045"].set_role(
                                 room=room,
-                                nick=nick,
+                                nick=nick_name,
                                 role="none",
                                 reason=comment or "Banned by admin"
                             )
-                        log.info("✅ Kicked %s from %s", nick, room)
+                        log.info("✅ Kicked %s from %s", nick_name, room)
                         break
                     except IqTimeout:
-                        log.warning("Timeout kicking %s in %s, retrying...", nick, room)
+                        log.warning("Timeout kicking %s in %s, retrying...", nick_name, room)
                         await asyncio.sleep(1)
                     except IqError as e:
-                        log.warning("IqError kicking %s in %s: %s", nick, room, e)
+                        log.warning("IqError kicking %s in %s: %s", nick_name, room, e)
                         break
 
         try:
@@ -863,8 +863,10 @@ class BanBot(ClientXMPP):
                         reason=comment or "Banned by admin"
                     )
                 log.info("✅ Kick applied to %s (nick-only) in %s", ban_nick, room)
-            except Exception:
-                pass
+            except IqError as e:
+                log.debug("Could not kick nick-only user %s: %s", ban_nick, e)
+            except IqTimeout:
+                log.warning("Timeout kicking nick-only user %s", ban_nick)
 
         # --- Step 4: Notifications ---
         if room == ADMIN_ROOM:
@@ -878,7 +880,7 @@ class BanBot(ClientXMPP):
                 self.send_ephemeral(room, msg)
 
     # ---------- BAN ALL ----------
-    async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None):
+    async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None) -> None:
         """
         Bans a user by JID, nick, or domain (*.domain.tld):
         - Resolves JID from current room occupants if only Nick is given
@@ -984,7 +986,7 @@ class BanBot(ClientXMPP):
                 log.warning("Failed to ban/kick %s in %s: %s", identifier, room, e)
 
     # ---------- UNBAN WORKER ----------
-    async def unban_worker(self):
+    async def unban_worker(self) -> None:
         """
         Periodically unban users whose temporary bans have expired.
         Runs in an infinite loop every 60 seconds.
@@ -1020,7 +1022,7 @@ class BanBot(ClientXMPP):
         ban_jid: str | None,
         ban_nick: str | None,
         domain: str | None = None
-    ):
+    ) -> None:
         """
         Removes Outcast for a user reliably.
         If user is online, restores participant role.
@@ -1043,6 +1045,9 @@ class BanBot(ClientXMPP):
                     except IqTimeout:
                         log.warning("Timeout removing outcast for %s in %s, retrying...", bare, room)
                         await asyncio.sleep(1)
+                    except IqError as e:
+                        log.debug("IqError removing outcast for %s in %s: %s", bare, room, e)
+                        break
 
             # --- Step 2: Restore role if online ---
             room_occupants = self.occupants.get(room, {})
@@ -1064,6 +1069,9 @@ class BanBot(ClientXMPP):
                         except IqTimeout:
                             log.warning("Timeout restoring role for %s in %s, retrying...", nick, room)
                             await asyncio.sleep(1)
+                        except IqError as e:
+                            log.debug("IqError restoring role for %s in %s: %s", nick, room, e)
+                            break
 
             # --- Step 3: Notifications ---
             if room == ADMIN_ROOM:
@@ -1080,7 +1088,7 @@ class BanBot(ClientXMPP):
             log.warning("Failed to unban %s in %s: %s", ban_jid or ban_nick, room, e)
 
     # ---------- UNBAN HANDLING ----------
-    async def unban_all(self, identifier: str, issuer: str | None = None):
+    async def unban_all(self, identifier: str, issuer: str | None = None) -> None:
         """
         Remove a ban from a user (JID, nick, or domain) and unban in all protected rooms.
         Supports domain bans (*.domain.tld)
@@ -1150,7 +1158,7 @@ class BanBot(ClientXMPP):
 
     # ---------- ROOM MANAGEMENT ----------
 
-    async def cmd_room(self, args, room):
+    async def cmd_room(self, args: list[str], room: str) -> None:
         """
         Manage protected rooms.
         Commands: list, add <room>, remove <room>
@@ -1221,7 +1229,7 @@ class BanBot(ClientXMPP):
 
     # ---------- SYNC ----------
 
-    async def sync_rooms_and_bans(self):
+    async def sync_rooms_and_bans(self) -> None:
         """
         Full sync for !sync command:
         - Rejoin all protected rooms
@@ -1239,7 +1247,7 @@ class BanBot(ClientXMPP):
             )
             return
 
-        async def sync_single_room(idx: int, room: str):
+        async def sync_single_room(idx: int, room: str) -> None:
             # --- Leave and rejoin room to refresh presence ---
             try:
                 self.plugin["xep_0045"].leave_muc(room, NICK)
@@ -1306,7 +1314,7 @@ class BanBot(ClientXMPP):
             mtype="groupchat"
         )
 
-    async def sync_bans_to_rooms_for_single_room(self, room: str):
+    async def sync_bans_to_rooms_for_single_room(self, room: str) -> None:
         """
         Sync bans for a single room (after !room add or !sync).
         Skips expired temporary bans automatically.
@@ -1367,7 +1375,7 @@ class BanBot(ClientXMPP):
         except Exception as e:
             log.warning("⚠️ Failed to sync bans for room %s: %s", room, e)
 
-    async def sync_admins(self, announce: bool = False):
+    async def sync_admins(self, announce: bool = False) -> None:
         """
         Fetch current owners/admins from ADMIN_ROOM via XMPP.
         Updates self.occupants for admin checks.
@@ -1412,7 +1420,7 @@ class BanBot(ClientXMPP):
         except Exception as e:
             log.warning("Failed to sync admins: %s", e)
 
-    async def sync_bans_to_rooms(self, startup: bool = False, announce_progress: bool = True):
+    async def sync_bans_to_rooms(self, startup: bool = False, announce_progress: bool = True) -> None:
         """
         Sync all bans from the database to all protected rooms.
         Skips expired temporary bans.
@@ -1521,7 +1529,7 @@ class BanBot(ClientXMPP):
 
         log.info("✅ Ban sync completed: %d unique bans applied in %d rooms", len(applied_bans_set), len(self.protected_rooms))
 
-    async def sync_bans_startup(self):
+    async def sync_bans_startup(self) -> None:
         """
         Startup ban sync.
         Announce messages in Admin-Room only if ANNOUNCE_STARTUP=True in config.py
@@ -1529,12 +1537,12 @@ class BanBot(ClientXMPP):
         announce = getattr(self, "announce_startup", True)
         await self.sync_bans_to_rooms(startup=True, announce_progress=announce)
 
-    async def sync_bans(self):
+    async def sync_bans(self) -> None:
         await self.sync_bans_to_rooms(startup=False, announce_progress=True)
 
 
     # ---------- BANSEARCH ----------
-    async def cmd_bansearch(self, query: str):
+    async def cmd_bansearch(self, query: str) -> None:
         """
         Searches bans by nick, JID, or domain.
         Supports domain bans (*.domain.tld)
@@ -1579,7 +1587,7 @@ class BanBot(ClientXMPP):
         )
 
     # ---------- BANLIST ----------
-    async def cmd_banlist(self, room):
+    async def cmd_banlist(self, room: str) -> None:
         """
         Shows active bans.
         Admin Room: full info (JID/nick/domain)
@@ -1620,7 +1628,7 @@ class BanBot(ClientXMPP):
             self.send_message(mto=room, mbody=text, mtype="groupchat")
 
     # ---------- WHY ----------
-    async def cmd_why(self, identifier, room):
+    async def cmd_why(self, identifier: str, room: str) -> None:
         """
         Show reason for a ban.
         Admin Room: full info (JID/nick)
