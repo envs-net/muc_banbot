@@ -1234,7 +1234,7 @@ class BanBot(ClientXMPP):
         Full sync for !sync command:
         - Rejoin all protected rooms
         - Check bot admin/owner rights
-        - Apply all active bans
+        - Apply all active bans (only missing ones)
         - Skip expired temporary bans automatically
         """
         now = int(time.time())
@@ -1293,14 +1293,42 @@ class BanBot(ClientXMPP):
                     continue
                 active_bans.append((ban_jid, ban_nick, comment))
 
-            # --- Apply all active bans ---
-            tasks = [self.apply_ban_to_room(room, ban_jid, ban_nick, comment) for ban_jid, ban_nick, comment in active_bans]
+            # --- Fetch current outcasts in this room ---
+            try:
+                outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
+                outcasts_bare = [self.bare_jid(str(j)) for j in outcasts]
+            except Exception as e:
+                log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
+                outcasts_bare = []
+
+            # --- Apply only MISSING bans ---
+            tasks = []
+            new_bans_count = 0
+
+            for ban_jid, ban_nick, comment in active_bans:
+                # Check if already outcast in this room
+                already_banned = False
+
+                if ban_jid:
+                    ban_jid_bare = self.bare_jid(ban_jid)
+                    if ban_jid_bare in outcasts_bare:
+                        already_banned = True
+                        log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
+
+                if not already_banned:
+                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+                    new_bans_count += 1
+
             if tasks:
                 await asyncio.gather(*tasks)
+                log.info("ℹ️ Applied %d new bans in %s (skipped %d already banned)",
+                        new_bans_count, room, len(active_bans) - new_bans_count)
+            else:
+                log.info("ℹ️ All bans already applied in %s, nothing to do", room)
 
             self.send_message(
                 mto=ADMIN_ROOM,
-                mbody=f"✅ Finished syncing room {room} ({idx}/{total_rooms})",
+                mbody=f"✅ Finished syncing room {room} ({idx}/{total_rooms}) - {new_bans_count} new bans applied",
                 mtype="groupchat"
             )
 
@@ -1318,6 +1346,7 @@ class BanBot(ClientXMPP):
         """
         Sync bans for a single room (after !room add or !sync).
         Skips expired temporary bans automatically.
+        Only applies bans that are NOT already set (outcast affiliation).
         """
         if not self.is_bot_admin_or_owner(room):
             log.warning("⛔ Skipping initial sync for %s (bot is not admin/owner)", room)
@@ -1344,8 +1373,12 @@ class BanBot(ClientXMPP):
                 active_bans.append((ban_jid, ban_nick, until, comment))
 
             # --- Fetch current outcasts in the room ---
-            outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
-            outcasts_bare = [self.bare_jid(str(j)) for j in outcasts]
+            try:
+                outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
+                outcasts_bare = [self.bare_jid(str(j)) for j in outcasts]
+            except Exception as e:
+                log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
+                outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---
             to_insert = []
@@ -1362,15 +1395,32 @@ class BanBot(ClientXMPP):
                 await self.db.commit()
                 log.info("✅ Added %d orphan outcasts to DB for room %s", len(to_insert), room)
 
-            # --- Apply all active bans in this room ---
+            # --- Apply only MISSING bans in this room ---
             tasks = []
+            new_bans_count = 0
+
             for ban_jid, ban_nick, until, comment in active_bans:
-                tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+                # Check if already outcast in this room
+                already_banned = False
+
+                if ban_jid:
+                    ban_jid_bare = self.bare_jid(ban_jid)
+                    if ban_jid_bare in outcasts_bare:
+                        already_banned = True
+                        log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
+
+                if not already_banned:
+                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+                    new_bans_count += 1
 
             if tasks:
                 await asyncio.gather(*tasks)
+                log.info("ℹ️ Applied %d new bans in %s (skipped %d already banned)",
+                        new_bans_count, room, len(active_bans) - new_bans_count)
+            else:
+                log.info("ℹ️ All bans already applied in %s, nothing to do", room)
 
-            log.info("✅ Ban sync completed for room %s", room)
+            log.info("✅ Ban sync completed for room %s (%d new bans applied)", room, new_bans_count)
 
         except Exception as e:
             log.warning("⚠️ Failed to sync bans for room %s: %s", room, e)
@@ -1424,6 +1474,7 @@ class BanBot(ClientXMPP):
         """
         Sync all bans from the database to all protected rooms.
         Skips expired temporary bans.
+        Only applies bans that are NOT already set (outcast affiliation).
         Counts only unique bans for statistics.
 
         :param startup: If True, this is called at startup.
@@ -1503,19 +1554,36 @@ class BanBot(ClientXMPP):
                 active_bans.extend(orphan_bans)
                 log.info("✅ Added %d orphan outcasts to DB for room %s", len(orphan_bans), room)
 
-            # --- Apply all bans in parallel ---
+            # --- Apply only MISSING bans in parallel ---
             tasks = []
+            new_bans_count = 0
+
             for ban_jid, ban_nick, comment in active_bans:
-                tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
-                applied_bans_set.add((ban_jid, ban_nick))  # unique count
+                # Check if already outcast in this room
+                already_banned = False
+
+                if ban_jid:
+                    ban_jid_bare = self.bare_jid(ban_jid)
+                    if ban_jid_bare in outcasts_bare:
+                        already_banned = True
+                        log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
+
+                if not already_banned:
+                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+                    applied_bans_set.add((ban_jid, ban_nick))
+                    new_bans_count += 1
 
             if tasks:
                 await asyncio.gather(*tasks)
+                log.info("ℹ️ Applied %d new bans in %s (skipped %d already banned)",
+                        new_bans_count, room, len(active_bans) - new_bans_count)
+            else:
+                log.info("ℹ️ All bans already applied in %s, nothing to do", room)
 
             if announce_progress:
                 self.send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"✅ Finished syncing room {room} ({idx}/{len(self.protected_rooms)})",
+                    mbody=f"✅ Finished syncing room {room} ({idx}/{len(self.protected_rooms)}) - {new_bans_count} new bans applied",
                     mtype="groupchat"
                 )
 
