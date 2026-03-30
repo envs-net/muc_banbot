@@ -86,7 +86,7 @@ class BanBot(ClientXMPP):
         self.room_join_time = {}
         self.reconnecting = False
 
-        # --- Uptime tracking (NEW) ---
+        # --- Uptime tracking ---
         self.bot_start_time = time.time()
         self.server_connect_time = None
 
@@ -324,7 +324,7 @@ class BanBot(ClientXMPP):
 
         await asyncio.sleep(3)
 
-        # --- Record server connection time (NEW) ---
+        # --- Record server connection time ---
         self.server_connect_time = time.time()
 
         # --- Join admin room ---
@@ -519,7 +519,7 @@ class BanBot(ClientXMPP):
 
         self.reconnecting = True
 
-        # runtime state reset (NEW: clean up more thoroughly)
+        # runtime state reset
         self.occupants.clear()
         self.bot_admin_state.clear()
         self.room_join_time.clear()
