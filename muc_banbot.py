@@ -59,6 +59,36 @@ def human_time(seconds: int) -> str:
     if s: parts.append(f"{s}s")
     return " ".join(parts)
 
+def validate_jid_format(jid: str) -> bool:
+    """Validate JID format (user@domain.tld)."""
+    if not jid or "@" not in jid:
+        return False
+    parts = jid.split("@")
+    if len(parts) != 2:
+        return False
+    local, domain = parts
+    # Basic validation: non-empty parts with valid characters
+    if not local or not domain or "." not in domain:
+        return False
+    return True
+
+def validate_domain_ban(domain: str) -> tuple[bool, str]:
+    """
+    Validate domain ban format.
+    - Blocks: *.tld (generic)
+    - Allows: *.domain.tld (specific)
+    Returns: (is_valid: bool, error_message: str)
+    """
+    parts = domain.split(".")
+    # Need at least 2 parts: *.domain.tld → ["", "domain", "tld"]
+    if len(parts) < 3:
+        return False, f"❌ Domain '{domain}' is too generic. Specify more precise domain (e.g., *.domain.tld)."
+    return True, ""
+
+def validate_tempban_duration(max_days: int) -> tuple[bool, str]:
+    """Validate if duration doesn't exceed MAX_TEMPBAN_DAYS."""
+    pass  # Used in ban_all()
+
 # ---------- BAN BOT ----------
 class BanBot(ClientXMPP):
     def __init__(self, jid: str, password: str):
@@ -86,6 +116,7 @@ class BanBot(ClientXMPP):
         self.registered_rooms: set[str] = set()
         self.room_join_time = {}
         self.reconnecting = False
+        self.health_check_task = None
 
         # --- Uptime tracking ---
         self.bot_start_time = time.time()
@@ -380,12 +411,57 @@ class BanBot(ClientXMPP):
         # --- Start unban worker ---
         asyncio.create_task(self.unban_worker())
 
+        # --- Start health check worker ---
+        self.health_check_task = asyncio.create_task(self.health_check_worker())
+
         # --- Set Bot Avatar ---
         await self.set_avatar()
 
         self.reconnecting = False
 
         log.info("✅ Bot started, all rooms joined and bans applied")
+
+    # ---------- HEALTH CHECK ----------
+    async def health_check_worker(self) -> None:
+        """
+        Periodically check connection status of all protected rooms.
+        Verifies bot is still in rooms and has admin rights.
+        """
+        check_interval = getattr(config, "HEALTH_CHECK_INTERVAL", 300)
+        check_interval = max(60, check_interval)  # Minimum 60 seconds
+
+        while True:
+            try:
+                await asyncio.sleep(check_interval)
+
+                for room in self.protected_rooms:
+                    try:
+                        # Check if bot is still in room
+                        occ = self.occupants.get(room, {})
+                        if NICK not in occ:
+                            log.warning("⚠️ Health check: Bot not found in occupants for room %s", room)
+                            self.send_message(
+                                mto=ADMIN_ROOM,
+                                mbody=f"⚠️ Health check warning: Bot not in room {room} occupants",
+                                mtype="groupchat"
+                            )
+                            continue
+
+                        # Check admin rights
+                        if not self.is_bot_admin_or_owner(room):
+                            log.warning("⚠️ Health check: Bot lost admin rights in %s", room)
+                            self.send_message(
+                                mto=ADMIN_ROOM,
+                                mbody=f"⚠️ Health check: Bot lost admin/owner rights in {room}",
+                                mtype="groupchat"
+                            )
+
+                    except Exception as e:
+                        log.warning("Health check error for %s: %s", room, e)
+
+            except Exception as e:
+                log.warning("Error in health_check_worker: %s", e)
+                await asyncio.sleep(10)
 
     # ---------- MUC EVENT HANDLERS ----------
     async def muc_online(self, presence) -> None:
@@ -587,7 +663,8 @@ class BanBot(ClientXMPP):
                 text = (
                     "!help - show this help\n"
                     "!reloadconfig - reload config.py at runtime\n"
-                    "!status - show bot health, active rooms, and bot admin/owner status\n"
+                    "!status - show bot health, active rooms, and ban statistics\n"
+                    "!config - show current configuration\n"
                     "!whoami - show your affiliation/role\n\n"
 
                     "!room add/remove/list - manage protected rooms\n\n"
@@ -623,7 +700,7 @@ class BanBot(ClientXMPP):
         # ---------- ADMIN COMMANDS ----------
         admin_commands = (
             "!ban", "!tempban", "!unban", "!bansearch", "!room", "!sync",
-            "!syncadmins", "!syncbans", "!status", "!whoami", "!reloadconfig"
+            "!syncadmins", "!syncbans", "!status", "!whoami", "!reloadconfig", "!config"
         )
         if cmd in admin_commands:
             if room != ADMIN_ROOM or not self.is_authorized(msg):
@@ -704,6 +781,19 @@ class BanBot(ClientXMPP):
                     server_uptime = int(time.time()) - self.server_connect_time
                     status_lines.append(f"🌐 Server Connected: {human_time(server_uptime)}")
 
+                # Active Bans Count
+                now = int(time.time())
+                permanent_bans = 0
+                temporary_bans = 0
+                async with self.db.execute("SELECT until FROM bans") as cursor:
+                    async for (until,) in cursor:
+                        if until <= 0:
+                            permanent_bans += 1
+                        elif until > now:
+                            temporary_bans += 1
+
+                status_lines.append(f"📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
+
                 admin_infos = self.occupants.get(ADMIN_ROOM, {})
                 admins = [
                     f"{n} ({info['jid']})"
@@ -719,6 +809,25 @@ class BanBot(ClientXMPP):
                     if self.protected_rooms else "⚠️ No protected rooms configured."
                 )
                 self.send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
+
+            elif cmd == "!config":
+                config_lines = ["📋 Current Bot Configuration:\n"]
+
+                config_lines.append(f"🔐 JID: {JID}")
+                config_lines.append(f"👤 Nick: {NICK}")
+                config_lines.append(f"💾 Database: {DB_FILE}")
+                config_lines.append(f"⏱️ Unban Check Interval: {getattr(config, 'UNBAN_CHECK_INTERVAL', 60)}s")
+                config_lines.append(f"⏰ Health Check Interval: {getattr(config, 'HEALTH_CHECK_INTERVAL', 300)}s")
+                config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
+                config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
+                config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
+                config_lines.append(f"📅 Max Tempban Days: {getattr(config, 'MAX_TEMPBAN_DAYS', 30)}")
+
+                self.send_message(
+                    mto=room,
+                    mbody="\n".join(config_lines),
+                    mtype="groupchat"
+                )
 
             elif cmd == "!whoami":
                 info = self.occupants.get(room, {}).get(nick, {})
@@ -958,11 +1067,10 @@ class BanBot(ClientXMPP):
     async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None) -> None:
         """
         Bans a user by JID, nick, or domain (*.domain.tld):
-        - Resolves JID from current room occupants if only Nick is given
-        - Resolves Nick from current room occupants if only JID is given
-        - Supports domain bans (*.domain.tld)
-        - Saves both JID/Nick or domain in DB
-        - Applies ban to all protected rooms
+        - Validates JID format
+        - Checks tempban duration limits
+        - Handles duplicate bans (smart conversion)
+        - Prevents race conditions
         """
         ts = until if until is not None else 0
 
@@ -970,12 +1078,27 @@ class BanBot(ClientXMPP):
         ban_nick = None
         is_domain = identifier.startswith("*.")
 
+        # --- Step 1: Validations ---
         if is_domain:
-            # Domain-ban
-            ban_jid = identifier.lower()  # store as *.domain.tld
+            # Domain ban validation
+            is_valid, error_msg = validate_domain_ban(identifier[2:])
+            if not is_valid:
+                self.send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
+                return
+            ban_jid = identifier.lower()
             ban_nick = None
         else:
             is_jid = "@" in identifier
+
+            # JID format validation
+            if is_jid and not validate_jid_format(identifier):
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"❌ Invalid JID format: {identifier}. Expected: user@domain.tld",
+                    mtype="groupchat"
+                )
+                return
+
             ban_jid = identifier if is_jid else None
             ban_nick = None if is_jid else identifier.lower()
 
@@ -1000,6 +1123,71 @@ class BanBot(ClientXMPP):
                     if ban_nick:
                         break
 
+        # --- Step 2: Check tempban duration limits ---
+        if until is not None and until > 0:
+            max_days = getattr(config, "MAX_TEMPBAN_DAYS", 30)
+            max_days = max(1, min(365, max_days))  # Clamp between 1-365
+            max_seconds = max_days * 86400
+            duration = until - int(time.time())
+
+            if duration <= 0:
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"❌ Invalid duration: must be in the future.",
+                    mtype="groupchat"
+                )
+                return
+
+            if duration > max_seconds:
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"❌ Tempban duration exceeds MAX_TEMPBAN_DAYS ({max_days} days). Max: {max_days} days.",
+                    mtype="groupchat"
+                )
+                return
+
+        # --- Step 3: Check for duplicate bans and handle smart conversion ---
+        db_key = ban_jid or ban_nick
+        if db_key in self.ban_cache:
+            existing_jid, existing_nick, existing_until, existing_issuer, existing_comment = self.ban_cache[db_key]
+            existing_is_permanent = existing_until <= 0
+            new_is_permanent = ts <= 0
+
+            if existing_is_permanent and new_is_permanent:
+                # Permanent → Permanent
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"ℹ️ Ban already exists for {identifier} (permanent)",
+                    mtype="groupchat"
+                )
+                return
+            elif existing_is_permanent and not new_is_permanent:
+                # Permanent → Tempban (CONVERT)
+                log.info("🔄 Converting permanent ban to tempban for %s", identifier)
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"🔄 Converting permanent ban to tempban for {identifier} ({human_time(until - int(time.time()))})",
+                    mtype="groupchat"
+                )
+            elif not existing_is_permanent and new_is_permanent:
+                # Tempban → Permanent (CONVERT)
+                log.info("🔄 Converting tempban to permanent ban for %s", identifier)
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"🔄 Converting tempban to permanent ban for {identifier}",
+                    mtype="groupchat"
+                )
+            else:
+                # Tempban → Tempban (UPDATE)
+                new_duration = human_time(until - int(time.time()))
+                old_duration = human_time(max(0, existing_until - int(time.time())))
+                log.info("🔄 Updating tempban for %s: %s → %s", identifier, old_duration, new_duration)
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"🔄 Ban updated: {identifier}'s tempban duration changed from {old_duration} to {new_duration}",
+                    mtype="groupchat"
+                )
+
         # --- Prevent banning admins/owners ---
         for room_occ in self.occupants.values():
             for n, info in room_occ.items():
@@ -1023,12 +1211,21 @@ class BanBot(ClientXMPP):
                             )
                             return
 
-        # --- Save ban to DB ---
-        await self.db.execute(
-            "REPLACE INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, ?, ?, ?)",
-            (ban_jid, ban_nick, ts, issuer, comment)
-        )
-        await self.db.commit()
+        # --- Save ban to DB (REPLACE for atomic operation) ---
+        try:
+            await self.db.execute(
+                "REPLACE INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, ?, ?, ?)",
+                (ban_jid, ban_nick, ts, issuer, comment)
+            )
+            await self.db.commit()
+        except Exception as e:
+            log.error("Database error when saving ban: %s", e)
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody=f"❌ Database error: {e}",
+                mtype="groupchat"
+            )
+            return
 
         self.ban_cache[ban_jid or ban_nick] = (
             ban_jid,
