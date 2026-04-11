@@ -98,8 +98,8 @@ class BanBot(ClientXMPP):
         self.register_plugin("xep_0030")  # Service Discovery
         self.register_plugin("xep_0045")  # Multi-User Chat
         self.register_plugin('xep_0054')  # vCard
-        self.register_plugin('xep_0084')  # Moderner Avatar
-        self.register_plugin('xep_0153')  # vCard Avatar Kompatibilität
+        self.register_plugin('xep_0084')  # Modern Avatar
+        self.register_plugin('xep_0153')  # vCard Avatar compatibility
 
         # --- Event handlers ---
         self.add_event_handler("session_start", self.start)
@@ -259,15 +259,37 @@ class BanBot(ClientXMPP):
 
         avatar_type = f"image/{pathlib.Path(avatar_path).suffix.lstrip('.').lower()}"
 
-        # --- XEP-0054: vCard photo ---
+        # --- XEP-0054: vCard photo + additional fields ---
         try:
             vcard = self['xep_0054'].make_vcard()
+
+            # Set avatar
             vcard['PHOTO']['TYPE'] = avatar_type
             vcard['PHOTO']['BINVAL'] = image_data
+
+            # Add optional vCard fields from config
+            if hasattr(config, 'VCARD_NICKNAME') and config.VCARD_NICKNAME:
+                vcard['NICKNAME'] = config.VCARD_NICKNAME
+
+            if hasattr(config, 'VCARD_FN') and config.VCARD_FN:
+                vcard['FN'] = config.VCARD_FN
+
+            if hasattr(config, 'VCARD_ORG') and config.VCARD_ORG:
+                vcard['ORG'] = config.VCARD_ORG
+
+            if hasattr(config, 'VCARD_ROLE') and config.VCARD_ROLE:
+                vcard['ROLE'] = config.VCARD_ROLE
+
+            if hasattr(config, 'VCARD_URL') and config.VCARD_URL:
+                vcard['URL'] = config.VCARD_URL
+
+            if hasattr(config, 'VCARD_NOTE') and config.VCARD_NOTE:
+                vcard['NOTE'] = config.VCARD_NOTE
+
             await self['xep_0054'].publish_vcard(vcard)
-            log.info("✅ XEP-0054 avatar updated successfully")
+            log.info("✅ XEP-0054 vCard updated successfully")
         except Exception as e:
-            log.warning("⚠️ Failed to update XEP-0054 avatar: %s", e)
+            log.warning("⚠️ Failed to update XEP-0054 vCard: %s", e)
 
         # --- XEP-0084: User Avatar / vCard4 ---
         try:

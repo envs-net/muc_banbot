@@ -7,6 +7,16 @@ NICK = "adminbot"
 DB_FILE = "banbot.db"
 AVATAR_PATH = "avatar.png" # PATH to Avatar, None = do not set an avatar
 
+# ================= vCARD SETTINGS =================
+VCARD_NICKNAME = "My Bot Nickname"   # Optional nickname for vCard
+VCARD_FN = "Admin Bot"               # Full name
+VCARD_ORG = "My Organization"        # Organization name
+VCARD_ROLE = "Administrator"         # Role/position
+VCARD_URL = "https://example.com"    # Website URL
+VCARD_NOTE = "Bot Admin Assistant"   # Notes/description
+
+# ================= BOT SETTINGS =================
+
 UNBAN_CHECK_INTERVAL = 60  # Interval (seconds) for checking expired temporary bans. Lower = faster unbans but more DB queries. Default: 60
 
 ANNOUNCE_STARTUP = True  # True = Show startup messages in the admin room, False = off
