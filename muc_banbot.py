@@ -14,6 +14,7 @@ import slixmpp
 import pathlib
 import importlib
 import hashlib
+import re
 from slixmpp import ClientXMPP
 from slixmpp.exceptions import IqError, IqTimeout
 from slixmpp.xmlstream import ET
@@ -1236,25 +1237,94 @@ class BanBot(ClientXMPP):
         self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
         log.info(msg_admin)
 
+    # ========== ROOM JID VALIDATION ==========
+
+    async def validate_room_jid(self, room_jid: str) -> tuple[bool, str]:
+        """
+        Validate a room JID in two steps:
+        1. Format validation (name@domain.tld)
+        2. Service Discovery check (XEP-0030)
+
+        Returns: (is_valid: bool, error_message: str)
+        """
+        room_jid = room_jid.strip().lower()
+
+        # --- Step 1: Format Validation ---
+        if not room_jid:
+            return False, "❌ Room JID cannot be empty."
+
+        if "@" not in room_jid:
+            return False, "❌ Invalid JID format. Expected: name@muc.example.com"
+
+        parts = room_jid.split("@")
+        if len(parts) != 2:
+            return False, "❌ Invalid JID format. Expected: name@muc.example.com"
+
+        room_name, domain = parts
+
+        # Check for valid characters (alphanumeric, dots, hyphens, underscores)
+        if not re.match(r"^[a-z0-9._-]+$", room_name):
+            return False, f"❌ Invalid room name '{room_name}'. Use alphanumeric, dots, hyphens, underscores only."
+
+        if not re.match(r"^[a-z0-9.-]+\.[a-z]{2,}$", domain):
+            return False, f"❌ Invalid domain '{domain}'. Expected: domain.tld"
+
+        # --- Step 2: Service Discovery Check (XEP-0030) ---
+        try:
+            info = await self.plugin["xep_0030"].get_info(jid=room_jid, timeout=5)
+
+            # Check if it's a MUC (Multi-User Chat)
+            identities = info["disco_info"]["identities"]
+            is_muc = any(
+                identity[0] == "conference" and identity[1] == "text"
+                for identity in identities
+            )
+
+            if not is_muc:
+                return False, f"❌ '{room_jid}' exists but is not a Multi-User Chat room."
+
+            log.info("✅ Room validated: %s (is MUC)", room_jid)
+            return True, ""
+
+        except IqTimeout:
+            return False, f"❌ Service Discovery timeout for '{room_jid}'. Room may not exist or server is unresponsive."
+        except IqError as e:
+            error_msg = str(e.iq["error"]["type"]) if e.iq and e.iq["error"] else "Unknown error"
+            return False, f"❌ Service Discovery error for '{room_jid}': {error_msg}"
+        except Exception as e:
+            return False, f"❌ Failed to validate room: {str(e)}"
+
     # ---------- ROOM MANAGEMENT ----------
 
     async def cmd_room(self, args: list[str], room: str) -> None:
         """
         Manage protected rooms.
         Commands: list, add <room>, remove <room>
+
+        The `add` command now validates:
+        - JID format (name@domain.tld)
+        - Room existence via Service Discovery (XEP-0030)
         """
         if not args:
             return
 
         action = args[0].lower()
+
         if action == "list":
             rooms = "\n".join(self.protected_rooms) if self.protected_rooms else "No protected rooms."
             self.send_message(mto=room, mbody=rooms, mtype="groupchat")
 
         elif action in ("add", "remove") and len(args) >= 2:
-            target = args[1]
+            target = args[1].lower()
 
             if action == "add":
+                # --- Validate Room JID before adding ---
+                is_valid, error_msg = await self.validate_room_jid(target)
+                if not is_valid:
+                    self.send_message(mto=room, mbody=error_msg, mtype="groupchat")
+                    log.warning("Room validation failed for %s: %s", target, error_msg)
+                    return
+
                 if target not in self.protected_rooms:
                     # --- In-Memory and DB ---
                     self.protected_rooms.add(target)
@@ -1294,6 +1364,8 @@ class BanBot(ClientXMPP):
                                 await self.sync_bans_to_rooms_for_single_room(room)
 
                     asyncio.create_task(wait_for_bot_online())
+                else:
+                    self.send_message(mto=room, mbody=f"⚠️ Room already in protected list: {target}", mtype="groupchat")
 
             elif action == "remove":
                 self.protected_rooms.discard(target)
