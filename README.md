@@ -21,8 +21,12 @@ It provides central administration via an admin room and protects multiple chat 
 * 👀 Monitors bot's admin/owner rights per room and reports loss to the admin room  
 * ⛔ Prevents ban application if the bot does not have admin/owner rights  
 * 🐞 Handles nick-only bans with best-effort enforcement  
-* 🔄 Auto-updates nick-only bans to JID when user rejoins
-* 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization
+* 🔄 Auto-updates nick-only bans to JID when user rejoins  
+* 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
+* ✅ Input validation for JID format and domain bans  
+* 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
+* ⏰ Configurable tempban duration limits (1-365 days, default: 30)  
+* 🏥 Periodic health checks for room connectivity and admin rights
 
 ---
 
@@ -31,14 +35,15 @@ It provides central administration via an admin room and protects multiple chat 
 | Command | Description | Example |
 |---------|-------------|---------|
 | `!help` | Shows this help message | `!help` |
+| `!config` | Shows current bot configuration | `!config` |
 | `!reloadconfig` | Reloads `config.py` at runtime without restarting | `!reloadconfig` |
-| `!status` | Shows bot status, active rooms, uptime, and bot admin/owner rights per room | `!status` |
+| `!status` | Shows bot status, active rooms, uptime, and ban statistics | `!status` |
 | `!whoami` | Shows your affiliation/role in the current room | `!whoami` |
 | `!room add <room>` | Adds a room to the protected list and stores it in the DB | `!room add secretroom@muc.example.com` |
 | `!room remove <room>` | Removes a room from the protected list and DB | `!room remove secretroom@muc.example.com` |
 | `!room list` | Lists all protected rooms | `!room list` |
 | `!ban <jid/nick/domain> [comment]` | Bans a user or domain across all protected rooms | `!ban alice@example.com spamming` or `!ban *.evil.com` |
-| `!tempban <jid/nick> <10m/2h/1d> [comment]` | Temporary ban | `!tempban bob 10m rude behavior` |
+| `!tempban <jid/nick> <10m/2h/1d> [comment]` | Temporary ban (limited to MAX_TEMPBAN_DAYS) | `!tempban bob 10m rude behavior` |
 | `!unban <jid/nick/domain>` | Removes a ban | `!unban bob` or `!unban *.evil.com` |
 | `!banlist` | Shows all active bans with remaining time and comments | `!banlist` |
 | `!bansearch <query>` | Searches bans by nick, JID, domain, or issuer | `!bansearch example.com` |
@@ -124,7 +129,9 @@ You can run `!reloadconfig` in the admin room to apply most changes immediately.
 - `ANNOUNCE_STARTUP` (bool, default: `True`) - Send status messages when bot starts
 - `SHOW_BAN_IN_MUC` (bool, default: `True`) - Announce bans in protected rooms
 - `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` (bool, default: `True`) - Allow users to run `!help`, `!banlist`, `!why`
+- `HEALTH_CHECK_INTERVAL` (int, default: `300`) - Seconds between health checks of room connectivity (minimum: 60)
 - `UNBAN_CHECK_INTERVAL` (int, default: `60`) - Seconds between checking for expired tempbans
+- `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `AVATAR_PATH` (str) - Path to bot avatar image (PNG, JPG, etc.)
 - `VCARD_NICKNAME` (str) - Bot's nickname in vCard
 - `VCARD_FN` (str) - Bot's full name in vCard (e.g., "Ban Management Bot")
@@ -181,10 +188,42 @@ sudo journalctl -u muc_banbot -f
 * Admins/Owners are automatically protected from bans.  
 * Bot automatically reports if admin/owner rights are lost or regained.
 * Domain bans (`*.domain.tld`) will refuse to ban admins/owners on that domain.
+* **JID validation** prevents malformed JIDs from being banned.
+* **Domain ban validation** blocks overly generic bans (e.g., `*.com`).
 
 ---
 
 ## Advanced Features
+
+### Input Validation & Duration Limits
+
+The bot validates all ban inputs to prevent errors:
+- **JID Format Validation**: Checks for valid `user@domain.tld` format
+- **Domain Ban Validation**: Requires specific domains (e.g., `*.spam-domain.com`), blocks generic TLDs like `*.com`
+- **Tempban Duration Limits**: Enforces configurable limits (default max: 30 days, configurable up to 365 days)
+- **Negative Duration Rejection**: Prevents banning into the past
+
+Example validations:
+```
+❌ !ban invalid  → Invalid JID format
+❌ !ban user@  → Invalid JID format
+❌ !ban *.com  → Domain too generic
+✅ !ban user@example.com  → Valid
+✅ !ban *.spam-domain.com  → Valid
+❌ !tempban user 400d  → Duration exceeds MAX_TEMPBAN_DAYS (30)
+✅ !tempban user 30d  → Valid
+```
+
+### Smart Duplicate Ban Handling
+
+When banning an existing user, the bot intelligently handles the action:
+
+| Scenario | Action | Message |
+|----------|--------|---------|
+| Permanent ban exists, applying permanent | Returns info | `ℹ️ Ban already exists (permanent)` |
+| Permanent ban exists, applying tempban | Converts | `🔄 Converting permanent ban to tempban (10m)` |
+| Tempban exists, applying permanent | Converts | `🔄 Converting tempban to permanent ban` |
+| Tempban exists, applying new tempban | Updates | `🔄 Ban updated: duration changed from 10m to 20m` |
 
 ### Auto-Update Nick-Only Bans
 
@@ -209,6 +248,7 @@ Protections:
 - Will refuse to ban admins/owners on the domain
 - Automatically kicks all current users from that domain
 - Prevents future logins from that domain
+- Must be specific (e.g., `*.spam-domain.com`, not `*.com`)
 
 ### Avatar & vCard Support
 
@@ -242,6 +282,14 @@ The bot continuously monitors its affiliation status in all rooms:
 
 The `!status` command shows the current admin/owner status in each room.
 
+### Periodic Health Checks
+
+The bot runs a **health check worker** that:
+- Periodically verifies bot is still connected to all rooms (configurable interval, default: 300s)
+- Checks if bot maintains admin/owner rights in each room
+- Notifies admin room if connectivity or rights issues are detected
+- Configurable via `HEALTH_CHECK_INTERVAL` (minimum: 60 seconds)
+
 ### Automatic Temporary Ban Expiration
 
 The bot runs an automatic **unban worker** that:
@@ -250,18 +298,27 @@ The bot runs an automatic **unban worker** that:
 - Restores `participant` role to users who are currently online
 - Logs all auto-unbans to the admin room
 
+### Configuration Display
+
+The `!config` command displays all current bot configuration settings in the admin room:
+- Bot JID and nickname
+- Database path
+- Check intervals (health check, unban check)
+- Feature flags (announcements, ban visibility, user commands)
+- Tempban limits (MAX_TEMPBAN_DAYS)
+
 ---
 
 ## Sync and Room/Ban Commands Overview
 
 | Command                          | Effect                                                                                            | When Useful / Example Use Case                            |
 | -------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `!room add <room>`               | Adds a new protected room to the list **and saves it in the database**                            | After creating a new room to protect; optionally run `!syncbans` |
-| `!room remove <room>`            | Removes a room from the protected list and database; bot leaves immediately                       | Stop protecting a room; bot will no longer enforce bans there |
+| `!room add <room>`               | Adds a new protected room to the list **and saves it in the database**                            | After creating a new room to protect; optionally run `!syncbans`  |
+| `!room remove <room>`            | Removes a room from the protected list and database; bot leaves immediately                       | Stop protecting a room; bot will no longer enforce bans   |
 | `!sync`                          | Full sync: rejoin rooms, verify admin rights, apply only MISSING active bans (fast)               | After bot was disconnected or removed from rooms          |
 | `!syncadmins`                    | Updates internal admin list from admin room (via server query)                                    | After adding/removing admins or owners; at startup        |
 | `!syncbans`                      | Full ban synchronization: reads outcasts from all rooms, adds orphan bans to DB, reapplies all    | After manual ban changes in rooms or DB recovery          |
-| `sync_bans_startup()` (internal) | Runs automatically on bot startup; applies only active (non-expired) bans                         | Not an admin command. Ensures bans enforced after restart  |
+| `sync_bans_startup()` (internal) | Runs automatically on bot startup; applies only active (non-expired) bans                         | Not an admin command. Ensures bans enforced after restart |
 
 **Key Differences:**
 - **`!sync`**: Faster, applies only bans that aren't already set; useful for reconnects
@@ -300,11 +357,46 @@ The bot runs an automatic **unban worker** that:
 
 ## Troubleshooting
 
+### Invalid JID format error
+
+```
+❌ Invalid JID format: user@. Expected: user@domain.tld
+```
+
+**Solution:** Use valid JID format with both local part and domain:
+- ✅ `user@example.com`
+- ✅ `alice@my-server.org`
+- ❌ `user@` (missing domain)
+- ❌ `@example.com` (missing local part)
+
+### Domain ban too generic error
+
+```
+❌ Domain '*.com' is too generic. Specify more precise domain (e.g., *.domain.tld).
+```
+
+**Solution:** Use specific domain bans, not generic TLDs:
+- ✅ `!ban *.spam-domain.com`
+- ✅ `!ban *.evil-company.co.uk`
+- ❌ `!ban *.com` (too generic)
+- ❌ `!ban *.org` (too generic)
+
+### Tempban duration exceeds limit
+
+```
+❌ Tempban duration exceeds MAX_TEMPBAN_DAYS (30 days). Max: 30 days.
+```
+
+**Solution:** Use duration within limits, or adjust `MAX_TEMPBAN_DAYS` in config (max: 365):
+- ✅ `!tempban user 30d`
+- ✅ `!tempban user 10m`
+- ❌ `!tempban user 365d` (if MAX_TEMPBAN_DAYS is 30)
+
 ### Bot loses admin rights in a room
 
 The bot will automatically notify the admin room. To fix:
 1. Ensure the bot account has admin/owner affiliation in the room
-2. Check room settings in your XMPP server
+2. Check room settings on your XMPP server
 3. Run `!sync` to verify rights are restored
 
 ### Ban not being enforced
@@ -318,6 +410,14 @@ Run `!syncbans` to:
 
 Verify `UNBAN_CHECK_INTERVAL` is set in config.py (default 60 seconds). The unban worker runs in the background automatically.
 
+### Health check warnings
+
+If you see health check warnings in the admin room, the bot has detected:
+- Bot is not in room occupants list → likely a network issue, will attempt rejoin
+- Bot lost admin/owner rights → check room configuration on server
+
+Run `!sync` to re-establish connections and verify rights.
+
 ---
 
 ## Notes
@@ -327,5 +427,4 @@ Verify `UNBAN_CHECK_INTERVAL` is set in config.py (default 60 seconds). The unba
 * Messages in protected rooms are sent as **ephemeral** (not stored); admin room always receives full notifications.
 * Changes to `config.py` can **usually be applied via `!reloadconfig`** (except critical settings).
 * The bot uses **exponential backoff** (max 5 minutes) if disconnected from the XMPP server.
-* Domain bans are stored as-is (e.g., `*.domain.tld`) and matched during bans/unbans.
-* Nick-only bans are automatically upgraded to JID-based bans when the user rejoins.
+* Domain bans are stored as-is (e.g., `*.domain.tld`) an
