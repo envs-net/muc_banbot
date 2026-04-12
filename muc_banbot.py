@@ -28,7 +28,7 @@ from config import JID, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 # ---------- TIME HELPERS ----------
 def parse_duration(s: str) -> int:
