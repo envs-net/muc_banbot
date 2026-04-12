@@ -992,9 +992,9 @@ class BanBot(ClientXMPP):
 
                     await self.db.execute(
                         "REPLACE INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, ?, ?, ?)",
-                        (jid, nick.lower() if nick else None, until, issuer, comment)
+                        (jid.lower() if jid else None, nick.lower() if nick else None, until, issuer, comment)
                     )
-                    self.ban_cache[db_key] = (jid, nick.lower() if nick else None, until, issuer, comment)
+                    self.ban_cache[db_key] = (jid.lower() if jid else None, nick.lower() if nick else None, until, issuer, comment)
                     successful += 1
 
                 except Exception as e:
@@ -1231,9 +1231,9 @@ class BanBot(ClientXMPP):
 
         # --- Step 4: Notifications ---
         if room == ADMIN_ROOM:
-            display = ban_jid or ban_nick or "Unknown"
-            msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + (f" by {issuer}" if issuer else "")
-            self.send_message(mto=ADMIN_ROOM, mbody=msg, mtype="groupchat")
+            display = self.bare_jid(ban_jid) if ban_jid else (ban_nick or "Unknown")
+            msg_admin = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + f" by {issuer}"
+            self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
         elif room in self.protected_rooms:
             display = ban_nick or "Unknown"
             msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "")
@@ -1284,7 +1284,7 @@ class BanBot(ClientXMPP):
                 for room_occ in self.occupants.values():
                     for n, info in room_occ.items():
                         if n.lower() == ban_nick and info.get("jid"):
-                            ban_jid = info["jid"]
+                            ban_jid = self.bare_jid(info["jid"])
                             break
                     if ban_jid:
                         break
@@ -1391,7 +1391,7 @@ class BanBot(ClientXMPP):
         try:
             await self.db.execute(
                 "REPLACE INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, ?, ?, ?)",
-                (ban_jid, ban_nick, ts, issuer, comment)
+                (self.bare_jid(ban_jid) if ban_jid else None, ban_nick, ts, issuer, comment)
             )
             await self.db.commit()
         except Exception as e:
@@ -1403,8 +1403,9 @@ class BanBot(ClientXMPP):
             )
             return
 
-        self.ban_cache[ban_jid or ban_nick] = (
-            ban_jid,
+        cache_key = self.bare_jid(ban_jid) if ban_jid else ban_nick
+        self.ban_cache[cache_key] = (
+            self.bare_jid(ban_jid) if ban_jid else None,
             ban_nick.lower() if ban_nick else None,
             ts,
             issuer,
@@ -1415,8 +1416,9 @@ class BanBot(ClientXMPP):
                  identifier, ban_jid, ban_nick, ts, issuer)
 
         # --- Notify Admin Room explicitly ---
-        display = ban_jid or ban_nick or "Unknown"
-        msg_admin = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + f" by {issuer}"
+        display = self.bare_jid(ban_jid) if ban_jid else (ban_nick or "Unknown")
+        time_info = f" ({human_time(ts - int(time.time()))})" if ts > 0 else ""
+        msg_admin = f"✅ Banned {display}{time_info}" + (f" ({comment})" if comment else "") + f" by {issuer}"
         self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
 
         # --- Apply ban to all protected rooms ---
@@ -1427,7 +1429,7 @@ class BanBot(ClientXMPP):
                     for n, info in list(self.occupants.get(room, {}).items()):
                         jid_in_room = info.get("jid")
                         if jid_in_room and self.bare_jid(jid_in_room).split("@")[1].lower() == ban_jid[2:]:
-                            await self.apply_ban_to_room(room, jid_in_room, n, comment, issuer)
+                            await self.apply_ban_to_room(room, self.bare_jid(jid_in_room), n, comment, issuer)
                 else:
                     await self.apply_ban_to_room(room, ban_jid, ban_nick, comment, issuer)
             except (IqError, IqTimeout) as e:
@@ -2073,7 +2075,7 @@ class BanBot(ClientXMPP):
             if orphan_bans:
                 await self.db.executemany(
                     "INSERT INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, 0, ?, ?)",
-                    [(jid, nick, "sync_room_add", comment) for jid, nick, comment in orphan_bans]
+                    [(self.bare_jid(jid) if jid else None, nick, "sync_room_add", comment) for jid, nick, comment in orphan_bans]
                 )
                 await self.db.commit()
                 active_bans.extend(orphan_bans)

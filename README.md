@@ -8,7 +8,6 @@ It provides central administration via an admin room and protects multiple chat 
 ## Features
 
 * 🛡️ Central admin room for all commands
-* 📦 Version tracking  
 * 🔒 Dynamic addition/removal of protected rooms  
 * 🔄 Automatic rejoin and reapplication of bans on restart  
 * 📦 Sync existing room bans into the database at startup  
