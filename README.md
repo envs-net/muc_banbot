@@ -28,7 +28,7 @@ It provides central administration via an admin room and protects multiple chat 
 * ⏰ Configurable tempban duration limits (1-365 days, default: 30)  
 * 🏥 Periodic health checks for room connectivity and admin rights
 * 💾 Ban import/export to CSV format for backup and migration
-* 📦 Version tracking (v1.2.0)
+* 📦 Version tracking
 
 ---
 
@@ -39,7 +39,7 @@ It provides central administration via an admin room and protects multiple chat 
 | `!help` | Shows this help message | `!help` |
 | `!config` | Shows current bot configuration | `!config` |
 | `!reloadconfig` | Reloads `config.py` at runtime without restarting | `!reloadconfig` |
-| `!status` | Shows bot status (v1.2.0), active rooms, uptime, and ban statistics | `!status` |
+| `!status` | Shows bot status, active rooms, uptime, and ban statistics | `!status` |
 | `!whoami` | Shows your affiliation/role in the current room | `!whoami` |
 | `!room add <room>` | Adds a room to the protected list and stores it in the DB | `!room add secretroom@muc.example.com` |
 | `!room remove <room>` | Removes a room from the protected list and DB | `!room remove secretroom@muc.example.com` |
@@ -364,7 +364,7 @@ The `!config` command displays all current bot configuration settings in the adm
 - Check intervals (health check, unban check)
 - Feature flags (announcements, ban visibility, user commands)
 - Tempban limits (MAX_TEMPBAN_DAYS)
-- Bot version (v1.2.0) displayed in `!config` and `!status`
+- Bot version displayed in `!config` and `!status`
 
 ---
 
