@@ -5,6 +5,7 @@
 # License: MIT
 
 import os
+import csv
 import config
 import asyncio
 import logging
@@ -15,6 +16,7 @@ import pathlib
 import importlib
 import hashlib
 import re
+from datetime import datetime
 from slixmpp import ClientXMPP
 from slixmpp.exceptions import IqError, IqTimeout
 from slixmpp.xmlstream import ET
@@ -25,6 +27,8 @@ from config import JID, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
+
+__version__ = "1.2.0"
 
 # ---------- TIME HELPERS ----------
 def parse_duration(s: str) -> int:
@@ -687,7 +691,10 @@ class BanBot(ClientXMPP):
 
                     "!sync - rejoin rooms, verify admin rights, and enforce all active bans\n"
                     "!syncadmins - update admin list from the admin room\n"
-                    "!syncbans - sync bans from all rooms into the database and enforce them"
+                    "!syncbans - sync bans from all rooms into the database and enforce them\n\n"
+
+                    "!export - export all bans to a CSV file\n"
+                    "!import <filename> - import bans from a CSV file"
                 )
             elif self.user_cmds_allowed(room):
                 text = "!help - show this help\n!banlist - show temporary bans\n!why <nick> - show ban reason"
@@ -709,7 +716,8 @@ class BanBot(ClientXMPP):
         # ---------- ADMIN COMMANDS ----------
         admin_commands = (
             "!ban", "!tempban", "!unban", "!bansearch", "!room", "!sync",
-            "!syncadmins", "!syncbans", "!status", "!whoami", "!reloadconfig", "!config"
+            "!syncadmins", "!syncbans", "!status", "!whoami", "!reloadconfig", "!config",
+            "!export", "!import"
         )
         if cmd in admin_commands:
             if room != ADMIN_ROOM or not self.is_authorized(msg):
@@ -784,6 +792,9 @@ class BanBot(ClientXMPP):
             elif cmd == "!status":
                 status_lines = ["✅ Bot is online and healthy."]
 
+                # Bot Version
+                status_lines.append(f"🤖 Bot Version: {__version__}")
+
                 # Bot Uptime
                 bot_uptime = int(time.time()) - self.bot_start_time
                 status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
@@ -844,6 +855,160 @@ class BanBot(ClientXMPP):
             elif cmd == "!whoami":
                 info = self.occupants.get(room, {}).get(nick, {})
                 self.send_message(mto=room, mbody=f"You are {info.get('affiliation', 'none')}", mtype="groupchat")
+
+            elif cmd == "!export":
+                success, message = await self.export_bans_to_csv()
+                self.send_message(mto=room, mbody=message, mtype="groupchat")
+
+            elif cmd == "!import":
+                if len(parts) < 2:
+                    self.send_message(
+                        mto=room,
+                        mbody="❌ Usage: !import <filename>",
+                        mtype="groupchat"
+                    )
+                else:
+                    filename = parts[1]
+                    successful, skipped, errors = await self.import_bans_from_csv(filename)
+                    result_msg = f"📥 Import Results:\n✅ Successful: {successful}\n⚠️ Skipped: {skipped}"
+                    if errors:
+                        result_msg += f"\n\n❌ Errors ({len(errors)}):\n"
+                        result_msg += "\n".join(errors[:10])
+                        if len(errors) > 10:
+                            result_msg += f"\n... and {len(errors) - 10} more errors"
+                    self.send_message(mto=room, mbody=result_msg, mtype="groupchat")
+                    log.info("Import completed: %d successful, %d skipped, %d errors", successful, skipped, len(errors))
+
+    # ---------- EXPORT / IMPORT ----------
+    async def export_bans_to_csv(self) -> tuple[bool, str]:
+        """
+        Export all bans to a CSV file.
+        Returns: (success: bool, message: str)
+        """
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"bans_export_{timestamp}.csv"
+
+            async with self.db.execute(
+                "SELECT jid, nick, until, issuer, comment FROM bans"
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+            if not rows:
+                return False, "❌ No bans to export."
+
+            try:
+                with open(filename, "w", newline="", encoding="utf-8") as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(["jid", "nick", "until", "issuer", "comment"])
+                    for jid, nick, until, issuer, comment in rows:
+                        writer.writerow([
+                            jid or "",
+                            nick or "",
+                            until if until is not None else "",
+                            issuer or "",
+                            comment or ""
+                        ])
+                log.info("Exported %d bans to %s", len(rows), filename)
+                return True, f"✅ Exported {len(rows)} bans to {filename}"
+            except IOError as e:
+                log.error("File I/O error during export: %s", e)
+                return False, f"❌ Failed to write file: {e}"
+
+        except Exception as e:
+            log.error("Export error: %s", e)
+            return False, f"❌ Export failed: {e}"
+
+    async def import_bans_from_csv(self, filename: str) -> tuple[int, int, list[str]]:
+        """
+        Import bans from a CSV file.
+        Returns: (successful_count, skipped_count, error_messages)
+        """
+        successful = 0
+        skipped = 0
+        errors = []
+
+        try:
+            if not pathlib.Path(filename).exists():
+                errors.append(f"❌ File not found: {filename}")
+                return 0, 0, errors
+
+            try:
+                with open(filename, "r", encoding="utf-8") as csvfile:
+                    reader = csv.DictReader(csvfile)
+
+                    if not reader.fieldnames or set(reader.fieldnames) != {"jid", "nick", "until", "issuer", "comment"}:
+                        errors.append("❌ Invalid CSV header. Expected: jid,nick,until,issuer,comment")
+                        return 0, 0, errors
+
+                    rows = list(reader)
+
+            except IOError as e:
+                errors.append(f"❌ File I/O error: {e}")
+                log.error("Import file error: %s", e)
+                return 0, 0, errors
+
+            for row_num, row in enumerate(rows, start=2):
+                try:
+                    jid = (row.get("jid") or "").strip() or None
+                    nick = (row.get("nick") or "").strip() or None
+                    until_str = (row.get("until") or "").strip()
+                    issuer = (row.get("issuer") or "").strip() or "import"
+                    comment = (row.get("comment") or "").strip() or None
+
+                    # Require at least one of jid or nick
+                    if not jid and not nick:
+                        errors.append(f"Row {row_num}: At least one of jid or nick required")
+                        skipped += 1
+                        continue
+
+                    # Validate JID format if present
+                    if jid and not validate_jid_format(jid):
+                        errors.append(f"Row {row_num}: Invalid JID format: {jid}")
+                        skipped += 1
+                        continue
+
+                    # Parse until timestamp
+                    try:
+                        until = int(until_str) if until_str else 0
+                        if until < 0:
+                            errors.append(f"Row {row_num}: until must be >= 0 (got {until})")
+                            skipped += 1
+                            continue
+                    except ValueError:
+                        errors.append(f"Row {row_num}: until must be a valid number or empty (got '{until_str}')")
+                        skipped += 1
+                        continue
+
+                    # Check for existing permanent ban — skip if both are permanent
+                    db_key = jid or nick
+                    if db_key in self.ban_cache:
+                        existing = self.ban_cache[db_key]
+                        existing_until = existing[2]
+                        if (existing_until is None or existing_until <= 0) and until <= 0:
+                            log.info("Row %d: Ban already exists for %s (permanent), skipping", row_num, db_key)
+                            skipped += 1
+                            continue
+
+                    await self.db.execute(
+                        "REPLACE INTO bans (jid, nick, until, issuer, comment) VALUES (?, ?, ?, ?, ?)",
+                        (jid, nick.lower() if nick else None, until, issuer, comment)
+                    )
+                    self.ban_cache[db_key] = (jid, nick.lower() if nick else None, until, issuer, comment)
+                    successful += 1
+
+                except Exception as e:
+                    errors.append(f"Row {row_num}: {e}")
+                    skipped += 1
+
+            await self.db.commit()
+            log.info("Import complete: %d successful, %d skipped", successful, skipped)
+
+        except Exception as e:
+            errors.append(f"❌ Import failed: {e}")
+            log.error("Import error: %s", e)
+
+        return successful, skipped, errors
 
     # ---------- CHECKS ----------
     async def check_bot_admin_rights(self) -> None:
