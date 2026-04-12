@@ -122,9 +122,13 @@ class BanBot(ClientXMPP):
         self.bot_start_time = time.time()
         self.server_connect_time = None
 
+        # --- default config options ---
         self.announce_startup: bool = getattr(config, "ANNOUNCE_STARTUP", True)
         self.show_ban_in_muc: bool = getattr(config, "SHOW_BAN_IN_MUC", True)
         self.allow_user_cmds: bool = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
+        self.health_check_interval: int = max(60, getattr(config, "HEALTH_CHECK_INTERVAL", 300))
+        self.unban_check_interval: int = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
+        self.max_tempban_days: int = max(1, min(365, getattr(config, "MAX_TEMPBAN_DAYS", 30)))
 
         # --- Register XMPP plugins ---
         self.register_plugin("xep_0030")  # Service Discovery
@@ -264,42 +268,44 @@ class BanBot(ClientXMPP):
             await asyncio.sleep(2)
         log.warning("Timeout waiting for occupants; some users may not be kicked immediately")
 
-    # ---------- AVATAR HELPER ----------
-    async def set_avatar(self) -> bool:
+    # ---------- VCARD HELPER ----------
+    async def update_vcard(self) -> bool:
         """
-        Update bot avatar for all major XMPP clients.
-        Uses config.AVATAR_PATH
+        Update bot vCard and avatar information.
+        - Avatar: optional (from config.AVATAR_PATH)
+        - vCard fields: always updated (VCARD_NICKNAME, VCARD_FN, etc.)
         Updates:
-          - XEP-0054 (vCard photo)
-          - XEP-0084 (User Avatar / vCard4)
-          - XEP-0153 (Avatar hash in presence)
+          - XEP-0054 (vCard photo + optional vCard fields)
+          - XEP-0084 (User Avatar / vCard4) - only if avatar present
+          - XEP-0153 (Avatar hash in presence) - only if avatar present
         """
         avatar_path = getattr(config, "AVATAR_PATH", None)
-        if not avatar_path or not pathlib.Path(avatar_path).exists():
-            log.warning("⚠️ AVATAR_PATH not set or file does not exist")
-            return False
+        image_data = None
+        avatar_type = None
 
-        try:
-            with open(avatar_path, "rb") as f:
-                image_data = f.read()
-        except FileNotFoundError:
-            log.error("Avatar file not found: %s", avatar_path)
-            return False
-        except IOError as e:
-            log.error("Failed to read avatar image %s: %s", avatar_path, e)
-            return False
+        # --- Try to load avatar if path is provided ---
+        if avatar_path and pathlib.Path(avatar_path).exists():
+            try:
+                with open(avatar_path, "rb") as f:
+                    image_data = f.read()
+                avatar_type = f"image/{pathlib.Path(avatar_path).suffix.lstrip('.').lower()}"
+                log.info("✅ Avatar loaded from: %s", avatar_path)
+            except (FileNotFoundError, IOError) as e:
+                log.warning("⚠️ Failed to load avatar image: %s", e)
+        else:
+            if avatar_path:
+                log.warning("⚠️ AVATAR_PATH not set or file does not exist: %s", avatar_path)
 
-        avatar_type = f"image/{pathlib.Path(avatar_path).suffix.lstrip('.').lower()}"
-
-        # --- XEP-0054: vCard photo + additional fields ---
+        # --- XEP-0054: vCard with optional photo + vCard fields ---
         try:
             vcard = self['xep_0054'].make_vcard()
 
-            # Set avatar
-            vcard['PHOTO']['TYPE'] = avatar_type
-            vcard['PHOTO']['BINVAL'] = image_data
+            # Set avatar only if image data was loaded
+            if image_data and avatar_type:
+                vcard['PHOTO']['TYPE'] = avatar_type
+                vcard['PHOTO']['BINVAL'] = image_data
 
-            # Add optional vCard fields from config
+            # Add optional vCard fields from config (always, regardless of avatar)
             if hasattr(config, 'VCARD_NICKNAME') and config.VCARD_NICKNAME:
                 vcard['NICKNAME'] = config.VCARD_NICKNAME
 
@@ -323,33 +329,36 @@ class BanBot(ClientXMPP):
         except Exception as e:
             log.warning("⚠️ Failed to update XEP-0054 vCard: %s", e)
 
-        # --- XEP-0084: User Avatar / vCard4 ---
-        try:
-            await self['xep_0084'].publish_avatar(image_data)
-            log.info("✅ XEP-0084 avatar updated successfully")
-        except Exception as e:
-            log.warning("⚠️ Failed to update XEP-0084 avatar: %s", e)
+        # --- XEP-0084: User Avatar / vCard4 (only if avatar present) ---
+        if image_data:
+            try:
+                await self['xep_0084'].publish_avatar(image_data)
+                log.info("✅ XEP-0084 avatar updated successfully")
+            except Exception as e:
+                log.warning("⚠️ Failed to update XEP-0084 avatar: %s", e)
 
-        # --- XEP-0153: Avatar hash in presence ---
-        try:
-            # SHA1 hex hash (XEP-0153 requires hex)
-            sha1_hex = hashlib.sha1(image_data).hexdigest()
+            # --- XEP-0153: Avatar hash in presence (only if avatar present) ---
+            try:
+                # SHA1 hex hash (XEP-0153 requires hex)
+                sha1_hex = hashlib.sha1(image_data).hexdigest()
 
-            # Build <x xmlns='vcard-temp:x:update'><photo>HASH</photo></x>
-            x = ET.Element("{vcard-temp:x:update}x")
-            photo = ET.SubElement(x, "photo")
-            photo.text = sha1_hex
+                # Build <x xmlns='vcard-temp:x:update'><photo>HASH</photo></x>
+                x = ET.Element("{vcard-temp:x:update}x")
+                photo = ET.SubElement(x, "photo")
+                photo.text = sha1_hex
 
-            await asyncio.sleep(1)
+                await asyncio.sleep(1)
 
-            # Build a Presence stanza and send
-            presence = Presence()
-            presence.append(x)
-            self.send(presence)
+                # Build a Presence stanza and send
+                presence = Presence()
+                presence.append(x)
+                self.send(presence)
 
-            log.info("✅ XEP-0153 avatar hash updated successfully")
-        except Exception as e:
-            log.warning("⚠️ Failed to update XEP-0153 avatar: %s", e)
+                log.info("✅ XEP-0153 avatar hash updated successfully")
+            except Exception as e:
+                log.warning("⚠️ Failed to update XEP-0153 avatar: %s", e)
+        else:
+            log.info("ℹ️ No avatar to publish (XEP-0084, XEP-0153 skipped)")
 
         return True
 
@@ -414,8 +423,8 @@ class BanBot(ClientXMPP):
         # --- Start health check worker ---
         self.health_check_task = asyncio.create_task(self.health_check_worker())
 
-        # --- Set Bot Avatar ---
-        await self.set_avatar()
+        # --- Set Bot vCard ---
+        await self.update_vcard()
 
         self.reconnecting = False
 
@@ -426,9 +435,9 @@ class BanBot(ClientXMPP):
         """
         Periodically check connection status of all protected rooms.
         Verifies bot is still in rooms and has admin rights.
+        Uses self.health_check_interval (reloadable via !reloadconfig).
         """
-        check_interval = getattr(config, "HEALTH_CHECK_INTERVAL", 300)
-        check_interval = max(60, check_interval)  # Minimum 60 seconds
+        check_interval = self.health_check_interval
 
         while True:
             try:
@@ -752,8 +761,11 @@ class BanBot(ClientXMPP):
                     self.announce_startup = getattr(config, "ANNOUNCE_STARTUP", True)
                     self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", True)
                     self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
+                    self.health_check_interval = max(60, getattr(config, "HEALTH_CHECK_INTERVAL", 300))
+                    self.unban_check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
+                    self.max_tempban_days = max(1, min(365, getattr(config, "MAX_TEMPBAN_DAYS", 30)))
 
-                    await self.set_avatar()
+                    await self.update_vcard()
 
                     self.send_message(
                         mto=room,
@@ -1125,8 +1137,7 @@ class BanBot(ClientXMPP):
 
         # --- Step 2: Check tempban duration limits ---
         if until is not None and until > 0:
-            max_days = getattr(config, "MAX_TEMPBAN_DAYS", 30)
-            max_days = max(1, min(365, max_days))  # Clamp between 1-365
+            max_days = self.max_tempban_days  # Uses reloadable config
             max_seconds = max_days * 86400
             duration = until - int(time.time())
 
@@ -1289,8 +1300,8 @@ class BanBot(ClientXMPP):
                 await asyncio.sleep(5)
                 continue
 
-            # Configurable check interval, default 60 seconds
-            check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
+            # Configurable check interval (reloadable via !reloadconfig)
+            check_interval = self.unban_check_interval
             await asyncio.sleep(check_interval)
 
     # ---------- APPLY UNBAN TO ROOM ----------
