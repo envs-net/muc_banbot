@@ -7,26 +7,27 @@ It provides central administration via an admin room and protects multiple chat 
 
 ## Features
 
-* 🛡️ Central admin room for all commands  
-* ❌ Ban, temporary ban, unban, banlist, bansearch, why  
-* 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain  
-* 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  
+* 🛡️ Central admin room for all commands
+* 📦 Version tracking  
 * 🔒 Dynamic addition/removal of protected rooms  
 * 🔄 Automatic rejoin and reapplication of bans on restart  
 * 📦 Sync existing room bans into the database at startup  
+* ❌ Ban, temporary ban, unban, banlist, bansearch, why  
+* 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain  
+* 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  
+* 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
+* 💾 Ban import/export to CSV format for backup and migration
 * ⏱️ Human-readable remaining time for temporary bans  
 * ⏳ Automatic removal of expired temporary bans  
 * 📣 Logs ban/unban actions in both admin and protected rooms  
 * ⚠️ Admins/Owners are protected from accidental bans  
+* 🏥 Periodic health checks for room connectivity and admin rights
 * 👀 Monitors bot's admin/owner rights per room and reports loss to the admin room  
 * ⛔ Prevents ban application if the bot does not have admin/owner rights  
 * 🐞 Handles nick-only bans with best-effort enforcement  
 * 🔄 Auto-updates nick-only bans to JID when user rejoins  
 * 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
 * ✅ Input validation for JID format and domain bans  
-* 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
-* ⏰ Configurable tempban duration limits (1-365 days, default: 30)  
-* 🏥 Periodic health checks for room connectivity and admin rights
 
 ---
 
@@ -51,6 +52,8 @@ It provides central administration via an admin room and protects multiple chat 
 | `!sync` | Full room sync: rejoin rooms, verify admin rights, apply only missing active bans | `!sync` |
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
 | `!syncbans` | Full ban synchronization: syncs outcasts from rooms into DB and applies all active bans | `!syncbans` |
+| `!export` | Exports all bans to a CSV file (bans_export_TIMESTAMP.csv) | `!export` |
+| `!import <file>` | Imports bans from a CSV file with validation | `!import bans_export_20240412_120000.csv` |
 
 ---
 
@@ -195,6 +198,60 @@ sudo journalctl -u muc_banbot -f
 
 ## Advanced Features
 
+### Ban Import/Export
+
+The bot supports importing and exporting bans in CSV format for easy backup, migration, and batch operations.
+
+#### Export Bans
+
+```
+!export
+```
+
+Exports all current bans to a CSV file named `bans_export_YYYYMMDD_HHMMSS.csv` in the current working directory.
+
+**CSV Format:**
+```
+jid,nick,until,issuer,comment
+alice@example.com,Alice,0,admin@example.com,spamming
+bob@example.com,Bob,1712923200,mod@example.com,rude behavior
+```
+
+#### Import Bans
+
+```
+!import <filename>
+```
+
+Imports bans from a CSV file with full validation:
+- **JID Format**: Validates `user@domain.tld` format
+- **Timestamps**: Supports `0` (permanent) or Unix timestamp for temporary bans
+- **Smart Duplicates**: Automatically handles conflicts (converts permanent ↔ tempban)
+- **Error Reporting**: Shows invalid rows with reasons (first 10 errors)
+- **Atomic Operations**: All-or-nothing database updates
+
+**Example Import:**
+```
+!import bans_backup.csv
+```
+
+Response:
+```
+📥 Import Results:
+✅ Successful: 42
+⚠️ Skipped: 3
+
+❌ Errors (2):
+Row 5: Invalid JID format: user@
+Row 12: until must be a valid number
+```
+
+**Use Cases:**
+- Backup before major operations
+- Migrate bans to a new bot instance
+- Batch import bans from external lists
+- Restore from backup after database recovery
+
 ### Input Validation & Duration Limits
 
 The bot validates all ban inputs to prevent errors:
@@ -306,6 +363,7 @@ The `!config` command displays all current bot configuration settings in the adm
 - Check intervals (health check, unban check)
 - Feature flags (announcements, ban visibility, user commands)
 - Tempban limits (MAX_TEMPBAN_DAYS)
+- Bot version displayed in `!config` and `!status`
 
 ---
 
