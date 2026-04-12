@@ -7,28 +7,27 @@ It provides central administration via an admin room and protects multiple chat 
 
 ## Features
 
-* 🛡️ Central admin room for all commands  
-* ❌ Ban, temporary ban, unban, banlist, bansearch, why  
-* 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain  
-* 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  
+* 🛡️ Central admin room for all commands
+* 📦 Version tracking  
 * 🔒 Dynamic addition/removal of protected rooms  
 * 🔄 Automatic rejoin and reapplication of bans on restart  
 * 📦 Sync existing room bans into the database at startup  
+* ❌ Ban, temporary ban, unban, banlist, bansearch, why  
+* 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain  
+* 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  
+* 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
+* 💾 Ban import/export to CSV format for backup and migration
 * ⏱️ Human-readable remaining time for temporary bans  
 * ⏳ Automatic removal of expired temporary bans  
 * 📣 Logs ban/unban actions in both admin and protected rooms  
 * ⚠️ Admins/Owners are protected from accidental bans  
+* 🏥 Periodic health checks for room connectivity and admin rights
 * 👀 Monitors bot's admin/owner rights per room and reports loss to the admin room  
 * ⛔ Prevents ban application if the bot does not have admin/owner rights  
 * 🐞 Handles nick-only bans with best-effort enforcement  
 * 🔄 Auto-updates nick-only bans to JID when user rejoins  
 * 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
 * ✅ Input validation for JID format and domain bans  
-* 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
-* ⏰ Configurable tempban duration limits (1-365 days, default: 30)  
-* 🏥 Periodic health checks for room connectivity and admin rights
-* 💾 Ban import/export to CSV format for backup and migration
-* 📦 Version tracking
 
 ---
 
