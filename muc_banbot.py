@@ -694,9 +694,9 @@ class BanBot(ClientXMPP):
             if room == ADMIN_ROOM and self.is_authorized(msg):
                 text = (
                     "!help - show this help\n"
+                    "!config - show current configuration\n"
                     "!reloadconfig - reload config.py at runtime\n"
                     "!status - show bot health, active rooms, and ban statistics\n"
-                    "!config - show current configuration\n"
                     "!whoami - show your affiliation/role\n\n"
 
                     "!room add/remove/list - manage protected rooms\n\n"
@@ -716,7 +716,7 @@ class BanBot(ClientXMPP):
                     "!import <filename> - import bans from a CSV file"
                 )
             elif self.user_cmds_allowed(room):
-                text = "!help - show this help\n!banlist - show temporary bans\n!why <nick> - show ban reason"
+                text = "!help - show this help\n!whoami - show your affiliation/role and permissions\n!banlist - show temporary bans\n!why <nick> - show ban reason"
             else:
                 return
             self.send_message(mto=room, mbody=text, mtype="groupchat")
@@ -732,9 +732,51 @@ class BanBot(ClientXMPP):
             await self.cmd_why(parts[1], room)
             return
 
+        # ---------- WHOAMI COMMAND ----------
+        if cmd == "!whoami":
+            info = self.occupants.get(room, {}).get(nick, {})
+            affiliation = info.get('affiliation', 'none')
+            role = info.get('role', 'none')
+            jid = info.get('jid', 'unknown')
+
+            # Build permissions list
+            permissions = []
+            if affiliation in ("owner", "admin"):
+                permissions.append("✅ Can ban/kick users")
+                permissions.append("✅ Can manage room")
+            elif role == "moderator":
+                permissions.append("✅ Can kick users")
+            else:
+                permissions.append("❌ Regular participant")
+
+            perms_text = "\n".join(permissions)
+
+            if room == ADMIN_ROOM:
+                # Full info in admin room
+                msg = (
+                    f"👤 **Your Status:**\n"
+                    f"  Nick: {nick}\n"
+                    f"  JID: {jid}\n"
+                    f"  Affiliation: {affiliation}\n"
+                    f"  Role: {role}\n\n"
+                    f"**Permissions:**\n{perms_text}"
+                )
+            else:
+                # Reduced info in protected rooms
+                emoji = "🔑" if affiliation in ("owner", "admin") else "👤"
+                msg = (
+                    f"{emoji} **Your Status:**\n"
+                    f"  Affiliation: {affiliation}\n"
+                    f"  Role: {role}\n\n"
+                    f"**Permissions:**\n{perms_text}"
+                )
+
+            self.send_message(mto=room, mbody=msg, mtype="groupchat")
+            return
+
         # ---------- ADMIN COMMANDS ----------
         admin_commands = (
-            "!reloadconfig", "!status", "!config", "!whoami", "!room",
+            "!reloadconfig", "!status", "!config", "!room",
             "!ban", "!tempban", "!unban", "!bansearch",
             "!sync", "!syncadmins", "!syncbans",
             "!export", "!import"
@@ -743,7 +785,29 @@ class BanBot(ClientXMPP):
             if room != ADMIN_ROOM or not self.is_authorized(msg):
                 return
 
-            if cmd == "!reloadconfig":
+            if cmd == "!config":
+                config_lines = ["📋 Current Bot Configuration:\n"]
+
+                config_lines.append(f"🤖 Bot Version: {__version__}")
+                config_lines.append(f"🔐 JID: {JID}")
+                config_lines.append(f"📦 Resource: {getattr(config, 'RESSOURCE', 'None')}")
+                config_lines.append(f"👤 Nick: {NICK}")
+                config_lines.append(f"💾 Database: {DB_FILE}")
+                config_lines.append(f"⏰ Health Check Interval: {getattr(config, 'HEALTH_CHECK_INTERVAL', 300)}s")
+                config_lines.append(f"⏱️ Unban Check Interval: {getattr(config, 'UNBAN_CHECK_INTERVAL', 60)}s")
+                config_lines.append(f"📅 Max Tempban Days: {getattr(config, 'MAX_TEMPBAN_DAYS', 30)}")
+                config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
+                config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
+                config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
+                config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
+
+                self.send_message(
+                    mto=room,
+                    mbody="\n".join(config_lines),
+                    mtype="groupchat"
+                )
+
+            elif cmd == "!reloadconfig":
                 try:
                     importlib.reload(config)
 
@@ -814,32 +878,6 @@ class BanBot(ClientXMPP):
                     if self.protected_rooms else "⚠️ No protected rooms configured."
                 )
                 self.send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
-
-            elif cmd == "!config":
-                config_lines = ["📋 Current Bot Configuration:\n"]
-
-                config_lines.append(f"🤖 Bot Version: {__version__}")
-                config_lines.append(f"🔐 JID: {JID}")
-                config_lines.append(f"📦 Resource: {getattr(config, 'RESSOURCE', 'None')}")
-                config_lines.append(f"👤 Nick: {NICK}")
-                config_lines.append(f"💾 Database: {DB_FILE}")
-                config_lines.append(f"⏰ Health Check Interval: {getattr(config, 'HEALTH_CHECK_INTERVAL', 300)}s")
-                config_lines.append(f"⏱️ Unban Check Interval: {getattr(config, 'UNBAN_CHECK_INTERVAL', 60)}s")
-                config_lines.append(f"📅 Max Tempban Days: {getattr(config, 'MAX_TEMPBAN_DAYS', 30)}")
-                config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
-                config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
-                config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
-                config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
-
-                self.send_message(
-                    mto=room,
-                    mbody="\n".join(config_lines),
-                    mtype="groupchat"
-                )
-
-            elif cmd == "!whoami":
-                info = self.occupants.get(room, {}).get(nick, {})
-                self.send_message(mto=room, mbody=f"You are {info.get('affiliation', 'none')}", mtype="groupchat")
 
             elif cmd == "!room" and len(parts) >= 2:
                 await self.cmd_room(parts[1:], room)
