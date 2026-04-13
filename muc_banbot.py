@@ -387,11 +387,11 @@ class BanBot(ClientXMPP):
         await self.setup_db()
         await self.load_bans_from_db()
 
-        if self.reconnecting:
-            log.info("🔄 Reconnected successfully")
-        else:
-            # First connection (not a reconnect)
+        if not self.reconnecting:
+            # First connection only
             self.bot_start_time = time.time()
+        else:
+            log.info("🔄 Reconnected successfully")
 
         self.send_presence()
         await self.get_roster()
@@ -458,7 +458,8 @@ class BanBot(ClientXMPP):
                     try:
                         # Check if bot is still in room
                         occ = self.occupants.get(room, {})
-                        if NICK not in occ:
+                        bot_in_room = any(nick.lower() == NICK.lower() for nick in occ.keys())
+                        if not bot_in_room:
                             log.warning("⚠️ Health check: Bot not found in occupants for room %s", room)
                             self.send_message(
                                 mto=ADMIN_ROOM,
@@ -668,7 +669,7 @@ class BanBot(ClientXMPP):
         - Parses commands
         - Distinguishes admin-only commands vs. user commands
         """
-        if msg["mucnick"] == NICK:
+        if msg["mucnick"].lower() == NICK.lower():
             return  # Ignore own messages
 
         room = msg["from"].bare
@@ -826,7 +827,7 @@ class BanBot(ClientXMPP):
 
                 admin_infos = self.occupants.get(ADMIN_ROOM, {})
                 admins = [
-                    f"{n} ({info['jid']})"
+                    f"{n} ({info.get('jid', 'unknown')})"
                     for n, info in admin_infos.items()
                     if info.get("affiliation") in ("owner", "admin")
                 ]
@@ -1010,8 +1011,12 @@ class BanBot(ClientXMPP):
                     errors.append(f"Row {row_num}: {e}")
                     skipped += 1
 
-            await self.db.commit()
-            log.info("Import complete: %d successful, %d skipped", successful, skipped)
+            try:
+                await self.db.commit()
+                log.info("Import complete: %d successful, %d skipped", successful, skipped)
+            except Exception as e:
+                log.error("Import commit failed: %s", e)
+                errors.append(f"❌ Database commit failed: {e}")
 
         except Exception as e:
             errors.append(f"❌ Import failed: {e}")
@@ -1376,7 +1381,8 @@ class BanBot(ClientXMPP):
         # --- Prevent banning admins/owners ---
         for room_occ in self.occupants.values():
             for n, info in room_occ.items():
-                info_jid_bare = self.bare_jid(info.get("jid"))
+                jid_value = info.get("jid")
+                info_jid_bare = self.bare_jid(jid_value) if jid_value else None
                 if is_domain:
                     if info_jid_bare and info_jid_bare.split("@")[1].lower() == ban_jid[2:]:
                         if info.get("affiliation") in ("owner", "admin"):
@@ -1617,7 +1623,10 @@ class BanBot(ClientXMPP):
                 log.warning("Error unbanning %s in %s: %s", identifier, room, e)
 
         # Admin Room notification
-        msg_admin = f"♻️ Unbanned {identifier}" + (f" by {issuer}" if issuer else " (tempban expired)")
+        if issuer == "system":
+            msg_admin = f"♻️ Unbanned {identifier} (tempban expired)"
+        else:
+            msg_admin = f"♻️ Unbanned {identifier}" + (f" by {issuer}" if issuer else "")
         self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
         log.info(msg_admin)
 
@@ -1747,7 +1756,7 @@ class BanBot(ClientXMPP):
                             for room in other_rooms:
                                 await self.sync_bans_to_rooms_for_single_room(room)
 
-                    asyncio.create_task(wait_for_bot_online())
+                    await wait_for_bot_online()
                 else:
                     self.send_message(mto=room, mbody=f"⚠️ Room already in protected list: {target}", mtype="groupchat")
 
