@@ -845,6 +845,7 @@ class BanBot(ClientXMPP):
 
                 config_lines.append(f"🤖 Bot Version: {__version__}")
                 config_lines.append(f"🔐 JID: {JID}")
+                config_lines.append(f"📦 Resource: {getattr(config, 'RESSOURCE', 'None')}")
                 config_lines.append(f"👤 Nick: {NICK}")
                 config_lines.append(f"💾 Database: {DB_FILE}")
                 config_lines.append(f"⏰ Health Check Interval: {getattr(config, 'HEALTH_CHECK_INTERVAL', 300)}s")
