@@ -4,6 +4,8 @@
 # Author: creme <xmpp:creme@envs.net>
 # License: MIT
 
+__version__ = "1.2.2"
+
 import os
 import csv
 import config
@@ -28,8 +30,6 @@ from config import JID, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-__version__ = "1.2.1"
-
 # ---------- TIME HELPERS ----------
 def parse_duration(s: str) -> int:
     """
@@ -51,6 +51,7 @@ def human_time(seconds: int) -> str:
     Convert seconds to human-readable string.
     Example: 3661 -> '1h 1m 1s'
     """
+    seconds = int(seconds)
     if seconds <= 0:
         return "permanent"
     m, s = divmod(seconds, 60)
@@ -616,7 +617,7 @@ class BanBot(ClientXMPP):
                 )
             else:
                 log.info("✅ False alarm: server confirms bot is still admin in %s", room)
-                self.bot_admin_state[room] = True  # korrigiere State
+                self.bot_admin_state[room] = True  # correct state
 
         else:
             log.info("✅ Bot regained admin rights in %s", room)
@@ -836,15 +837,16 @@ class BanBot(ClientXMPP):
             elif cmd == "!config":
                 config_lines = ["📋 Current Bot Configuration:\n"]
 
+                config_lines.append(f"🤖 Bot Version: {__version__}")
                 config_lines.append(f"🔐 JID: {JID}")
                 config_lines.append(f"👤 Nick: {NICK}")
                 config_lines.append(f"💾 Database: {DB_FILE}")
-                config_lines.append(f"⏱️ Unban Check Interval: {getattr(config, 'UNBAN_CHECK_INTERVAL', 60)}s")
                 config_lines.append(f"⏰ Health Check Interval: {getattr(config, 'HEALTH_CHECK_INTERVAL', 300)}s")
+                config_lines.append(f"⏱️ Unban Check Interval: {getattr(config, 'UNBAN_CHECK_INTERVAL', 60)}s")
+                config_lines.append(f"📅 Max Tempban Days: {getattr(config, 'MAX_TEMPBAN_DAYS', 30)}")
                 config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
                 config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
                 config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
-                config_lines.append(f"📅 Max Tempban Days: {getattr(config, 'MAX_TEMPBAN_DAYS', 30)}")
 
                 self.send_message(
                     mto=room,

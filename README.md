@@ -7,7 +7,7 @@ It provides central administration via an admin room and protects multiple chat 
 
 ## Features
 
-* 🛡️ Central admin room for all commands
+* 🛡️ Central admin room for all commands  
 * 🔒 Dynamic addition/removal of protected rooms  
 * 🔄 Automatic rejoin and reapplication of bans on restart  
 * 📦 Sync existing room bans into the database at startup  
@@ -15,7 +15,7 @@ It provides central administration via an admin room and protects multiple chat 
 * 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain  
 * 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  
 * 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
-* 💾 Ban import/export to CSV format for backup and migration
+* 💾 Ban import/export to CSV format for backup and migration  
 * ⏱️ Human-readable remaining time for temporary bans  
 * ⏳ Automatic removal of expired temporary bans  
 * 📣 Logs ban/unban actions in both admin and protected rooms  
