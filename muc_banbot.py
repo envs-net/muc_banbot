@@ -1295,8 +1295,8 @@ class BanBot(ClientXMPP):
 
             # --- Find JID if only Nick provided ---
             if ban_nick and not ban_jid:
-                for room_occ in self.occupants.values():
-                    for n, info in room_occ.items():
+                for room_occ in list(self.occupants.values()):
+                    for n, info in list(room_occ.items()):
                         if n.lower() == ban_nick and info.get("jid"):
                             ban_jid = self.bare_jid(info["jid"])
                             break
@@ -1306,8 +1306,8 @@ class BanBot(ClientXMPP):
             # --- Find Nick if only JID provided ---
             ban_jid_bare = self.bare_jid(ban_jid) if ban_jid else None
             if ban_jid and not ban_nick:
-                for room_occ in self.occupants.values():
-                    for n, info in room_occ.items():
+                for room_occ in list(self.occupants.values()):
+                    for n, info in list(room_occ.items()):
                         if info.get("jid") and self.bare_jid(info["jid"]) == ban_jid_bare:
                             ban_nick = n.lower()
                             break
@@ -1379,8 +1379,8 @@ class BanBot(ClientXMPP):
                 )
 
         # --- Prevent banning admins/owners ---
-        for room_occ in self.occupants.values():
-            for n, info in room_occ.items():
+        for room_occ in list(self.occupants.values()):
+            for n, info in list(room_occ.items()):
                 jid_value = info.get("jid")
                 info_jid_bare = self.bare_jid(jid_value) if jid_value else None
                 if is_domain:
