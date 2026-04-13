@@ -1338,6 +1338,8 @@ class BanBot(ClientXMPP):
 
         # --- Step 3: Check for duplicate bans and handle smart conversion ---
         db_key = ban_jid or ban_nick
+        skip_final_message = False
+
         if db_key in self.ban_cache:
             existing_jid, existing_nick, existing_until, existing_issuer, existing_comment = self.ban_cache[db_key]
             existing_is_permanent = existing_until <= 0
@@ -1359,6 +1361,7 @@ class BanBot(ClientXMPP):
                     mbody=f"🔄 Converting permanent ban to tempban for {identifier} ({human_time(until - int(time.time()))})",
                     mtype="groupchat"
                 )
+                skip_final_message = True
             elif not existing_is_permanent and new_is_permanent:
                 # Tempban → Permanent (CONVERT)
                 log.info("🔄 Converting tempban to permanent ban for %s", identifier)
@@ -1367,6 +1370,7 @@ class BanBot(ClientXMPP):
                     mbody=f"🔄 Converting tempban to permanent ban for {identifier}",
                     mtype="groupchat"
                 )
+                skip_final_message = True
             else:
                 # Tempban → Tempban (UPDATE)
                 new_duration = human_time(until - int(time.time()))
@@ -1377,6 +1381,7 @@ class BanBot(ClientXMPP):
                     mbody=f"🔄 Ban updated: {identifier}'s tempban duration changed from {old_duration} to {new_duration}",
                     mtype="groupchat"
                 )
+                skip_final_message = True
 
         # --- Prevent banning admins/owners ---
         for room_occ in list(self.occupants.values()):
@@ -1430,11 +1435,12 @@ class BanBot(ClientXMPP):
         log.info("Ban applied: identifier=%s, JID/Nick=%s/%s, until=%s, issuer=%s",
                  identifier, ban_jid, ban_nick, ts, issuer)
 
-        # --- Notify Admin Room explicitly ---
-        display = self.bare_jid(ban_jid) if ban_jid else (ban_nick or "Unknown")
-        time_info = f" ({human_time(ts - int(time.time()))})" if ts > 0 else ""
-        msg_admin = f"✅ Banned {display}{time_info}" + (f" ({comment})" if comment else "") + f" by {issuer}"
-        self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
+        # --- Notify Admin Room explicitly (skip if conversion message was sent) ---
+        if not skip_final_message:
+            display = self.bare_jid(ban_jid) if ban_jid else (ban_nick or "Unknown")
+            time_info = f" ({human_time(ts - int(time.time()))})" if ts > 0 else ""
+            msg_admin = f"✅ Banned {display}{time_info}" + (f" ({comment})" if comment else "") + f" by {issuer}"
+            self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
 
         # --- Apply ban to all protected rooms ---
         for room in self.protected_rooms:
