@@ -723,54 +723,16 @@ class BanBot(ClientXMPP):
 
         # ---------- ADMIN COMMANDS ----------
         admin_commands = (
-            "!ban", "!tempban", "!unban", "!bansearch", "!room", "!sync",
-            "!syncadmins", "!syncbans", "!status", "!whoami", "!reloadconfig", "!config",
+            "!reloadconfig", "!status", "!config", "!whoami", "!room",
+            "!ban", "!tempban", "!unban", "!bansearch",
+            "!sync", "!syncadmins", "!syncbans",
             "!export", "!import"
         )
         if cmd in admin_commands:
             if room != ADMIN_ROOM or not self.is_authorized(msg):
                 return
 
-            if cmd == "!ban" and len(parts) >= 2:
-                comment = " ".join(parts[2:]) if len(parts) > 2 else None
-                await self.ban_all(parts[1], None, nick, comment)
-
-            elif cmd == "!tempban" and len(parts) >= 3:
-                try:
-                    until = int(time.time()) + parse_duration(parts[2])
-                except Exception:
-                    self.send_message(
-                        mto=room,
-                        mbody="❌ Invalid duration format (10m, 2h, 1d).",
-                        mtype="groupchat"
-                    )
-                    return
-                comment = " ".join(parts[3:]) if len(parts) > 3 else None
-                await self.ban_all(parts[1], until, nick, comment)
-
-            elif cmd == "!unban" and len(parts) >= 2:
-                await self.unban_all(parts[1], nick)
-
-            elif cmd == "!bansearch" and len(parts) >= 2:
-                query = " ".join(parts[1:])
-                await self.cmd_bansearch(query)
-
-            elif cmd == "!room" and len(parts) >= 2:
-                await self.cmd_room(parts[1:], room)
-
-            elif cmd == "!sync":
-                if room != ADMIN_ROOM or not self.is_authorized(msg):
-                    return
-
-                await self.sync_rooms_and_bans()
-
-            elif cmd == "!syncadmins":
-                await self.sync_admins(announce=True)
-
-            elif cmd == "!syncbans":
-                await self.sync_bans()
-
-            elif cmd == "!reloadconfig":
+            if cmd == "!reloadconfig":
                 try:
                     importlib.reload(config)
 
@@ -865,6 +827,45 @@ class BanBot(ClientXMPP):
             elif cmd == "!whoami":
                 info = self.occupants.get(room, {}).get(nick, {})
                 self.send_message(mto=room, mbody=f"You are {info.get('affiliation', 'none')}", mtype="groupchat")
+
+            elif cmd == "!room" and len(parts) >= 2:
+                await self.cmd_room(parts[1:], room)
+
+            elif cmd == "!ban" and len(parts) >= 2:
+                comment = " ".join(parts[2:]) if len(parts) > 2 else None
+                await self.ban_all(parts[1], None, nick, comment)
+
+            elif cmd == "!tempban" and len(parts) >= 3:
+                try:
+                    until = int(time.time()) + parse_duration(parts[2])
+                except Exception:
+                    self.send_message(
+                        mto=room,
+                        mbody="❌ Invalid duration format (10m, 2h, 1d).",
+                        mtype="groupchat"
+                    )
+                    return
+                comment = " ".join(parts[3:]) if len(parts) > 3 else None
+                await self.ban_all(parts[1], until, nick, comment)
+
+            elif cmd == "!unban" and len(parts) >= 2:
+                await self.unban_all(parts[1], nick)
+
+            elif cmd == "!bansearch" and len(parts) >= 2:
+                query = " ".join(parts[1:])
+                await self.cmd_bansearch(query)
+
+            elif cmd == "!sync":
+                if room != ADMIN_ROOM or not self.is_authorized(msg):
+                    return
+
+                await self.sync_rooms_and_bans()
+
+            elif cmd == "!syncadmins":
+                await self.sync_admins(announce=True)
+
+            elif cmd == "!syncbans":
+                await self.sync_bans()
 
             elif cmd == "!export":
                 success, message = await self.export_bans_to_csv()
