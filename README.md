@@ -38,7 +38,7 @@ It provides central administration via an admin room and protects multiple chat 
 | `!config` | Shows current bot configuration | `!config` |
 | `!reloadconfig` | Reloads `config.py` at runtime without restarting | `!reloadconfig` |
 | `!status` | Shows bot status, active rooms, uptime, and ban statistics | `!status` |
-| `!whoami` | Shows your affiliation/role in the current room | `!whoami` |
+| `!whoami` | Shows your affiliation/role and permissions in the current room | `!whoami` |
 | `!room add <room>` | Adds a room to the protected list and stores it in the DB | `!room add secretroom@muc.example.com` |
 | `!room remove <room>` | Removes a room from the protected list and DB | `!room remove secretroom@muc.example.com` |
 | `!room list` | Lists all protected rooms | `!room list` |
@@ -61,6 +61,7 @@ It provides central administration via an admin room and protects multiple chat 
 | Command       | Description                               | Example      |
 | ------------- | ----------------------------------------- | ------------ |
 | `!help`       | Shows a restricted help message           | `!help`      |
+| `!whoami`     | Shows your affiliation/role and permissions | `!whoami`  |
 | `!banlist`    | Shows active temporary bans (if enabled)  | `!banlist`   |
 | `!why <jid/nick>` | Shows reason and remaining time for a ban | `!why alice` |
 
