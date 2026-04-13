@@ -25,7 +25,7 @@ from slixmpp.xmlstream import ET
 from slixmpp.stanza.presence import Presence
 from slixmpp.plugins.xep_0054 import VCardTemp
 
-from config import JID, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
+from config import JID, RESSOURCE, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -96,16 +96,22 @@ def validate_tempban_duration(max_days: int) -> tuple[bool, str]:
 
 # ---------- BAN BOT ----------
 class BanBot(ClientXMPP):
-    def __init__(self, jid: str, password: str):
+    def __init__(self, jid: str, password: str, resource: str = None):
         """
         Initialize the bot with:
-        - Connection info (jid/password)
+        - Connection info (jid/resource/password)
         - RAM caches for bans and admin state
         - Semaphores to avoid flooding XMPP server
         - Uptime tracking for bot and server connection
         Sets up DB, protected rooms, occupants dicts, and registers XMPP plugins.
         """
-        super().__init__(jid, password)
+        # Combine JID with resource if provided
+        if resource:
+            full_jid = f"{jid}/{resource}"
+        else:
+            full_jid = jid
+
+        super().__init__(full_jid, password)
         self.db: aiosqlite.Connection | None = None
 
         # --- Concurrency limit for MUC write operations ---
@@ -2285,7 +2291,8 @@ if __name__ == "__main__":
     Connects to XMPP server and starts the event loop.
     Handles KeyboardInterrupt gracefully.
     """
-    xmpp = BanBot(JID, PASSWORD)
+    resource = getattr(config, "RESSOURCE", None)
+    xmpp = BanBot(JID, PASSWORD, resource)
 
     # Attempt connection
     if xmpp.connect():

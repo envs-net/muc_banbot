@@ -2,6 +2,7 @@
 
 JID = "adminbot@domain.tld"
 PASSWORD = "yourpassword"
+RESSOURCE = "service"
 ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
 DB_FILE = "banbot.db"
