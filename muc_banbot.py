@@ -4,7 +4,7 @@
 # Author: creme <xmpp:creme@envs.net>
 # License: MIT
 
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 
 import os
 import csv
@@ -135,6 +135,7 @@ class BanBot(ClientXMPP):
 
         # --- default config options ---
         self.announce_startup: bool = getattr(config, "ANNOUNCE_STARTUP", True)
+        self.announce_sync_details: bool = getattr(config, "ANNOUNCE_SYNC_DETAILS", False)
         self.show_ban_in_muc: bool = getattr(config, "SHOW_BAN_IN_MUC", True)
         self.allow_user_cmds: bool = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
         self.health_check_interval: int = max(60, getattr(config, "HEALTH_CHECK_INTERVAL", 300))
@@ -150,6 +151,7 @@ class BanBot(ClientXMPP):
 
         # --- Event handlers ---
         self.add_event_handler("session_start", self.start)
+        self.add_event_handler("message", self.on_direct_message)
         self.add_event_handler("groupchat_message", self.on_message)
         self.add_event_handler("groupchat_presence", self.on_muc_presence)
         self.add_event_handler("disconnected", self.on_disconnect)
@@ -438,6 +440,15 @@ class BanBot(ClientXMPP):
         await self.update_vcard()
 
         self.reconnecting = False
+
+        # Send startup notification if enabled
+        if self.announce_startup:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody=f"✅ Bot has restarted and synced all bans. ({timestamp})",
+                mtype="groupchat"
+            )
 
         log.info("✅ Bot started, all rooms joined and bans applied")
 
@@ -737,6 +748,7 @@ class BanBot(ClientXMPP):
                     importlib.reload(config)
 
                     self.announce_startup = getattr(config, "ANNOUNCE_STARTUP", True)
+                    self.announce_sync_details = getattr(config, "ANNOUNCE_SYNC_DETAILS", True)
                     self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", True)
                     self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
                     self.health_check_interval = max(60, getattr(config, "HEALTH_CHECK_INTERVAL", 300))
@@ -815,6 +827,7 @@ class BanBot(ClientXMPP):
                 config_lines.append(f"⏱️ Unban Check Interval: {getattr(config, 'UNBAN_CHECK_INTERVAL', 60)}s")
                 config_lines.append(f"📅 Max Tempban Days: {getattr(config, 'MAX_TEMPBAN_DAYS', 30)}")
                 config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
+                config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
                 config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
                 config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
 
@@ -889,6 +902,55 @@ class BanBot(ClientXMPP):
                             result_msg += f"\n... and {len(errors) - 10} more errors"
                     self.send_message(mto=room, mbody=result_msg, mtype="groupchat")
                     log.info("Import completed: %d successful, %d skipped, %d errors", successful, skipped, len(errors))
+
+    # ---------- DIRECT MESSAGE HANDLER (DM/PM REJECTION) ----------
+    async def on_direct_message(self, msg) -> None:
+        """
+        Reject direct messages (DMs/PMs) including room DMs.
+        """
+        # Ignore own messages
+        if msg["from"].bare == self.boundjid.bare:
+            return
+
+        # Only process direct messages (type: chat or normal)
+        if msg["type"] not in ("chat", "normal"):
+            return
+
+        # Get sender (bare JID for regular DMs, full JID for room DMs)
+        sender = msg["from"].bare
+        sender_full = str(msg["from"])
+
+        # Determine if this is a room DM or regular DM
+        is_room_dm = msg["from"].resource is not None
+
+        # Check if sender is admin in admin room
+        admin_info = self.occupants.get(ADMIN_ROOM, {})
+        is_admin = False
+        for nick, info in admin_info.items():
+            if info.get("jid"):
+                info_bare = self.bare_jid(info["jid"])
+                # For room DMs, match against the sender's bare JID
+                if is_room_dm and info_bare == sender:
+                    if info.get("affiliation") in ("owner", "admin"):
+                        is_admin = True
+                        break
+                # For regular DMs
+                elif not is_room_dm and info_bare == sender:
+                    if info.get("affiliation") in ("owner", "admin"):
+                        is_admin = True
+                        break
+
+        # Send rejection response
+        if is_admin:
+            response = "🤖 Nice try, admin! But I'm a bot and only take commands in the admin room. See you there! 😉"
+        else:
+            response = "❌ I'm a ban management bot and only operate in designated rooms. I only listen to admins."
+
+        self.send_message(
+            mto=sender_full if is_room_dm else sender,
+            mbody=response,
+            mtype="chat"
+        )
 
     # ---------- EXPORT / IMPORT ----------
     async def export_bans_to_csv(self) -> tuple[bool, str]:
@@ -2155,6 +2217,7 @@ class BanBot(ClientXMPP):
         Announce messages in Admin-Room only if ANNOUNCE_STARTUP=True in config.py
         """
         announce = getattr(self, "announce_startup", True)
+        announce = getattr(self, "announce_sync_details", True)
         await self.sync_bans_to_rooms(startup=True, announce_progress=announce)
 
     async def sync_bans(self) -> None:
