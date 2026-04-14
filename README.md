@@ -129,12 +129,6 @@ You can run `!reloadconfig` in the admin room to apply most changes immediately.
 - `DB_FILE` - SQLite database path (default: `banbot.db`)
 
 **Optional Settings (can be reloaded with `!reloadconfig`):**
-- `ANNOUNCE_STARTUP` (bool, default: `True`) - Send status messages when bot starts
-- `SHOW_BAN_IN_MUC` (bool, default: `True`) - Announce bans in protected rooms
-- `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` (bool, default: `True`) - Allow users to run `!help`, `!banlist`, `!why`
-- `HEALTH_CHECK_INTERVAL` (int, default: `300`) - Seconds between health checks of room connectivity (minimum: 60)
-- `UNBAN_CHECK_INTERVAL` (int, default: `60`) - Seconds between checking for expired tempbans
-- `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `AVATAR_PATH` (str) - Path to bot avatar image (PNG, JPG, etc.)
 - `VCARD_NICKNAME` (str) - Bot's nickname in vCard
 - `VCARD_FN` (str) - Bot's full name in vCard (e.g., "Ban Management Bot")
@@ -142,6 +136,13 @@ You can run `!reloadconfig` in the admin room to apply most changes immediately.
 - `VCARD_ROLE` (str) - Role in vCard (e.g., "Security")
 - `VCARD_URL` (str) - Website or contact URL
 - `VCARD_NOTE` (str) - Additional notes in vCard
+- `ANNOUNCE_STARTUP` (bool, default: `True`) - Send status messages when bot starts
+- `ANNOUNCE_SYNC_DETAILS` (bool, default: `True`) - Show detailed sync progress messages at startup
+- `SHOW_BAN_IN_MUC` (bool, default: `True`) - Announce bans in protected rooms
+- `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` (bool, default: `True`) - Allow users to run `!help`, `!banlist`, `!why`
+- `HEALTH_CHECK_INTERVAL` (int, default: `300`) - Seconds between health checks of room connectivity (minimum: 60)
+- `UNBAN_CHECK_INTERVAL` (int, default: `60`) - Seconds between checking for expired tempbans
+- `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `MUC_WRITE_SEMAPHORE` (int, default: `5`) - Concurrency limit for XMPP IQ operations
 
 ### 6. Test the bot manually
@@ -482,7 +483,6 @@ Run `!sync` to re-establish connections and verify rights.
 ## Notes
 
 * Temporary bans expire automatically; the bot removes them periodically (configurable interval).  
-* `!why` supports lookup by **JID**, **Nick**, or domain prefix from JID.
 * Messages in protected rooms are sent as **ephemeral** (not stored); admin room always receives full notifications.
 * Changes to `config.py` can **usually be applied via `!reloadconfig`** (except critical settings).
 * The bot uses **exponential backoff** (max 5 minutes) if disconnected from the XMPP server.
