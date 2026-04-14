@@ -142,6 +142,7 @@ You can run `!reloadconfig` in the admin room to apply most changes immediately.
 - `VCARD_ROLE` (str) - Role in vCard (e.g., "Security")
 - `VCARD_URL` (str) - Website or contact URL
 - `VCARD_NOTE` (str) - Additional notes in vCard
+- `MUC_WRITE_SEMAPHORE` (int, default: `5`) - Concurrency limit for XMPP IQ operations
 
 ### 6. Test the bot manually
 
