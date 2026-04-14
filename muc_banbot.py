@@ -16,6 +16,7 @@ import aiosqlite
 import slixmpp
 import pathlib
 import importlib
+import threading
 import hashlib
 import re
 from datetime import datetime
@@ -35,39 +36,44 @@ class LogRateLimiter:
     """
     Prevents log spam by limiting identical messages per minute.
     Useful under high load to avoid filling log files.
+    Thread-safe implementation.
     """
     def __init__(self, max_per_minute: int = 100):
         self.counts: dict[str, list] = {}
         self.max_per_minute = max_per_minute
+        self.lock = threading.Lock()
 
     def should_log(self, key: str) -> bool:
         """
         Check if a message should be logged based on rate limit.
+        Thread-safe operation.
 
         :param key: Unique identifier for the message (e.g., "ban_applied")
         :return: True if should log, False if rate limited
         """
-        now = time.time()
+        with self.lock:
+            now = time.time()
 
-        if key not in self.counts:
-            self.counts[key] = []
+            if key not in self.counts:
+                self.counts[key] = []
 
-        # Remove entries older than 60 seconds
-        self.counts[key] = [t for t in self.counts[key] if now - t < 60]
+            # Remove entries older than 60 seconds
+            self.counts[key] = [t for t in self.counts[key] if now - t < 60]
 
-        # Check if under limit
-        if len(self.counts[key]) < self.max_per_minute:
-            self.counts[key].append(now)
-            return True
+            # Check if under limit
+            if len(self.counts[key]) < self.max_per_minute:
+                self.counts[key].append(now)
+                return True
 
-        return False
+            return False
 
     def reset(self, key: str | None = None) -> None:
         """Reset rate limit counter(s)."""
-        if key:
-            self.counts.pop(key, None)
-        else:
-            self.counts.clear()
+        with self.lock:
+            if key:
+                self.counts.pop(key, None)
+            else:
+                self.counts.clear()
 
 # ---------- TIME HELPERS ----------
 def parse_duration(s: str) -> int:
@@ -1186,14 +1192,27 @@ class BanBot(ClientXMPP):
                         comment
                     ))
 
-                    # Update cache immediately (for deduplication check in next rows)
-                    self.ban_cache[db_key] = (
+                    # Update cache AND indexes immediately (for deduplication check in next rows)
+                    ban_tuple = (
                         jid.lower() if jid else None,
                         nick.lower() if nick else None,
                         until,
                         issuer,
                         comment
                     )
+                    self.ban_cache[db_key] = ban_tuple
+
+                    # Update indexes for deduplication and immediate availability
+                    if jid and not jid.startswith("*."):
+                        self.ban_index_by_jid[jid.lower()] = ban_tuple
+                    if nick:
+                        self.ban_index_by_nick[nick.lower()] = ban_tuple
+                    if jid and jid.startswith("*."):
+                        domain = jid[2:].lower()
+                        if domain not in self.ban_index_by_domain:
+                            self.ban_index_by_domain[domain] = []
+                        self.ban_index_by_domain[domain] = [ban_tuple]  # Replace, don't append (fix #5)
+
                     successful += 1
 
                 except Exception as e:
@@ -1214,8 +1233,7 @@ class BanBot(ClientXMPP):
                     errors.append(f"❌ Database batch insert failed: {e}")
                     return 0, 0, errors
 
-                # Rebuild indexes after batch insert
-                await self.load_bans_from_db()
+                # Indexes already updated during import loop - no need to rebuild
 
             log.info("Import complete: %d successful, %d skipped", successful, skipped)
 
@@ -1665,9 +1683,8 @@ class BanBot(ClientXMPP):
 
         if ban_jid and ban_jid.startswith("*."):
             domain = ban_jid[2:].lower()
-            if domain not in self.ban_index_by_domain:
-                self.ban_index_by_domain[domain] = []
-            self.ban_index_by_domain[domain].append(ban_tuple)
+            # Replace (REPLACE INTO in DB), don't append
+            self.ban_index_by_domain[domain] = [ban_tuple]
 
         log.info("Ban applied: identifier=%s, JID/Nick=%s/%s, until=%s, issuer=%s",
                  identifier, ban_jid, ban_nick, ts, issuer)
@@ -1875,7 +1892,7 @@ class BanBot(ClientXMPP):
 
         if is_domain_ban and domain:
             self.ban_index_by_domain.pop(domain, None)
-        elif ban_jid and "@" in ban_jid:
+        elif not is_domain_ban and ban_jid and "@" in ban_jid:
             domain_from_jid = ban_jid.split("@")[1].lower()
             if domain_from_jid in self.ban_index_by_domain:
                 self.ban_index_by_domain[domain_from_jid] = [
@@ -2164,10 +2181,18 @@ class BanBot(ClientXMPP):
             )
 
             # Run batch in parallel
-            await asyncio.gather(*(
-                sync_single_room(batch_num + 1 + i, room)
-                for i, room in enumerate(batch)
-            ))
+            try:
+                await asyncio.gather(*(
+                    sync_single_room(batch_num + 1 + i, room)
+                    for i, room in enumerate(batch)
+                ))
+            except Exception as e:
+                log.warning("Error in batch %d-%d: %s", batch_start, batch_end, e)
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"⚠️ Error during batch {batch_start}-{batch_end} sync: {e}",
+                    mtype="groupchat"
+                )
 
             # Small delay between batches to avoid overwhelming server
             if batch_end < len(rooms_list):
