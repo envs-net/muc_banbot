@@ -485,4 +485,5 @@ Run `!sync` to re-establish connections and verify rights.
 * Messages in protected rooms are sent as **ephemeral** (not stored); admin room always receives full notifications.
 * Changes to `config.py` can **usually be applied via `!reloadconfig`** (except critical settings).
 * The bot uses **exponential backoff** (max 5 minutes) if disconnected from the XMPP server.
-* Domain bans are stored as-is (e.g., `*.domain.tld`) an
+* Domain bans are stored as-is (e.g., `*.domain.tld`) and can be searched/unbanned using `!bansearch` and `!unban`
+* Bot prevents banning of admins/owners, even via domain bans
