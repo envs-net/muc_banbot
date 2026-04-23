@@ -6,9 +6,9 @@ PASSWORD = "yourpassword"
 ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
 DB_FILE = "banbot.db"
-AVATAR_PATH = "avatar.png" # PATH to Avatar, None = do not set an avatar
 
 # ================= vCARD SETTINGS =================
+AVATAR_PATH = "avatar.png"           # Path to avatar file (PNG/JPG), None disables avatar
 VCARD_NICKNAME = "My Bot Nickname"   # Optional nickname for vCard
 VCARD_FN = "Admin Bot"               # Full name
 VCARD_ORG = "My Organization"        # Organization name
