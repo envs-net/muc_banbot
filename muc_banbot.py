@@ -4,7 +4,7 @@
 # Author: creme <xmpp:creme@envs.net>
 # License: MIT
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 import os
 import csv
@@ -138,13 +138,14 @@ class BanBot(ClientXMPP):
         self.server_connect_time = None
 
         # --- default config options ---
-        self.announce_startup: bool = getattr(config, "ANNOUNCE_STARTUP", True)
-        self.announce_sync_details: bool = getattr(config, "ANNOUNCE_SYNC_DETAILS", True)
-        self.show_ban_in_muc: bool = getattr(config, "SHOW_BAN_IN_MUC", False)
-        self.allow_user_cmds: bool = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
-        self.health_check_interval: int = max(60, getattr(config, "HEALTH_CHECK_INTERVAL", 300))
-        self.unban_check_interval: int = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
-        self.max_tempban_days: int = max(1, min(365, getattr(config, "MAX_TEMPBAN_DAYS", 30)))
+        self.announce_startup: bool = True
+        self.announce_sync_details: bool = True
+        self.show_ban_in_muc: bool = False
+        self.allow_user_cmds: bool = True
+        self.health_check_interval: int = 300
+        self.unban_check_interval: int = 60
+        self.max_tempban_days: int = 30
+        self.apply_runtime_config()
 
         # --- Register XMPP plugins ---
         self.register_plugin("xep_0030")  # Service Discovery
@@ -160,6 +161,30 @@ class BanBot(ClientXMPP):
         self.add_event_handler("groupchat_presence", self.on_muc_presence)
         self.add_event_handler("disconnected", self.on_disconnect)
         self.add_event_handler("connection_failed", self.on_disconnect)
+
+    # ---------- RUNTIME CONFIG ----------
+    def apply_runtime_config(self) -> None:
+        """Load reloadable runtime settings from config."""
+        new_semaphore_value = getattr(config, "MUC_WRITE_SEMAPHORE", 5)
+        if new_semaphore_value != self.muc_write_limit:
+            old_value = self.muc_write_limit
+            self.muc_write_limit = new_semaphore_value
+            self.muc_write_semaphore = asyncio.Semaphore(new_semaphore_value)
+            log.info("🔄 MUC_WRITE_SEMAPHORE updated: %d → %d", old_value, new_semaphore_value)
+
+        self.announce_startup = getattr(config, "ANNOUNCE_STARTUP", True)
+        self.announce_sync_details = getattr(config, "ANNOUNCE_SYNC_DETAILS", True)
+        self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", False)
+        self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
+        self.health_check_interval = max(60, getattr(config, "HEALTH_CHECK_INTERVAL", 300))
+        self.unban_check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
+        self.max_tempban_days = max(1, min(365, getattr(config, "MAX_TEMPBAN_DAYS", 30)))
+
+    async def reload_runtime_config(self) -> None:
+        """Reload config.py and re-apply runtime settings."""
+        importlib.reload(config)
+        self.apply_runtime_config()
+        await self.update_vcard()
 
     async def stop_background_tasks(self) -> None:
         """Cancel running background tasks before starting new ones."""
@@ -848,25 +873,7 @@ class BanBot(ClientXMPP):
 
             elif cmd == "!reloadconfig":
                 try:
-                    importlib.reload(config)
-
-                    # Reload performance config
-                    new_semaphore_value = getattr(config, "MUC_WRITE_SEMAPHORE", 5)
-                    if new_semaphore_value != self.muc_write_limit:
-                        old_value = self.muc_write_limit
-                        self.muc_write_limit = new_semaphore_value
-                        self.muc_write_semaphore = asyncio.Semaphore(new_semaphore_value)
-                        log.info("🔄 MUC_WRITE_SEMAPHORE updated: %d → %d", old_value, new_semaphore_value)
-
-                    self.announce_startup = getattr(config, "ANNOUNCE_STARTUP", True)
-                    self.announce_sync_details = getattr(config, "ANNOUNCE_SYNC_DETAILS", True)
-                    self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", False)
-                    self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
-                    self.health_check_interval = max(60, getattr(config, "HEALTH_CHECK_INTERVAL", 300))
-                    self.unban_check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
-                    self.max_tempban_days = max(1, min(365, getattr(config, "MAX_TEMPBAN_DAYS", 30)))
-
-                    await self.update_vcard()
+                    await self.reload_runtime_config()
 
                     self.send_message(
                         mto=room,
@@ -943,7 +950,7 @@ class BanBot(ClientXMPP):
                 ))
                 status_lines.append(
                     "\n🛡️ Admins/Owners in Admin-Room:\n" + "\n".join(admins)
-                    if admins else "⚠️ No admins/owners found in Admin-Room."
+                    if admins else "\n⚠️ No admins/owners found in Admin-Room."
                 )
 
                 # Protected Rooms
@@ -953,7 +960,7 @@ class BanBot(ClientXMPP):
                         "\n".join(sorted(self.protected_rooms))
                     )
                 else:
-                    status_lines.append("⚠️ No protected rooms configured.")
+                    status_lines.append("\n⚠️ No protected rooms configured.")
 
                 self.send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
 
@@ -1176,46 +1183,30 @@ class BanBot(ClientXMPP):
                         skipped += 1
                         continue
 
+                    normalized_jid = jid.lower() if jid else None
+                    normalized_nick = nick.lower() if nick else None
+                    lookup_key = normalized_jid or normalized_nick
+
                     # Check for existing permanent ban — skip if both are permanent
-                    db_key = jid or nick
-                    if db_key in self.ban_cache:
-                        existing = self.ban_cache[db_key]
+                    if lookup_key in self.ban_cache:
+                        existing = self.ban_cache[lookup_key]
                         existing_until = existing[2]
-                        if (existing_until is None or existing_until <= 0) and until <= 0:
-                            log.info("Row %d: Ban already exists for %s (permanent), skipping", row_num, db_key)
+                        if existing_until <= 0 and until <= 0:
+                            log.info("Row %d: Ban already exists for %s (permanent), skipping", row_num, lookup_key)
                             skipped += 1
                             continue
 
                     # Collect for batch insert
                     bans_to_insert.append((
-                        jid.lower() if jid else None,
-                        nick.lower() if nick else None,
+                        normalized_jid,
+                        normalized_nick,
                         until,
                         issuer,
                         comment
                     ))
 
                     # Update cache AND indexes immediately (for deduplication check in next rows)
-                    ban_tuple = (
-                        jid.lower() if jid else None,
-                        nick.lower() if nick else None,
-                        until,
-                        issuer,
-                        comment
-                    )
-                    self.ban_cache[db_key] = ban_tuple
-
-                    # Update indexes for deduplication and immediate availability
-                    if jid and not jid.startswith("*."):
-                        self.ban_index_by_jid[jid.lower()] = ban_tuple
-                    if nick:
-                        self.ban_index_by_nick[nick.lower()] = ban_tuple
-                    if jid and jid.startswith("*."):
-                        domain = jid[2:].lower()
-                        if domain not in self.ban_index_by_domain:
-                            self.ban_index_by_domain[domain] = []
-                        self.ban_index_by_domain[domain] = [ban_tuple]  # Replace, don't append (fix #5)
-
+                    self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
                     successful += 1
 
                 except Exception as e:
@@ -1233,6 +1224,7 @@ class BanBot(ClientXMPP):
                     log.info("✅ Batch inserted %d bans", len(bans_to_insert))
                 except Exception as e:
                     log.error("Batch insert failed: %s", e)
+                    await self.load_bans_from_db()
                     errors.append(f"❌ Database batch insert failed: {e}")
                     return 0, 0, errors
 
@@ -1335,6 +1327,76 @@ class BanBot(ClientXMPP):
         log.warning("Bot not recognized in %s after %ds", room, timeout)
         return False
 
+    # ---------- CACHE HELPERS ----------
+    def _build_ban_tuple(
+        self,
+        jid: str | None,
+        nick: str | None,
+        until: int,
+        issuer: str | None,
+        comment: str | None,
+    ) -> tuple[str | None, str | None, int, str | None, str | None]:
+        """Return a normalized ban tuple for caches and indexes."""
+        return (
+            self.bare_jid(jid) if jid and not jid.startswith("*.") else (jid.lower() if jid else None),
+            nick.lower() if nick else None,
+            until,
+            issuer,
+            comment,
+        )
+
+    def _cache_ban(
+        self,
+        jid: str | None,
+        nick: str | None,
+        until: int,
+        issuer: str | None,
+        comment: str | None,
+    ) -> None:
+        """Store a single ban consistently in cache and indexes."""
+        ban_tuple = self._build_ban_tuple(jid, nick, until, issuer, comment)
+        normalized_jid, normalized_nick, *_ = ban_tuple
+        cache_key = normalized_jid or normalized_nick
+        if not cache_key:
+            return
+
+        self.ban_cache[cache_key] = ban_tuple
+
+        if normalized_jid and not normalized_jid.startswith("*."):
+            self.ban_index_by_jid[normalized_jid] = ban_tuple
+
+        if normalized_nick:
+            self.ban_index_by_nick[normalized_nick] = ban_tuple
+
+        if normalized_jid and normalized_jid.startswith("*."):
+            domain = normalized_jid[2:]
+            self.ban_index_by_domain[domain] = [ban_tuple]
+
+    def _remove_ban_from_cache(self, identifier: str, ban_jid: str | None = None, ban_nick: str | None = None) -> None:
+        """Remove a single JID/nick ban consistently from cache and indexes."""
+        normalized_identifier = identifier.lower() if identifier else identifier
+        normalized_jid = self.bare_jid(ban_jid) if ban_jid and not ban_jid.startswith("*.") else (ban_jid.lower() if ban_jid else None)
+        normalized_nick = ban_nick.lower() if ban_nick else None
+
+        self.ban_cache.pop(normalized_identifier, None)
+        if normalized_jid:
+            self.ban_cache.pop(normalized_jid, None)
+        if normalized_nick:
+            self.ban_cache.pop(normalized_nick, None)
+
+        if normalized_jid and not normalized_jid.startswith("*."):
+            self.ban_index_by_jid.pop(normalized_jid, None)
+        if normalized_nick:
+            self.ban_index_by_nick.pop(normalized_nick, None)
+
+    def _remove_domain_bans_from_cache(self, domain: str) -> None:
+        """Remove all wildcard domain bans associated with a domain from cache and indexes."""
+        domain = domain.lower()
+        wildcard_jid = f"*.{domain}"
+
+        self.ban_cache.pop(wildcard_jid, None)
+        self.ban_index_by_domain.pop(domain, None)
+
     # ---------- BAN CACHE ----------
     async def load_bans_from_db(self) -> None:
         """
@@ -1352,26 +1414,7 @@ class BanBot(ClientXMPP):
         self.ban_index_by_domain.clear()
 
         for jid, nick, until, issuer, comment in rows:
-            key = jid or nick
-            if key:
-                # Store in main cache
-                self.ban_cache[key] = (jid, nick, until, issuer, comment)
-                ban_tuple = (jid, nick, until, issuer, comment)
-
-                # Index by JID
-                if jid and not jid.startswith("*."):
-                    self.ban_index_by_jid[jid] = ban_tuple
-
-                # Index by nick
-                if nick:
-                    self.ban_index_by_nick[nick.lower()] = ban_tuple
-
-                # Index by domain
-                if jid and jid.startswith("*."):
-                    domain = jid[2:].lower()
-                    if domain not in self.ban_index_by_domain:
-                        self.ban_index_by_domain[domain] = []
-                    self.ban_index_by_domain[domain].append(ban_tuple)
+            self._cache_ban(jid, nick, until, issuer, comment)
 
         log.info("✅ Loaded %d bans", len(self.ban_cache))
 
@@ -1666,28 +1709,7 @@ class BanBot(ClientXMPP):
             )
             return
 
-        cache_key = self.bare_jid(ban_jid) if ban_jid else ban_nick
-        ban_tuple = (
-            self.bare_jid(ban_jid) if ban_jid else None,
-            ban_nick.lower() if ban_nick else None,
-            ts,
-            issuer,
-            comment
-        )
-
-        self.ban_cache[cache_key] = ban_tuple
-
-        # Update indexes
-        if ban_jid and not ban_jid.startswith("*."):
-            self.ban_index_by_jid[self.bare_jid(ban_jid)] = ban_tuple
-
-        if ban_nick:
-            self.ban_index_by_nick[ban_nick.lower()] = ban_tuple
-
-        if ban_jid and ban_jid.startswith("*."):
-            domain = ban_jid[2:].lower()
-            # Replace (REPLACE INTO in DB), don't append
-            self.ban_index_by_domain[domain] = [ban_tuple]
+        self._cache_ban(ban_jid, ban_nick, ts, issuer, comment)
 
         log.info("Ban applied: identifier=%s, JID/Nick=%s/%s, until=%s, issuer=%s",
                  identifier, ban_jid, ban_nick, ts, issuer)
@@ -1881,32 +1903,11 @@ class BanBot(ClientXMPP):
             await self.db.execute("DELETE FROM bans WHERE LOWER(nick)=?", (ban_nick,))
         await self.db.commit()
 
-        # Update in-memory cache
-        for key, ban in list(self.ban_cache.items()):
-            jid_val, nick_val, *_ = ban
-            if is_domain_ban and jid_val and jid_val.split("@")[-1].lower() == domain:
-                self.ban_cache.pop(key, None)
-            elif identifier == jid_val or identifier == nick_val:
-                self.ban_cache.pop(key, None)
-
-        # Clean up indexes
-        if ban_jid and not ban_jid.startswith("*."):
-            self.ban_index_by_jid.pop(ban_jid, None)
-
-        if ban_nick:
-            self.ban_index_by_nick.pop(ban_nick.lower(), None)
-
+        # Update in-memory cache and indexes
         if is_domain_ban and domain:
-            self.ban_index_by_domain.pop(domain, None)
-        elif not is_domain_ban and ban_jid and "@" in ban_jid:
-            domain_from_jid = ban_jid.split("@")[1].lower()
-            if domain_from_jid in self.ban_index_by_domain:
-                self.ban_index_by_domain[domain_from_jid] = [
-                    b for b in self.ban_index_by_domain[domain_from_jid]
-                    if b != (ban_jid, ban_nick, *_)
-                ]
-                if not self.ban_index_by_domain[domain_from_jid]:
-                    self.ban_index_by_domain.pop(domain_from_jid, None)
+            self._remove_domain_bans_from_cache(domain)
+        else:
+            self._remove_ban_from_cache(identifier, ban_jid=ban_jid, ban_nick=ban_nick)
 
         # Unban in all protected rooms
         for room in self.protected_rooms:
