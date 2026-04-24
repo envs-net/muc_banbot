@@ -1614,10 +1614,21 @@ class BanBot(ClientXMPP):
 
         # protected rooms
         if self.protected_rooms:
+            rooms = sorted(self.protected_rooms)
+            preview_count = 10
+            preview_rooms = rooms[:preview_count]
+
             status_lines.append(
-                f"\n🔒 Protected Rooms ({len(self.protected_rooms)}):\n" +
-                "\n".join(sorted(self.protected_rooms))
+                f"\n🔒 Protected Rooms ({len(rooms)}):\n" +
+                "\n".join(preview_rooms)
             )
+
+            remaining = len(rooms) - len(preview_rooms)
+            if remaining > 0:
+                status_lines.append(
+                    f"\n... and {remaining} more.\n"
+                    f"Use {self.command_prefix}room list [page] to view all protected rooms."
+                )
         else:
             status_lines.append("\n⚠️ No protected rooms configured.")
 
