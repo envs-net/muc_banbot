@@ -18,6 +18,7 @@ import importlib
 import hashlib
 import re
 import psutil
+import urllib.request
 from datetime import datetime
 from slixmpp import ClientXMPP
 from slixmpp.exceptions import IqError, IqTimeout
@@ -146,6 +147,16 @@ class BanBot(ClientXMPP):
         self.health_check_interval: int = 300
         self.unban_check_interval: int = 60
         self.max_tempban_days: int = 30
+
+        # --- update check ---
+        self.version_check_task: asyncio.Task | None = None
+        self.version_check_enabled: bool = False
+        self.version_check_interval: int = 3600
+        self.version_check_url: str | None = None
+        self.last_version_check_result: str | None = None
+        self.last_update_notified_version: str | None = None
+
+        # --- apply config ---
         self.apply_runtime_config()
 
         # --- Register XMPP plugins ---
@@ -183,6 +194,10 @@ class BanBot(ClientXMPP):
         self.unban_check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
         self.max_tempban_days = max(1, min(365, getattr(config, "MAX_TEMPBAN_DAYS", 30)))
 
+        self.version_check_enabled = getattr(config, "VERSION_CHECK_ENABLED", False)
+        self.version_check_interval = max(300, getattr(config, "VERSION_CHECK_INTERVAL", 3600))
+        self.version_check_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip() or None
+
     async def reload_runtime_config(self) -> None:
         """Reload config.py and re-apply runtime settings."""
         importlib.reload(config)
@@ -193,7 +208,7 @@ class BanBot(ClientXMPP):
     # ---------- TASKS ----------
     async def stop_background_tasks(self) -> None:
         """Cancel running background tasks before starting new ones."""
-        for task in (self.unban_task, self.health_check_task):
+        for task in (self.unban_task, self.health_check_task, self.version_check_task):
             if task and not task.done():
                 task.cancel()
                 try:
@@ -267,6 +282,10 @@ class BanBot(ClientXMPP):
 
         # --- Start health check worker ---
         self.health_check_task = asyncio.create_task(self.health_check_worker())
+
+        # --- Start version check worker ---
+        if self.version_check_enabled and self.version_check_url:
+            self.version_check_task = asyncio.create_task(self.version_check_worker())
 
         # --- Set Bot vCard ---
         await self.update_vcard()
@@ -359,6 +378,107 @@ class BanBot(ClientXMPP):
             except Exception as e:
                 log.warning("Error in health_check_worker: %s", e)
                 await asyncio.sleep(10)
+
+
+    # ---------- VERSION CHECK ----------
+
+    def _parse_version_tuple(self, version: str) -> tuple[int, ...]:
+        parts = re.findall(r"\d+", version)
+        return tuple(int(p) for p in parts)
+
+    def _is_remote_version_newer(self, remote_version: str, local_version: str) -> bool:
+        return self._parse_version_tuple(remote_version) > self._parse_version_tuple(local_version)
+
+    def _fetch_latest_release_version_sync(self) -> str:
+        """
+        Fetch the latest GitHub release version by following the /releases/latest redirect.
+        Example final URL:
+            https://github.com/envs-net/muc_banbot/releases/tag/v1.3.0
+        Returns:
+            1.3.0
+        """
+        if not self.version_check_url:
+            raise ValueError("VERSION_CHECK_URL is not configured")
+
+        req = urllib.request.Request(
+            self.version_check_url,
+            headers={"User-Agent": f"muc_banbot/{__version__}"}
+        )
+
+        with urllib.request.urlopen(req, timeout=15) as response:
+            final_url = response.geturl()
+
+        marker = "/releases/tag/"
+        if marker not in final_url:
+            raise ValueError(f"Unexpected release redirect URL: {final_url}")
+
+        tag = final_url.split(marker, 1)[1].strip().strip("/")
+        if not tag:
+            raise ValueError("Could not extract release tag from redirect URL")
+
+        return tag.lstrip("v")
+
+    async def check_for_updates_once(
+        self,
+        announce: bool = True
+    ) -> tuple[bool, str | None, str | None]:
+        """
+        Check once whether a newer bot version is available.
+        Returns: (is_update_available, remote_version, error_message)
+        """
+        if not self.version_check_enabled or not self.version_check_url:
+            return False, None, "Version check is disabled or URL is missing"
+
+        try:
+            remote_version = await asyncio.to_thread(self._fetch_latest_release_version_sync)
+            self.last_version_check_result = remote_version
+
+            current_version = __version__.lstrip("v").strip()
+
+            if self._is_remote_version_newer(remote_version, current_version):
+                log.info(
+                    "⬆️ New bot version available: remote=%s local=%s url=%s",
+                    remote_version,
+                    current_version,
+                    self.version_check_url
+                )
+
+                if announce and self.last_update_notified_version != remote_version:
+                    self.send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=(
+                            f"⬆️ New bot version available: {remote_version}\n"
+                            f"Current version: {current_version}\n"
+                            f"Release page: {self.version_check_url}"
+                        ),
+                        mtype="groupchat"
+                    )
+                    self.last_update_notified_version = remote_version
+
+                return True, remote_version, None
+
+            return False, remote_version, None
+
+        except Exception as e:
+            log.warning("Version check failed: %s", e)
+            return False, None, str(e)
+
+    async def version_check_worker(self) -> None:
+        """
+        Periodically check whether a newer bot version is available.
+        """
+        while True:
+            try:
+                await self.check_for_updates_once(announce=True)
+
+            except asyncio.CancelledError:
+                log.info("version_check_worker cancelled")
+                raise
+
+            except Exception as e:
+                log.warning("Error in version_check_worker: %s", e)
+
+            await asyncio.sleep(self.version_check_interval)
 
 
     # ---------- BASIC HELPERS ----------
@@ -1166,9 +1286,10 @@ class BanBot(ClientXMPP):
         args: list[str]
     ) -> bool:
         admin_commands = {
+            "config",
             "reloadconfig",
             "status",
-            "config",
+            "checkupdate",
             "room",
             "ban",
             "tempban",
@@ -1190,7 +1311,7 @@ class BanBot(ClientXMPP):
         if not self.is_authorized(msg):
             self.send_message(
                 mto=room,
-                mbody="❌ Du bist nicht berechtigt, diesen Admin-Befehl zu verwenden.",
+                mbody="❌ You are not authorized to use this admin command.",
                 mtype="groupchat"
             )
             return True
@@ -1205,6 +1326,32 @@ class BanBot(ClientXMPP):
 
         if cmd == "status":
             await self._cmd_status(room)
+            return True
+
+        if cmd == "checkupdate":
+            is_update, remote_version, error_message = await self.check_for_updates_once(announce=False)
+
+            if error_message:
+                self.send_message(
+                    mto=room,
+                    mbody=f"❌ Update check failed: {error_message}",
+                    mtype="groupchat"
+                )
+            elif is_update:
+                self.send_message(
+                    mto=room,
+                    mbody=(
+                        f"⬆️ New bot version available: {remote_version} (current: {__version__})\n"
+                        f"Release page: {self.version_check_url}"
+                    ),
+                    mtype="groupchat"
+                )
+            else:
+                self.send_message(
+                    mto=room,
+                    mbody=f"✅ Bot is up to date ({__version__})",
+                    mtype="groupchat"
+                )
             return True
 
         if cmd == "room":
@@ -1314,6 +1461,7 @@ class BanBot(ClientXMPP):
             f"{p}config - show current configuration\n"
             f"{p}reloadconfig - reload config.py at runtime\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"
+            f"{p}checkupdate - check if a newer bot release is available\n"
             f"{p}whoami - show your affiliation/role\n\n"
             f"{p}room add/remove/list - manage protected rooms\n\n"
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"

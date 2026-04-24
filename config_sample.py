@@ -1,11 +1,12 @@
 # ================= CONFIG =================
 
+DB_FILE = "banbot.db"
+
 JID = "adminbot@domain.tld"
 RESSOURCE = "service"
 PASSWORD = "yourpassword"
 ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
-DB_FILE = "banbot.db"
 
 # ================= vCARD SETTINGS =================
 AVATAR_PATH = "avatar.png"           # Path to avatar file (PNG/JPG), None disables avatar
@@ -34,3 +35,9 @@ MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default
 # Each ban/unban operation = 1 IQ request. Higher = faster but more server load.
 # Recommended: 5-20 (default: 5)
 MUC_WRITE_SEMAPHORE = 5
+
+# ================= UPDATE CHECK =================
+
+VERSION_CHECK_ENABLED = True  # True = check periodically for new bot releases, False = disabled
+VERSION_CHECK_INTERVAL = 3600  # Interval in seconds for update checks. Default: 3600 (1 hour)
+VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"  # URL used to detect the latest GitHub release
