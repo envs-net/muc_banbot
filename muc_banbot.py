@@ -1487,7 +1487,7 @@ class BanBot(ClientXMPP):
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
             f"{p}unban <jid|nick> - remove ban\n"
-            f"{p}banlist - show all active bans with remaining time and comments\n"
+            f"{p}banlist [page] - show all active bans with remaining time and comments\n"
             f"{p}bansearch <query> - search bans by nick, domain or jid\n"
             f"{p}why <nick|jid> - show the reason and remaining time for a ban\n\n"
             f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"

@@ -46,11 +46,11 @@ It provides central administration via an admin room and protects multiple chat 
 | `!whoami` | Shows your affiliation/role and permissions in the current room | `!whoami` |
 | `!room add <room>` | Adds a room to the protected list and stores it in the DB | `!room add secretroom@muc.example.com` |
 | `!room remove <room>` | Removes a room from the protected list and DB | `!room remove secretroom@muc.example.com` |
-| `!room list` | Lists all protected rooms | `!room list` |
+| `!room list [page]` | Lists all protected rooms with pagination | `!room list` |
 | `!ban <jid/nick/domain> [comment]` | Bans a user or domain across all protected rooms | `!ban alice@example.com spamming` or `!ban *.evil.com` |
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Temporary ban (limited to MAX_TEMPBAN_DAYS) | `!tempban bob 10m rude behavior` |
 | `!unban <jid/nick/domain>` | Removes a ban | `!unban bob` or `!unban *.evil.com` |
-| `!banlist` | Shows all active bans with remaining time and comments | `!banlist` |
+| `!banlist [page]` | Shows all active bans with remaining time and comments | `!banlist` |
 | `!bansearch <query>` | Searches bans by nick, JID, domain, or issuer | `!bansearch example.com` |
 | `!why <nick/jid>` | Shows the reason and remaining time of a ban | `!why bob` |
 | `!sync` | Full room sync: rejoin rooms, verify admin rights, apply only missing active bans | `!sync` |
@@ -69,7 +69,7 @@ It provides central administration via an admin room and protects multiple chat 
 | ------------- | ----------------------------------------- | ------------ |
 | `!help`       | Shows a restricted help message           | `!help`      |
 | `!whoami`     | Shows your affiliation/role and permissions | `!whoami`  |
-| `!banlist`    | Shows active temporary bans (if enabled)  | `!banlist`   |
+| `!banlist [page]` | Shows active temporary bans (if enabled)  | `!banlist`   |
 | `!why <jid/nick>` | Shows reason and remaining time for a ban | `!why alice` |
 
 > ⚠️ **Visibility Rules:**
