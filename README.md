@@ -12,6 +12,7 @@ It provides central administration via an admin room and protects multiple chat 
 * 🔄 Automatic rejoin and reapplication of bans on restart  
 * 📦 Sync existing room bans into the database at startup  
 * ❌ Ban, temporary ban, unban, banlist, bansearch, why  
+* ⌨️ Configurable command prefix for all chat commands  
 * 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain  
 * 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  
 * 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
@@ -21,6 +22,7 @@ It provides central administration via an admin room and protects multiple chat 
 * 📣 Logs ban/unban actions in both admin and protected rooms  
 * ⚠️ Admins/Owners are protected from accidental bans  
 * 🏥 Periodic health checks for room connectivity and admin rights
+* ⬆️ Periodic GitHub release checks with admin notifications and manual update checks  
 * 👀 Monitors bot's admin/owner rights per room and reports loss to the admin room  
 * ⛔ Prevents ban application if the bot does not have admin/owner rights  
 * 🐞 Handles nick-only bans with best-effort enforcement  
@@ -32,12 +34,15 @@ It provides central administration via an admin room and protects multiple chat 
 
 ## Commands (Admin Room)
 
+> Examples below assume the default command prefix `!`. If you change `COMMAND_PREFIX`, replace `!` accordingly.
+
 | Command | Description | Example |
 |---------|-------------|---------|
 | `!help` | Shows this help message | `!help` |
 | `!config` | Shows current bot configuration | `!config` |
 | `!reloadconfig` | Reloads `config.py` at runtime without restarting | `!reloadconfig` |
 | `!status` | Shows bot status, active rooms, uptime, and ban statistics | `!status` |
+| `!checkupdate` | Checks whether a newer GitHub release is available | `!checkupdate` |
 | `!whoami` | Shows your affiliation/role and permissions in the current room | `!whoami` |
 | `!room add <room>` | Adds a room to the protected list and stores it in the DB | `!room add secretroom@muc.example.com` |
 | `!room remove <room>` | Removes a room from the protected list and DB | `!room remove secretroom@muc.example.com` |
@@ -57,6 +62,8 @@ It provides central administration via an admin room and protects multiple chat 
 ---
 
 ## Public Commands (Protected Rooms)
+
+> Examples below assume the default command prefix `!`. If you change `COMMAND_PREFIX`, replace `!` accordingly.
 
 | Command       | Description                               | Example      |
 | ------------- | ----------------------------------------- | ------------ |
@@ -110,7 +117,7 @@ pip install -r requirements.txt
 
 Copy `config_sample.py` to `config.py` and configure as needed.
 
-You can run `!reloadconfig` in the admin room to apply most changes immediately.  
+You can run `<prefix>reloadconfig` in the admin room to apply most changes immediately. Examples in this README use the default prefix `!`.  
 **Note:** The following settings **REQUIRE** a bot restart!
 
 - `JID` - Bot's XMPP account
@@ -136,14 +143,18 @@ You can run `!reloadconfig` in the admin room to apply most changes immediately.
 - `VCARD_ROLE` (str) - Role in vCard (e.g., "Security")
 - `VCARD_URL` (str) - Website or contact URL
 - `VCARD_NOTE` (str) - Additional notes in vCard
+- `COMMAND_PREFIX` (str, default: `!`) - Prefix used to trigger commands in rooms (for example `!help`, `.help`, `/help`)
 - `ANNOUNCE_STARTUP` (bool, default: `True`) - Send status messages when bot starts
 - `ANNOUNCE_SYNC_DETAILS` (bool, default: `True`) - Show detailed sync progress messages at startup
-- `SHOW_BAN_IN_MUC` (bool, default: `True`) - Announce bans in protected rooms
+- `SHOW_BAN_IN_MUC` (bool, default: `False`) - Announce bans in protected rooms
 - `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` (bool, default: `True`) - Allow users to run `!help`, `!banlist`, `!why`
 - `HEALTH_CHECK_INTERVAL` (int, default: `300`) - Seconds between health checks of room connectivity (minimum: 60)
 - `UNBAN_CHECK_INTERVAL` (int, default: `60`) - Seconds between checking for expired tempbans
 - `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `MUC_WRITE_SEMAPHORE` (int, default: `5`) - Concurrency limit for XMPP IQ operations
+- `VERSION_CHECK_ENABLED` (bool, default: `True`) - Enable periodic checks for newer GitHub releases
+- `VERSION_CHECK_INTERVAL` (int, default: `3600`) - Seconds between release checks (minimum: 300)
+- `VERSION_CHECK_URL` (str, default: `https://github.com/envs-net/muc_banbot/releases/latest`) - URL used to detect the latest GitHub release
 
 ### 6. Test the bot manually
 
@@ -209,6 +220,8 @@ The bot supports importing and exporting bans in CSV format for easy backup, mig
 ```
 !export
 ```
+
+> Replace `!` with your configured `COMMAND_PREFIX` if you changed it.
 
 Exports all current bans to a CSV file named `bans_export_YYYYMMDD_HHMMSS.csv` in the current working directory.
 
@@ -357,6 +370,16 @@ The bot runs an automatic **unban worker** that:
 - Restores `participant` role to users who are currently online
 - Logs all auto-unbans to the admin room
 
+### Release Update Checks
+
+The bot can periodically check the latest GitHub release page and notify the admin room when a newer version is available.
+
+- Automatic checks run in the background when `VERSION_CHECK_ENABLED=True`
+- The release check interval is controlled by `VERSION_CHECK_INTERVAL`
+- The release URL is configurable via `VERSION_CHECK_URL`
+- Manual checks are available with `!checkupdate` (or your configured `COMMAND_PREFIX`)
+- When a newer release is found, the bot logs the event and includes the release page URL in the admin-room notification
+
 ### Configuration Display
 
 The `!config` command displays all current bot configuration settings in the admin room:
@@ -366,6 +389,7 @@ The `!config` command displays all current bot configuration settings in the adm
 - Feature flags (announcements, ban visibility, user commands)
 - Tempban limits (MAX_TEMPBAN_DAYS)
 - Bot version displayed in `!config` and `!status`
+- Examples in this README assume the default `!` prefix; if you set `COMMAND_PREFIX`, commands use that prefix instead
 
 ---
 
@@ -484,7 +508,7 @@ Run `!sync` to re-establish connections and verify rights.
 
 * Temporary bans expire automatically; the bot removes them periodically (configurable interval).  
 * Messages in protected rooms are sent as **ephemeral** (not stored); admin room always receives full notifications.
-* Changes to `config.py` can **usually be applied via `!reloadconfig`** (except critical settings).
+* Changes to `config.py` can **usually be applied via your configured command prefix + `reloadconfig`** (examples here use `!reloadconfig`).
 * The bot uses **exponential backoff** (max 5 minutes) if disconnected from the XMPP server.
 * Domain bans are stored as-is (e.g., `*.domain.tld`) and can be searched/unbanned using `!bansearch` and `!unban`
 * Bot prevents banning of admins/owners, even via domain bans
