@@ -1528,13 +1528,14 @@ class BanBot(ClientXMPP):
     async def _cmd_status(self, room: str) -> None:
         status_lines = ["✅ Bot is online and healthy."]
 
+        # version
         status_lines.append(f"🤖 Bot Version: {__version__}")
         if self.last_version_check_result:
             status_lines.append(f"🏷️ Latest Remote Version: {self.last_version_check_result}")
 
         # uptime
         bot_uptime = int(time.time()) - self.bot_start_time
-        status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
+        status_lines.append(f"\n⏱️ Bot Uptime: {human_time(bot_uptime)}")
 
         if self.server_connect_time:
             server_uptime = int(time.time()) - self.server_connect_time
