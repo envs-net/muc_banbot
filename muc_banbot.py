@@ -514,6 +514,25 @@ class BanBot(ClientXMPP):
             (room in self.protected_rooms and self.allow_user_cmds)
         )
 
+    def _paginate_lines(
+        self,
+        lines: list[str],
+        page: int,
+        per_page: int = 10,
+    ) -> tuple[list[str], int, int, int]:
+        """
+        Paginate a list of lines.
+        Returns: (page_lines, current_page, total_pages, total_items)
+        """
+        total_items = len(lines)
+        total_pages = max(1, (total_items + per_page - 1) // per_page)
+        current_page = max(1, min(page, total_pages))
+
+        start = (current_page - 1) * per_page
+        end = start + per_page
+        return lines[start:end], current_page, total_pages, total_items
+
+
     # ---------- AUTH / PERMISSIONS ----------
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
         """Check if a user is admin or owner in a room."""
@@ -1261,7 +1280,19 @@ class BanBot(ClientXMPP):
             return True
 
         if cmd == "banlist" and self.user_cmds_allowed(room):
-            await self.cmd_banlist(room)
+            page = 1
+            if len(args) >= 1:
+                try:
+                    page = max(1, int(args[0]))
+                except ValueError:
+                    self.send_message(
+                        mto=room,
+                        mbody=f"❌ Usage: {self.command_prefix}banlist [page]",
+                        mtype="groupchat"
+                    )
+                    return True
+
+            await self.cmd_banlist(room, page=page)
             return True
 
         if cmd == "why" and len(args) >= 1 and self.user_cmds_allowed(room):
@@ -1448,7 +1479,7 @@ class BanBot(ClientXMPP):
         return (
             f"{p}help - show this help\n"
             f"{p}whoami - show your affiliation/role and permissions\n"
-            f"{p}banlist - show temporary bans\n"
+            f"{p}banlist [page] - show temporary bans\n"
             f"{p}why <nick> - show ban reason"
         )
 
@@ -1461,7 +1492,8 @@ class BanBot(ClientXMPP):
             f"{p}status - show bot health, active rooms, and ban statistics\n"
             f"{p}checkupdate - check if a newer bot release is available\n"
             f"{p}whoami - show your affiliation/role\n\n"
-            f"{p}room add/remove/list - manage protected rooms\n\n"
+            f"{p}room add/remove - manage protected rooms\n"
+            f"{p}room list [page] - list protected rooms\n\n"
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
             f"{p}unban <jid|nick> - remove ban\n"
@@ -1531,7 +1563,7 @@ class BanBot(ClientXMPP):
         # version
         status_lines.append(f"🤖 Bot Version: {__version__}")
         if self.last_version_check_result:
-            status_lines.append(f"🏷️ Latest Remote Version: {self.last_version_check_result}")
+            status_lines.append(f"🏷️ Latest Release Version: {self.last_version_check_result}")
 
         # uptime
         bot_uptime = int(time.time()) - self.bot_start_time
@@ -2274,9 +2306,29 @@ class BanBot(ClientXMPP):
         action = args[0].lower()
 
         if action == "list":
+            page = 1
+            if len(args) >= 2:
+                try:
+                    page = max(1, int(args[1]))
+                except ValueError:
+                    self.send_message(
+                        mto=room,
+                        mbody=f"❌ Usage: {self.command_prefix}room list [page]",
+                        mtype="groupchat"
+                    )
+                    return
+
             if self.protected_rooms:
                 rooms = sorted(self.protected_rooms)
-                text = f"🔒 Protected Rooms ({len(rooms)}):\n" + "\n".join(rooms)
+                page_lines, current_page, total_pages, total_items = self._paginate_lines(rooms, page, per_page=10)
+
+                text = (
+                    f"🔒 Protected Rooms ({total_items}) - Page {current_page}/{total_pages}:\n"
+                    + "\n".join(page_lines)
+                )
+
+                if current_page < total_pages:
+                    text += f"\n\nUse {self.command_prefix}room list {current_page + 1} for the next page."
             else:
                 text = "🔒 Protected Rooms:\nNo protected rooms."
 
@@ -2826,13 +2878,16 @@ class BanBot(ClientXMPP):
         )
 
     # ---------- BANLIST ----------
-    async def cmd_banlist(self, room: str) -> None:
+    async def cmd_banlist(self, room: str, page: int = 1) -> None:
         """
-        Shows active bans.
-        Admin Room: full info (JID/nick/domain)
-        Protected Rooms: only temporary bans, nick or domain only
+        Show bans with pagination.
+        Admin Room: full info (all bans)
+        Protected Rooms: temporary bans only, anonymized
         """
-        async with self.db.execute("SELECT jid, nick, until, issuer, comment FROM bans") as cursor:
+        async with self.db.execute(
+            "SELECT jid, nick, until, issuer, comment FROM bans ORDER BY "
+            "CASE WHEN until <= 0 THEN 1 ELSE 0 END, until ASC, LOWER(COALESCE(nick, jid)) ASC"
+        ) as cursor:
             rows = await cursor.fetchall()
 
         if not rows:
@@ -2842,6 +2897,10 @@ class BanBot(ClientXMPP):
             entries = []
 
             for jid, nick, until, issuer, comment in rows:
+                # Skip expired tempbans
+                if until > 0 and until <= now:
+                    continue
+
                 # Skip permanent bans in protected rooms
                 if room != ADMIN_ROOM and until <= 0:
                     continue
@@ -2849,7 +2908,6 @@ class BanBot(ClientXMPP):
                 remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
                 emoji = "⏳" if until > 0 else "🔒"
 
-                # Domain-ban display
                 if jid and jid.startswith("*."):
                     display = jid
                 elif room == ADMIN_ROOM:
@@ -2860,10 +2918,16 @@ class BanBot(ClientXMPP):
                 entry = f"{emoji} {display} ({remaining}, by {issuer}" + (f", {comment}" if comment else "") + ")"
                 entries.append(entry)
 
-            if entries:
-                text = f"📋 Banlist ({len(entries)}):\n" + "\n".join(entries)
+            if not entries:
+                text = "📋 Banlist:\nNo active temporary bans." if room != ADMIN_ROOM else "📋 Banlist:\nNo active bans."
             else:
-                text = "📋 Banlist:\nNo active temporary bans."
+                page_lines, current_page, total_pages, total_items = self._paginate_lines(entries, page, per_page=10)
+
+                header = f"📋 Banlist ({total_items}) - Page {current_page}/{total_pages}:"
+                text = header + "\n" + "\n".join(page_lines)
+
+                if current_page < total_pages:
+                    text += f"\n\nUse {self.command_prefix}banlist {current_page + 1} for the next page."
 
         if room != ADMIN_ROOM:
             self.send_ephemeral(room, text)
