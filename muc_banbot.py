@@ -492,20 +492,10 @@ class BanBot(ClientXMPP):
     def safe_jid(text) -> str:
         return str(text).replace("@", "@\u200b")
 
-    def send_ephemeral(self, mto: str, mbody: str) -> None:
-        """Send a message to a room without storing it."""
-        msg = self.Message()
-        msg["to"] = mto
-        msg["type"] = "groupchat"
-        msg["body"] = mbody
-        no_store = ET.Element("{urn:xmpp:hints}no-store")
-        msg.append(no_store)
-        msg.send()
-
     def notify_protected(self, room: str, message: str) -> None:
         """Notify users in protected rooms if SHOW_BAN_IN_MUC=True"""
         if self.show_ban_in_muc:
-            self.send_ephemeral(room, message)
+            self.send_message(mto=room, mbody=message, mtype="groupchat")
 
     def user_cmds_allowed(self, room: str) -> bool:
         """Check if user commands are allowed in this room."""
@@ -1842,7 +1832,7 @@ class BanBot(ClientXMPP):
             display = ban_nick or "Unknown"
             msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "")
             if self.allow_user_cmds and self.show_ban_in_muc:
-                self.send_ephemeral(room, msg)
+                self.send_message(mto=room, mbody=msg, mtype="groupchat")
 
 
     # ---------- BAN ALL ----------
@@ -2929,10 +2919,7 @@ class BanBot(ClientXMPP):
                 if current_page < total_pages:
                     text += f"\n\nUse {self.command_prefix}banlist {current_page + 1} for the next page."
 
-        if room != ADMIN_ROOM:
-            self.send_ephemeral(room, text)
-        else:
-            self.send_message(mto=room, mbody=text, mtype="groupchat")
+        self.send_message(mto=room, mbody=text, mtype="groupchat")
 
     # ---------- WHY ----------
     async def cmd_why(self, identifier: str, room: str) -> None:
@@ -2983,10 +2970,7 @@ class BanBot(ClientXMPP):
         else:
             msg = f"No ban found for {identifier}"
 
-        if room != ADMIN_ROOM:
-            self.send_ephemeral(room, msg)
-        else:
-            self.send_message(mto=room, mbody=msg, mtype="groupchat")
+        self.send_message(mto=room, mbody=msg, mtype="groupchat")
 
 
 # ---------- RUN BOT ----------
