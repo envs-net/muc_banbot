@@ -339,11 +339,9 @@ class BanBot(ClientXMPP):
         Verifies bot is still in rooms and has admin rights.
         Uses self.health_check_interval (reloadable via !reloadconfig).
         """
-        check_interval = self.health_check_interval
-
         while True:
             try:
-                await asyncio.sleep(check_interval)
+                await asyncio.sleep(self.health_check_interval)
 
                 for room in self.protected_rooms:
                     try:
@@ -1531,7 +1529,10 @@ class BanBot(ClientXMPP):
         status_lines = ["✅ Bot is online and healthy."]
 
         status_lines.append(f"🤖 Bot Version: {__version__}")
+        if self.last_version_check_result:
+            status_lines.append(f"🏷️ Latest Remote Version: {self.last_version_check_result}")
 
+        # uptime
         bot_uptime = int(time.time()) - self.bot_start_time
         status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
 
@@ -1539,6 +1540,7 @@ class BanBot(ClientXMPP):
             server_uptime = int(time.time()) - self.server_connect_time
             status_lines.append(f"🌐 Server Connected: {human_time(server_uptime)}")
 
+        # ban count
         now = int(time.time())
         permanent_bans = 0
         temporary_bans = 0
@@ -1551,6 +1553,7 @@ class BanBot(ClientXMPP):
 
         status_lines.append(f"📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
 
+        # mem info
         try:
             process = psutil.Process(os.getpid())
             memory_info = process.memory_info()
@@ -1559,6 +1562,7 @@ class BanBot(ClientXMPP):
         except Exception as e:
             log.debug("Could not get memory info: %s", e)
 
+        # cpu info
         try:
             process = psutil.Process(os.getpid())
             loop = asyncio.get_running_loop()
@@ -1573,6 +1577,7 @@ class BanBot(ClientXMPP):
         except Exception as e:
             log.debug("Could not get CPU info: %s", e)
 
+        # admins
         admin_infos = self.occupants.get(ADMIN_ROOM, {})
         admins = sorted(set(
             self.safe_jid(info.get("jid", "unknown"))
@@ -1584,6 +1589,7 @@ class BanBot(ClientXMPP):
             if admins else "\n⚠️ No admins/owners found in Admin-Room."
         )
 
+        # protected rooms
         if self.protected_rooms:
             status_lines.append(
                 f"\n🔒 Protected Rooms ({len(self.protected_rooms)}):\n" +
