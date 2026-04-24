@@ -1487,15 +1487,20 @@ class BanBot(ClientXMPP):
         config_lines.append(f"📦 Resource: {getattr(config, 'RESSOURCE', 'None')}")
         config_lines.append(f"👤 Nick: {NICK}")
         config_lines.append("")
+        config_lines.append(f"⌨️ Command Prefix: {self.command_prefix}")
         config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
         config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
         config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
         config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
         config_lines.append("")
-        config_lines.append(f"⏰ Health Check Interval: {getattr(config, 'HEALTH_CHECK_INTERVAL', 300)}s")
-        config_lines.append(f"⏱️ Unban Check Interval: {getattr(config, 'UNBAN_CHECK_INTERVAL', 60)}s")
-        config_lines.append(f"📅 Max Tempban Days: {getattr(config, 'MAX_TEMPBAN_DAYS', 30)}")
+        config_lines.append(f"⏰ Health Check Interval: {self.health_check_interval}s")
+        config_lines.append(f"⏱️ Unban Check Interval: {self.unban_check_interval}s")
+        config_lines.append(f"📅 Max Tempban Days: {self.max_tempban_days}")
         config_lines.append(f"🔌 MUC Write Semaphore: {self.muc_write_limit}")
+        config_lines.append("")
+        config_lines.append(f"🔄 Version Check Enabled: {self.version_check_enabled}")
+        config_lines.append(f"🕒 Version Check Interval: {self.version_check_interval}s")
+        config_lines.append(f"🌐 Version Check URL: {self.version_check_url or 'None'}")
 
         self.send_message(
             mto=room,
