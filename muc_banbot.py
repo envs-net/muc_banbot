@@ -1541,25 +1541,12 @@ class BanBot(ClientXMPP):
             server_uptime = int(time.time()) - self.server_connect_time
             status_lines.append(f"🌐 Server Connected: {human_time(server_uptime)}")
 
-        # ban count
-        now = int(time.time())
-        permanent_bans = 0
-        temporary_bans = 0
-        async with self.db.execute("SELECT until FROM bans") as cursor:
-            async for (until,) in cursor:
-                if until <= 0:
-                    permanent_bans += 1
-                elif until > now:
-                    temporary_bans += 1
-
-        status_lines.append(f"📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
-
         # mem info
         try:
             process = psutil.Process(os.getpid())
             memory_info = process.memory_info()
             memory_mb = memory_info.rss / 1024 / 1024
-            status_lines.append(f"\n💾 Memory Usage: {memory_mb:.1f} MB")
+            status_lines.append(f"💾 Memory Usage: {memory_mb:.1f} MB")
         except Exception as e:
             log.debug("Could not get memory info: %s", e)
 
@@ -1577,6 +1564,19 @@ class BanBot(ClientXMPP):
             status_lines.append(f"⚙️ System Load: {cpu_load:.2f} ({cpu_count} cores)")
         except Exception as e:
             log.debug("Could not get CPU info: %s", e)
+
+        # ban count
+        now = int(time.time())
+        permanent_bans = 0
+        temporary_bans = 0
+        async with self.db.execute("SELECT until FROM bans") as cursor:
+            async for (until,) in cursor:
+                if until <= 0:
+                    permanent_bans += 1
+                elif until > now:
+                    temporary_bans += 1
+
+        status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
 
         # admins
         admin_infos = self.occupants.get(ADMIN_ROOM, {})
