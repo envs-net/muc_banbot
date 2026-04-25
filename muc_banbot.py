@@ -4,7 +4,7 @@
 # Author: creme <xmpp:creme@envs.net>
 # License: MIT
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 import os
 import csv
@@ -1247,7 +1247,38 @@ class BanBot(ClientXMPP):
         if handled:
             return
 
-        await self._handle_admin_command(msg, room, nick, cmd, args)
+        handled = await self._handle_admin_command(msg, room, nick, cmd, args)
+        if handled:
+            return
+
+        await self._handle_unknown_command(msg, room, cmd)
+
+
+    async def _handle_unknown_command(self, msg, room: str, cmd: str) -> None:
+        """
+        Inform users/admins about unknown commands and point to help.
+        """
+        p = self.command_prefix
+
+        # In admin room: only answer admins
+        if room == ADMIN_ROOM:
+            if not self.is_authorized(msg):
+                return
+
+            self.send_message(
+                mto=room,
+                mbody=f"❌ Unknown command: {p}{cmd}\nUse {p}help to see available admin commands.",
+                mtype="groupchat"
+            )
+            return
+
+        # In protected rooms: only answer if user commands are allowed
+        if self.user_cmds_allowed(room):
+            self.send_message(
+                mto=room,
+                mbody=f"❌ Unknown command: {p}{cmd}\nUse {p}help to see available commands.",
+                mtype="groupchat"
+            )
 
 
     async def _handle_user_command(
@@ -1676,48 +1707,79 @@ class BanBot(ClientXMPP):
     # ---------- DIRECT MESSAGE HANDLER (DM/PM REJECTION) ----------
     async def on_direct_message(self, msg) -> None:
         """
-        Reject direct messages (DMs/PMs) including room DMs.
+        Reject direct messages (regular DMs and MUC PMs).
+        MUC PM admin detection is based on room + nick from the MUC occupant cache.
         """
         # Ignore own messages
         if msg["from"].bare == self.boundjid.bare:
             return
 
-        # Only process direct messages (type: chat or normal)
+        # Only process direct messages
         if msg["type"] not in ("chat", "normal"):
             return
 
-        # Get sender (bare JID for regular DMs, full JID for room DMs)
         sender = msg["from"].bare
         sender_full = str(msg["from"])
+        sender_resource = msg["from"].resource
 
-        # Determine if this is a room DM or regular DM
-        is_room_dm = msg["from"].resource is not None
+        known_rooms = self.protected_rooms | {ADMIN_ROOM}
 
-        # Check if sender is admin in admin room
-        admin_info = self.occupants.get(ADMIN_ROOM, {})
+        # A real MUC PM looks like: room@conference.example/Nick
+        is_muc_pm = sender in known_rooms and sender_resource is not None
+
         is_admin = False
-        for nick, info in admin_info.items():
-            if info.get("jid"):
-                info_bare = self.bare_jid(info["jid"])
-                # For room DMs, match against the sender's bare JID
-                if is_room_dm and info_bare == sender:
-                    if info.get("affiliation") in ("owner", "admin"):
-                        is_admin = True
-                        break
-                # For regular DMs
-                elif not is_room_dm and info_bare == sender:
-                    if info.get("affiliation") in ("owner", "admin"):
+
+        if is_muc_pm:
+            room = sender
+            nick = sender_resource
+            info = self.occupants.get(room, {}).get(nick)
+
+            if info and info.get("affiliation") in ("owner", "admin"):
+                is_admin = True
+
+            # Optional fallback: if the PM came from another known room,
+            # also check whether this user's real JID is admin in ADMIN_ROOM.
+            real_jid = info.get("jid") if info else None
+            real_bare = self.bare_jid(real_jid) if real_jid else None
+
+            if not is_admin and real_bare:
+                for admin_info in self.occupants.get(ADMIN_ROOM, {}).values():
+                    admin_jid = admin_info.get("jid")
+                    if (
+                        admin_jid
+                        and self.bare_jid(admin_jid) == real_bare
+                        and admin_info.get("affiliation") in ("owner", "admin")
+                    ):
                         is_admin = True
                         break
 
-        # Send rejection response
-        if is_admin:
-            response = "🤖 Nice try, admin! But I'm a bot and only take commands in the admin room. See you there! 😉"
         else:
-            response = "❌ I'm a ban management bot and only operate in designated rooms. I only listen to admins."
+            # Regular direct DM: user@example/resource or user@example
+            sender_bare = self.bare_jid(str(msg["from"]))
+
+            for admin_info in self.occupants.get(ADMIN_ROOM, {}).values():
+                admin_jid = admin_info.get("jid")
+                if (
+                    admin_jid
+                    and self.bare_jid(admin_jid) == sender_bare
+                    and admin_info.get("affiliation") in ("owner", "admin")
+                ):
+                    is_admin = True
+                    break
+
+        if is_admin:
+            response = (
+                "🤖 Nice try, admin! But I only take commands in the admin room. "
+                f"Please use {ADMIN_ROOM}.\nSee you there! 😉"
+            )
+        else:
+            response = (
+                "❌ I'm a ban management bot and only operate in designated rooms. "
+                "I only listen to admins."
+            )
 
         self.send_message(
-            mto=sender_full if is_room_dm else sender,
+            mto=sender_full if is_muc_pm else sender,
             mbody=response,
             mtype="chat"
         )
