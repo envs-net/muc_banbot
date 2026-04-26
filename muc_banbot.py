@@ -73,7 +73,7 @@ from slixmpp.exceptions import IqError, IqTimeout
 from slixmpp.xmlstream import ET
 from slixmpp.stanza.presence import Presence
 
-from config import JID, RESSOURCE, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
+from config import JID, PASSWORD, ADMIN_ROOM, NICK, DB_FILE
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -93,6 +93,8 @@ def parse_duration(s: str) -> int:
         value = int(s[:-1])
     except ValueError:
         raise ValueError("Invalid duration number")
+    if value <= 0:
+        raise ValueError("Duration must be greater than zero")
     return value * units[s[-1].lower()]
 
 def human_time(seconds: int) -> str:
@@ -138,6 +140,24 @@ def validate_domain_ban(domain: str) -> tuple[bool, str]:
     if len(parts) < 3:
         return False, f"❌ Domain '{domain}' is too generic. Specify more precise domain (e.g., *.domain.tld)."
     return True, ""
+
+def domain_matches(user_domain: str | None, banned_domain: str | None) -> bool:
+    """Return True if a user domain matches a wildcard ban domain.
+
+    A ban for *.domain.tld matches both domain.tld and sub.domain.tld.
+    """
+    if not user_domain or not banned_domain:
+        return False
+    user_domain = user_domain.lower().strip(".")
+    banned_domain = banned_domain.lower().strip(".")
+    return user_domain == banned_domain or user_domain.endswith("." + banned_domain)
+
+def get_config_resource() -> str | None:
+    """Return RESOURCE with backwards-compatible support for legacy RESSOURCE."""
+    resource = getattr(config, "RESOURCE", None)
+    if resource is not None:
+        return resource
+    return getattr(config, "RESSOURCE", None)
 
 
 # ---------- BAN BOT ----------
@@ -246,6 +266,16 @@ class BanBot(ClientXMPP):
         "VCARD_NOTE",
     )
 
+    STARTUP_ONLY_CONFIG_KEYS = (
+        "JID",
+        "PASSWORD",
+        "RESOURCE",
+        "RESSOURCE",  # legacy spelling, kept for backwards compatibility
+        "ADMIN_ROOM",
+        "NICK",
+        "DB_FILE",
+    )
+
     def _runtime_config_snapshot(self) -> dict[str, object]:
         """Return the currently effective runtime config values."""
         return {
@@ -269,6 +299,33 @@ class BanBot(ClientXMPP):
             "VCARD_URL": getattr(config, "VCARD_URL", None),
             "VCARD_NOTE": getattr(config, "VCARD_NOTE", None),
         }
+
+    def _startup_config_snapshot(self) -> dict[str, object]:
+        """Return startup-only config values that cannot be changed via !reloadconfig."""
+        return {
+            "JID": getattr(config, "JID", None),
+            "PASSWORD": getattr(config, "PASSWORD", None),
+            "RESOURCE": get_config_resource(),
+            "ADMIN_ROOM": getattr(config, "ADMIN_ROOM", None),
+            "NICK": getattr(config, "NICK", None),
+            "DB_FILE": getattr(config, "DB_FILE", None),
+        }
+
+    def _format_startup_only_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
+        changes = []
+        for key in ("JID", "PASSWORD", "RESOURCE", "ADMIN_ROOM", "NICK", "DB_FILE"):
+            old = before.get(key)
+            new = after.get(key)
+            if old != new:
+                changes.append(f"- {key}: {old!r} → {new!r}")
+        return changes
+
+    def _restore_config_values(self, values: dict[str, object]) -> None:
+        """Restore selected config module values to the last known good values."""
+        for key, value in values.items():
+            if value is None and key == "RESOURCE" and not hasattr(config, "RESOURCE"):
+                continue
+            setattr(config, key, value)
 
     def _validate_config(self) -> tuple[list[str], list[str]]:
         """Validate config.py and return (errors, warnings)."""
@@ -295,6 +352,14 @@ class BanBot(ClientXMPP):
             errors.append("NICK must not contain whitespace")
         if password in {"yourpassword", "password", "changeme"}:
             warnings.append("PASSWORD still looks like a placeholder")
+        if (
+            hasattr(config, "RESOURCE")
+            and config.RESOURCE is not None
+            and hasattr(config, "RESSOURCE")
+            and config.RESSOURCE is not None
+            and config.RESOURCE != config.RESSOURCE
+        ):
+            warnings.append("Both RESOURCE and legacy RESSOURCE are set; RESOURCE will be used")
 
         command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip()
         if not command_prefix:
@@ -395,25 +460,41 @@ class BanBot(ClientXMPP):
         self.version_check_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip() or None
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:
-        """Reload config.py, validate it, apply settings, and return (changes, errors, warnings)."""
+        """Reload config.py, validate it, apply reloadable settings, and return (changes, errors, warnings).
+
+        Startup-only settings (JID, PASSWORD, RESOURCE/RESSOURCE, ADMIN_ROOM, NICK, DB_FILE)
+        are intentionally not applied at runtime. If they changed, the old in-memory
+        values remain active and a restart warning is returned.
+        """
         before = self._runtime_config_snapshot()
-        restore_keys = self.CONFIG_KEYS + ("JID", "RESSOURCE", "PASSWORD", "ADMIN_ROOM", "NICK", "DB_FILE")
+        startup_before = self._startup_config_snapshot()
+        restore_keys = self.CONFIG_KEYS + self.STARTUP_ONLY_CONFIG_KEYS
         previous_module_values = {key: getattr(config, key, None) for key in restore_keys}
 
         try:
             importlib.reload(config)
         except Exception as e:
             # Keep the last known good config module values for code paths that read config directly.
-            for key, value in previous_module_values.items():
-                setattr(config, key, value)
+            self._restore_config_values(previous_module_values)
             return [], [format_config_import_error(e)], []
 
         errors, warnings = self._validate_config()
         if errors:
             # Keep the last known good config module values for code paths that read config directly.
-            for key, value in previous_module_values.items():
-                setattr(config, key, value)
+            self._restore_config_values(previous_module_values)
             return [], errors, warnings
+
+        startup_after = self._startup_config_snapshot()
+        startup_changes = self._format_startup_only_changes(startup_before, startup_after)
+        if startup_changes:
+            warnings.append(
+                "Startup-only config changes detected and NOT applied. Restart the bot to activate:\n"
+                + "\n".join(startup_changes)
+            )
+            # Restore startup-only values so the running process stays internally consistent.
+            for key in self.STARTUP_ONLY_CONFIG_KEYS:
+                if key in previous_module_values:
+                    setattr(config, key, previous_module_values[key])
 
         self.apply_runtime_config()
         await self.update_vcard()
@@ -1132,7 +1213,7 @@ class BanBot(ClientXMPP):
 
         if normalized_jid and normalized_jid.startswith("*."):
             domain = normalized_jid[2:]
-            self.ban_index_by_domain[domain] = [ban_tuple]
+            self.ban_index_by_domain.setdefault(domain, []).append(ban_tuple)
 
     def _remove_ban_from_cache(self, identifier: str, ban_jid: str | None = None, ban_nick: str | None = None) -> None:
         """Remove a single JID/nick ban consistently from cache and indexes."""
@@ -1337,12 +1418,14 @@ class BanBot(ClientXMPP):
                 if until <= 0 or until > now:  # Check if not expired
                     tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
 
-            # Check by domain
+            # Check by wildcard domain bans (*.domain.tld matches domain.tld and sub.domain.tld)
             domain = jid_bare.split("@")[1].lower() if "@" in jid_bare else None
-            if domain and domain in self.ban_index_by_domain:
-                for ban_jid, ban_nick, until, issuer, comment in self.ban_index_by_domain[domain]:
-                    if until <= 0 or until > now:
-                        tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+            if domain:
+                for banned_domain, bans in self.ban_index_by_domain.items():
+                    if domain_matches(domain, banned_domain):
+                        for ban_jid, ban_nick, until, issuer, comment in bans:
+                            if until <= 0 or until > now:
+                                tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
 
         # Check by nick
         if nick.lower() in self.ban_index_by_nick:
@@ -1755,7 +1838,7 @@ class BanBot(ClientXMPP):
         config_lines.append(f"🤖 Bot Version: {__version__}")
         config_lines.append(f"💾 Database: {DB_FILE}")
         config_lines.append(f"🔐 JID: {JID}")
-        config_lines.append(f"📦 Resource: {getattr(config, 'RESSOURCE', 'None')}")
+        config_lines.append(f"📦 Resource: {get_config_resource() or 'None'}")
         config_lines.append(f"👤 Nick: {NICK}")
         config_lines.append("")
         config_lines.append(f"⌨️ Command Prefix: {self.command_prefix}")
@@ -2088,7 +2171,7 @@ class BanBot(ClientXMPP):
 
             if is_domain and jid_in_room:
                 domain = self.bare_jid(jid_in_room).split("@")[1].lower()
-                match = domain == ban_jid[2:]
+                match = domain_matches(domain, ban_jid[2:])
             elif ban_jid_bare and jid_in_room:
                 match = self.bare_jid(jid_in_room) == ban_jid_bare
             elif ban_nick:
@@ -2286,7 +2369,7 @@ class BanBot(ClientXMPP):
                 jid_value = info.get("jid")
                 info_jid_bare = self.bare_jid(jid_value) if jid_value else None
                 if is_domain:
-                    if info_jid_bare and info_jid_bare.split("@")[1].lower() == ban_jid[2:]:
+                    if info_jid_bare and domain_matches(info_jid_bare.split("@")[1].lower(), ban_jid[2:]):
                         if info.get("affiliation") in ("owner", "admin"):
                             self.send_message(
                                 mto=ADMIN_ROOM,
@@ -2339,7 +2422,7 @@ class BanBot(ClientXMPP):
                     # Kick all current occupants from this domain
                     for n, info in list(self.occupants.get(room, {}).items()):
                         jid_in_room = info.get("jid")
-                        if jid_in_room and self.bare_jid(jid_in_room).split("@")[1].lower() == ban_jid[2:]:
+                        if jid_in_room and domain_matches(self.bare_jid(jid_in_room).split("@")[1].lower(), ban_jid[2:]):
                             await self.apply_ban_to_room(room, self.bare_jid(jid_in_room), n, comment, issuer)
                 else:
                     await self.apply_ban_to_room(room, ban_jid, ban_nick, comment, issuer)
@@ -3296,7 +3379,7 @@ if __name__ == "__main__":
     Connects to XMPP server and starts the event loop.
     Handles KeyboardInterrupt gracefully.
     """
-    resource = getattr(config, "RESSOURCE", None)
+    resource = get_config_resource()
     try:
         xmpp = BanBot(JID, PASSWORD, resource)
         errors, warnings = xmpp._validate_config()

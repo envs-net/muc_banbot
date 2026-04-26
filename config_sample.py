@@ -3,7 +3,7 @@
 DB_FILE = "banbot.db"
 
 JID = "adminbot@domain.tld"
-RESSOURCE = "service"
+RESOURCE = "service"
 PASSWORD = "yourpassword"
 ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
@@ -38,6 +38,6 @@ MUC_WRITE_SEMAPHORE = 5
 
 # ================= UPDATE CHECK =================
 
-VERSION_CHECK_ENABLED = True  # True = check periodically for new bot releases, False = disabled
+VERSION_CHECK_ENABLED = False  # True = check periodically for new bot releases, False = disabled
 VERSION_CHECK_INTERVAL = 3600  # Interval in seconds for update checks. Default: 3600 (1 hour)
 VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"  # URL used to detect the latest GitHub release
