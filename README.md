@@ -29,6 +29,7 @@ It provides central administration via an admin room and protects multiple chat 
 * 🔄 Auto-updates nick-only bans to JID when user rejoins  
 * 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
 * ✅ Input validation for JID format and domain bans  
+* ✅ Startup and runtime config validation with safe reload handling  
 
 ---
 
@@ -51,7 +52,7 @@ It provides central administration via an admin room and protects multiple chat 
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Temporary ban (limited to MAX_TEMPBAN_DAYS) | `!tempban bob 10m rude behavior` |
 | `!unban <jid/nick/domain>` | Removes a ban | `!unban bob` or `!unban *.evil.com` |
 | `!banlist [page]` | Shows all active bans with remaining time and comments | `!banlist` |
-| `!bansearch <query>` | Searches bans by nick, JID, domain, or issuer | `!bansearch example.com` |
+| `!bansearch <query>` | Searches bans by nick, JID, domain, issuer, or comment/reason | `!bansearch spam`, `!bansearch issuer:alice`, `!bansearch reason:abuse` |
 | `!why <nick/jid>` | Shows the reason and remaining time of a ban | `!why bob` |
 | `!sync` | Full room sync: rejoin rooms, verify admin rights, apply only missing active bans | `!sync` |
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
@@ -118,10 +119,13 @@ pip install -r requirements.txt
 Copy `config_sample.py` to `config.py` and configure as needed.
 
 You can run `<prefix>reloadconfig` in the admin room to apply most changes immediately. Examples in this README use the default prefix `!`.  
-**Note:** The following settings **REQUIRE** a bot restart!
+`reloadconfig` validates `config.py`, keeps the last known good configuration active if reload fails, and reports warnings/errors in the admin room.
+
+**Note:** The following settings **REQUIRE** a bot restart! `reloadconfig` will warn if any of these changed and keep the old running values active.
 
 - `JID` - Bot's XMPP account
 - `PASSWORD` - Bot's password
+- `RESOURCE` / `RESSOURCE` - Bot's XMPP resource (`RESSOURCE` is legacy spelling)
 - `ADMIN_ROOM` - JID of the admin control room
 - `NICK` - Bot's nickname in rooms
 - `DB_FILE` - Path to SQLite database
@@ -131,6 +135,7 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 **Required Settings:**
 - `JID` - Bot's full JID (e.g., `bot@example.com`)
 - `PASSWORD` - Bot's XMPP password
+- `RESOURCE` - Bot's XMPP resource
 - `ADMIN_ROOM` - Control room JID (e.g., `admin@muc.example.com`)
 - `NICK` - Bot's nickname in rooms (default: `BanBot`)
 - `DB_FILE` - SQLite database path (default: `banbot.db`)
@@ -152,7 +157,7 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `UNBAN_CHECK_INTERVAL` (int, default: `60`) - Seconds between checking for expired tempbans
 - `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `MUC_WRITE_SEMAPHORE` (int, default: `5`) - Concurrency limit for XMPP IQ operations
-- `VERSION_CHECK_ENABLED` (bool, default: `True`) - Enable periodic checks for newer GitHub releases
+- `VERSION_CHECK_ENABLED` (bool, default: `False`) - Enable periodic checks for newer GitHub releases
 - `VERSION_CHECK_INTERVAL` (int, default: `3600`) - Seconds between release checks (minimum: 300)
 - `VERSION_CHECK_URL` (str, default: `https://github.com/envs-net/muc_banbot/releases/latest`) - URL used to detect the latest GitHub release
 
@@ -273,7 +278,7 @@ The bot validates all ban inputs to prevent errors:
 - **JID Format Validation**: Checks for valid `user@domain.tld` format
 - **Domain Ban Validation**: Requires specific domains (e.g., `*.spam-domain.com`), blocks generic TLDs like `*.com`
 - **Tempban Duration Limits**: Enforces configurable limits (default max: 30 days, configurable up to 365 days)
-- **Negative Duration Rejection**: Prevents banning into the past
+- **Zero/Negative Duration Rejection**: Prevents empty, zero-length, or past temporary bans
 
 Example validations:
 ```
@@ -282,6 +287,8 @@ Example validations:
 ❌ !ban *.com  → Domain too generic
 ✅ !ban user@example.com  → Valid
 ✅ !ban *.spam-domain.com  → Valid
+❌ !tempban user 0m  → Duration must be greater than zero
+❌ !tempban user -1d  → Duration must be greater than zero
 ❌ !tempban user 400d  → Duration exceeds MAX_TEMPBAN_DAYS (30)
 ✅ !tempban user 30d  → Valid
 ```
@@ -315,6 +322,12 @@ Ban all users from a domain using the `*.domain.tld` format:
 !tempban *.spam.org 2h
 !unban *.evil.com
 ```
+
+A wildcard domain ban matches both the base domain and its subdomains:
+
+- `*.evil.com` matches `user@evil.com`
+- `*.evil.com` also matches `user@chat.evil.com`
+- Generic TLD bans such as `*.com` or `*.org` are blocked
 
 Protections:
 - Will refuse to ban admins/owners on the domain
@@ -508,7 +521,7 @@ Run `!sync` to re-establish connections and verify rights.
 
 * Temporary bans expire automatically; the bot removes them periodically (configurable interval).  
 * Messages in protected rooms are sent as **ephemeral** (not stored); admin room always receives full notifications.
-* Changes to `config.py` can **usually be applied via your configured command prefix + `reloadconfig`** (examples here use `!reloadconfig`).
+* Changes to `config.py` can **usually be applied via your configured command prefix + `reloadconfig`** (examples here use `!reloadconfig`). Startup-only settings such as `JID`, `PASSWORD`, `RESOURCE` / `RESSOURCE`, `ADMIN_ROOM`, `NICK`, and `DB_FILE` require a restart.
 * The bot uses **exponential backoff** (max 5 minutes) if disconnected from the XMPP server.
 * Domain bans are stored as-is (e.g., `*.domain.tld`) and can be searched/unbanned using `!bansearch` and `!unban`
 * Bot prevents banning of admins/owners, even via domain bans
