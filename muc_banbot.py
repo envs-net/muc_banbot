@@ -3315,42 +3315,92 @@ class BanBot(ClientXMPP):
 
     async def cmd_bansearch(self, query: str) -> None:
         """
-        Searches bans by nick, JID, or domain.
-        Uses indexes for instant lookups
+        Searches bans by JID, nick, domain, issuer, or comment/reason.
+        Supports optional filters:
+        jid:<query>, nick:<query>, domain:<query>, issuer:<query>, by:<query>,
+        comment:<query>, reason:<query>
         """
-        q = query.lower()
+        raw_query = query.strip()
+        q = raw_query.lower()
         matches = []
+        seen = set()
         now = int(time.time())
 
-        # Direct index lookup first (instant!)
-        if q in self.ban_index_by_jid:
-            ban = self.ban_index_by_jid[q]
-            matches.append(self._format_ban_match(*ban, now))
+        field = None
+        value = q
 
-        if q in self.ban_index_by_nick:
-            ban = self.ban_index_by_nick[q]
-            matches.append(self._format_ban_match(*ban, now))
+        for prefix in ("jid:", "nick:", "domain:", "issuer:", "by:", "comment:", "reason:"):
+            if q.startswith(prefix):
+                field = prefix[:-1]
+                value = q[len(prefix):].strip()
+                break
 
-        if q in self.ban_index_by_domain:
-            for ban in self.ban_index_by_domain[q]:
-                matches.append(self._format_ban_match(*ban, now))
+        if field == "by":
+            field = "issuer"
+        if field == "reason":
+            field = "comment"
 
-        # Fallback: Partial search in cache (only if no direct match)
-        if not matches:
-            for key, (jid, nick, until, issuer, comment) in self.ban_cache.items():
-                if jid and jid.startswith("*."):
-                    display = jid
-                    domain = jid[2:].lower()
-                    haystack = domain
-                else:
-                    display = jid or nick or "Unknown"
-                    haystack = " ".join(filter(None, [jid, nick])).lower()
+        if not value:
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody=f"❌ Usage: {self.command_prefix}bansearch <query>",
+                mtype="groupchat"
+            )
+            return
 
-                if q in haystack:
-                    matches.append(self._format_ban_match(jid, nick, until, issuer, comment, now))
+        def add_match(ban):
+            jid, nick, until, issuer, comment = ban
+            key = (jid or "", nick or "", until, issuer or "", comment or "")
+            if key not in seen:
+                seen.add(key)
+                matches.append(self._format_ban_match(jid, nick, until, issuer, comment, now))
+
+        # Direct index lookup for unfiltered broad searches.
+        if field is None:
+            if value in self.ban_index_by_jid:
+                add_match(self.ban_index_by_jid[value])
+
+            if value in self.ban_index_by_nick:
+                add_match(self.ban_index_by_nick[value])
+
+            domain_value = value[2:] if value.startswith("*.") else value
+            if domain_value in self.ban_index_by_domain:
+                for ban in self.ban_index_by_domain[domain_value]:
+                    add_match(ban)
+
+        for _, (jid, nick, until, issuer, comment) in self.ban_cache.items():
+            jid_value = jid or ""
+            nick_value = nick or ""
+            issuer_value = issuer or ""
+            comment_value = comment or ""
+
+            if jid_value.startswith("*."):
+                domain_value = jid_value[2:]
+            elif "@" in jid_value:
+                domain_value = jid_value.split("@", 1)[1]
+            else:
+                domain_value = ""
+
+            fields = {
+                "jid": jid_value.lower(),
+                "nick": nick_value.lower(),
+                "domain": domain_value.lower(),
+                "issuer": issuer_value.lower(),
+                "comment": comment_value.lower(),
+            }
+
+            if field:
+                haystack = fields.get(field, "")
+            else:
+                haystack = " ".join(v for v in fields.values() if v)
+
+            if value in haystack:
+                add_match((jid, nick, until, issuer, comment))
 
         if matches:
-            msg = "🔍 Ban search results:\n" + "\n".join(matches)
+            msg = "🔍 Ban search results:\n" + "\n".join(matches[:20])
+            if len(matches) > 20:
+                msg += f"\n... and {len(matches) - 20} more matches"
         else:
             msg = f"❌ No bans found matching '{query}'."
 
