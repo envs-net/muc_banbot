@@ -131,14 +131,24 @@ def validate_jid_format(jid: str) -> bool:
 def validate_domain_ban(domain: str) -> tuple[bool, str]:
     """
     Validate domain ban format.
-    - Blocks: *.tld (generic)
-    - Allows: *.domain.tld (specific)
-    Returns: (is_valid: bool, error_message: str)
+    Input can be either '*.domain.tld' or 'domain.tld'.
+    - Blocks: *.tld
+    - Allows: *.domain.tld and *.sub.domain.tld
     """
-    parts = domain.split(".")
-    # Need at least 2 parts: *.domain.tld → ["", "domain", "tld"]
-    if len(parts) < 3:
-        return False, f"❌ Domain '{domain}' is too generic. Specify more precise domain (e.g., *.domain.tld)."
+    domain = domain.lower().strip()
+
+    if domain.startswith("*."):
+        domain = domain[2:]
+
+    domain = domain.strip(".")
+    parts = [p for p in domain.split(".") if p]
+
+    if len(parts) < 2:
+        return False, (
+            f"❌ Domain '*.{domain}' is too generic. "
+            "Specify more precise domain (e.g., *.domain.tld)."
+        )
+
     return True, ""
 
 def domain_matches(user_domain: str | None, banned_domain: str | None) -> bool:
@@ -2252,7 +2262,7 @@ class BanBot(ClientXMPP):
         # --- Step 1: Validations ---
         if is_domain:
             # Domain ban validation
-            is_valid, error_msg = validate_domain_ban(identifier[2:])
+            is_valid, error_msg = validate_domain_ban(identifier)
             if not is_valid:
                 self.send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
                 return
