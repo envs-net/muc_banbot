@@ -4,11 +4,59 @@
 # Author: creme <xmpp:creme@envs.net>
 # License: MIT
 
-__version__ = "1.4.1"
+__version__ = "1.5.0"
 
 import os
 import csv
-import config
+import sys
+import builtins
+import linecache
+
+# Allow config.py to use lowercase boolean aliases like in YAML/JSON/TOML.
+builtins.true = True
+builtins.false = False
+
+def format_config_import_error(exc: BaseException) -> str:
+    """Return a helpful config.py import/reload error with file line and source text."""
+    filename = "config.py"
+    lineno = None
+    text = None
+
+    if isinstance(exc, SyntaxError):
+        filename = exc.filename or filename
+        lineno = exc.lineno
+        text = (exc.text or "").strip() or None
+    else:
+        tb = exc.__traceback__
+        while tb:
+            frame_filename = tb.tb_frame.f_code.co_filename
+            if frame_filename.endswith("config.py") or os.path.basename(frame_filename) == "config.py":
+                filename = frame_filename
+                lineno = tb.tb_lineno
+                text = linecache.getline(frame_filename, lineno).strip() or None
+            tb = tb.tb_next
+
+    location = f"{os.path.basename(filename)}"
+    if lineno:
+        location += f":{lineno}"
+
+    lines = [f"{location}: {exc.__class__.__name__}: {exc}"]
+    if text:
+        lines.append(f"    {text}")
+        if isinstance(exc, SyntaxError) and exc.offset:
+            lines.append("    " + " " * max(exc.offset - 1, 0) + "^")
+
+    if isinstance(exc, NameError):
+        lines.append("Hint: Python booleans are True/False. This bot also accepts lowercase true/false.")
+
+    return "\n".join(lines)
+
+try:
+    import config
+except Exception as exc:
+    sys.stderr.write("Failed to load config.py\n" + format_config_import_error(exc) + "\n")
+    raise
+
 import asyncio
 import logging
 import time
@@ -176,8 +224,156 @@ class BanBot(ClientXMPP):
 
 
     # ---------- RUNTIME CONFIG ----------
+    CONFIG_KEYS = (
+        "COMMAND_PREFIX",
+        "ANNOUNCE_STARTUP",
+        "ANNOUNCE_SYNC_DETAILS",
+        "SHOW_BAN_IN_MUC",
+        "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
+        "HEALTH_CHECK_INTERVAL",
+        "UNBAN_CHECK_INTERVAL",
+        "MAX_TEMPBAN_DAYS",
+        "MUC_WRITE_SEMAPHORE",
+        "VERSION_CHECK_ENABLED",
+        "VERSION_CHECK_INTERVAL",
+        "VERSION_CHECK_URL",
+        "AVATAR_PATH",
+        "VCARD_NICKNAME",
+        "VCARD_FN",
+        "VCARD_ORG",
+        "VCARD_ROLE",
+        "VCARD_URL",
+        "VCARD_NOTE",
+    )
+
+    def _runtime_config_snapshot(self) -> dict[str, object]:
+        """Return the currently effective runtime config values."""
+        return {
+            "COMMAND_PREFIX": self.command_prefix,
+            "ANNOUNCE_STARTUP": self.announce_startup,
+            "ANNOUNCE_SYNC_DETAILS": self.announce_sync_details,
+            "SHOW_BAN_IN_MUC": self.show_ban_in_muc,
+            "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": self.allow_user_cmds,
+            "HEALTH_CHECK_INTERVAL": self.health_check_interval,
+            "UNBAN_CHECK_INTERVAL": self.unban_check_interval,
+            "MAX_TEMPBAN_DAYS": self.max_tempban_days,
+            "MUC_WRITE_SEMAPHORE": self.muc_write_limit,
+            "VERSION_CHECK_ENABLED": self.version_check_enabled,
+            "VERSION_CHECK_INTERVAL": self.version_check_interval,
+            "VERSION_CHECK_URL": self.version_check_url,
+            "AVATAR_PATH": getattr(config, "AVATAR_PATH", None),
+            "VCARD_NICKNAME": getattr(config, "VCARD_NICKNAME", None),
+            "VCARD_FN": getattr(config, "VCARD_FN", None),
+            "VCARD_ORG": getattr(config, "VCARD_ORG", None),
+            "VCARD_ROLE": getattr(config, "VCARD_ROLE", None),
+            "VCARD_URL": getattr(config, "VCARD_URL", None),
+            "VCARD_NOTE": getattr(config, "VCARD_NOTE", None),
+        }
+
+    def _validate_config(self) -> tuple[list[str], list[str]]:
+        """Validate config.py and return (errors, warnings)."""
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        def require_non_empty(name: str) -> str:
+            value = str(getattr(config, name, "")).strip()
+            if not value:
+                errors.append(f"{name} must not be empty")
+            return value
+
+        jid = require_non_empty("JID")
+        password = require_non_empty("PASSWORD")
+        admin_room = require_non_empty("ADMIN_ROOM")
+        nick = require_non_empty("NICK")
+        db_file = require_non_empty("DB_FILE")
+
+        if jid and not validate_jid_format(jid):
+            errors.append("JID must be a valid bare JID like bot@example.org")
+        if admin_room and not validate_jid_format(admin_room):
+            errors.append("ADMIN_ROOM must be a valid room JID like admin@muc.example.org")
+        if nick and any(ch.isspace() for ch in nick):
+            errors.append("NICK must not contain whitespace")
+        if password in {"yourpassword", "password", "changeme"}:
+            warnings.append("PASSWORD still looks like a placeholder")
+
+        command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip()
+        if not command_prefix:
+            warnings.append("COMMAND_PREFIX is empty; effective value will be '!'")
+        elif any(ch.isspace() for ch in command_prefix):
+            errors.append("COMMAND_PREFIX must not contain whitespace")
+
+        int_ranges = {
+            "HEALTH_CHECK_INTERVAL": (60, 86400),
+            "UNBAN_CHECK_INTERVAL": (10, 86400),
+            "MAX_TEMPBAN_DAYS": (1, 365),
+            "MUC_WRITE_SEMAPHORE": (1, 100),
+            "VERSION_CHECK_INTERVAL": (300, 86400),
+        }
+        for name, (minimum, maximum) in int_ranges.items():
+            value = getattr(config, name, None)
+            if not isinstance(value, int):
+                errors.append(f"{name} must be an integer")
+                continue
+            if value < minimum or value > maximum:
+                errors.append(f"{name} must be between {minimum} and {maximum} (got {value})")
+
+        bool_names = (
+            "ANNOUNCE_STARTUP",
+            "ANNOUNCE_SYNC_DETAILS",
+            "SHOW_BAN_IN_MUC",
+            "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
+            "VERSION_CHECK_ENABLED",
+        )
+        for name in bool_names:
+            if not isinstance(getattr(config, name, None), bool):
+                errors.append(f"{name} must be True or False")
+
+        version_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip()
+        if getattr(config, "VERSION_CHECK_ENABLED", False) and not version_url:
+            errors.append("VERSION_CHECK_URL must not be empty when VERSION_CHECK_ENABLED=True")
+        if version_url and not version_url.startswith(("http://", "https://")):
+            errors.append("VERSION_CHECK_URL must start with http:// or https://")
+
+        avatar_path = getattr(config, "AVATAR_PATH", None)
+        if avatar_path and not pathlib.Path(str(avatar_path)).exists():
+            warnings.append(f"AVATAR_PATH does not exist: {avatar_path}")
+
+        if db_file:
+            db_parent = pathlib.Path(db_file).expanduser().parent
+            if str(db_parent) not in ("", ".") and not db_parent.exists():
+                errors.append(f"DB_FILE directory does not exist: {db_parent}")
+
+        return errors, warnings
+
+    def _format_config_validation(self, errors: list[str], warnings: list[str]) -> str:
+        lines = []
+        if errors:
+            lines.append("❌ Config validation errors:")
+            lines.extend(f"- {e}" for e in errors)
+        if warnings:
+            lines.append("⚠️ Config validation warnings:")
+            lines.extend(f"- {w}" for w in warnings)
+        if not lines:
+            lines.append("✅ Config validation passed.")
+        return "\n".join(lines)
+
+    def _format_config_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
+        changes = []
+        for key in self.CONFIG_KEYS:
+            old = before.get(key)
+            new = after.get(key)
+            if old != new:
+                changes.append(f"- {key}: {old!r} → {new!r}")
+        return changes
+
     def apply_runtime_config(self) -> None:
         """Load reloadable runtime settings from config."""
+        errors, warnings = self._validate_config()
+        for warning in warnings:
+            log.warning("Config warning: %s", warning)
+        if errors:
+            raise ValueError("Invalid config:\n" + "\n".join(f"- {e}" for e in errors))
+
         new_semaphore_value = getattr(config, "MUC_WRITE_SEMAPHORE", 5)
         if new_semaphore_value != self.muc_write_limit:
             old_value = self.muc_write_limit
@@ -190,19 +386,41 @@ class BanBot(ClientXMPP):
         self.announce_sync_details = getattr(config, "ANNOUNCE_SYNC_DETAILS", True)
         self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", False)
         self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
-        self.health_check_interval = max(60, getattr(config, "HEALTH_CHECK_INTERVAL", 300))
+        self.health_check_interval = getattr(config, "HEALTH_CHECK_INTERVAL", 300)
         self.unban_check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
-        self.max_tempban_days = max(1, min(365, getattr(config, "MAX_TEMPBAN_DAYS", 30)))
+        self.max_tempban_days = getattr(config, "MAX_TEMPBAN_DAYS", 30)
 
         self.version_check_enabled = getattr(config, "VERSION_CHECK_ENABLED", False)
-        self.version_check_interval = max(300, getattr(config, "VERSION_CHECK_INTERVAL", 3600))
+        self.version_check_interval = getattr(config, "VERSION_CHECK_INTERVAL", 3600)
         self.version_check_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip() or None
 
-    async def reload_runtime_config(self) -> None:
-        """Reload config.py and re-apply runtime settings."""
-        importlib.reload(config)
+    async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:
+        """Reload config.py, validate it, apply settings, and return (changes, errors, warnings)."""
+        before = self._runtime_config_snapshot()
+        restore_keys = self.CONFIG_KEYS + ("JID", "RESSOURCE", "PASSWORD", "ADMIN_ROOM", "NICK", "DB_FILE")
+        previous_module_values = {key: getattr(config, key, None) for key in restore_keys}
+
+        try:
+            importlib.reload(config)
+        except Exception as e:
+            # Keep the last known good config module values for code paths that read config directly.
+            for key, value in previous_module_values.items():
+                setattr(config, key, value)
+            return [], [format_config_import_error(e)], []
+
+        errors, warnings = self._validate_config()
+        if errors:
+            # Keep the last known good config module values for code paths that read config directly.
+            for key, value in previous_module_values.items():
+                setattr(config, key, value)
+            return [], errors, warnings
+
         self.apply_runtime_config()
         await self.update_vcard()
+
+        after = self._runtime_config_snapshot()
+        changes = self._format_config_changes(before, after)
+        return changes, [], warnings
 
 
     # ---------- TASKS ----------
@@ -690,6 +908,7 @@ class BanBot(ClientXMPP):
         CREATE TABLE IF NOT EXISTS rooms (
             room TEXT PRIMARY KEY
         )""")
+
         await self.db.commit()
 
         # --- Create indexes for performance ---
@@ -1055,6 +1274,7 @@ class BanBot(ClientXMPP):
             log.info("ℹ️ No avatar to publish (XEP-0084, XEP-0153 skipped)")
 
         return True
+
 
 
     # ---------- MUC EVENT HANDLERS ----------
@@ -1562,13 +1782,36 @@ class BanBot(ClientXMPP):
 
     async def _cmd_reloadconfig(self, room: str) -> None:
         try:
-            await self.reload_runtime_config()
+            changes, errors, warnings = await self.reload_runtime_config()
+
+            if errors:
+                msg = self._format_config_validation(errors, warnings)
+                self.send_message(
+                    mto=room,
+                    mbody=f"❌ Config reload aborted. Old config is still active.\n\n{msg}",
+                    mtype="groupchat"
+                )
+                log.error("Config reload aborted: %s", errors)
+                return
+
+            lines = ["✅ Config reloaded successfully."]
+
+            if warnings:
+                lines.append("\n⚠️ Warnings:")
+                lines.extend(f"- {w}" for w in warnings)
+
+            if changes:
+                lines.append("\nChanged:")
+                lines.extend(changes)
+            else:
+                lines.append("\nNo runtime config changes detected.")
+
             self.send_message(
                 mto=room,
-                mbody="✅ Config reloaded successfully.",
+                mbody="\n".join(lines),
                 mtype="groupchat"
             )
-            log.info("Config reloaded at runtime.")
+            log.info("Config reloaded at runtime. Changes: %s", changes or "none")
         except Exception as e:
             self.send_message(
                 mto=room,
@@ -1769,7 +2012,7 @@ class BanBot(ClientXMPP):
 
         if is_admin:
             response = (
-                "🤖 Nice try, admin! But I only take commands in the admin room. "
+                "🤖 Nice try, admin! But I only take commands directly in the admin room. "
                 f"Please use {ADMIN_ROOM}.\nSee you there! 😉"
             )
         else:
@@ -3054,7 +3297,20 @@ if __name__ == "__main__":
     Handles KeyboardInterrupt gracefully.
     """
     resource = getattr(config, "RESSOURCE", None)
-    xmpp = BanBot(JID, PASSWORD, resource)
+    try:
+        xmpp = BanBot(JID, PASSWORD, resource)
+        errors, warnings = xmpp._validate_config()
+        validation_msg = xmpp._format_config_validation(errors, warnings)
+        for line in validation_msg.splitlines():
+            if line.startswith("❌") or (line.startswith("- ") and errors):
+                log.error(line)
+            elif line.startswith("⚠️") or (line.startswith("- ") and warnings):
+                log.warning(line)
+            else:
+                log.info(line)
+    except Exception as e:
+        log.error("Startup config validation failed: %s", e)
+        raise SystemExit(1)
 
     # Attempt connection
     if xmpp.connect():
