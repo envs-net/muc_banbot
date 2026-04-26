@@ -162,6 +162,23 @@ def domain_matches(user_domain: str | None, banned_domain: str | None) -> bool:
     banned_domain = banned_domain.lower().strip(".")
     return user_domain == banned_domain or user_domain.endswith("." + banned_domain)
 
+def looks_like_domain(text: str | None) -> bool:
+    """Return True if text looks like a bare domain without wildcard.
+
+    Bare domains are rejected for ban/unban commands so users do not
+    accidentally create nick bans such as 'example.com'.
+    """
+    if not text:
+        return False
+    text = text.strip().lower()
+    return (
+        "." in text
+        and "@" not in text
+        and "/" not in text
+        and not text.startswith("*.")
+    )
+
+
 def get_config_resource() -> str | None:
     """Return RESOURCE with backwards-compatible support for legacy RESSOURCE."""
     resource = getattr(config, "RESOURCE", None)
@@ -2254,19 +2271,31 @@ class BanBot(ClientXMPP):
         - Prevents race conditions
         """
         ts = until if until is not None else 0
+        identifier = identifier.strip().lower()
 
         ban_jid = None
         ban_nick = None
         is_domain = identifier.startswith("*.")
 
         # --- Step 1: Validations ---
+        if looks_like_domain(identifier):
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody=(
+                    f"❌ Invalid domain ban: {identifier}\n"
+                    f"Use wildcard format instead: *.{identifier}"
+                ),
+                mtype="groupchat"
+            )
+            return
+
         if is_domain:
             # Domain ban validation
             is_valid, error_msg = validate_domain_ban(identifier)
             if not is_valid:
                 self.send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
                 return
-            ban_jid = identifier.lower()
+            ban_jid = identifier
             ban_nick = None
         else:
             is_jid = "@" in identifier
@@ -2528,7 +2557,7 @@ class BanBot(ClientXMPP):
                 jid_in_room = info.get("jid")
                 if ((ban_jid and jid_in_room and self.bare_jid(jid_in_room) == self.bare_jid(ban_jid)) or
                     (ban_nick and n.lower() == ban_nick) or
-                    (domain and jid_in_room and jid_in_room.split("@")[-1].lower() == domain)):
+                    (domain and jid_in_room and domain_matches(self.bare_jid(jid_in_room).split("@")[1].lower(), domain))):
                     for attempt in range(2):
                         try:
                             async with self.muc_write_semaphore:
@@ -2565,49 +2594,99 @@ class BanBot(ClientXMPP):
     async def unban_all(self, identifier: str, issuer: str | None = None) -> None:
         """
         Remove a ban from a user (JID, nick, or domain) and unban in all protected rooms.
-        Supports domain bans (*.domain.tld)
-        Admin Room: full info
-        Protected Rooms: only nick/JID anonymized
+        Supports domain bans (*.domain.tld).
+        Domain unbans require an exact existing wildcard-domain ban and never remove
+        individual user/JID bans from the same domain.
         """
         if not identifier:
             return
 
-        is_domain_ban = identifier.startswith("*.") if identifier else False
+        identifier = identifier.strip().lower()
+
+        if looks_like_domain(identifier):
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody=(
+                    f"❌ Invalid domain unban: {identifier}\n"
+                    f"Use wildcard format instead: *.{identifier}"
+                ),
+                mtype="groupchat"
+            )
+            return
+
+        is_domain_ban = identifier.startswith("*.")
         domain = identifier[2:].lower() if is_domain_ban else None
 
         row = None
         is_jid = "@" in identifier
 
-        if not is_domain_ban:
+        if is_domain_ban:
+            is_valid, error_msg = validate_domain_ban(identifier)
+            if not is_valid:
+                self.send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
+                return
+
+            async with self.db.execute(
+                "SELECT jid, nick FROM bans WHERE jid = ?",
+                (identifier,)
+            ) as cur:
+                row = await cur.fetchone()
+
+            if not row:
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"❌ No ban found for {identifier}",
+                    mtype="groupchat"
+                )
+                return
+
+        else:
             # Lookup JID in DB
             if is_jid:
-                async with self.db.execute("SELECT jid, nick FROM bans WHERE jid=?", (identifier,)) as cur:
+                async with self.db.execute(
+                    "SELECT jid, nick FROM bans WHERE jid = ?",
+                    (identifier,)
+                ) as cur:
                     row = await cur.fetchone()
 
             # Lookup nick in DB
             if not row:
-                async with self.db.execute("SELECT jid, nick FROM bans WHERE LOWER(nick)=?", (identifier.lower(),)) as cur:
+                async with self.db.execute(
+                    "SELECT jid, nick FROM bans WHERE LOWER(nick) = ?",
+                    (identifier,)
+                ) as cur:
                     row = await cur.fetchone()
 
             # Fallback nick-only check against JIDs
             if not row and not is_jid:
                 async with self.db.execute("SELECT jid, nick FROM bans") as cursor:
                     async for jid_db, nick_db in cursor:
-                        if jid_db and self.bare_jid(jid_db).split("@")[0].lower() == identifier.lower():
+                        if jid_db and self.bare_jid(jid_db).split("@")[0].lower() == identifier:
                             row = (jid_db, nick_db)
                             break
 
-        ban_jid = row[0] if row and row[0] else None
-        ban_nick = row[1] if row and row[1] else (None if ban_jid else identifier.lower())
+            if not row:
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"❌ No ban found for {identifier}",
+                    mtype="groupchat"
+                )
+                return
 
-        # Delete from DB
+        ban_jid = row[0] if row and row[0] else None
+        ban_nick = row[1] if row and row[1] else None
+
+        # Delete from DB. Domain unbans are exact only and must not delete
+        # individual JID bans from users on the same domain.
         if is_domain_ban:
             await self.db.execute("DELETE FROM bans WHERE jid = ?", (identifier,))
-            await self.db.execute("DELETE FROM bans WHERE jid LIKE ?", (f"%@{domain}",))
         elif ban_jid:
-            await self.db.execute("DELETE FROM bans WHERE jid=? OR LOWER(nick)=?", (ban_jid, ban_nick))
-        else:
-            await self.db.execute("DELETE FROM bans WHERE LOWER(nick)=?", (ban_nick,))
+            await self.db.execute("DELETE FROM bans WHERE jid = ?", (ban_jid,))
+            if ban_nick:
+                await self.db.execute("DELETE FROM bans WHERE LOWER(nick) = ?", (ban_nick.lower(),))
+        elif ban_nick:
+            await self.db.execute("DELETE FROM bans WHERE LOWER(nick) = ?", (ban_nick.lower(),))
+
         await self.db.commit()
 
         # Update in-memory cache and indexes
@@ -2619,7 +2698,12 @@ class BanBot(ClientXMPP):
         # Unban in all protected rooms
         for room in self.protected_rooms:
             try:
-                await self.apply_unban_to_room(room, ban_jid if not is_domain_ban else None, ban_nick, domain=domain if is_domain_ban else None)
+                await self.apply_unban_to_room(
+                    room,
+                    ban_jid if not is_domain_ban else None,
+                    ban_nick,
+                    domain=domain if is_domain_ban else None
+                )
             except Exception as e:
                 log.warning("Error unbanning %s in %s: %s", identifier, room, e)
 
