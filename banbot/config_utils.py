@@ -67,9 +67,6 @@ class ConfigMixin:
         "COMMAND_PREFIX",
         "ANNOUNCE_STARTUP",
         "ANNOUNCE_SYNC_DETAILS",
-        "STRUCTURED_EVENT_LOGS",
-        "AUDIT_LOG_ENABLED",
-        "AUDIT_LOG_RETENTION_DAYS",
         "SHOW_BAN_IN_MUC",
         "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
         "HEALTH_CHECK_INTERVAL",
@@ -77,6 +74,9 @@ class ConfigMixin:
         "MAX_TEMPBAN_DAYS",
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW",
         "PUBLIC_COMMAND_RATE_LIMIT_MAX",
+        "STRUCTURED_EVENT_LOGS",
+        "AUDIT_LOG_ENABLED",
+        "AUDIT_LOG_RETENTION_DAYS",
         "MUC_WRITE_SEMAPHORE",
         "VERSION_CHECK_ENABLED",
         "VERSION_CHECK_INTERVAL",
@@ -100,15 +100,13 @@ class ConfigMixin:
         "DB_FILE",
     )
 
+
     def _runtime_config_snapshot(self) -> dict[str, object]:
         """Return the currently effective runtime config values."""
         return {
             "COMMAND_PREFIX": self.command_prefix,
             "ANNOUNCE_STARTUP": self.announce_startup,
             "ANNOUNCE_SYNC_DETAILS": self.announce_sync_details,
-            "STRUCTURED_EVENT_LOGS": self.structured_event_logs,
-            "AUDIT_LOG_ENABLED": self.audit_log_enabled,
-            "AUDIT_LOG_RETENTION_DAYS": self.audit_log_retention_days,
             "SHOW_BAN_IN_MUC": self.show_ban_in_muc,
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": self.allow_user_cmds,
             "HEALTH_CHECK_INTERVAL": self.health_check_interval,
@@ -116,6 +114,9 @@ class ConfigMixin:
             "MAX_TEMPBAN_DAYS": self.max_tempban_days,
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": self.public_command_rate_limit_window,
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": self.public_command_rate_limit_max,
+            "STRUCTURED_EVENT_LOGS": self.structured_event_logs,
+            "AUDIT_LOG_ENABLED": self.audit_log_enabled,
+            "AUDIT_LOG_RETENTION_DAYS": self.audit_log_retention_days,
             "MUC_WRITE_SEMAPHORE": self.muc_write_limit,
             "VERSION_CHECK_ENABLED": self.version_check_enabled,
             "VERSION_CHECK_INTERVAL": self.version_check_interval,
@@ -129,6 +130,7 @@ class ConfigMixin:
             "VCARD_NOTE": getattr(config, "VCARD_NOTE", None),
         }
 
+
     def _startup_config_snapshot(self) -> dict[str, object]:
         """Return startup-only config values that cannot be changed via !reloadconfig."""
         return {
@@ -140,6 +142,7 @@ class ConfigMixin:
             "DB_FILE": getattr(config, "DB_FILE", None),
         }
 
+
     def _format_startup_only_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
         changes = []
         for key in ("JID", "PASSWORD", "RESOURCE", "ADMIN_ROOM", "NICK", "DB_FILE"):
@@ -149,12 +152,14 @@ class ConfigMixin:
                 changes.append(f"- {key}: {old!r} → {new!r}")
         return changes
 
+
     def _restore_config_values(self, values: dict[str, object]) -> None:
         """Restore selected config module values to the last known good values."""
         for key, value in values.items():
             if value is None and key == "RESOURCE" and not hasattr(config, "RESOURCE"):
                 continue
             setattr(config, key, value)
+
 
     def _validate_config(self) -> tuple[list[str], list[str]]:
         """Validate config.py and return (errors, warnings)."""
@@ -263,6 +268,7 @@ class ConfigMixin:
 
         return errors, warnings
 
+
     def _format_config_validation(self, errors: list[str], warnings: list[str]) -> str:
         lines = []
         if errors:
@@ -275,6 +281,7 @@ class ConfigMixin:
             lines.append("✅ Config validation passed.")
         return "\n".join(lines)
 
+
     def _format_config_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
         changes = []
         for key in self.CONFIG_KEYS:
@@ -283,6 +290,7 @@ class ConfigMixin:
             if old != new:
                 changes.append(f"- {key}: {old!r} → {new!r}")
         return changes
+
 
     def apply_runtime_config(self) -> None:
         """Load reloadable runtime settings from config."""
@@ -317,6 +325,7 @@ class ConfigMixin:
         self.version_check_enabled = getattr(config, "VERSION_CHECK_ENABLED", False)
         self.version_check_interval = getattr(config, "VERSION_CHECK_INTERVAL", 3600)
         self.version_check_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip() or None
+
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:
         """Reload config.py, validate it, apply reloadable settings, and return (changes, errors, warnings).

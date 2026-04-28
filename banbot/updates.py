@@ -17,8 +17,10 @@ class UpdateMixin:
         parts = re.findall(r"\d+", version)
         return tuple(int(p) for p in parts)
 
+
     def _is_remote_version_newer(self, remote_version: str, local_version: str) -> bool:
         return self._parse_version_tuple(remote_version) > self._parse_version_tuple(local_version)
+
 
     def _fetch_latest_release_version_sync(self) -> str:
         """
@@ -48,6 +50,7 @@ class UpdateMixin:
             raise ValueError("Could not extract release tag from redirect URL")
 
         return tag.lstrip("v")
+
 
     async def check_for_updates_once(
         self,
@@ -93,6 +96,7 @@ class UpdateMixin:
         except Exception as e:
             log.warning("Version check failed: %s", e)
             return False, None, str(e)
+
 
     async def version_check_worker(self) -> None:
         """

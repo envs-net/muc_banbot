@@ -40,6 +40,7 @@ class ModerationMixin:
             # Return False on error → Alarm or Retry
             return False
 
+
     async def get_room_admin_owner_jids(self, room: str) -> set[str]:
         """Return bare JIDs with owner/admin affiliation from the server.
 
@@ -75,6 +76,7 @@ class ModerationMixin:
 
         return protected
 
+
     async def is_protected_admin_target(
         self,
         target: str,
@@ -108,6 +110,7 @@ class ModerationMixin:
                         return True, f"domain ban *.{domain_target} would include admin/owner {protected_jid} in {room}"
 
         return False, None
+
 
     async def check_bot_admin_rights(self) -> None:
         """
@@ -154,6 +157,7 @@ class ModerationMixin:
                 mtype="groupchat"
             )
             log.info("Bot has admin rights in all protected rooms.")
+
 
     async def apply_ban_to_room(
         self,
@@ -275,6 +279,7 @@ class ModerationMixin:
             msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "")
             if self.allow_user_cmds and self.show_ban_in_muc:
                 self.send_message(mto=room, mbody=msg, mtype="groupchat")
+
 
     async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None) -> None:
         """
@@ -479,6 +484,7 @@ class ModerationMixin:
             except (IqError, IqTimeout) as e:
                 log.warning("Failed to ban/kick %s in %s: %s", identifier, room, e)
 
+
     async def unban_worker(self) -> None:
         """
         Periodically unban users whose temporary bans have expired.
@@ -527,6 +533,7 @@ class ModerationMixin:
             # Configurable check interval (reloadable via !reloadconfig)
             check_interval = self.unban_check_interval
             await asyncio.sleep(check_interval)
+
 
     async def apply_unban_to_room(
         self,
@@ -598,6 +605,7 @@ class ModerationMixin:
 
         except (IqError, IqTimeout) as e:
             log.warning("Failed to unban %s in %s: %s", ban_jid or ban_nick, room, e)
+
 
     async def unban_all(self, identifier: str, issuer: str | None = None) -> None:
         """

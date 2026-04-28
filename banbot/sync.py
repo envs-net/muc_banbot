@@ -154,6 +154,7 @@ class SyncMixin:
             mtype="groupchat"
         )
 
+
     async def sync_bans_to_rooms_for_single_room(self, room: str) -> None:
         """
         Sync bans for a single room (after !room add or !sync).
@@ -234,6 +235,7 @@ class SyncMixin:
         except Exception as e:
             log.warning("⚠️ Failed to sync bans for room %s: %s", room, e)
 
+
     async def sync_admins(self, announce: bool = False) -> None:
         """
         Fetch current owners/admins from ADMIN_ROOM via XMPP.
@@ -280,6 +282,7 @@ class SyncMixin:
 
         except Exception as e:
             log.warning("Failed to sync admins: %s", e)
+
 
     async def sync_bans_to_rooms(self, startup: bool = False, announce_progress: bool = True) -> None:
         """
@@ -405,6 +408,7 @@ class SyncMixin:
 
         log.info("✅ Ban sync completed: %d unique bans applied in %d rooms", len(applied_bans_set), len(self.protected_rooms))
 
+
     async def sync_bans_startup(self) -> None:
         """
         Startup ban sync.
@@ -415,6 +419,7 @@ class SyncMixin:
             and getattr(self, "announce_sync_details", True)
         )
         await self.sync_bans_to_rooms(startup=True, announce_progress=announce)
+
 
     async def sync_bans(self) -> None:
         await self.sync_bans_to_rooms(startup=False, announce_progress=True)

@@ -23,6 +23,7 @@ class AuditMixin:
         except Exception:
             log.log(level, "%s: %s", event, fields)
 
+
     async def audit_event(self, event_type: str, actor: str | None = None, room: str | None = None,
                           target_type: str | None = None, target: str | None = None,
                           jid: str | None = None, nick: str | None = None, until: int | None = None,
@@ -44,6 +45,7 @@ class AuditMixin:
         except Exception as e:
             log.warning("Failed to write audit event %s: %s", event_type, e)
 
+
     async def cleanup_old_audit_logs(self) -> int:
         """Delete audit log entries older than AUDIT_LOG_RETENTION_DAYS."""
         if not self.db or not self.audit_log_enabled:
@@ -61,6 +63,7 @@ class AuditMixin:
         except Exception as e:
             log.warning("Audit cleanup failed: %s", e)
             return 0
+
 
     async def get_db_stats(self) -> dict[str, object]:
         """Return lightweight DB statistics for !status."""
@@ -92,6 +95,7 @@ class AuditMixin:
         except Exception as e:
             log.debug("Could not collect DB stats: %s", e)
         return stats
+
 
     def _format_audit_row(self, row) -> str:
         created_at, event_type, actor, target_type, target, jid, nick, until, comment, details = row

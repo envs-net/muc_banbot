@@ -39,6 +39,7 @@ class MucMixin:
 
             delay = min(delay * 2, 300)  # exponential backoff max 5min
 
+
     async def health_check_worker(self) -> None:
         """
         Periodically check connection status of all protected rooms.
@@ -88,6 +89,7 @@ class MucMixin:
                 log.warning("Error in health_check_worker: %s", e)
                 await asyncio.sleep(10)
 
+
     async def wait_for_occupants(self, timeout: int = 20) -> None:
         """
         Wait until all protected rooms and admin room have at least one occupant loaded.
@@ -106,6 +108,7 @@ class MucMixin:
             await asyncio.sleep(2)
         log.warning("Timeout waiting for occupants; some users may not be kicked immediately")
 
+
     async def wait_for_bot_online(self, room: str, timeout: int = 10) -> bool:
         """
         Wait until the bot is recognized as a participant in a room.
@@ -119,10 +122,12 @@ class MucMixin:
         log.warning("Bot not recognized in %s after %ds", room, timeout)
         return False
 
+
     def notify_protected(self, room: str, message: str) -> None:
         """Notify users in protected rooms if SHOW_BAN_IN_MUC=True"""
         if self.show_ban_in_muc:
             self.send_message(mto=room, mbody=message, mtype="groupchat")
+
 
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
         """Check if a user is admin or owner in a room."""
@@ -133,6 +138,7 @@ class MucMixin:
             if jid and info.get("jid") and self.bare_jid(info["jid"]) == self.bare_jid(jid):
                 return info.get("affiliation") in ("owner", "admin")
         return False
+
 
     def is_bot_admin_or_owner(self, room: str) -> bool:
         """
@@ -147,6 +153,7 @@ class MucMixin:
 
         return bot_info.get("affiliation") in ("owner", "admin")
 
+
     def is_authorized(self, msg) -> bool:
         """
         Check if a message sender is authorized to issue admin commands.
@@ -155,6 +162,7 @@ class MucMixin:
             return False
         info = self.occupants.get(ADMIN_ROOM, {}).get(msg["mucnick"])
         return info and info.get("affiliation") in ("owner", "admin")
+
 
     async def muc_online(self, presence) -> None:
         """
@@ -236,6 +244,7 @@ class MucMixin:
         if tasks:
             await asyncio.gather(*tasks)
 
+
     async def muc_offline(self, presence) -> None:
         """
         Called when a user goes offline in a MUC.
@@ -254,6 +263,7 @@ class MucMixin:
                      info.get("jid", "unknown"),
                      info.get("affiliation", "none"),
                      info.get("role", "none"))
+
 
     async def on_muc_presence(self, presence) -> None:
         """

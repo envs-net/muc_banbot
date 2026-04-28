@@ -179,6 +179,7 @@ class DatabaseMixin:
 
         log.info("✅ Loaded %d active bans", len(self.ban_cache))
 
+
     async def find_active_jid_ban_by_nick(
         self,
         nick: str | None,
@@ -218,6 +219,7 @@ class DatabaseMixin:
 
         return bare_jid, int(until or 0), issuer, comment
 
+
     async def delete_duplicate_nick_ban(
         self,
         nick: str | None,
@@ -238,6 +240,7 @@ class DatabaseMixin:
             log.info("🧹 Removed duplicate nick-only ban for %s after JID merge", normalized_nick)
 
         return deleted
+
 
     async def upsert_ban_db(
         self,
@@ -271,6 +274,7 @@ class DatabaseMixin:
 
         await self.db.commit()
         self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
+
 
     async def delete_ban_db(self, identifier: str) -> int:
         """Delete a ban by JID, nick, or wildcard domain and return the affected row count."""

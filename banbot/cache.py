@@ -18,6 +18,7 @@ class CacheMixin:
             normalized_jid = f"*.{target}"
         return (normalized_jid, normalized_nick, until, issuer, comment)
 
+
     def _cache_ban(
         self,
         jid: str | None,
@@ -44,6 +45,7 @@ class CacheMixin:
             # One row per domain target; replace instead of appending to avoid stale duplicates after updates.
             self.ban_index_by_domain[target] = [ban_tuple]
 
+
     def _remove_ban_from_cache(self, identifier: str, ban_jid: str | None = None, ban_nick: str | None = None) -> None:
         """Remove a single JID/nick/domain ban consistently from cache and indexes."""
         candidates = set()
@@ -61,6 +63,7 @@ class CacheMixin:
                 self.ban_index_by_jid.pop(self.bare_jid(candidate), None)
             else:
                 self.ban_index_by_nick.pop(candidate, None)
+
 
     def _remove_domain_bans_from_cache(self, domain: str) -> None:
         """Remove all wildcard domain bans associated with a domain from cache and indexes."""

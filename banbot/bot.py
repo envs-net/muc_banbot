@@ -166,6 +166,7 @@ class BanBot(
                 except asyncio.CancelledError:
                     pass
 
+
     async def start(self, _) -> None:
         """
         Called when the XMPP session starts.

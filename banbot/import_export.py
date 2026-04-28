@@ -60,6 +60,7 @@ class ImportExportMixin:
             log.error("Export error: %s", e)
             return False, f"❌ Export failed: {e}"
 
+
     async def backup_database_before_import(self) -> tuple[bool, str]:
         """Create a timestamped SQLite DB backup before an import changes bans."""
         self.last_import_backup_file = None
@@ -82,6 +83,7 @@ class ImportExportMixin:
         except Exception as e:
             log.error("Failed to create DB backup before import: %s", e)
             return False, str(e)
+
 
     async def import_bans_from_csv(self, filename: str) -> tuple[int, int, list[str]]:
         """
