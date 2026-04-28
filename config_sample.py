@@ -29,6 +29,23 @@ HEALTH_CHECK_INTERVAL = 300  # Interval (seconds) for health checks of bot right
 UNBAN_CHECK_INTERVAL = 60  # Interval (seconds) for checking expired temporary bans. Lower = faster unbans but more DB queries. Default: 60
 MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default: 30
 
+# Rate limit for public commands in protected rooms.
+# Applies only to !why and !banlist outside the admin room.
+# Example default: max 3 uses per nick/room/command every 30 seconds.
+PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 30
+PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
+
+# ================= LOGGING / AUDIT =================
+
+# Structured event logs are emitted as JSON for important moderation events.
+# Useful with journalctl, jq, Loki, ELK, etc.
+STRUCTURED_EVENT_LOGS = True
+
+# SQLite audit log for moderation actions and important operational events.
+# Retention is capped at 365 days by config validation.
+AUDIT_LOG_ENABLED = True
+AUDIT_LOG_RETENTION_DAYS = 365
+
 # ================= PERFORMANCE TUNING =================
 
 # Concurrency limit for MUC write operations (IQ stanzas to XMPP server)

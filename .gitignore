@@ -1,4 +1,10 @@
+__pycache__/
+*.pyc
+venv/
+
 config.py
-banbot.db
-venv
-__pycache__
+banbot.db*
+bans_export_*.csv
+bans_import_*.csv
+import_*.csv
+*.backup-before-import-*

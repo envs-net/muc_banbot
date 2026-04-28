@@ -17,9 +17,12 @@ It provides central administration via an admin room and protects multiple chat 
 * 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  
 * 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
 * 💾 Ban import/export to CSV format for backup and migration  
+* 🧯 Automatic SQLite database backup before CSV imports  
 * ⏱️ Human-readable remaining time for temporary bans  
 * ⏳ Automatic removal of expired temporary bans  
 * 📣 Logs ban/unban actions in both admin and protected rooms  
+* 🧾 SQLite audit log for moderation actions with automatic 365-day retention  
+* 🧱 Structured JSON event logs for important moderation and operational events  
 * ⚠️ Admins/Owners are protected from accidental bans  
 * 🏥 Periodic health checks for room connectivity and admin rights
 * ⬆️ Periodic GitHub release checks with admin notifications and manual update checks  
@@ -30,6 +33,7 @@ It provides central administration via an admin room and protects multiple chat 
 * 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
 * ✅ Input validation for JID format and domain bans  
 * ✅ Startup and runtime config validation with safe reload handling  
+* 🚦 Rate limiting for public `!why` and `!banlist` commands  
 
 ---
 
@@ -53,7 +57,8 @@ It provides central administration via an admin room and protects multiple chat 
 | `!unban <jid/nick/domain>` | Removes a ban | `!unban bob` or `!unban *.evil.com` |
 | `!banlist [page]` | Shows all active bans with remaining time and comments | `!banlist` |
 | `!bansearch <query>` | Searches bans by nick, JID, domain, issuer, or comment/reason | `!bansearch spam`, `!bansearch issuer:alice`, `!bansearch reason:abuse` |
-| `!why <nick/jid>` | Shows the reason and remaining time of a ban | `!why bob` |
+| `!why <nick/jid>` | Shows the reason and remaining time of a ban; admin-room output also includes recent audit history | `!why bob` |
+| `!audit [page/query]` | Shows recent audit events, optionally filtered by text | `!audit`, `!audit skx` |
 | `!sync` | Full room sync: rejoin rooms, verify admin rights, apply only missing active bans | `!sync` |
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
 | `!syncbans` | Full ban synchronization: syncs outcasts from rooms into DB and applies all active bans | `!syncbans` |
@@ -77,6 +82,7 @@ It provides central administration via an admin room and protects multiple chat 
 > - Permanent bans are **only shown in admin room**.
 > - In protected rooms: only temporary bans are visible (if `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS=True`).
 > - JID information is anonymized in protected rooms (only nick shown).
+> - Public `!why` and `!banlist` are rate-limited per room, nick, and command. Admin-room use is not rate-limited.
 
 ---
 
@@ -153,6 +159,11 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `ANNOUNCE_SYNC_DETAILS` (bool, default: `True`) - Show detailed sync progress messages at startup
 - `SHOW_BAN_IN_MUC` (bool, default: `False`) - Announce bans in protected rooms
 - `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` (bool, default: `True`) - Allow users to run `!help`, `!banlist`, `!why`
+- `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` (int, default: `30`) - Sliding window in seconds for public `!why` and `!banlist` rate limits
+- `PUBLIC_COMMAND_RATE_LIMIT_MAX` (int, default: `3`) - Max public `!why`/`!banlist` uses per nick, room, and command within the rate-limit window
+- `STRUCTURED_EVENT_LOGS` (bool, default: `True`) - Emit important bot events as JSON logs
+- `AUDIT_LOG_ENABLED` (bool, default: `True`) - Store moderation and operational audit events in SQLite
+- `AUDIT_LOG_RETENTION_DAYS` (int, default: `365`) - Delete audit events older than this many days; maximum 365
 - `HEALTH_CHECK_INTERVAL` (int, default: `300`) - Seconds between health checks of room connectivity (minimum: 60)
 - `UNBAN_CHECK_INTERVAL` (int, default: `60`) - Seconds between checking for expired tempbans
 - `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
@@ -207,10 +218,13 @@ sudo journalctl -u muc_banbot -f
 * The bot account **must be moderator/admin** in all protected rooms.  
 * Admin room is the **single source of truth** for permissions.  
 * Admins/Owners are automatically protected from bans.  
+* Admin/Owner protection checks both the local occupant cache and server-side room affiliations where available.  
 * Bot automatically reports if admin/owner rights are lost or regained.
 * Domain bans (`*.domain.tld`) will refuse to ban admins/owners on that domain.
 * **JID validation** prevents malformed JIDs from being banned.
 * **Domain ban validation** blocks overly generic bans (e.g., `*.com`).
+* CSV imports create a timestamped database backup before any database write is attempted.
+* Audit events are retained for up to 365 days and cleaned up automatically.
 
 ---
 
@@ -248,6 +262,7 @@ Imports bans from a CSV file with full validation:
 - **Timestamps**: Supports `0` (permanent) or Unix timestamp for temporary bans
 - **Smart Duplicates**: Automatically handles conflicts (converts permanent ↔ tempban)
 - **Error Reporting**: Shows invalid rows with reasons (first 10 errors)
+- **Pre-Import Backup**: Creates `banbot.db.backup-before-import-YYYYMMDD_HHMMSS` before writing imported rows
 - **Atomic Operations**: All-or-nothing database updates
 
 **Example Import:**
@@ -271,6 +286,36 @@ Row 12: until must be a valid number
 - Migrate bans to a new bot instance
 - Batch import bans from external lists
 - Restore from backup after database recovery
+
+
+### Audit Log and Structured Event Logs
+
+BanBot stores important moderation and operational events in the SQLite `audit_log` table when `AUDIT_LOG_ENABLED=True`.
+Audit events are kept for `AUDIT_LOG_RETENTION_DAYS` days, with config validation capped at 365 days. Old audit events are cleaned up automatically during normal bot operation.
+
+Examples of audited events:
+
+- `ban_applied`
+- `ban_updated`
+- `ban_duplicate_ignored`
+- `ban_refused_admin_protected`
+- `unban_applied`
+- `tempban_expired`
+- `import_completed`
+- `db_backup_created`
+
+Use the admin command:
+
+```
+!audit
+!audit 2
+!audit skx
+!audit ban_refused
+```
+
+Admin-room `!why <target>` also shows recent audit history for that target.
+
+When `STRUCTURED_EVENT_LOGS=True`, important events are also logged as JSON objects, making them easier to process with tools like `journalctl`, `jq`, Loki, or ELK.
 
 ### Input Validation & Duration Limits
 
@@ -432,17 +477,39 @@ The `!config` command displays all current bot configuration settings in the adm
 
 ## Database (SQLite)
 
-**`banbot.db`** with two tables:
+**`banbot.db`** contains three main tables:
 
 ### `bans`
 
-| Column    | Type    | Description                                         |
-| --------- | ------- | --------------------------------------------------- |
-| `jid`     | TEXT    | User JID (optional if nick exists; can be `*.domain.tld` for domain bans) |
-| `nick`    | TEXT    | User nickname (optional if JID exists)              |
-| `until`   | INTEGER | Expiration time as Unix timestamp (`0` = permanent) |
-| `issuer`  | TEXT    | Who issued the ban (username or "system" for auto-unban) |
-| `comment` | TEXT    | Optional reason/comment                             |
+| Column        | Type    | Description |
+| ------------- | ------- | ----------- |
+| `id`          | INTEGER | Internal row id |
+| `target_type` | TEXT    | `jid`, `nick`, or `domain` |
+| `target`      | TEXT    | Normalized unique target key |
+| `jid`         | TEXT    | Bare JID or wildcard domain (`*.domain.tld`) if known |
+| `nick`        | TEXT    | User nickname if known |
+| `until`       | INTEGER | Expiration time as Unix timestamp (`0` = permanent) |
+| `issuer`      | TEXT    | Who issued the ban, or `system` for auto-unban |
+| `comment`     | TEXT    | Optional reason/comment |
+| `created_at`  | INTEGER | Creation timestamp |
+| `updated_at`  | INTEGER | Last update timestamp |
+
+### `audit_log`
+
+| Column       | Type    | Description |
+| ------------ | ------- | ----------- |
+| `id`         | INTEGER | Internal row id |
+| `created_at` | INTEGER | Event timestamp |
+| `event_type` | TEXT    | Event name, e.g. `ban_applied`, `unban_applied` |
+| `actor`      | TEXT    | Admin nick or `system` |
+| `room`       | TEXT    | Related room if applicable |
+| `target_type`| TEXT    | `jid`, `nick`, or `domain` if applicable |
+| `target`     | TEXT    | Normalized target if applicable |
+| `jid`        | TEXT    | Related JID if applicable |
+| `nick`       | TEXT    | Related nick if applicable |
+| `until`      | INTEGER | Expiration timestamp if applicable |
+| `comment`    | TEXT    | Reason/comment if applicable |
+| `details`    | TEXT    | JSON metadata for event-specific details |
 
 ### `rooms`
 
@@ -520,7 +587,6 @@ Run `!sync` to re-establish connections and verify rights.
 ## Notes
 
 * Temporary bans expire automatically; the bot removes them periodically (configurable interval).  
-* Messages in protected rooms are sent as **ephemeral** (not stored); admin room always receives full notifications.
 * Changes to `config.py` can **usually be applied via your configured command prefix + `reloadconfig`** (examples here use `!reloadconfig`). Startup-only settings such as `JID`, `PASSWORD`, `RESOURCE` / `RESSOURCE`, `ADMIN_ROOM`, `NICK`, and `DB_FILE` require a restart.
 * The bot uses **exponential backoff** (max 5 minutes) if disconnected from the XMPP server.
 * Domain bans are stored as-is (e.g., `*.domain.tld`) and can be searched/unbanned using `!bansearch` and `!unban`
