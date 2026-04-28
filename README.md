@@ -374,7 +374,7 @@ A wildcard domain ban matches both the base domain and its subdomains:
 - `*.evil.com` also matches `user@chat.evil.com`
 - Generic TLD bans such as `*.com` or `*.org` are blocked
 
-Protections:
+Safety behavior:
 - Will refuse to ban admins/owners on the domain
 - Automatically kicks all current users from that domain
 - Prevents future logins from that domain
