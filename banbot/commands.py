@@ -12,7 +12,7 @@ from slixmpp.exceptions import IqError, IqTimeout
 
 from .config_utils import get_config_resource
 from .utils import human_time, paginate_lines, parse_duration
-from .version import __version__
+from ._version import __version__
 
 log = logging.getLogger(__name__)
 

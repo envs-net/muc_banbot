@@ -7,7 +7,7 @@ import urllib.request
 
 from config import ADMIN_ROOM
 
-from .version import __version__
+from ._version import __version__
 
 log = logging.getLogger(__name__)
 
