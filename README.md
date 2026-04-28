@@ -193,7 +193,7 @@ After=network.target
 Type=simple
 User=adminbot
 WorkingDirectory=/srv/adminbot/muc_banbot
-ExecStart=/srv/adminbot/venv/bin/python /srv/adminbot/muc_banbot/muc_banbot.py
+ExecStart=/srv/adminbot/muc_banbot/venv/bin/python /srv/adminbot/muc_banbot/muc_banbot.py
 Restart=always
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
