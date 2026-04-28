@@ -33,7 +33,7 @@ It provides central administration via an admin room and protects multiple chat 
 * 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
 * ✅ Input validation for JID format and domain bans  
 * ✅ Startup and runtime config validation with safe reload handling  
-* 🚦 Rate limiting for public `!why` and `!banlist` commands  
+* 🚦 Rate limiting for all public protected-room commands  
 
 ---
 
@@ -82,7 +82,7 @@ It provides central administration via an admin room and protects multiple chat 
 > - Permanent bans are **only shown in admin room**.
 > - In protected rooms: only temporary bans are visible (if `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS=True`).
 > - JID information is anonymized in protected rooms (only nick shown).
-> - Public `!why` and `!banlist` are rate-limited per room, nick, and command. Admin-room use is not rate-limited.
+> - Public `!help`, `!whoami`, `!why` and `!banlist` are rate-limited per room, nick, and command. Admin-room use is not rate-limited.
 
 ---
 
@@ -159,8 +159,8 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `ANNOUNCE_SYNC_DETAILS` (bool, default: `True`) - Show detailed sync progress messages at startup
 - `SHOW_BAN_IN_MUC` (bool, default: `False`) - Announce bans in protected rooms
 - `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` (bool, default: `True`) - Allow users to run `!help`, `!banlist`, `!why`
-- `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` (int, default: `30`) - Sliding window in seconds for public `!why` and `!banlist` rate limits
-- `PUBLIC_COMMAND_RATE_LIMIT_MAX` (int, default: `3`) - Max public `!why`/`!banlist` uses per nick, room, and command within the rate-limit window
+- `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` (int, default: `30`) - Sliding window in seconds for public protected-room command rate limits
+- `PUBLIC_COMMAND_RATE_LIMIT_MAX` (int, default: `3`) - Max public command uses per nick, room, and command within the rate-limit window
 - `STRUCTURED_EVENT_LOGS` (bool, default: `True`) - Emit important bot events as JSON logs
 - `AUDIT_LOG_ENABLED` (bool, default: `True`) - Store moderation and operational audit events in SQLite
 - `AUDIT_LOG_RETENTION_DAYS` (int, default: `365`) - Delete audit events older than this many days; maximum 365

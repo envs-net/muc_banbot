@@ -30,7 +30,6 @@ UNBAN_CHECK_INTERVAL = 60  # Interval (seconds) for checking expired temporary b
 MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default: 30
 
 # Rate limit for public commands in protected rooms.
-# Applies only to !why and !banlist outside the admin room.
 # Example default: max 3 uses per nick/room/command every 30 seconds.
 PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 30
 PUBLIC_COMMAND_RATE_LIMIT_MAX = 3

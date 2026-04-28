@@ -16,6 +16,9 @@ from .version import __version__
 
 log = logging.getLogger(__name__)
 
+# PUBLIC_COMMANDS used for ratelimits
+PUBLIC_COMMANDS = {"help", "whoami", "banlist", "why"}
+
 
 class CommandMixin:
     def user_cmds_allowed(self, room: str) -> bool:
@@ -24,6 +27,7 @@ class CommandMixin:
             room == ADMIN_ROOM or
             (room in self.protected_rooms and self.allow_user_cmds)
         )
+
 
     async def on_message(self, msg) -> None:
         """
@@ -61,6 +65,7 @@ class CommandMixin:
 
         await self._handle_unknown_command(msg, room, cmd)
 
+
     async def _handle_unknown_command(self, msg, room: str, cmd: str) -> None:
         """
         Inform users/admins about unknown commands and point to help.
@@ -87,9 +92,10 @@ class CommandMixin:
                 mtype="groupchat"
             )
 
+
     def check_public_command_rate_limit(self, room: str, nick: str, cmd: str) -> tuple[bool, int]:
-        """Rate-limit public user commands; admin-room use is never limited here."""
-        if room == ADMIN_ROOM or cmd not in {"why", "banlist"}:
+        """Rate-limit public commands in protected rooms; admin-room use is never limited."""
+        if room == ADMIN_ROOM or cmd not in PUBLIC_COMMANDS:
             return True, 0
 
         window = max(1, int(self.public_command_rate_limit_window))
@@ -117,6 +123,7 @@ class CommandMixin:
 
         return True, 0
 
+
     async def _handle_user_command(
         self,
         msg,
@@ -125,6 +132,19 @@ class CommandMixin:
         cmd: str,
         args: list[str]
     ) -> bool:
+        if room != ADMIN_ROOM and cmd in PUBLIC_COMMANDS and self.user_cmds_allowed(room):
+            allowed, retry_after = self.check_public_command_rate_limit(room, nick, cmd)
+            if not allowed:
+                self.send_message(
+                    mto=room,
+                    mbody=(
+                        f"⏳ Rate limit: please wait {retry_after}s before using "
+                        f"{self.command_prefix}{cmd} again."
+                    ),
+                    mtype="groupchat"
+                )
+                return True
+
         if cmd == "help":
             if room == ADMIN_ROOM and self.is_authorized(msg):
                 text = self._admin_help_text()
@@ -137,15 +157,6 @@ class CommandMixin:
             return True
 
         if cmd == "banlist" and self.user_cmds_allowed(room):
-            allowed, retry_after = self.check_public_command_rate_limit(room, nick, cmd)
-            if not allowed:
-                self.send_message(
-                    mto=room,
-                    mbody=f"⏳ Rate limit: please wait {retry_after}s before using {self.command_prefix}banlist again.",
-                    mtype="groupchat"
-                )
-                return True
-
             page = 1
             if len(args) >= 1:
                 try:
@@ -162,15 +173,6 @@ class CommandMixin:
             return True
 
         if cmd == "why" and len(args) >= 1 and self.user_cmds_allowed(room):
-            allowed, retry_after = self.check_public_command_rate_limit(room, nick, cmd)
-            if not allowed:
-                self.send_message(
-                    mto=room,
-                    mbody=f"⏳ Rate limit: please wait {retry_after}s before using {self.command_prefix}why again.",
-                    mtype="groupchat"
-                )
-                return True
-
             await self.cmd_why(args[0], room)
             return True
 
@@ -179,6 +181,7 @@ class CommandMixin:
             return True
 
         return False
+
 
     async def _handle_admin_command(
         self,
@@ -357,6 +360,7 @@ class CommandMixin:
 
         return True
 
+
     def _user_help_text(self) -> str:
         p = self.command_prefix
         return (
@@ -365,6 +369,7 @@ class CommandMixin:
             f"{p}banlist [page] - show temporary bans\n"
             f"{p}why <nick> - show ban reason"
         )
+
 
     def _admin_help_text(self) -> str:
         p = self.command_prefix
@@ -391,6 +396,7 @@ class CommandMixin:
             f"{p}import <filename> - import bans from a CSV file"
         )
 
+
     async def _cmd_config(self, room: str) -> None:
         config_lines = ["📋 Current Bot Configuration:\n"]
 
@@ -401,10 +407,10 @@ class CommandMixin:
         config_lines.append(f"👤 Nick: {NICK}")
         config_lines.append("")
         config_lines.append(f"⌨️ Command Prefix: {self.command_prefix}")
-        config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
-        config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
         config_lines.append(f"🧱 Structured Event Logs: {self.structured_event_logs}")
         config_lines.append(f"🧾 Audit Log: {self.audit_log_enabled} ({self.audit_log_retention_days}d retention)")
+        config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
+        config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
         config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
         config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
         config_lines.append("")
@@ -423,6 +429,7 @@ class CommandMixin:
             mbody="\n".join(config_lines),
             mtype="groupchat"
         )
+
 
     async def _cmd_reloadconfig(self, room: str) -> None:
         try:
@@ -463,6 +470,7 @@ class CommandMixin:
                 mtype="groupchat"
             )
             log.error("Failed to reload config: %s", e)
+
 
     async def _cmd_status(self, room: str) -> None:
         status_lines = ["✅ Bot is online and healthy."]
@@ -555,6 +563,7 @@ class CommandMixin:
 
         self.send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
 
+
     async def _cmd_whoami(self, room: str, nick: str) -> None:
         info = self.occupants.get(room, {}).get(nick, {})
         affiliation = info.get("affiliation", "none")
@@ -591,6 +600,7 @@ class CommandMixin:
             )
 
         self.send_message(mto=room, mbody=message, mtype="groupchat")
+
 
     async def on_direct_message(self, msg) -> None:
         """
@@ -671,6 +681,7 @@ class CommandMixin:
             mtype="chat"
         )
 
+
     async def validate_room_jid(self, room_jid: str) -> tuple[bool, str]:
         """
         Validate a room JID in two steps:
@@ -725,6 +736,7 @@ class CommandMixin:
             return False, f"❌ Service Discovery error for '{room_jid}': {error_msg}"
         except Exception as e:
             return False, f"❌ Failed to validate room: {str(e)}"
+
 
     async def cmd_room(self, args: list[str], room: str) -> None:
         """
@@ -834,11 +846,13 @@ class CommandMixin:
                 except Exception as e:
                     log.warning("⚠️ Failed to leave room %s: %s", target, e)
 
+
     def _format_ban_match(self, jid, nick, until, issuer, comment, now):
         """Format a ban match for display in bansearch results."""
         remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
         emoji = "⏳" if until > 0 else "🔒"
         return f"{emoji} {jid or nick or 'Unknown'} ({remaining}, by {issuer}" + (f", {comment}" if comment else "") + ")"
+
 
     async def cmd_bansearch(self, query: str) -> None:
         """
@@ -937,6 +951,7 @@ class CommandMixin:
             mtype="groupchat"
         )
 
+
     async def cmd_audit(self, args: list[str], room: str) -> None:
         """Show recent audit events. Usage: !audit [page|query]."""
         page = 1
@@ -994,6 +1009,7 @@ class CommandMixin:
 
         self.send_message(mto=room, mbody=text, mtype="groupchat")
 
+
     async def cmd_banlist(self, room: str, page: int = 1) -> None:
         """
         Show bans with pagination.
@@ -1046,6 +1062,7 @@ class CommandMixin:
                     text += f"\n\nUse {self.command_prefix}banlist {current_page + 1} for the next page."
 
         self.send_message(mto=room, mbody=text, mtype="groupchat")
+
 
     async def cmd_why(self, identifier: str, room: str) -> None:
         """
