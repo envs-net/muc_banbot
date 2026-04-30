@@ -15,6 +15,10 @@ class MucMixin:
     async def on_disconnect(self, _) -> None:
         log.warning("⚠️ Disconnected from server")
 
+        if self.reconnect_task and not self.reconnect_task.done():
+            log.info("🔄 Reconnect already scheduled")
+            return
+
         self.reconnecting = True
 
         # runtime state reset
@@ -23,21 +27,19 @@ class MucMixin:
         self.room_join_time.clear()
         log.info("🧹 Cleaned up occupants dictionary and states")
 
-        delay = 5
+        self.reconnect_task = asyncio.create_task(self._delayed_reconnect())
 
-        while not self.connected:
-            try:
-                log.info("🔄 Attempting reconnect in %ds...", delay)
-                await asyncio.sleep(delay)
-
-                if self.connect():
-                    log.info("🔌 Reconnect initiated")
-                    return
-
-            except Exception as e:
-                log.error("Reconnect error: %s", e)
-
-            delay = min(delay * 2, 300)  # exponential backoff max 5min
+    async def _delayed_reconnect(self) -> None:
+        try:
+            delay = 5
+            log.info("🔄 Attempting reconnect in %ds...", delay)
+            await asyncio.sleep(delay)
+            self.connect()
+            log.info("🔌 Reconnect initiated")
+        except Exception as e:
+            log.error("Reconnect error: %s", e)
+        finally:
+            self.reconnect_task = None
 
 
     async def health_check_worker(self) -> None:

@@ -97,6 +97,7 @@ class BanBot(
         self.registered_rooms: set[str] = set()
         self.room_join_time: dict[str, float] = {}
         self.reconnecting = False
+        self.reconnect_task: asyncio.Task | None = None
         self.health_check_task: asyncio.Task | None = None
         self.unban_task: asyncio.Task | None = None
 
@@ -188,6 +189,8 @@ class BanBot(
             self.bot_start_time = time.time()
         else:
             log.info("🔄 Reconnected successfully")
+
+        self.reconnect_task = None
 
         self.send_presence()
         await self.get_roster()
