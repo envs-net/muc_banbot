@@ -13,11 +13,11 @@ log = logging.getLogger(__name__)
 
 class MucMixin:
     async def on_disconnect(self, _) -> None:
-        log.warning("⚠️ Disconnected from server")
-
         if self.reconnect_task and not self.reconnect_task.done():
-            log.info("🔄 Reconnect already scheduled")
+            log.info("🔄 Disconnect event received while reconnect is already scheduled")
             return
+
+        log.warning("⚠️ Disconnected from server")
 
         self.reconnecting = True
 
