@@ -230,6 +230,7 @@ class CommandMixin:
             "import",
             "audit",
             "rtbl",
+            "ignore",
         }
 
         if cmd not in admin_commands:
@@ -412,6 +413,11 @@ class CommandMixin:
             await self.cmd_rtbl(args, room, actor=actor_jid)
             return True
 
+        if cmd == "ignore":
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            await self.cmd_ignore(args, room, actor=actor_jid)
+            return True
+
         return True
 
 
@@ -449,12 +455,12 @@ class CommandMixin:
             f"{p}syncbans - sync bans from all rooms into the database and enforce them\n\n"
             f"{p}export - export all bans to a CSV file\n"
             f"{p}import <filename> - import bans from a CSV file\n\n"
+            f"{p}ignore list [page] - show global ignorelist\n"
+            f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
+            f"{p}ignore remove <jid|domain> - remove from ignorelist\n"
             f"{p}rtbl list - show active RTBL subscriptions\n"
             f"{p}rtbl add <service> <node> - subscribe to a RTBL node\n"
             f"{p}rtbl delete <service> [node] - remove a RTBL subscription\n"
-            f"{p}rtbl ignore list - show RTBL ignorelist\n"
-            f"{p}rtbl ignore add <jid|domain> [reason] - add to ignorelist\n"
-            f"{p}rtbl ignore remove <jid|domain> - remove from ignorelist\n"
             f"{p}rtbl publish status - Status of your own RTBL feed\n"
             f"{p}rtbl publish sync - Publish all current bans to your own feed\n"
         )
@@ -487,13 +493,6 @@ class CommandMixin:
         config_lines.append(f"💾 RTBL Persist Bans: {getattr(self, 'rtbl_persist_bans', False)}")
         config_lines.append(f"📢 RTBL Announce: {self.rtbl_announce}")
         config_lines.append(f"🔄 RTBL Refresh Interval: {self.rtbl_refresh_interval}s" if self.rtbl_refresh_interval > 0 else "🔄 RTBL Refresh: disabled")
-        if self.rtbl_enabled:
-            if self.rtbl_subscriptions:
-                subs = ", ".join(f"{s}/{n}" for s, n in self.rtbl_subscriptions)
-                config_lines.append(f"📋 RTBL Subscriptions: {subs}")
-            else:
-                config_lines.append(f"📋 RTBL Subscriptions: (none)")
-
         config_lines.append(f"📡 RTBL Publish Enabled: {getattr(self, 'rtbl_publish_enabled', False)}")
         if getattr(self, "rtbl_publish_enabled", False):
             config_lines.append(f"   Service:     {self.rtbl_publish_service}")
@@ -603,9 +602,11 @@ class CommandMixin:
         status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
 
         if getattr(self, "rtbl_enabled", False):
-            rtbl_hashes  = len(getattr(self, "rtbl_hash_cache", {}))
+            rtbl_hashes = len(getattr(self, "rtbl_hash_cache", {}))
             rtbl_domains = len(getattr(self, "rtbl_domain_cache", {}))
+            rtbl_subscriptions = len(getattr(self, "rtbl_subscriptions", []))
             status_lines.append(f"🛡️ RTBL Bans: {rtbl_hashes} JID hashes, {rtbl_domains} domains")
+            status_lines.append(f"📋 RTBL Subscriptions: {rtbl_subscriptions}")
         status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
         status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
         status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")

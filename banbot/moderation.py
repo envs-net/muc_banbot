@@ -447,6 +447,27 @@ class ModerationMixin:
             await self.audit_event("ban_refused_admin_protected", actor=issuer, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, comment=comment, details={"reason": reason, "identifier": identifier})
             return
 
+        # --- Ignorelist protection ---
+        ignore_candidate = normalized_jid or target or identifier
+
+        if self.is_ignored_target(ignore_candidate):
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody=f"⛔ Refusing ban: {ignore_candidate} is on the ignorelist.",
+                mtype="groupchat",
+            )
+            self.log_event(
+                logging.WARNING, "ban_refused_ignorelist",
+                actor=issuer, identifier=identifier,
+                target_type=target_type, target=target,
+            )
+            await self.audit_event(
+                "ban_refused_ignorelist", actor=issuer,
+                target_type=target_type, target=target,
+                jid=normalized_jid, nick=normalized_nick,
+            )
+            return
+
         try:
             await self.upsert_ban_db(normalized_jid, normalized_nick, ts, issuer, comment)
         except Exception as e:

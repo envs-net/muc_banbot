@@ -35,6 +35,7 @@ from .muc import MucMixin
 from .sync import SyncMixin
 from .vcard import VCardMixin
 from .updates import UpdateMixin
+from .ignorelist import IgnorelistMixin
 from .rtbl import RtblMixin
 
 logging.basicConfig(level=logging.INFO)
@@ -54,6 +55,7 @@ class BanBot(
     SyncMixin,
     VCardMixin,
     UpdateMixin,
+    IgnorelistMixin,
     RtblMixin,
 ):
     bare_jid = staticmethod(bare_jid)
@@ -146,8 +148,8 @@ class BanBot(
         self.rtbl_subscriptions: list[tuple[str, str]] = []   # loaded from DB
         self.rtbl_hash_cache: dict[str, str | None] = {}      # hash → reason
         self.rtbl_domain_cache: dict[str, str | None] = {}
-        self.rtbl_ignore_jids: set[str] = set()
-        self.rtbl_ignore_domains: set[str] = set()
+        self.ignore_jids: set[str] = set()
+        self.ignore_domains: set[str] = set()
         self._rtbl_handlers_registered: bool = False
         self.rtbl_persist_bans: bool     = getattr(config, "RTBL_PERSIST_BANS", False)
         self.rtbl_refresh_interval: int  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
@@ -205,6 +207,7 @@ class BanBot(
         await self.setup_db()
         await self.load_bans_from_db()
         await self.cleanup_old_audit_logs()
+        await self.setup_ignorelist()
 
         if not self.reconnecting:
             # First connection only
