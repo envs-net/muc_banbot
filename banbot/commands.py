@@ -481,6 +481,7 @@ class CommandMixin:
         config_lines.append(f"🔌 MUC Write Semaphore: {self.muc_write_limit}")
         config_lines.append("")
         config_lines.append(f"🛡️ RTBL Enabled: {self.rtbl_enabled}")
+        config_lines.append(f"💾 RTBL Persist Bans: {getattr(self, 'rtbl_persist_bans', False)}")
         config_lines.append(f"📢 RTBL Announce: {self.rtbl_announce}")
         config_lines.append(f"🔄 RTBL Refresh Interval: {self.rtbl_refresh_interval}s" if self.rtbl_refresh_interval > 0 else "🔄 RTBL Refresh: disabled")
         if self.rtbl_enabled:
@@ -597,6 +598,11 @@ class CommandMixin:
         db_size_kib = int(db_stats.get("db_size_bytes", 0)) / 1024
 
         status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
+
+        if getattr(self, "rtbl_enabled", False):
+            rtbl_hashes  = len(getattr(self, "rtbl_hash_cache", {}))
+            rtbl_domains = len(getattr(self, "rtbl_domain_cache", {}))
+            status_lines.append(f"🛡️ RTBL Bans: {rtbl_hashes} JID hashes, {rtbl_domains} domains")
         status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
         status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
         status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")
@@ -885,16 +891,24 @@ class CommandMixin:
 
                     # --- Ensure the bot itself is online ---
                     async def wait_for_bot_online():
-                        # Wait until the bot itself is recognized as Nick.
-                        for _ in range(10):  # max 10 second timeout
+                        for _ in range(10):
                             occ = self.occupants.get(target, {})
                             if NICK in occ:
                                 break
                             await asyncio.sleep(1)
-                        # --- Start ban sync for this new room ---
+
+                        # Sync regular bans
                         await self.sync_bans_to_rooms_for_single_room(target)
 
-                        # --- Optional: Check all other rooms for new bans ---
+                        # Scan current occupants against RTBL
+                        if getattr(self, "rtbl_enabled", False):
+                            occ = self.occupants.get(target, {})
+                            for occ_nick, info in list(occ.items()):
+                                jid = info.get("jid")
+                                if jid:
+                                    await self.check_jid_against_rtbl(jid, occ_nick)
+
+                        # Apply existing bans to other rooms
                         other_rooms = self.protected_rooms - {target}
                         if other_rooms:
                             log.info("🔄 Applying existing bans to other rooms due to new room addition")

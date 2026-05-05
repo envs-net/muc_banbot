@@ -411,16 +411,24 @@ class RtblMixin:
                     (item_id, service_jid, node),
                 )
                 await self.db.commit()
-                # Remove from cache only when no other subscription still carries it
                 async with self.db.execute(
                     "SELECT 1 FROM rtbl_hashes WHERE hash = ? LIMIT 1", (item_id,)
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_hash_cache.pop(item_id, None)
-                log.info(
-                    "RTBL: JID hash retracted from %s/%s: %s…",
-                    service_jid, node, item_id[:12],
-                )
+                        # If persisted: remove from main bans table too
+                        if getattr(self, "rtbl_persist_bans", False):
+                            async with self.db.execute(
+                                "SELECT jid FROM bans WHERE issuer = 'rtbl'"
+                            ) as c:
+                                async for (banned_jid,) in c:
+                                    if banned_jid and self._rtbl_hash_jid(banned_jid) == item_id:
+                                        await self.db.execute(
+                                            "DELETE FROM bans WHERE jid = ? AND issuer = 'rtbl'",
+                                            (banned_jid,)
+                                        )
+                                        break
+                            await self.db.commit()
 
             elif _is_domain(item_id):
                 domain = item_id.lstrip("*.")
@@ -434,10 +442,13 @@ class RtblMixin:
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_domain_cache.pop(domain, None)
-                log.info(
-                    "RTBL: Domain ban retracted from %s/%s: *.%s",
-                    service_jid, node, domain,
-                )
+                        # If persisted: remove from main bans table too
+                        if getattr(self, "rtbl_persist_bans", False):
+                            await self.db.execute(
+                                "DELETE FROM bans WHERE jid = ? AND issuer = 'rtbl'",
+                                (f"*.{domain}",)
+                            )
+                            await self.db.commit()
 
     # ------------------------------------------------------------------
     # Join-time check (called from muc_online)
@@ -562,6 +573,13 @@ class RtblMixin:
         comment = f"RTBL: {reason}" if reason else "RTBL ban"
         log.info("RTBL: Banning JID %s (reason: %s)", jid, reason)
 
+        if getattr(self, "rtbl_persist_bans", False):
+            await self.upsert_ban_db(
+                jid=jid, nick=nick, until=0, issuer="rtbl", comment=comment
+            )
+            await self.db.commit()
+            log.debug("RTBL: Persisted JID ban for %s to bans table", jid)
+
         if self.rtbl_announce:
             self.send_message(
                 mto=ADMIN_ROOM,
@@ -626,6 +644,13 @@ class RtblMixin:
 
         comment = f"RTBL: {reason}" if reason else "RTBL domain ban"
         log.info("RTBL: Applying domain ban *.%s (reason: %s)", domain, reason)
+
+        if getattr(self, "rtbl_persist_bans", False):
+            await self.upsert_ban_db(
+                jid=f"*.{domain}", nick=None, until=0, issuer="rtbl", comment=comment
+            )
+            await self.db.commit()
+            log.debug("RTBL: Persisted domain ban *.%s to bans table", domain)
 
         if self.rtbl_announce:
             self.send_message(
@@ -883,11 +908,13 @@ class RtblMixin:
                 comment=f"Removed {label}",
             )
 
-            self.send_message(
-                mto=room,
-                mbody=f"✅ RTBL: Removed {label}. All hashes and domains purged from DB.",
-                mtype="groupchat",
-            )
+            msg = f"✅ RTBL: Removed {label}. All hashes and domains purged from DB."
+            if getattr(self, "rtbl_persist_bans", False):
+                msg += (
+                    "\n⚠️ RTBL_PERSIST_BANS is enabled — bans written to the main bans "
+                    "table were NOT automatically removed. Use !unban to remove them manually."
+                )
+            self.send_message(mto=room, mbody=msg, mtype="groupchat")
             return
 
         # ----------------------------------------------------------------

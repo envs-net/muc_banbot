@@ -146,6 +146,7 @@ class BanBot(
         self.rtbl_subscriptions: list[tuple[str, str]] = []   # loaded from DB
         self.rtbl_hash_cache: dict[str, str | None] = {}      # hash → reason
         self._rtbl_handlers_registered: bool = False
+        self.rtbl_persist_bans: bool     = getattr(config, "RTBL_PERSIST_BANS", False)
         self.rtbl_refresh_interval: int  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
         self._rtbl_refresh_task: asyncio.Task | None = None
 
