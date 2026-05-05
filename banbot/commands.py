@@ -614,7 +614,7 @@ class CommandMixin:
             rtbl_hashes = len(getattr(self, "rtbl_hash_cache", {}))
             rtbl_domains = len(getattr(self, "rtbl_domain_cache", {}))
             rtbl_subscriptions = len(getattr(self, "rtbl_subscriptions", []))
-            status_lines.append(f"🛡️ RTBL Bans: {rtbl_hashes} JID hashes, {rtbl_domains} domains")
+            status_lines.append(f"\n🛡️ RTBL Bans: {rtbl_hashes} JID hashes, {rtbl_domains} domains")
             status_lines.append(f"📋 RTBL Subscriptions: {rtbl_subscriptions}")
 
         # admins
