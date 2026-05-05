@@ -145,6 +145,9 @@ class BanBot(
         self.rtbl_announce: bool = getattr(config, "RTBL_ANNOUNCE", True)
         self.rtbl_subscriptions: list[tuple[str, str]] = []   # loaded from DB
         self.rtbl_hash_cache: dict[str, str | None] = {}      # hash → reason
+        self.rtbl_domain_cache: dict[str, str | None] = {}
+        self.rtbl_ignore_jids: set[str] = set()
+        self.rtbl_ignore_domains: set[str] = set()
         self._rtbl_handlers_registered: bool = False
         self.rtbl_persist_bans: bool     = getattr(config, "RTBL_PERSIST_BANS", False)
         self.rtbl_refresh_interval: int  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
@@ -155,10 +158,6 @@ class BanBot(
         self.rtbl_publish_service: str = getattr(config, "RTBL_PUBLISH_SERVICE", "")
         self.rtbl_publish_jid_node: str = getattr(config, "RTBL_PUBLISH_JID_NODE", "muc_bans_sha256")
         self.rtbl_publish_domain_node: str = getattr(config, "RTBL_PUBLISH_DOMAIN_NODE", "muc_bans_domains")
-
-        # --- RTBL runtime caches (populated by setup_rtbl) ---
-        self.rtbl_hash_cache: dict[str, str | None] = {}
-        self.rtbl_domain_cache: dict[str, str | None] = {}
 
         # --- apply config ---
         self.apply_runtime_config()

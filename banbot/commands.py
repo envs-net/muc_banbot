@@ -452,6 +452,9 @@ class CommandMixin:
             f"{p}rtbl list - show active RTBL subscriptions\n"
             f"{p}rtbl add <service> <node> - subscribe to a RTBL node\n"
             f"{p}rtbl delete <service> [node] - remove a RTBL subscription\n"
+            f"{p}rtbl ignore list - show RTBL ignorelist\n"
+            f"{p}rtbl ignore add <jid|domain> [reason] - add to ignorelist\n"
+            f"{p}rtbl ignore remove <jid|domain> - remove from ignorelist\n"
             f"{p}rtbl publish status - Status of your own RTBL feed\n"
             f"{p}rtbl publish sync - Publish all current bans to your own feed\n"
         )

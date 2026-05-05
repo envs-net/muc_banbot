@@ -14,15 +14,19 @@ Own publish feed (optional, requires a PubSub service on the local server):
   - Domain bans -> RTBL_PUBLISH_DOMAIN_NODE (default: muc_bans_domains)
 
 Bans from subscribed RTBL feeds are stored in separate tables
-(rtbl_hashes, rtbl_domains) and are NEVER written to the main bans table.
+(rtbl_hashes, rtbl_domains) and are NEVER written to the main bans table
+unless RTBL_PERSIST_BANS = True.
 Admin/owner protection is always enforced before any RTBL ban is applied.
 """
 
+import asyncio
 import hashlib
 import logging
 import re
 
 from slixmpp.exceptions import IqError, IqTimeout
+
+from .utils import domain_matches, resolve_page
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +98,19 @@ class RtblMixin:
         await self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_rtbl_domains_domain ON rtbl_domains(domain)"
         )
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS rtbl_ignorelist (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                target      TEXT    NOT NULL UNIQUE,
+                target_type TEXT    NOT NULL,
+                reason      TEXT,
+                added_by    TEXT,
+                created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+            )
+        """)
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rtbl_ignorelist_target ON rtbl_ignorelist(target)"
+        )
         await self.db.commit()
 
         # Register handlers only once — they survive reconnects
@@ -103,6 +120,7 @@ class RtblMixin:
             self._rtbl_handlers_registered = True
 
         await self._load_rtbl_subscriptions_from_db()
+        await self._load_rtbl_ignorelist_from_db()
 
         for service_jid, node in list(self.rtbl_subscriptions):
             await self._rtbl_subscribe_and_fetch(service_jid, node)
@@ -118,6 +136,29 @@ class RtblMixin:
         self.rtbl_subscriptions = [(r[0], r[1]) for r in rows]
         await self._rebuild_rtbl_caches()
         log.info("RTBL: Loaded %d subscription(s)", len(self.rtbl_subscriptions))
+
+
+    async def _load_rtbl_ignorelist_from_db(self) -> None:
+        """Load RTBL ignorelist from DB into in-memory sets."""
+        ignore_jids: set[str] = set()
+        ignore_domains: set[str] = set()
+
+        async with self.db.execute(
+            "SELECT target, target_type FROM rtbl_ignorelist"
+        ) as cursor:
+            async for target, target_type in cursor:
+                if target_type == "jid":
+                    ignore_jids.add(target.lower())
+                elif target_type == "domain":
+                    ignore_domains.add(target.lstrip("*.").lower())
+
+        self.rtbl_ignore_jids    = ignore_jids
+        self.rtbl_ignore_domains = ignore_domains
+
+        log.debug(
+            "RTBL: Ignorelist loaded — %d JIDs, %d domains",
+            len(ignore_jids), len(ignore_domains),
+        )
 
 
     async def _rebuild_rtbl_caches(self) -> None:
@@ -186,27 +227,24 @@ class RtblMixin:
             try:
                 iq = self.make_iq_get(ito=service_jid)
 
-                # Build <pubsub><items node="..."/><set><max>N</max>[<after>…</after>]</set></pubsub>
                 pubsub_el = ET.Element(f"{{{_PUBSUB}}}pubsub")
                 items_el  = ET.SubElement(pubsub_el, f"{{{_PUBSUB}}}items")
                 items_el.set("node", node)
 
-                rsm_set  = ET.SubElement(pubsub_el, f"{{{_RSM}}}set")
-                max_el   = ET.SubElement(rsm_set, f"{{{_RSM}}}max")
+                rsm_set = ET.SubElement(pubsub_el, f"{{{_RSM}}}set")
+                max_el  = ET.SubElement(rsm_set, f"{{{_RSM}}}max")
                 max_el.text = str(page_size)
                 if last_id is not None:
                     after_el      = ET.SubElement(rsm_set, f"{{{_RSM}}}after")
                     after_el.text = last_id
 
-                # Replace any existing payload with our hand-built element
                 for child in list(iq.xml):
                     iq.xml.remove(child)
                 iq.xml.append(pubsub_el)
 
                 result = await iq.send()
 
-                # Parse items from raw XML response
-                result_pubsub = result.xml.find(f"{{{_PUBSUB}}}pubsub")
+                result_pubsub   = result.xml.find(f"{{{_PUBSUB}}}pubsub")
                 if result_pubsub is None:
                     break
                 result_items_el = result_pubsub.find(f"{{{_PUBSUB}}}items")
@@ -227,7 +265,6 @@ class RtblMixin:
                 if not item_id:
                     continue
 
-                # Extract reason from payload child element
                 payload = item_el[0] if len(item_el) > 0 else None
                 reason  = self._rtbl_extract_reason(payload)
 
@@ -272,7 +309,6 @@ class RtblMixin:
                 last_id[:12] if last_id else "none",
             )
 
-            # Read RSM <last> from the response XML to detect end of result set
             rsm_el   = result.xml.find(f".//{{{_RSM}}}set")
             rsm_last = None
             if rsm_el is not None:
@@ -416,7 +452,6 @@ class RtblMixin:
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_hash_cache.pop(item_id, None)
-                        # If persisted: remove from main bans table too
                         if getattr(self, "rtbl_persist_bans", False):
                             async with self.db.execute(
                                 "SELECT jid FROM bans WHERE issuer = 'rtbl'"
@@ -442,7 +477,6 @@ class RtblMixin:
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_domain_cache.pop(domain, None)
-                        # If persisted: remove from main bans table too
                         if getattr(self, "rtbl_persist_bans", False):
                             await self.db.execute(
                                 "DELETE FROM bans WHERE jid = ? AND issuer = 'rtbl'",
@@ -471,6 +505,17 @@ class RtblMixin:
         bare = self.bare_jid(jid)
         if not bare:
             return False
+
+        # --- Ignorelist check ---
+        if bare.lower() in self.rtbl_ignore_jids:
+            log.debug("RTBL: Ignoring JID %s (in ignorelist)", bare)
+            return False
+
+        if "@" in bare:
+            user_domain = bare.split("@", 1)[1].lower()
+            if any(_domain_matches(user_domain, d) for d in self.rtbl_ignore_domains):
+                log.debug("RTBL: Ignoring JID %s (domain in ignorelist)", bare)
+                return False
 
         # JID hash check
         h = self._rtbl_hash_jid(bare)
@@ -504,7 +549,16 @@ class RtblMixin:
                 if not jid:
                     continue
                 bare = self.bare_jid(jid)
-                if bare and self._rtbl_hash_jid(bare) == hash_val:
+                if not bare:
+                    continue
+                # Ignorelist check
+                if bare.lower() in self.rtbl_ignore_jids:
+                    continue
+                if "@" in bare:
+                    user_domain = bare.split("@", 1)[1].lower()
+                    if any(_domain_matches(user_domain, d) for d in self.rtbl_ignore_domains):
+                        continue
+                if self._rtbl_hash_jid(bare) == hash_val:
                     await self._rtbl_apply_ban_jid(bare, nick, reason)
 
 
@@ -526,11 +580,16 @@ class RtblMixin:
                 if not bare or "@" not in bare:
                     continue
                 user_domain = bare.split("@", 1)[1].lower()
+                # Ignorelist check
+                if bare.lower() in self.rtbl_ignore_jids:
+                    continue
+                if any(_domain_matches(user_domain, d) for d in self.rtbl_ignore_domains):
+                    continue
                 if _domain_matches(user_domain, domain):
                     await self._rtbl_apply_ban_domain(domain, reason, nick=nick, jid=bare)
 
     # ------------------------------------------------------------------
-    # Ban application (never writes to the main bans table)
+    # Ban application
     # ------------------------------------------------------------------
 
     async def _rtbl_apply_ban_jid(
@@ -547,7 +606,7 @@ class RtblMixin:
         silently dropped and, if RTBL_ANNOUNCE is True, a warning is sent to
         the admin room.
 
-        The ban is NOT written to the main bans table.
+        The ban is only written to the main bans table if RTBL_PERSIST_BANS = True.
         """
         from config import ADMIN_ROOM
 
@@ -616,10 +675,9 @@ class RtblMixin:
         protected room via MUC outcast affiliation.
 
         Admin/owner protection is always checked first (same as a manual !ban).
-        The ban is NOT written to the main bans table.
+        The ban is only written to the main bans table if RTBL_PERSIST_BANS = True.
         """
         from config import ADMIN_ROOM
-        from .utils import domain_matches
 
         wildcard = f"*.{domain}"
 
@@ -731,16 +789,19 @@ class RtblMixin:
         return payload
 
     # ------------------------------------------------------------------
-    # Bot commands: !rtbl list / add / delete / publish
+    # Bot commands: !rtbl list / add / delete / ignore / publish
     # ------------------------------------------------------------------
 
     async def cmd_rtbl(self, args: list[str], room: str, actor: str = "unknown") -> None:
         """
-        Manage RTBL subscriptions and the optional own publish feed.
+        Manage RTBL subscriptions, ignorelist and the optional own publish feed.
 
         !rtbl list
         !rtbl add <service_jid> <node>
         !rtbl delete <service_jid> [node]
+        !rtbl ignore list
+        !rtbl ignore add <jid|domain> [reason]
+        !rtbl ignore remove <jid|domain>
         !rtbl publish status
         !rtbl publish sync
         """
@@ -752,6 +813,9 @@ class RtblMixin:
                 f"  {p}rtbl list",
                 f"  {p}rtbl add <service_jid> <node>",
                 f"  {p}rtbl delete <service_jid> [node]",
+                f"  {p}rtbl ignore list",
+                f"  {p}rtbl ignore add <jid|domain> [reason]",
+                f"  {p}rtbl ignore remove <jid|domain>",
             ]
             if getattr(self, "rtbl_publish_enabled", False):
                 lines += [
@@ -918,6 +982,171 @@ class RtblMixin:
             return
 
         # ----------------------------------------------------------------
+        # ignore
+        # ----------------------------------------------------------------
+        if action == "ignore":
+            sub_action = args[1].lower() if len(args) >= 2 else "list"
+
+            if sub_action == "list":
+                async with self.db.execute(
+                    "SELECT COUNT(*) FROM rtbl_ignorelist"
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    total = row[0] if row else 0
+
+                page = 1
+                if len(args) >= 3:
+                    if args[2].lower() == "last":
+                        page = -1
+                    else:
+                        try:
+                            page = max(1, int(args[2]))
+                        except ValueError:
+                            pass
+
+                if total == 0:
+                    self.send_message(
+                        mto=room,
+                        mbody="🚫 RTBL Ignorelist:\n  (none)",
+                        mtype="groupchat",
+                    )
+                    return
+
+                per_page = 10
+                resolved_page = resolve_page(page, total, per_page)
+                offset = (resolved_page - 1) * per_page
+                total_pages = max(1, (total + per_page - 1) // per_page)
+
+                async with self.db.execute(
+                    "SELECT target, target_type, reason, added_by FROM rtbl_ignorelist "
+                    "ORDER BY target_type, target LIMIT ? OFFSET ?",
+                    (per_page, offset),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
+                lines = [f"🚫 RTBL Ignorelist ({total}) - Page {resolved_page}/{total_pages}:"]
+                for target, target_type, reason, added_by in rows:
+                    reason_str = f" — {reason}" if reason else ""
+                    added_str  = f" (by {added_by})" if added_by else ""
+                    emoji = "🔑" if target_type == "jid" else "🌐"
+                    lines.append(f"  {emoji} {target}{reason_str}{added_str}")
+
+                if resolved_page < total_pages:
+                    lines.append(f"\nUse {p}rtbl ignore list {resolved_page + 1} for the next page.")
+
+                self.send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
+                return
+
+            if sub_action == "add":
+                if len(args) < 3:
+                    self.send_message(
+                        mto=room,
+                        mbody=f"❌ Usage: {p}rtbl ignore add <jid|domain> [reason]",
+                        mtype="groupchat",
+                    )
+                    return
+
+                raw_target = args[2].strip().lower()
+                reason     = " ".join(args[3:]) if len(args) > 3 else None
+
+                if "@" in raw_target and not raw_target.startswith("*."):
+                    target      = raw_target
+                    target_type = "jid"
+                else:
+                    target      = f"*.{raw_target.lstrip('*.')}"
+                    target_type = "domain"
+
+                await self.db.execute(
+                    """
+                    INSERT INTO rtbl_ignorelist (target, target_type, reason, added_by)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(target) DO UPDATE SET
+                        reason   = excluded.reason,
+                        added_by = excluded.added_by
+                    """,
+                    (target, target_type, reason, actor),
+                )
+                await self.db.commit()
+                await self._load_rtbl_ignorelist_from_db()
+
+                self.log_event(
+                    logging.INFO, "rtbl_ignore_added",
+                    actor=actor, target_type=target_type, target=target, comment=reason,
+                )
+                await self.audit_event(
+                    "rtbl_ignore_added", actor=actor,
+                    target_type=target_type, target=target, comment=reason,
+                )
+
+                self.send_message(
+                    mto=room,
+                    mbody=f"✅ RTBL: Added {target} to ignorelist.",
+                    mtype="groupchat",
+                )
+                return
+
+            if sub_action in ("remove", "del", "delete"):
+                if len(args) < 3:
+                    self.send_message(
+                        mto=room,
+                        mbody=f"❌ Usage: {p}rtbl ignore remove <jid|domain>",
+                        mtype="groupchat",
+                    )
+                    return
+
+                raw_target = args[2].strip().lower()
+                targets_to_try = sorted(set([
+                    raw_target,
+                    raw_target.lstrip("*."),
+                    f"*.{raw_target.lstrip('*.')}",
+                ]))
+
+                found = None
+                for t in targets_to_try:
+                    async with self.db.execute(
+                        "SELECT target FROM rtbl_ignorelist WHERE target = ?", (t,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    if row:
+                        found = row[0]
+                        break
+
+                if not found:
+                    self.send_message(
+                        mto=room,
+                        mbody=f"⚠️ RTBL: {raw_target} was not in the ignorelist.",
+                        mtype="groupchat",
+                    )
+                    return
+
+                await self.db.execute(
+                    "DELETE FROM rtbl_ignorelist WHERE target = ?", (found,)
+                )
+                await self.db.commit()
+                await self._load_rtbl_ignorelist_from_db()
+
+                self.log_event(
+                    logging.INFO, "rtbl_ignore_removed",
+                    actor=actor, target=found,
+                )
+                await self.audit_event(
+                    "rtbl_ignore_removed", actor=actor, target=found,
+                )
+                self.send_message(
+                    mto=room,
+                    mbody=f"✅ RTBL: Removed {found} from ignorelist.",
+                    mtype="groupchat",
+                )
+                return
+
+            self.send_message(
+                mto=room,
+                mbody=f"❌ Unknown ignore sub-command: {sub_action}\nAvailable: list / add / remove",
+                mtype="groupchat",
+            )
+            return
+
+        # ----------------------------------------------------------------
         # publish
         # ----------------------------------------------------------------
         if action == "publish":
@@ -993,7 +1222,7 @@ class RtblMixin:
             mto=room,
             mbody=(
                 f"❌ Unknown RTBL action: {action}\n"
-                f"Available: list / add / delete / publish"
+                f"Available: list / add / delete / ignore / publish"
             ),
             mtype="groupchat",
         )
@@ -1117,10 +1346,7 @@ class RtblMixin:
     ) -> None:
         """
         Publish a single ban to the appropriate own RTBL node.
-
         Called from ban_all() after upsert_ban_db() succeeds.
-          jid    -> hashed and published to the JID node
-          domain -> published as plaintext to the domain node
         """
         if not getattr(self, "rtbl_publish_enabled", False):
             return
@@ -1143,7 +1369,6 @@ class RtblMixin:
     ) -> None:
         """
         Retract a ban from the appropriate own RTBL node.
-
         Called from unban_all() after the ban has been removed from DB.
         """
         if not getattr(self, "rtbl_publish_enabled", False):
