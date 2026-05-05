@@ -165,69 +165,130 @@ class RtblMixin:
 
     async def _rtbl_fetch_all_items(self, service_jid: str, node: str) -> None:
         """
-        Fetch all current items from an RTBL node and persist them.
+        Fetch all current items from an RTBL node using manual RSM pagination
+        (XEP-0059) via fully raw XML IQ construction.
         Items are classified as JID hashes or domain bans by their ID format.
         Unknown formats are skipped with a debug log entry.
         """
         from config import ADMIN_ROOM
+        from xml.etree import ElementTree as ET
 
-        try:
-            result = await self.plugin["xep_0060"].get_items(service_jid, node)
-            items = result["pubsub"]["items"]
-        except (IqError, IqTimeout) as e:
-            log.warning("RTBL: Could not fetch items from '%s' @ %s: %s", node, service_jid, e)
-            return
+        _PUBSUB = "http://jabber.org/protocol/pubsub"
+        _RSM    = "http://jabber.org/protocol/rsm"
 
-        hash_count = 0
+        hash_count   = 0
         domain_count = 0
+        page         = 0
+        last_id      = None
+        page_size    = 200
 
-        for item in items:
+        while True:
             try:
-                item_id = item["id"].lower().strip()
-            except Exception:
-                continue
-            if not item_id:
-                continue
+                iq = self.make_iq_get(ito=service_jid)
 
-            reason = self._rtbl_extract_reason(item.get("payload"))
+                # Build <pubsub><items node="..."/><set><max>N</max>[<after>…</after>]</set></pubsub>
+                pubsub_el = ET.Element(f"{{{_PUBSUB}}}pubsub")
+                items_el  = ET.SubElement(pubsub_el, f"{{{_PUBSUB}}}items")
+                items_el.set("node", node)
 
-            if _is_sha256(item_id):
-                await self.db.execute(
-                    """
-                    INSERT INTO rtbl_hashes (hash, service_jid, node, reason)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(hash, service_jid, node) DO UPDATE SET
-                        reason = excluded.reason
-                    """,
-                    (item_id, service_jid, node, reason),
+                rsm_set  = ET.SubElement(pubsub_el, f"{{{_RSM}}}set")
+                max_el   = ET.SubElement(rsm_set, f"{{{_RSM}}}max")
+                max_el.text = str(page_size)
+                if last_id is not None:
+                    after_el      = ET.SubElement(rsm_set, f"{{{_RSM}}}after")
+                    after_el.text = last_id
+
+                # Replace any existing payload with our hand-built element
+                for child in list(iq.xml):
+                    iq.xml.remove(child)
+                iq.xml.append(pubsub_el)
+
+                result = await iq.send()
+
+                # Parse items from raw XML response
+                result_pubsub = result.xml.find(f"{{{_PUBSUB}}}pubsub")
+                if result_pubsub is None:
+                    break
+                result_items_el = result_pubsub.find(f"{{{_PUBSUB}}}items")
+                items = list(result_items_el) if result_items_el is not None else []
+
+            except (IqError, IqTimeout) as e:
+                log.warning(
+                    "RTBL: Could not fetch items from '%s' @ %s (page %d): %s",
+                    node, service_jid, page, e,
                 )
-                hash_count += 1
+                break
 
-            elif _is_domain(item_id):
-                domain = item_id.lstrip("*.")
-                await self.db.execute(
-                    """
-                    INSERT INTO rtbl_domains (domain, service_jid, node, reason)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(domain, service_jid, node) DO UPDATE SET
-                        reason = excluded.reason
-                    """,
-                    (domain, service_jid, node, reason),
-                )
-                domain_count += 1
+            if not items:
+                break
 
-            else:
-                log.debug(
-                    "RTBL: Skipping unrecognised item ID '%s' from %s/%s",
-                    item_id, service_jid, node,
-                )
+            for item_el in items:
+                item_id = item_el.get("id", "").lower().strip()
+                if not item_id:
+                    continue
 
-        await self.db.commit()
+                # Extract reason from payload child element
+                payload = item_el[0] if len(item_el) > 0 else None
+                reason  = self._rtbl_extract_reason(payload)
+
+                if _is_sha256(item_id):
+                    await self.db.execute(
+                        """
+                        INSERT INTO rtbl_hashes (hash, service_jid, node, reason)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(hash, service_jid, node) DO UPDATE SET
+                            reason = excluded.reason
+                        """,
+                        (item_id, service_jid, node, reason),
+                    )
+                    hash_count += 1
+
+                elif _is_domain(item_id):
+                    domain = item_id.lstrip("*.")
+                    await self.db.execute(
+                        """
+                        INSERT INTO rtbl_domains (domain, service_jid, node, reason)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(domain, service_jid, node) DO UPDATE SET
+                            reason = excluded.reason
+                        """,
+                        (domain, service_jid, node, reason),
+                    )
+                    domain_count += 1
+
+                else:
+                    log.debug(
+                        "RTBL: Skipping unrecognised item ID '%s' from %s/%s",
+                        item_id, service_jid, node,
+                    )
+
+            await self.db.commit()
+            page   += 1
+            last_id = items[-1].get("id") if items else None
+
+            log.debug(
+                "RTBL: Page %d — %d hashes, %d domains so far (last: %s…)",
+                page, hash_count, domain_count,
+                last_id[:12] if last_id else "none",
+            )
+
+            # Read RSM <last> from the response XML to detect end of result set
+            rsm_el   = result.xml.find(f".//{{{_RSM}}}set")
+            rsm_last = None
+            if rsm_el is not None:
+                last_el  = rsm_el.find(f"{{{_RSM}}}last")
+                rsm_last = last_el.text.strip() if last_el is not None and last_el.text else None
+
+            log.debug("RTBL: RSM last=%s", rsm_last)
+
+            if not rsm_last or len(items) < page_size:
+                break
+
         await self._rebuild_rtbl_caches()
 
         log.info(
-            "RTBL: Fetched from '%s' @ %s — %d hashes, %d domains",
-            node, service_jid, hash_count, domain_count,
+            "RTBL: Fetched from '%s' @ %s — %d hashes, %d domains (%d pages)",
+            node, service_jid, hash_count, domain_count, page,
         )
 
         if self.rtbl_announce and (hash_count + domain_count) > 0:
@@ -648,7 +709,7 @@ class RtblMixin:
     # Bot commands: !rtbl list / add / delete / publish
     # ------------------------------------------------------------------
 
-    async def cmd_rtbl(self, args: list[str], room: str) -> None:
+    async def cmd_rtbl(self, args: list[str], room: str, actor: str = "unknown") -> None:
         """
         Manage RTBL subscriptions and the optional own publish feed.
 
@@ -754,6 +815,17 @@ class RtblMixin:
                 mtype="groupchat",
             )
             await self._rtbl_subscribe_and_fetch(service_jid, node)
+            self.log_event(
+                logging.INFO, "rtbl_subscription_added",
+                actor=actor, target_type="rtbl", target=f"{service_jid}/{node}",
+            )
+            await self.audit_event(
+                "rtbl_subscription_added",
+                actor=actor,
+                target_type="rtbl",
+                target=f"{service_jid}/{node}",
+                comment=f"Subscribed to node '{node}' @ {service_jid}",
+            )
             return
 
         # ----------------------------------------------------------------
@@ -799,6 +871,17 @@ class RtblMixin:
 
             await self.db.commit()
             await self._load_rtbl_subscriptions_from_db()
+            self.log_event(
+                logging.INFO, "rtbl_subscription_removed",
+                actor=actor, target_type="rtbl", target=f"{service_jid}/{node or '*'}",
+            )
+            await self.audit_event(
+                "rtbl_subscription_removed",
+                actor=actor,
+                target_type="rtbl",
+                target=f"{service_jid}/{node or '*'}",
+                comment=f"Removed {label}",
+            )
 
             self.send_message(
                 mto=room,

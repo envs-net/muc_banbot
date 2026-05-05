@@ -367,7 +367,8 @@ class CommandMixin:
                     mtype="groupchat",
                 )
                 return True
-            await self.cmd_rtbl(args, room)
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            await self.cmd_rtbl(args, room, actor=actor_jid)
             return True
 
         return True
