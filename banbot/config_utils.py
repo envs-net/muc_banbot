@@ -74,10 +74,11 @@ class ConfigMixin:
         "MAX_TEMPBAN_DAYS",
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW",
         "PUBLIC_COMMAND_RATE_LIMIT_MAX",
+        "MUC_WRITE_SEMAPHORE",
         "STRUCTURED_EVENT_LOGS",
         "AUDIT_LOG_ENABLED",
         "AUDIT_LOG_RETENTION_DAYS",
-        "MUC_WRITE_SEMAPHORE",
+        "RTBL_ANNOUNCE",
         "VERSION_CHECK_ENABLED",
         "VERSION_CHECK_INTERVAL",
         "VERSION_CHECK_URL",
@@ -98,6 +99,11 @@ class ConfigMixin:
         "ADMIN_ROOM",
         "NICK",
         "DB_FILE",
+        "RTBL_ENABLED",
+        "RTBL_PUBLISH_ENABLED",
+        "RTBL_PUBLISH_SERVICE",
+        "RTBL_PUBLISH_JID_NODE",
+        "RTBL_PUBLISH_DOMAIN_NODE",
     )
 
 
@@ -114,10 +120,11 @@ class ConfigMixin:
             "MAX_TEMPBAN_DAYS": self.max_tempban_days,
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": self.public_command_rate_limit_window,
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": self.public_command_rate_limit_max,
+            "MUC_WRITE_SEMAPHORE": self.muc_write_limit,
             "STRUCTURED_EVENT_LOGS": self.structured_event_logs,
             "AUDIT_LOG_ENABLED": self.audit_log_enabled,
             "AUDIT_LOG_RETENTION_DAYS": self.audit_log_retention_days,
-            "MUC_WRITE_SEMAPHORE": self.muc_write_limit,
+            "RTBL_ANNOUNCE": self.rtbl_announce,
             "VERSION_CHECK_ENABLED": self.version_check_enabled,
             "VERSION_CHECK_INTERVAL": self.version_check_interval,
             "VERSION_CHECK_URL": self.version_check_url,
@@ -266,6 +273,30 @@ class ConfigMixin:
             if str(db_parent) not in ("", ".") and not db_parent.exists():
                 errors.append(f"DB_FILE directory does not exist: {db_parent}")
 
+        # --- RTBL ---
+        if not isinstance(getattr(config, "RTBL_ENABLED", False), bool):
+            errors.append("RTBL_ENABLED must be True or False")
+        if not isinstance(getattr(config, "RTBL_ANNOUNCE", True), bool):
+            errors.append("RTBL_ANNOUNCE must be True or False")
+
+        # --- RTBL Publish ---
+        rtbl_pub = getattr(config, "RTBL_PUBLISH_ENABLED", False)
+        if not isinstance(rtbl_pub, bool):
+            errors.append("RTBL_PUBLISH_ENABLED must be True or False")
+
+        if rtbl_pub:
+            pub_service = str(getattr(config, "RTBL_PUBLISH_SERVICE", "")).strip()
+            pub_jid_node = str(getattr(config, "RTBL_PUBLISH_JID_NODE", "")).strip()
+            pub_domain_node = str(getattr(config, "RTBL_PUBLISH_DOMAIN_NODE", "")).strip()
+            if not pub_service:
+                errors.append("RTBL_PUBLISH_SERVICE must not be empty when RTBL_PUBLISH_ENABLED=True")
+            elif "." not in pub_service:
+                errors.append("RTBL_PUBLISH_SERVICE must be a valid JID like pubsub.domain.tld")
+            if not pub_jid_node:
+                errors.append("RTBL_PUBLISH_JID_NODE must not be empty when RTBL_PUBLISH_ENABLED=True")
+            if not pub_domain_node:
+                errors.append("RTBL_PUBLISH_DOMAIN_NODE must not be empty when RTBL_PUBLISH_ENABLED=True")
+
         return errors, warnings
 
 
@@ -325,6 +356,8 @@ class ConfigMixin:
         self.version_check_enabled = getattr(config, "VERSION_CHECK_ENABLED", False)
         self.version_check_interval = getattr(config, "VERSION_CHECK_INTERVAL", 3600)
         self.version_check_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip() or None
+
+        self.rtbl_announce = getattr(config, "RTBL_ANNOUNCE", True)
 
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:

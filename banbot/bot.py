@@ -35,6 +35,7 @@ from .muc import MucMixin
 from .sync import SyncMixin
 from .vcard import VCardMixin
 from .updates import UpdateMixin
+from .rtbl import RtblMixin
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class BanBot(
     SyncMixin,
     VCardMixin,
     UpdateMixin,
+    RtblMixin,
 ):
     bare_jid = staticmethod(bare_jid)
     safe_jid = staticmethod(safe_jid)
@@ -138,6 +140,23 @@ class BanBot(
         self.last_version_check_result: str | None = None
         self.last_update_notified_version: str | None = None
 
+        # --- RTBL ---
+        self.rtbl_enabled: bool = getattr(config, "RTBL_ENABLED", False)
+        self.rtbl_announce: bool = getattr(config, "RTBL_ANNOUNCE", True)
+        self.rtbl_subscriptions: list[tuple[str, str]] = []   # loaded from DB
+        self.rtbl_hash_cache: dict[str, str | None] = {}      # hash → reason
+        self._rtbl_handlers_registered: bool = False
+
+        # --- RTBL Publish ---
+        self.rtbl_publish_enabled: bool = getattr(config, "RTBL_PUBLISH_ENABLED", False)
+        self.rtbl_publish_service: str = getattr(config, "RTBL_PUBLISH_SERVICE", "")
+        self.rtbl_publish_jid_node: str = getattr(config, "RTBL_PUBLISH_JID_NODE", "muc_bans_sha256")
+        self.rtbl_publish_domain_node: str = getattr(config, "RTBL_PUBLISH_DOMAIN_NODE", "muc_bans_domains")
+
+        # --- RTBL runtime caches (populated by setup_rtbl) ---
+        self.rtbl_hash_cache: dict[str, str | None] = {}
+        self.rtbl_domain_cache: dict[str, str | None] = {}
+
         # --- apply config ---
         self.apply_runtime_config()
 
@@ -145,6 +164,7 @@ class BanBot(
         self.register_plugin("xep_0030")  # Service Discovery
         self.register_plugin("xep_0045")  # Multi-User Chat
         self.register_plugin('xep_0054')  # vCard
+        self.register_plugin("xep_0060")  # PubSub (RTBL)
         self.register_plugin('xep_0084')  # Modern Avatar
         self.register_plugin('xep_0153')  # vCard Avatar compatibility
 
@@ -229,6 +249,12 @@ class BanBot(
 
         # --- Apply all bans in parallel at startup ---
         await self.sync_bans_startup()
+
+        # --- Setup RTBL subscriptions ---
+        await self.setup_rtbl()
+
+        # --- Setup RTBL Publish-Node ---
+        await self.setup_rtbl_publish()
 
         # --- Start unban worker ---
         self.unban_task = asyncio.create_task(self.unban_worker())

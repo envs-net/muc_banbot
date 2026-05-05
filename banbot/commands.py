@@ -207,6 +207,7 @@ class CommandMixin:
             "export",
             "import",
             "audit",
+            "rtbl",
         }
 
         if cmd not in admin_commands:
@@ -358,6 +359,17 @@ class CommandMixin:
             await self.audit_event("import_completed", actor=nick, details={"filename": filename, "successful": successful, "skipped": skipped, "errors": len(errors), "backup": self.last_import_backup_file})
             return True
 
+        if cmd == "rtbl":
+            if not getattr(self, "rtbl_enabled", False):
+                self.send_message(
+                    mto=room,
+                    mbody="❌ RTBL is disabled. Set RTBL_ENABLED = True in config.py and restart.",
+                    mtype="groupchat",
+                )
+                return True
+            await self.cmd_rtbl(args, room)
+            return True
+
         return True
 
 
@@ -393,7 +405,12 @@ class CommandMixin:
             f"{p}syncadmins - update admin list from the admin room\n"
             f"{p}syncbans - sync bans from all rooms into the database and enforce them\n\n"
             f"{p}export - export all bans to a CSV file\n"
-            f"{p}import <filename> - import bans from a CSV file"
+            f"{p}import <filename> - import bans from a CSV file\n\n"
+            f"{p}rtbl list - show active RTBL subscriptions\n"
+            f"{p}rtbl add <service> <node> - subscribe to a RTBL node\n"
+            f"{p}rtbl delete <service> [node] - remove a RTBL subscription\n"
+            f"{p}rtbl publish status - Status of your own RTBL feed\n"
+            f"{p}rtbl publish sync - Publish all current bans to your own feed\n"
         )
 
 
@@ -419,6 +436,21 @@ class CommandMixin:
         config_lines.append(f"📅 Max Tempban Days: {self.max_tempban_days}")
         config_lines.append(f"🚦 Public Command Rate Limit: {self.public_command_rate_limit_max}/{self.public_command_rate_limit_window}s")
         config_lines.append(f"🔌 MUC Write Semaphore: {self.muc_write_limit}")
+        config_lines.append("")
+        config_lines.append(f"🛡️ RTBL Enabled: {self.rtbl_enabled}")
+        config_lines.append(f"📢 RTBL Announce: {self.rtbl_announce}")
+        if self.rtbl_enabled:
+            if self.rtbl_subscriptions:
+                subs = ", ".join(f"{s}/{n}" for s, n in self.rtbl_subscriptions)
+                config_lines.append(f"📋 RTBL Subscriptions: {subs}")
+            else:
+                config_lines.append(f"📋 RTBL Subscriptions: (none)")
+
+        config_lines.append(f"📡 RTBL Publish Enabled: {getattr(self, 'rtbl_publish_enabled', False)}")
+        if getattr(self, "rtbl_publish_enabled", False):
+            config_lines.append(f"   Service:     {self.rtbl_publish_service}")
+            config_lines.append(f"   JID node:    {self.rtbl_publish_jid_node}")
+            config_lines.append(f"   Domain node: {self.rtbl_publish_domain_node}")
         config_lines.append("")
         config_lines.append(f"🔄 Version Check Enabled: {self.version_check_enabled}")
         config_lines.append(f"🕒 Version Check Interval: {self.version_check_interval}s")

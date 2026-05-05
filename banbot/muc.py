@@ -190,6 +190,12 @@ class MucMixin:
         if self.is_admin_or_owner(room, nick=nick, jid=jid_str):
             return
 
+        # --- RTBL check (protected rooms only, not admin room) ---
+        if jid_str and room in self.protected_rooms:
+            rtbl_hit = await self.check_jid_against_rtbl(jid_str, nick)
+            if rtbl_hit:
+                return  # already banned via RTBL, skip the rest
+
         # --- Auto-update JID if nick-only ban exists ---
         if jid_str and nick:
             async with self.db.execute(

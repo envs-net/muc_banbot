@@ -34,6 +34,13 @@ MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default
 PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 30
 PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 
+# ================= PERFORMANCE TUNING =================
+
+# Concurrency limit for MUC write operations (IQ stanzas to XMPP server)
+# Each ban/unban operation = 1 IQ request. Higher = faster but more server load.
+# Recommended: 5-20 (default: 5)
+MUC_WRITE_SEMAPHORE = 5
+
 # ================= LOGGING / AUDIT =================
 
 # Structured event logs are emitted as JSON for important moderation events.
@@ -45,12 +52,25 @@ STRUCTURED_EVENT_LOGS = True
 AUDIT_LOG_ENABLED = True
 AUDIT_LOG_RETENTION_DAYS = 365
 
-# ================= PERFORMANCE TUNING =================
+# ================= RTBL (Real-Time Block List) =================
 
-# Concurrency limit for MUC write operations (IQ stanzas to XMPP server)
-# Each ban/unban operation = 1 IQ request. Higher = faster but more server load.
-# Recommended: 5-20 (default: 5)
-MUC_WRITE_SEMAPHORE = 5
+# Enable RTBL PubSub support.
+# Subscriptions are managed via !rtbl add / !rtbl delete in the admin room.
+# Requires a restart when changed.
+RTBL_ENABLED = False
+
+# True = announce RTBL bans (and skipped admin-protected entries) in the admin room.
+# Can be changed at runtime via !reloadconfig.
+RTBL_ANNOUNCE = True
+
+# ---- Own RTBL feed (others can subscribe to this node) ----
+# Requires a PubSub service on your own XMPP server.
+# Some servers (e.g., ejabberd, Prosody with mod_pubsub) offer pubsub.domain.tld.
+# Requires a restart when changed.
+RTBL_PUBLISH_ENABLED = False
+RTBL_PUBLISH_SERVICE = "pubsub.domain.tld" # PubSub Service JID
+RTBL_PUBLISH_JID_NODE = "muc_bans_sha256"      # Node for SHA-256 hashed JID bans
+RTBL_PUBLISH_DOMAIN_NODE = "muc_bans_domains"  # Node for plaintext domain bans
 
 # ================= UPDATE CHECK =================
 

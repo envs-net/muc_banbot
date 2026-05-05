@@ -458,6 +458,13 @@ class ModerationMixin:
             )
             return
 
+        # --- RTBL Publish: Update your own ban feed ---
+        # (JID and domain bans only, no nick-only bans)
+        if target_type == "jid" and normalized_jid and not normalized_jid.startswith("*."):
+            await self.rtbl_publish_ban(jid=normalized_jid, domain=None, comment=comment)
+        elif target_type == "domain" and target:
+            await self.rtbl_publish_ban(jid=None, domain=target, comment=comment)
+
         event_type = "ban_updated" if skip_final_message else "ban_applied"
         log.info("Ban applied: identifier=%s, JID/Nick=%s/%s, until=%s, issuer=%s",
                  identifier, normalized_jid, normalized_nick, ts, issuer)
@@ -678,6 +685,12 @@ class ModerationMixin:
             (target_type, target),
         )
         await self.db.commit()
+
+        # --- RTBL Publish: Withdraw ban from own feed ---
+        if target_type == "jid" and ban_jid and not (ban_jid or "").startswith("*."):
+            await self.rtbl_retract_ban(jid=ban_jid, domain=None)
+        elif target_type == "domain" and domain:
+            await self.rtbl_retract_ban(jid=None, domain=domain)
 
         if is_domain_ban and domain:
             self._remove_domain_bans_from_cache(domain)
