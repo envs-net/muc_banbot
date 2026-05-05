@@ -101,6 +101,7 @@ class BanBot(
         self.registered_rooms: set[str] = set()
         self.room_join_time: dict[str, float] = {}
         self.reconnecting = False
+        self.last_reconnect_time: float | None = None
         self.reconnect_task: asyncio.Task | None = None
         self.health_check_task: asyncio.Task | None = None
         self.unban_task: asyncio.Task | None = None
@@ -213,6 +214,7 @@ class BanBot(
             # First connection only
             self.bot_start_time = time.time()
         else:
+            self.last_reconnect_time = time.time()
             log.info("🔄 Reconnected successfully")
 
         self.reconnect_task = None
