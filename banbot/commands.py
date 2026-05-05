@@ -457,7 +457,7 @@ class CommandMixin:
             f"{p}import <filename> - import bans from a CSV file\n\n"
             f"{p}ignore list [page] - show global ignorelist\n"
             f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
-            f"{p}ignore remove <jid|domain> - remove from ignorelist\n"
+            f"{p}ignore remove <jid|domain> - remove from ignorelist\n\n"
             f"{p}rtbl list - show active RTBL subscriptions\n"
             f"{p}rtbl add <service> <node> - subscribe to a RTBL node\n"
             f"{p}rtbl delete <service> [node] - remove a RTBL subscription\n"
@@ -601,12 +601,6 @@ class CommandMixin:
 
         status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
 
-        if getattr(self, "rtbl_enabled", False):
-            rtbl_hashes = len(getattr(self, "rtbl_hash_cache", {}))
-            rtbl_domains = len(getattr(self, "rtbl_domain_cache", {}))
-            rtbl_subscriptions = len(getattr(self, "rtbl_subscriptions", []))
-            status_lines.append(f"🛡️ RTBL Bans: {rtbl_hashes} JID hashes, {rtbl_domains} domains")
-            status_lines.append(f"📋 RTBL Subscriptions: {rtbl_subscriptions}")
         status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
         status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
         status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")
@@ -614,6 +608,14 @@ class CommandMixin:
             status_lines.append(f"⚠️ Affiliation-query fallback rooms: {len(self.admin_affiliation_query_forbidden_rooms)}")
         if self.last_import_backup_file:
             status_lines.append(f"💾 Last Import Backup: {self.last_import_backup_file}")
+
+        # rtlb
+        if getattr(self, "rtbl_enabled", False):
+            rtbl_hashes = len(getattr(self, "rtbl_hash_cache", {}))
+            rtbl_domains = len(getattr(self, "rtbl_domain_cache", {}))
+            rtbl_subscriptions = len(getattr(self, "rtbl_subscriptions", []))
+            status_lines.append(f"🛡️ RTBL Bans: {rtbl_hashes} JID hashes, {rtbl_domains} domains")
+            status_lines.append(f"📋 RTBL Subscriptions: {rtbl_subscriptions}")
 
         # admins
         admin_infos = self.occupants.get(ADMIN_ROOM, {})
