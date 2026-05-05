@@ -1186,6 +1186,34 @@ class RtblMixin:
             )
 
 
+    async def _rtbl_refresh_worker(self) -> None:
+        """
+        Periodically re-fetch all items from every subscribed RTBL node.
+        Interval is controlled by RTBL_REFRESH_INTERVAL (seconds, 0 = disabled).
+        Acts as a fallback for missed PubSub events.
+        """
+        while True:
+            interval = getattr(self, "rtbl_refresh_interval", 3600)
+            if interval <= 0:
+                await asyncio.sleep(60)  # check again in 60s in case config changes
+                continue
+
+            await asyncio.sleep(interval)
+
+            if not getattr(self, "rtbl_enabled", False):
+                continue
+
+            log.info("RTBL: Starting periodic refresh (%ds interval)", interval)
+            for service_jid, node in list(self.rtbl_subscriptions):
+                try:
+                    await self._rtbl_fetch_all_items(service_jid, node)
+                except Exception as e:
+                    log.warning(
+                        "RTBL: Periodic refresh failed for '%s' @ %s: %s",
+                        node, service_jid, e,
+                    )
+            log.info("RTBL: Periodic refresh complete")
+
 # ------------------------------------------------------------------
 # Module-level helpers (not part of the mixin)
 # ------------------------------------------------------------------

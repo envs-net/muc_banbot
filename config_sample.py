@@ -63,6 +63,11 @@ RTBL_ENABLED = False
 # Can be changed at runtime via !reloadconfig.
 RTBL_ANNOUNCE = True
 
+# Periodically re-fetch all items from subscribed RTBL nodes (full refresh).
+# Acts as a fallback in case PubSub events were missed (e.g. after reconnect).
+# Set to 0 to disable. Default: 3600 (once per hour).
+RTBL_REFRESH_INTERVAL = 3600
+
 # ---- Own RTBL feed (others can subscribe to this node) ----
 # Requires a PubSub service on your own XMPP server.
 # Some servers (e.g., ejabberd, Prosody with mod_pubsub) offer pubsub.domain.tld.

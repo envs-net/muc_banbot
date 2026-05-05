@@ -11,7 +11,7 @@ from config import ADMIN_ROOM, DB_FILE, JID, NICK
 from slixmpp.exceptions import IqError, IqTimeout
 
 from .config_utils import get_config_resource
-from .utils import human_time, paginate_lines, parse_duration
+from .utils import human_time, paginate_lines, parse_duration, resolve_page
 from ._version import __version__
 
 log = logging.getLogger(__name__)
@@ -157,18 +157,40 @@ class CommandMixin:
             return True
 
         if cmd == "banlist" and self.user_cmds_allowed(room):
+            if args and args[0].lower() == "rtbl":
+                if room != ADMIN_ROOM:
+                    return True
+                page = 1
+                if len(args) >= 2:
+                    if args[1].lower() == "last":
+                        page = -1  # sentinel: last page
+                    else:
+                        try:
+                            page = max(1, int(args[1]))
+                        except ValueError:
+                            self.send_message(
+                                mto=room,
+                                mbody=f"❌ Usage: {self.command_prefix}banlist rtbl [page|last]",
+                                mtype="groupchat",
+                            )
+                            return True
+                await self.cmd_banlist_rtbl(room, page=page)
+                return True
+
             page = 1
             if len(args) >= 1:
-                try:
-                    page = max(1, int(args[0]))
-                except ValueError:
-                    self.send_message(
-                        mto=room,
-                        mbody=f"❌ Usage: {self.command_prefix}banlist [page]",
-                        mtype="groupchat"
-                    )
-                    return True
-
+                if args[0].lower() == "last":
+                    page = -1  # sentinel: last page
+                else:
+                    try:
+                        page = max(1, int(args[0]))
+                    except ValueError:
+                        self.send_message(
+                            mto=room,
+                            mbody=f"❌ Usage: {self.command_prefix}banlist [page|last]",
+                            mtype="groupchat",
+                        )
+                        return True
             await self.cmd_banlist(room, page=page)
             return True
 
@@ -296,8 +318,27 @@ class CommandMixin:
 
         if cmd == "bansearch":
             if len(args) >= 1:
-                query = " ".join(args)
-                await self.cmd_bansearch(query)
+                # Last arg is page number or "last", rest is query
+                page = 1
+                query_args = args
+                if args[-1].lower() == "last":
+                    page = -1
+                    query_args = args[:-1]
+                else:
+                    try:
+                        page = max(1, int(args[-1]))
+                        query_args = args[:-1]
+                    except ValueError:
+                        pass  # No page number — use all args as query
+                if not query_args:
+                    self.send_message(
+                        mto=room,
+                        mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [page|last]",
+                        mtype="groupchat",
+                    )
+                    return True
+                query = " ".join(query_args)
+                await self.cmd_bansearch(query, page=page)
             return True
 
         if cmd == "sync":
@@ -398,9 +439,10 @@ class CommandMixin:
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
             f"{p}unban <jid|nick> - remove ban\n\n"
-            f"{p}audit [page|query] - show recent audit events\n"
-            f"{p}banlist [page] - show all active bans with remaining time and comments\n"
-            f"{p}bansearch <query> - search bans by nick, domain or jid\n"
+            f"{p}audit [page|last|query] - show recent audit events\n"
+            f"{p}banlist [page|last] - show all active bans with remaining time and comments\n"
+            f"{p}banlist rtbl [page|last] - show all RTBL hash and domain entries\n"
+            f"{p}bansearch <query> [page|last] - search bans by nick, domain, jid or RTBL reason\n"
             f"{p}why <nick|jid> - show the reason and remaining time for a ban\n\n"
             f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"
             f"{p}syncadmins - update admin list from the admin room\n"
@@ -440,6 +482,7 @@ class CommandMixin:
         config_lines.append("")
         config_lines.append(f"🛡️ RTBL Enabled: {self.rtbl_enabled}")
         config_lines.append(f"📢 RTBL Announce: {self.rtbl_announce}")
+        config_lines.append(f"🔄 RTBL Refresh Interval: {self.rtbl_refresh_interval}s" if self.rtbl_refresh_interval > 0 else "🔄 RTBL Refresh: disabled")
         if self.rtbl_enabled:
             if self.rtbl_subscriptions:
                 subs = ", ".join(f"{s}/{n}" for s, n in self.rtbl_subscriptions)
@@ -887,12 +930,17 @@ class CommandMixin:
         return f"{emoji} {jid or nick or 'Unknown'} ({remaining}, by {issuer}" + (f", {comment}" if comment else "") + ")"
 
 
-    async def cmd_bansearch(self, query: str) -> None:
+    async def cmd_bansearch(self, query: str, page: int = 1) -> None:
         """
         Searches bans by JID, nick, domain, issuer, or comment/reason.
+        Also searches RTBL hashes (by hashing the query if it looks like a JID,
+        or by reason) and RTBL domain bans (by domain or reason).
+
         Supports optional filters:
         jid:<query>, nick:<query>, domain:<query>, issuer:<query>, by:<query>,
         comment:<query>, reason:<query>
+
+        Usage: !bansearch <query> [page|last]
         """
         raw_query = query.strip()
         q = raw_query.lower()
@@ -917,8 +965,8 @@ class CommandMixin:
         if not value:
             self.send_message(
                 mto=ADMIN_ROOM,
-                mbody=f"❌ Usage: {self.command_prefix}bansearch <query>",
-                mtype="groupchat"
+                mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [page|last]",
+                mtype="groupchat",
             )
             return
 
@@ -929,7 +977,7 @@ class CommandMixin:
                 seen.add(key)
                 matches.append(self._format_ban_match(jid, nick, until, issuer, comment, now))
 
-        # Direct index lookup for unfiltered broad searches.
+        # --- Regular bans ---
         if field is None:
             if value in self.ban_index_by_jid:
                 add_match(self.ban_index_by_jid[value])
@@ -943,9 +991,9 @@ class CommandMixin:
                     add_match(ban)
 
         for _, (jid, nick, until, issuer, comment) in self.ban_cache.items():
-            jid_value = jid or ""
-            nick_value = nick or ""
-            issuer_value = issuer or ""
+            jid_value   = jid or ""
+            nick_value  = nick or ""
+            issuer_value  = issuer or ""
             comment_value = comment or ""
 
             if jid_value.startswith("*."):
@@ -956,10 +1004,10 @@ class CommandMixin:
                 domain_value = ""
 
             fields = {
-                "jid": jid_value.lower(),
-                "nick": nick_value.lower(),
-                "domain": domain_value.lower(),
-                "issuer": issuer_value.lower(),
+                "jid":     jid_value.lower(),
+                "nick":    nick_value.lower(),
+                "domain":  domain_value.lower(),
+                "issuer":  issuer_value.lower(),
                 "comment": comment_value.lower(),
             }
 
@@ -971,18 +1019,101 @@ class CommandMixin:
             if value in haystack:
                 add_match((jid, nick, until, issuer, comment))
 
-        if matches:
-            msg = "🔍 Ban search results:\n" + "\n".join(matches[:20])
-            if len(matches) > 20:
-                msg += f"\n... and {len(matches) - 20} more matches"
-        else:
-            msg = f"❌ No bans found matching '{query}'."
+        # --- RTBL domain bans ---
+        rtbl_domain_matches = []
+        if getattr(self, "rtbl_enabled", False) and field in (None, "domain", "comment"):
+            async with self.db.execute(
+                "SELECT domain, service_jid, node, reason FROM rtbl_domains"
+            ) as cursor:
+                async for domain, service_jid, node, reason in cursor:
+                    if field == "domain":
+                        haystack = domain.lower()
+                    elif field == "comment":
+                        haystack = (reason or "").lower()
+                    else:
+                        haystack = f"{domain} {service_jid} {node} {reason or ''}".lower()
 
-        self.send_message(
-            mto=ADMIN_ROOM,
-            mbody=msg,
-            mtype="groupchat"
+                    if value in haystack:
+                        reason_str = f" — {reason}" if reason else ""
+                        rtbl_domain_matches.append(
+                            f"🌐 *.{domain}  [{service_jid}/{node}]{reason_str}"
+                        )
+
+        # --- RTBL JID hashes ---
+        rtbl_hash_matches = []
+        if getattr(self, "rtbl_enabled", False) and field in (None, "jid", "comment"):
+            if field in (None, "jid") and "@" in value:
+                # Hash the query JID and do an exact lookup
+                h = self._rtbl_hash_jid(value)
+                async with self.db.execute(
+                    "SELECT hash, service_jid, node, reason FROM rtbl_hashes WHERE hash = ?",
+                    (h,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row:
+                    hash_val, service_jid, node, reason = row
+                    reason_str = f" — {reason}" if reason else ""
+                    rtbl_hash_matches.append(
+                        f"🔑 {hash_val[:16]}…  [{service_jid}/{node}]{reason_str}  (matched JID hash)"
+                    )
+            elif field in (None, "comment"):
+                # Search by reason/service/node text
+                async with self.db.execute(
+                    "SELECT hash, service_jid, node, reason FROM rtbl_hashes"
+                ) as cursor:
+                    async for hash_val, service_jid, node, reason in cursor:
+                        haystack = f"{service_jid} {node} {reason or ''}".lower()
+                        if value in haystack:
+                            reason_str = f" — {reason}" if reason else ""
+                            rtbl_hash_matches.append(
+                                f"🔑 {hash_val[:16]}…  [{service_jid}/{node}]{reason_str}"
+                            )
+
+        # --- Collect all result entries ---
+        all_entries = []
+
+        if matches:
+            all_entries.extend(matches)
+
+        if rtbl_domain_matches:
+            all_entries.extend(rtbl_domain_matches)
+
+        if rtbl_hash_matches:
+            all_entries.extend(rtbl_hash_matches)
+
+        if not all_entries:
+            self.send_message(
+                mto=ADMIN_ROOM,
+                mbody=f"❌ No bans found matching '{raw_query}'.",
+                mtype="groupchat",
+            )
+            return
+
+        # Section headers for context (not paginated, prepended to output)
+        section_info = []
+        if matches:
+            section_info.append(f"🔍 Regular bans: {len(matches)}")
+        if rtbl_domain_matches:
+            section_info.append(f"🌐 RTBL domains: {len(rtbl_domain_matches)}")
+        if rtbl_hash_matches:
+            section_info.append(f"🔑 RTBL hashes: {len(rtbl_hash_matches)}")
+
+        per_page      = 10
+        resolved_page = resolve_page(page, len(all_entries), per_page)
+        page_lines, current_page, total_pages, total_items = paginate_lines(
+            all_entries, resolved_page, per_page=per_page
         )
+
+        header = (
+            f"🔍 Bansearch '{raw_query}' ({total_items}) - Page {current_page}/{total_pages}"
+            f"  [{', '.join(section_info)}]"
+        )
+        text = header + ":\n" + "\n".join(page_lines)
+
+        if current_page < total_pages:
+            text += f"\n\nUse {self.command_prefix}bansearch {raw_query} {current_page + 1} for the next page."
+
+        self.send_message(mto=ADMIN_ROOM, mbody=text, mtype="groupchat")
 
 
     async def cmd_audit(self, args: list[str], room: str) -> None:
@@ -990,10 +1121,14 @@ class CommandMixin:
         page = 1
         query = None
         if args:
-            try:
-                page = max(1, int(args[0]))
-            except ValueError:
-                query = " ".join(args).strip().lower()
+            if args[0].lower() == "last":
+                page = -1
+            else:
+                try:
+                    page = max(1, int(args[0]))
+                except ValueError:
+                    query = " ".join(args).strip().lower()
+        """Show recent audit events. Usage: !audit [page|query]."""
 
         params: list[object] = []
         where = ""
@@ -1014,6 +1149,7 @@ class CommandMixin:
             row = await cursor.fetchone()
             total = int(row[0] or 0) if row else 0
 
+        page = resolve_page(page, total, per_page=10)
         total_pages = max(1, (total + 9) // 10)
         page = max(1, min(page, total_pages))
         offset = (page - 1) * 10
@@ -1086,13 +1222,86 @@ class CommandMixin:
             if not entries:
                 text = "📋 Banlist:\nNo active temporary bans." if room != ADMIN_ROOM else "📋 Banlist:\nNo active bans."
             else:
-                page_lines, current_page, total_pages, total_items = paginate_lines(entries, page, per_page=10)
+                per_page = 10
+                resolved_page = resolve_page(page, len(entries), per_page)
+                page_lines, current_page, total_pages, total_items = paginate_lines(
+                    entries, resolved_page, per_page=per_page
+                )
 
                 header = f"📋 Banlist ({total_items}) - Page {current_page}/{total_pages}:"
                 text = header + "\n" + "\n".join(page_lines)
 
                 if current_page < total_pages:
                     text += f"\n\nUse {self.command_prefix}banlist {current_page + 1} for the next page."
+
+        self.send_message(mto=room, mbody=text, mtype="groupchat")
+
+
+    async def cmd_banlist_rtbl(self, room: str, page: int = 1) -> None:
+        """
+        Show entries from all RTBL subscriptions (hashes + domains).
+        Admin room only. Groups entries by subscription source.
+        """
+        if not getattr(self, "rtbl_enabled", False):
+            self.send_message(
+                mto=room,
+                mbody="❌ RTBL is disabled.",
+                mtype="groupchat",
+            )
+            return
+
+        entries = []
+
+        # --- JID hashes ---
+        async with self.db.execute(
+            """
+            SELECT hash, service_jid, node, reason, created_at
+            FROM rtbl_hashes
+            ORDER BY service_jid, node, created_at DESC
+            """
+        ) as cursor:
+            hash_rows = await cursor.fetchall()
+
+        for hash_val, service_jid, node, reason, created_at in hash_rows:
+            label = f"[{service_jid}/{node}]"
+            reason_str = f" — {reason}" if reason else ""
+            entries.append(f"🔑 {hash_val[:16]}…  {label}{reason_str}")
+
+        # --- Domain bans ---
+        async with self.db.execute(
+            """
+            SELECT domain, service_jid, node, reason, created_at
+            FROM rtbl_domains
+            ORDER BY service_jid, node, domain ASC
+            """
+        ) as cursor:
+            domain_rows = await cursor.fetchall()
+
+        for domain, service_jid, node, reason, created_at in domain_rows:
+            label = f"[{service_jid}/{node}]"
+            reason_str = f" — {reason}" if reason else ""
+            entries.append(f"🌐 *.{domain}  {label}{reason_str}")
+
+        if not entries:
+            self.send_message(
+                mto=room,
+                mbody="🛡️ RTBL Banlist:\nNo RTBL entries in database.",
+                mtype="groupchat",
+            )
+            return
+
+        per_page = 10
+        resolved_page = resolve_page(page, len(entries), per_page)
+        page_lines, current_page, total_pages, total_items = paginate_lines(
+            entries, resolved_page, per_page=per_page
+        )
+
+        text = (
+            f"🛡️ RTBL Banlist ({total_items}) - Page {current_page}/{total_pages}:\n"
+            + "\n".join(page_lines)
+        )
+        if current_page < total_pages:
+            text += f"\n\nUse {self.command_prefix}banlist rtbl {current_page + 1} for the next page."
 
         self.send_message(mto=room, mbody=text, mtype="groupchat")
 

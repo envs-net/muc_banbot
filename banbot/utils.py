@@ -146,3 +146,20 @@ def paginate_lines(lines: list[str], page: int, per_page: int = 10) -> tuple[lis
     start = (current_page - 1) * per_page
     end = start + per_page
     return lines[start:end], current_page, total_pages, total_items
+
+def resolve_page(page: int, total_items: int, per_page: int = 10) -> int:
+    """
+    Resolve a page number, supporting -1 as a sentinel for the last page.
+
+    Args:
+        page:        Requested page number, or -1 for the last page.
+        total_items: Total number of items to paginate.
+        per_page:    Items per page (default: 10).
+
+    Returns:
+        Resolved page number (always >= 1).
+    """
+    total_pages = max(1, (total_items + per_page - 1) // per_page)
+    if page == -1:
+        return total_pages
+    return max(1, min(page, total_pages))

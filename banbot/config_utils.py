@@ -79,6 +79,7 @@ class ConfigMixin:
         "AUDIT_LOG_ENABLED",
         "AUDIT_LOG_RETENTION_DAYS",
         "RTBL_ANNOUNCE",
+        "RTBL_REFRESH_INTERVAL",
         "VERSION_CHECK_ENABLED",
         "VERSION_CHECK_INTERVAL",
         "VERSION_CHECK_URL",
@@ -279,6 +280,10 @@ class ConfigMixin:
         if not isinstance(getattr(config, "RTBL_ANNOUNCE", True), bool):
             errors.append("RTBL_ANNOUNCE must be True or False")
 
+        rtbl_refresh = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
+        if not isinstance(rtbl_refresh, int) or rtbl_refresh < 0:
+            errors.append("RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)")
+
         # --- RTBL Publish ---
         rtbl_pub = getattr(config, "RTBL_PUBLISH_ENABLED", False)
         if not isinstance(rtbl_pub, bool):
@@ -358,6 +363,7 @@ class ConfigMixin:
         self.version_check_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip() or None
 
         self.rtbl_announce = getattr(config, "RTBL_ANNOUNCE", True)
+        self.rtbl_refresh_interval  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
 
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:

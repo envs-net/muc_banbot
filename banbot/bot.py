@@ -146,6 +146,8 @@ class BanBot(
         self.rtbl_subscriptions: list[tuple[str, str]] = []   # loaded from DB
         self.rtbl_hash_cache: dict[str, str | None] = {}      # hash → reason
         self._rtbl_handlers_registered: bool = False
+        self.rtbl_refresh_interval: int  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
+        self._rtbl_refresh_task: asyncio.Task | None = None
 
         # --- RTBL Publish ---
         self.rtbl_publish_enabled: bool = getattr(config, "RTBL_PUBLISH_ENABLED", False)
@@ -255,6 +257,11 @@ class BanBot(
 
         # --- Setup RTBL Publish-Node ---
         await self.setup_rtbl_publish()
+
+        # --- Start RTBL periodic refresh worker ---
+        if self._rtbl_refresh_task:
+            self._rtbl_refresh_task.cancel()
+        self._rtbl_refresh_task = asyncio.create_task(self._rtbl_refresh_worker())
 
         # --- Start unban worker ---
         self.unban_task = asyncio.create_task(self.unban_worker())
