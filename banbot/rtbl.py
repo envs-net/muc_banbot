@@ -1512,7 +1512,7 @@ class RtblMixin:
                 id=hash_val,
                 payload=self._rtbl_build_payload(comment),
             )
-            log.debug(
+            log.info(
                 "RTBL Publish: JID hash published for %s (%s…)",
                 bare_jid, hash_val[:12],
             )
@@ -1531,7 +1531,7 @@ class RtblMixin:
                 id=domain,
                 payload=self._rtbl_build_payload(comment),
             )
-            log.debug("RTBL Publish: Domain ban published for *.%s", domain)
+            log.info("RTBL Publish: Domain ban published for *.%s", domain)
             return True
         except (IqError, IqTimeout) as e:
             log.warning("RTBL Publish: Could not publish domain ban for *.%s: %s", domain, e)
@@ -1547,7 +1547,7 @@ class RtblMixin:
                 id=item_id,
                 notify=True,
             )
-            log.debug(
+            log.info(
                 "RTBL Publish: Retracted '%s…' from node '%s'",
                 item_id[:16], node,
             )
