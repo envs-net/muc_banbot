@@ -776,9 +776,21 @@ class RtblMixin:
             log.debug("RTBL: Persisted domain ban *.%s to bans table", domain)
 
         if self.rtbl_announce:
+            affected = ""
+            if jid and nick:
+                affected = f"\n   Matched: {nick} ({jid})"
+            elif jid:
+                affected = f"\n   Matched: {jid}"
+            elif nick:
+                affected = f"\n   Matched: {nick}"
+
             self.send_message(
                 mto=ADMIN_ROOM,
-                mbody=f"🛡️ RTBL: Domain ban *.{domain}" + (f" — {reason}" if reason else ""),
+                mbody=(
+                    f"🛡️ RTBL: Domain ban *.{domain}"
+                    f"{affected}"
+                    + (f"\n   Reason: {reason}" if reason else "")
+                ),
                 mtype="groupchat",
             )
 

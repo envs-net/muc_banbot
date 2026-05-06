@@ -99,8 +99,8 @@ class StatusMixin:
             notes.append(
                 f"Admin protection fallback active in "
                 f"{len(self.admin_affiliation_query_forbidden_rooms)} room(s)\n"
-                "   Server does not allow owner/admin affiliation queries there; "
-                "using live occupant cache."
+                "   Bot is admin, but not owner there; using live occupant cache "
+                "because affiliation queries are owner-only."
             )
 
         if getattr(self, "rtbl_enabled", False) and not getattr(self, "rtbl_subscriptions", []):
