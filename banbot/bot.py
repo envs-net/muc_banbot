@@ -31,7 +31,13 @@ from .db import DatabaseMixin
 from .import_export import ImportExportMixin
 from .moderation import ModerationMixin
 from .commands import CommandMixin
+from .direct_messages import DirectMessageMixin
+from .rooms import RoomMixin
+from .ban_queries import BanQueryMixin
+from .status import StatusMixin
+from .config_cmd import ConfigCommandMixin
 from .muc import MucMixin
+from .health_check import HealthCheckMixin
 from .sync import SyncMixin
 from .vcard import VCardMixin
 from .updates import UpdateMixin
@@ -51,7 +57,13 @@ class BanBot(
     ImportExportMixin,
     ModerationMixin,
     CommandMixin,
+    DirectMessageMixin,
+    RoomMixin,
+    BanQueryMixin,
+    StatusMixin,
+    ConfigCommandMixin,
     MucMixin,
+    HealthCheckMixin,
     SyncMixin,
     VCardMixin,
     UpdateMixin,

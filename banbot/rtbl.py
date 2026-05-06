@@ -1004,7 +1004,10 @@ class RtblMixin:
 
             msg = f"✅ RTBL: Removed {label}. All hashes and domains purged from DB."
             if getattr(self, "rtbl_persist_bans", False):
-                msg += "\n♻️ Persisted RTBL bans that are no longer present in active RTBL feeds were removed."
+                msg += (
+                    "\nℹ️ RTBL_PERSIST_BANS is enabled — persisted RTBL bans that are no "
+                    "longer present in active subscriptions were removed."
+                )
             self.send_message(mto=room, mbody=msg, mtype="groupchat")
             return
 
@@ -1328,20 +1331,3 @@ class RtblMixin:
                         node, service_jid, e,
                     )
             log.info("RTBL: Periodic refresh complete")
-
-# ------------------------------------------------------------------
-# Module-level helpers (not part of the mixin)
-# ------------------------------------------------------------------
-
-def _domain_matches(user_domain: str, banned_domain: str) -> bool:
-    """
-    Return True if user_domain is equal to banned_domain or is a subdomain of it.
-
-    Examples:
-      _domain_matches('spam.example.org', 'example.org')  -> True
-      _domain_matches('example.org',      'example.org')  -> True
-      _domain_matches('other.org',        'example.org')  -> False
-    """
-    user_domain   = user_domain.lower()
-    banned_domain = banned_domain.lower()
-    return user_domain == banned_domain or user_domain.endswith("." + banned_domain)

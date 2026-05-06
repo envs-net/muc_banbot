@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 
 from config import DB_FILE
 
+from .utils import resolve_page
+
 log = logging.getLogger(__name__)
 
 
@@ -105,3 +107,66 @@ class AuditMixin:
         until_text = f", until {datetime.fromtimestamp(until).strftime('%Y-%m-%d %H:%M')}" if until and until > 0 else ""
         comment_text = f", {comment}" if comment else ""
         return f"{ts} · {event_type} · {actor_display} · {target_type or '-'}:{display_target}{until_text}{comment_text}"
+
+
+    async def cmd_audit(self, args: list[str], room: str) -> None:
+        """Show recent audit events. Usage: !audit [page|query]."""
+        page = 1
+        query = None
+        if args:
+            if args[0].lower() == "last":
+                page = -1
+            else:
+                try:
+                    page = max(1, int(args[0]))
+                except ValueError:
+                    query = " ".join(args).strip().lower()
+        """Show recent audit events. Usage: !audit [page|query]."""
+
+        params: list[object] = []
+        where = ""
+        if query:
+            like = f"%{query}%"
+            where = """
+                WHERE LOWER(event_type) LIKE ?
+                   OR LOWER(COALESCE(actor, '')) LIKE ?
+                   OR LOWER(COALESCE(target, '')) LIKE ?
+                   OR LOWER(COALESCE(jid, '')) LIKE ?
+                   OR LOWER(COALESCE(nick, '')) LIKE ?
+                   OR LOWER(COALESCE(comment, '')) LIKE ?
+                   OR LOWER(COALESCE(details, '')) LIKE ?
+            """
+            params = [like] * 7
+
+        async with self.db.execute(f"SELECT COUNT(*) FROM audit_log {where}", params) as cursor:
+            row = await cursor.fetchone()
+            total = int(row[0] or 0) if row else 0
+
+        page = resolve_page(page, total, per_page=10)
+        total_pages = max(1, (total + 9) // 10)
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * 10
+
+        async with self.db.execute(
+            f"""
+            SELECT created_at, event_type, actor, target_type, target, jid, nick, until, comment, details
+            FROM audit_log
+            {where}
+            ORDER BY created_at DESC, id DESC
+            LIMIT 10 OFFSET ?
+            """,
+            [*params, offset],
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        if not rows:
+            text = "🧾 Audit log:\nNo matching events."
+        else:
+            title = f"🧾 Audit log ({total}) - Page {page}/{total_pages}"
+            if query:
+                title += f" - query: {query}"
+            text = title + ":\n" + "\n".join(self._format_audit_row(row) for row in rows)
+            if page < total_pages and not query:
+                text += f"\n\nUse {self.command_prefix}audit {page + 1} for the next page."
+
+        self.send_message(mto=room, mbody=text, mtype="groupchat")
