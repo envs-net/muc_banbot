@@ -181,7 +181,7 @@ class CommandMixin:
                     except ValueError:
                         self.send_message(
                             mto=room,
-                            mbody=f"❌ Usage: {self.command_prefix}banlist [page|last]",
+                            mbody=f"❌ Usage: {self.command_prefix}banlist [rtbl] [page|last]",
                             mtype="groupchat",
                         )
                         return True
@@ -441,7 +441,7 @@ class CommandMixin:
             f"{p}unban <jid|nick> - remove ban\n\n"
             f"{p}audit [page|last|query] - show recent audit events\n"
             f"{p}banlist [page|last] - show all active bans with remaining time and comments\n"
-            f"{p}banlist rtbl [page|last] - show all RTBL hash and domain entries\n"
+            f"{p}banlist rtbl [page|last] - show RTBL hash and domain entries\n"
             f"{p}bansearch <query> [page|last] - search bans by nick, domain, jid or RTBL reason\n"
             f"{p}why <nick|jid> - show the reason and remaining time for a ban\n\n"
             f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"
@@ -451,7 +451,7 @@ class CommandMixin:
             f"{p}import <filename> - import bans from a CSV file\n\n"
             f"{p}ignore list [page] - show global ignorelist\n"
             f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
-            f"{p}ignore remove <jid|domain> - remove from ignorelist\n"
+            f"{p}ignore remove <jid|domain> - remove from ignorelist\n\n"
             f"{p}rtbl list - show active RTBL subscriptions\n"
             f"{p}rtbl add <service> <node> - subscribe to a RTBL node\n"
             f"{p}rtbl delete <service> [node] - remove a RTBL subscription\n"

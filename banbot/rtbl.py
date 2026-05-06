@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 # Matches a plain domain name or wildcard domain (no @, contains a dot)
 _DOMAIN_RE = re.compile(r"^[\w*][\w\-.*]*\.[a-z]{2,}$")
+_DOMAIN_LABEL_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$", re.IGNORECASE)
 
 
 def _is_sha256(value: str) -> bool:
@@ -44,6 +45,33 @@ def _is_sha256(value: str) -> bool:
 def _is_domain(value: str) -> bool:
     """Return True if value looks like a (wildcard) domain name."""
     return "@" not in value and bool(_DOMAIN_RE.match(value.lstrip("*.")))
+
+
+def _looks_like_pubsub_service_jid(value: str) -> bool:
+    """Return True if value looks like a PubSub service JID or domain JID."""
+    value = (value or "").strip().lower()
+    if not value or any(ch.isspace() for ch in value) or "/" in value:
+        return False
+
+    # PubSub services are usually component/domain JIDs (pubsub.example.org),
+    # but allow localpart@domain as well for unusual deployments.
+    domain = value.split("@", 1)[1] if "@" in value else value
+    if not domain or domain.startswith(".") or domain.endswith("."):
+        return False
+
+    labels = domain.split(".")
+    if len(labels) < 2:
+        return False
+    if len(labels[-1]) < 2 or not labels[-1].isalpha():
+        return False
+
+    return all(_DOMAIN_LABEL_RE.match(label) for label in labels)
+
+
+def _looks_like_pubsub_node(value: str) -> bool:
+    """Return True if value is a non-empty PubSub node id without whitespace."""
+    value = (value or "").strip()
+    return bool(value) and not any(ch.isspace() for ch in value)
 
 
 class RtblMixin:
@@ -156,13 +184,31 @@ class RtblMixin:
     # PubSub subscribe and initial item fetch
     # ------------------------------------------------------------------
 
-    async def _rtbl_subscribe_and_fetch(self, service_jid: str, node: str) -> None:
-        """Subscribe to a PubSub node and fetch all existing items."""
+    async def _rtbl_subscribe_node(self, service_jid: str, node: str) -> tuple[bool, str | None]:
+        """Subscribe to a PubSub node and return a user-facing error on failure."""
         try:
             await self.plugin["xep_0060"].subscribe(service_jid, node)
             log.info("RTBL: Subscribed to '%s' @ %s", node, service_jid)
-        except (IqError, IqTimeout) as e:
-            log.warning("RTBL: Could not subscribe to '%s' @ %s: %s", node, service_jid, e)
+            return True, None
+        except IqTimeout:
+            msg = f"timeout while subscribing to '{node}' @ {service_jid}"
+            log.warning("RTBL: Could not subscribe: %s", msg)
+            return False, msg
+        except IqError as e:
+            msg = f"subscription failed for '{node}' @ {service_jid}: {e}"
+            log.warning("RTBL: %s", msg)
+            return False, msg
+        except Exception as e:
+            msg = f"unexpected error while subscribing to '{node}' @ {service_jid}: {e}"
+            log.warning("RTBL: %s", msg)
+            return False, msg
+
+
+    async def _rtbl_subscribe_and_fetch(self, service_jid: str, node: str) -> None:
+        """Subscribe to a PubSub node and fetch all existing items."""
+        ok, _error = await self._rtbl_subscribe_node(service_jid, node)
+        if not ok:
+            return
 
         await self._rtbl_fetch_all_items(service_jid, node)
 
@@ -891,12 +937,46 @@ class RtblMixin:
                 return
 
             service_jid = args[1].strip().lower()
-            node        = args[2].strip()
+            node = args[2].strip()
+
+            if not _looks_like_pubsub_service_jid(service_jid):
+                self.send_message(
+                    mto=room,
+                    mbody=(
+                        f"❌ Invalid RTBL service JID: {service_jid}\n"
+                        "Expected a PubSub service JID/domain like pubsub.example.org."
+                    ),
+                    mtype="groupchat",
+                )
+                return
+
+            if not _looks_like_pubsub_node(node):
+                self.send_message(
+                    mto=room,
+                    mbody=(
+                        f"❌ Invalid RTBL node: {node or '(empty)'}\n"
+                        "Node names must be non-empty and must not contain whitespace."
+                    ),
+                    mtype="groupchat",
+                )
+                return
 
             if (service_jid, node) in self.rtbl_subscriptions:
                 self.send_message(
                     mto=room,
                     mbody=f"⚠️ RTBL: Already subscribed to '{node}' @ {service_jid}.",
+                    mtype="groupchat",
+                )
+                return
+
+            subscribed, error = await self._rtbl_subscribe_node(service_jid, node)
+            if not subscribed:
+                self.send_message(
+                    mto=room,
+                    mbody=(
+                        f"❌ RTBL: Could not subscribe to '{node}' @ {service_jid}.\n"
+                        f"{error}"
+                    ),
                     mtype="groupchat",
                 )
                 return
@@ -916,7 +996,7 @@ class RtblMixin:
                 ),
                 mtype="groupchat",
             )
-            await self._rtbl_subscribe_and_fetch(service_jid, node)
+            await self._rtbl_fetch_all_items(service_jid, node)
             self.log_event(
                 logging.INFO, "rtbl_subscription_added",
                 actor=actor, target_type="rtbl", target=f"{service_jid}/{node}",
@@ -946,6 +1026,20 @@ class RtblMixin:
             node        = args[2].strip() if len(args) >= 3 else None
 
             if node:
+                async with self.db.execute(
+                    "SELECT 1 FROM rtbl_subscriptions WHERE service_jid = ? AND node = ?",
+                    (service_jid, node),
+                ) as cursor:
+                    existing = await cursor.fetchone()
+
+                if not existing:
+                    self.send_message(
+                        mto=room,
+                        mbody=f"⚠️ RTBL: Subscription '{node}' @ {service_jid} does not exist.",
+                        mtype="groupchat",
+                    )
+                    return
+
                 await self.db.execute(
                     "DELETE FROM rtbl_subscriptions WHERE service_jid = ? AND node = ?",
                     (service_jid, node),
@@ -960,6 +1054,21 @@ class RtblMixin:
                 )
                 label = f"'{node}' @ {service_jid}"
             else:
+                async with self.db.execute(
+                    "SELECT COUNT(*) FROM rtbl_subscriptions WHERE service_jid = ?",
+                    (service_jid,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    existing_count = int(row[0] or 0) if row else 0
+
+                if existing_count <= 0:
+                    self.send_message(
+                        mto=room,
+                        mbody=f"⚠️ RTBL: No subscriptions found for {service_jid}.",
+                        mtype="groupchat",
+                    )
+                    return
+
                 await self.db.execute(
                     "DELETE FROM rtbl_subscriptions WHERE service_jid = ?", (service_jid,)
                 )
