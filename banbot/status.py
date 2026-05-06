@@ -56,7 +56,10 @@ class StatusMixin:
 
         protected_rooms = sorted(getattr(self, "protected_rooms", set()))
         if not protected_rooms:
-            warnings.append("No protected rooms configured")
+            warnings.append(
+                "No protected rooms configured\n"
+                "   The bot is running but has no rooms to protect."
+            )
 
         missing_admin_rooms = sorted(
             room_name
@@ -75,7 +78,10 @@ class StatusMixin:
             if room_name not in getattr(self, "bot_admin_state", {})
         )
         if unconfirmed_admin_rooms:
-            warnings.append(f"Admin rights not confirmed yet in {len(unconfirmed_admin_rooms)} room(s)")
+            warnings.append(
+                f"Admin/owner rights not confirmed yet in {len(unconfirmed_admin_rooms)} room(s)\n"
+                "   The bot may still be waiting for room presence/state."
+            )
 
         admin_infos = self.occupants.get(ADMIN_ROOM, {})
         admins = sorted(set(
@@ -84,12 +90,17 @@ class StatusMixin:
             if info.get("affiliation") in ("owner", "admin")
         ))
         if not admins:
-            warnings.append("No admins/owners found in the admin room")
+            warnings.append(
+                "No admins/owners detected in the admin room\n"
+                "   Admin authorization may fail until occupants are synced."
+            )
 
         if getattr(self, "admin_affiliation_query_forbidden_rooms", set()):
-            warnings.append(
-                f"Affiliation-query fallback active in "
-                f"{len(self.admin_affiliation_query_forbidden_rooms)} room(s)"
+            notes.append(
+                f"Admin protection fallback active in "
+                f"{len(self.admin_affiliation_query_forbidden_rooms)} room(s)\n"
+                "   Server does not allow owner/admin affiliation queries there; "
+                "using live occupant cache."
             )
 
         if getattr(self, "rtbl_enabled", False) and not getattr(self, "rtbl_subscriptions", []):
@@ -105,7 +116,10 @@ class StatusMixin:
 
         expired_ban_rows = int(db_stats.get("expired_ban_rows", 0) or 0)
         if expired_ban_rows > 0:
-            warnings.append(f"{expired_ban_rows} expired tempban(s) are waiting for auto-unban")
+            warnings.append(
+                f"{expired_ban_rows} expired tempban(s) pending auto-unban\n"
+                "   The unban worker should clear them on the next cycle."
+            )
 
         if problems:
             status_lines = ["❌ Bot is online, but problems were detected."]
@@ -178,7 +192,10 @@ class StatusMixin:
         status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
         status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")
         if self.admin_affiliation_query_forbidden_rooms:
-            status_lines.append(f"⚠️ Affiliation-query fallback rooms: {len(self.admin_affiliation_query_forbidden_rooms)}")
+            status_lines.append(
+                f"ℹ️ Admin protection fallback rooms: "
+                f"{len(self.admin_affiliation_query_forbidden_rooms)}"
+            )
         if self.last_import_backup_file:
             status_lines.append(f"💾 Last Import Backup: {self.last_import_backup_file}")
 
