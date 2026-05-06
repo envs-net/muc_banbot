@@ -7,33 +7,38 @@ It provides central administration via an admin room and protects multiple chat 
 
 ## Features
 
-* 🛡️ Central admin room for all commands  
+* 🛡️ Central admin room for all administrative commands  
 * 🔒 Dynamic addition/removal of protected rooms  
-* 🔄 Automatic rejoin and reapplication of bans on restart  
-* 📦 Sync existing room bans into the database at startup  
-* ❌ Ban, temporary ban, unban, banlist, bansearch, why  
-* ⌨️ Configurable command prefix for all chat commands  
+* ❌ Ban, temporary ban, unban, banlist, bansearch, and why commands  
 * 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain  
 * 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  
-* 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
-* 💾 Ban import/export to CSV format for backup and migration  
-* 🧯 Automatic SQLite database backup before CSV imports  
 * ⏱️ Human-readable remaining time for temporary bans  
 * ⏳ Automatic removal of expired temporary bans  
+* 📊 Smart duplicate ban handling with automatic conversion (Permanent ↔ Tempban)  
+* 🐞 Handles nick-only bans with best-effort enforcement  
+* 🔄 Auto-updates nick-only bans to JID when user rejoins  
+* ⚠️ Admins/Owners are protected from accidental bans  
+* ⛔ Prevents ban application if the bot does not have admin/owner rights  
+* 🚫 Global ignorelist (`!ignore`) to protect JIDs/domains from manual and RTBL bans  
+* 📦 Sync existing room bans into the database at startup  
+* 🔄 Automatic rejoin and reapplication of bans on restart  
+* 👀 Monitors bot's admin/owner rights per room and reports loss to the admin room  
+* 🏥 Periodic health checks for room connectivity and admin rights  
+* 🩺 Dynamic `!status` health headline with reconnect, worker, DB, room-rights, and RTBL status  
+* 🛡️ RTBL subscriptions via PubSub for SHA-256 JID hashes and plaintext domain bans  
+* 🔄 Periodic RTBL refresh with quiet/no-change behavior  
+* 📡 Optional own RTBL publish feed for local bans  
 * 📣 Logs ban/unban actions in both admin and protected rooms  
 * 🧾 SQLite audit log for moderation actions with automatic 365-day retention  
 * 🧱 Structured JSON event logs for important moderation and operational events  
-* ⚠️ Admins/Owners are protected from accidental bans  
-* 🏥 Periodic health checks for room connectivity and admin rights
-* ⬆️ Periodic GitHub release checks with admin notifications and manual update checks  
-* 👀 Monitors bot's admin/owner rights per room and reports loss to the admin room  
-* ⛔ Prevents ban application if the bot does not have admin/owner rights  
-* 🐞 Handles nick-only bans with best-effort enforcement  
-* 🔄 Auto-updates nick-only bans to JID when user rejoins  
-* 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
+* 💾 Ban import/export to CSV format for backup and migration  
+* 🧯 Automatic SQLite database backup before CSV imports  
 * ✅ Input validation for JID format and domain bans  
 * ✅ Startup and runtime config validation with safe reload handling  
+* ⌨️ Configurable command prefix for all chat commands  
 * 🚦 Rate limiting for all public protected-room commands  
+* ⬆️ Periodic GitHub release checks with admin notifications and manual update checks  
+* 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
 
 ---
 
@@ -55,13 +60,22 @@ It provides central administration via an admin room and protects multiple chat 
 | `!ban <jid/nick/domain> [comment]` | Bans a user or domain across all protected rooms | `!ban alice@example.com spamming` or `!ban *.evil.com` |
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Temporary ban (limited to MAX_TEMPBAN_DAYS) | `!tempban bob 10m rude behavior` |
 | `!unban <jid/nick/domain>` | Removes a ban | `!unban bob` or `!unban *.evil.com` |
-| `!banlist [page]` | Shows all active bans with remaining time and comments | `!banlist` |
-| `!bansearch <query>` | Searches bans by nick, JID, domain, issuer, or comment/reason | `!bansearch spam`, `!bansearch issuer:alice`, `!bansearch reason:abuse` |
+| `!banlist [page/last]` | Shows all active bans with remaining time and comments | `!banlist`, `!banlist last` |
+| `!bansearch <query> [page/last]` | Searches bans by nick, JID, domain, issuer, comment, or RTBL reason | `!bansearch spam`, `!bansearch reason:abuse 2` |
 | `!why <nick/jid>` | Shows the reason and remaining time of a ban; admin-room output also includes recent audit history | `!why bob` |
-| `!audit [page/query]` | Shows recent audit events, optionally filtered by text | `!audit`, `!audit skx` |
+| `!audit [page/last/query]` | Shows recent audit events, optionally filtered by text | `!audit`, `!audit last`, `!audit skx` |
 | `!sync` | Full room sync: rejoin rooms, verify admin rights, apply only missing active bans | `!sync` |
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
 | `!syncbans` | Full ban synchronization: syncs outcasts from rooms into DB and applies all active bans | `!syncbans` |
+| `!ignore list [page]` | Shows the global ignorelist | `!ignore list`, `!ignore list last` |
+| `!ignore add <jid/domain> [reason]` | Protects a JID or domain from all bans | `!ignore add alice@example.com trusted admin` |
+| `!ignore remove <jid/domain>` | Removes an entry from the global ignorelist | `!ignore remove alice@example.com` |
+| `!banlist rtbl [page/last]` | Shows RTBL hash and domain entries | `!banlist rtbl`, `!banlist rtbl last` |
+| `!rtbl list` | Shows active RTBL subscriptions and own publish feed counts | `!rtbl list` |
+| `!rtbl add <service> <node>` | Subscribes to an RTBL PubSub node after validation | `!rtbl add xmppbl.org muc_bans_sha256` |
+| `!rtbl delete <service> [node]` | Removes one or all RTBL subscriptions for a service | `!rtbl delete xmppbl.org muc_bans_sha256` |
+| `!rtbl publish status` | Shows own RTBL publish feed status and local publish counts | `!rtbl publish status` |
+| `!rtbl publish sync` | Publishes all current local bans to the own RTBL feed | `!rtbl publish sync` |
 | `!export` | Exports all bans to a CSV file (bans_export_TIMESTAMP.csv) | `!export` |
 | `!import <file>` | Imports bans from a CSV file with validation | `!import bans_export_20240412_120000.csv` |
 
@@ -75,7 +89,7 @@ It provides central administration via an admin room and protects multiple chat 
 | ------------- | ----------------------------------------- | ------------ |
 | `!help`       | Shows a restricted help message           | `!help`      |
 | `!whoami`     | Shows your affiliation/role and permissions | `!whoami`  |
-| `!banlist [page]` | Shows active temporary bans (if enabled)  | `!banlist`   |
+| `!banlist [page/last]` | Shows active temporary bans (if enabled)  | `!banlist`, `!banlist last`   |
 | `!why <jid/nick>` | Shows reason and remaining time for a ban | `!why alice` |
 
 > ⚠️ **Visibility Rules:**
@@ -135,6 +149,11 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `ADMIN_ROOM` - JID of the admin control room
 - `NICK` - Bot's nickname in rooms
 - `DB_FILE` - Path to SQLite database
+- `RTBL_ENABLED` - Enables/disables RTBL support
+- `RTBL_PUBLISH_ENABLED` - Enables/disables the own RTBL publish feed
+- `RTBL_PUBLISH_SERVICE` - PubSub service used for the own publish feed
+- `RTBL_PUBLISH_JID_NODE` - Own publish node for SHA-256 JID hashes
+- `RTBL_PUBLISH_DOMAIN_NODE` - Own publish node for domain bans
 
 #### Configuration Options
 
@@ -145,6 +164,13 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `ADMIN_ROOM` - Control room JID (e.g., `admin@muc.example.com`)
 - `NICK` - Bot's nickname in rooms (default: `BanBot`)
 - `DB_FILE` - SQLite database path (default: `banbot.db`)
+
+**Optional Startup-Only Settings (require restart):**
+- `RTBL_ENABLED` (bool, default: `False`) - Enable RTBL subscriptions and checks
+- `RTBL_PUBLISH_ENABLED` (bool, default: `False`) - Enable the bot's own RTBL publish feed
+- `RTBL_PUBLISH_SERVICE` (str) - PubSub service used for publishing local bans (e.g., `pubsub.example.org`)
+- `RTBL_PUBLISH_JID_NODE` (str, default: `muc_bans_sha256`) - PubSub node for SHA-256 bare-JID hashes
+- `RTBL_PUBLISH_DOMAIN_NODE` (str, default: `muc_bans_domains`) - PubSub node for plaintext domain bans
 
 **Optional Settings (can be reloaded with `!reloadconfig`):**
 - `AVATAR_PATH` (str) - Path to bot avatar image (PNG, JPG, etc.)
@@ -168,6 +194,9 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `UNBAN_CHECK_INTERVAL` (int, default: `60`) - Seconds between checking for expired tempbans
 - `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `MUC_WRITE_SEMAPHORE` (int, default: `5`) - Concurrency limit for XMPP IQ operations
+- `RTBL_ANNOUNCE` (bool, default: `True`) - Announce RTBL changes in the admin room; periodic refreshes stay quiet when nothing changed
+- `RTBL_PERSIST_BANS` (bool, default: `False`) - Persist RTBL bans into the main bans table and remove stale persisted RTBL bans when subscriptions/retractions remove them
+- `RTBL_REFRESH_INTERVAL` (int, default: `3600`) - Seconds between periodic RTBL refreshes; set to `0` to disable periodic refresh
 - `VERSION_CHECK_ENABLED` (bool, default: `False`) - Enable periodic checks for newer GitHub releases
 - `VERSION_CHECK_INTERVAL` (int, default: `3600`) - Seconds between release checks (minimum: 300)
 - `VERSION_CHECK_URL` (str, default: `https://github.com/envs-net/muc_banbot/releases/latest`) - URL used to detect the latest GitHub release
@@ -225,6 +254,9 @@ sudo journalctl -u muc_banbot -f
 * **Domain ban validation** blocks overly generic bans (e.g., `*.com`).
 * CSV imports create a timestamped database backup before any database write is attempted.
 * Audit events are retained for up to 365 days and cleaned up automatically.
+* The global ignorelist protects trusted JIDs/domains from both manual bans and RTBL enforcement.
+* `!rtbl add` refuses malformed PubSub services/nodes and refuses to subscribe to the bot's own publish nodes.
+* If RTBL publish is enabled, ensure your PubSub service allows the bot to publish to the configured nodes.
 
 ---
 
@@ -380,6 +412,69 @@ Safety behavior:
 - Prevents future logins from that domain
 - Must be specific (e.g., `*.spam-domain.com`, not `*.com`)
 
+### Global Ignorelist
+
+The global ignorelist protects trusted JIDs and domains from **all** bans, including manual bans and RTBL-enforced bans.
+
+```
+!ignore list
+!ignore add alice@example.com trusted user
+!ignore add *.example.org local domain
+!ignore remove alice@example.com
+```
+
+Ignorelist behavior:
+- Exact bare JIDs are protected
+- Wildcard domains such as `*.example.org` are protected
+- Domain suffix matching is used, so `*.example.org` also protects users from subdomains
+- Entries are loaded into memory and checked before bans are written/applied
+- Existing legacy RTBL-only ignorelist entries are migrated into the global ignorelist table if present
+
+### RTBL Subscriptions and Own Publish Feed
+
+BanBot supports RTBL (Real-Time Block List) PubSub feeds:
+
+- **Inbound subscriptions**: subscribe to external RTBL nodes and apply matching bans at join time or on live PubSub events
+- **JID entries**: SHA-256 hashes of bare JIDs, compatible with `muc_bans_sha256`
+- **Domain entries**: plaintext domains, applied as wildcard domain bans
+- **Optional persistence**: with `RTBL_PERSIST_BANS=True`, RTBL bans are also stored in the main `bans` table
+- **Own publish feed**: publish local bans to your own PubSub service for other bots to consume
+
+Common commands:
+
+```
+!rtbl list
+!rtbl add xmppbl.org muc_bans_sha256
+!rtbl add xmppbl.org spam_source_domains
+!rtbl delete xmppbl.org muc_bans_sha256
+!banlist rtbl
+!rtbl publish status
+!rtbl publish sync
+```
+
+Safety and validation:
+- `!rtbl add` validates that the service looks like a PubSub service/domain and that the node is non-empty
+- The bot attempts to subscribe before writing the subscription into the database
+- `!rtbl delete` refuses to report success for non-existing subscriptions
+- The bot refuses to subscribe to its own configured publish nodes
+- Periodic refreshes only announce when new or updated RTBL entries are found
+- Admin/owner protection and the global ignorelist are checked before any RTBL ban is applied
+
+RTBL publish nodes on Prosody can be created/configured manually if your server does not allow the bot to create nodes:
+
+```lua
+pubsub:create_node("pubsub.example.org", "muc_bans_sha256")
+pubsub:create_node("pubsub.example.org", "muc_bans_domains")
+
+pubsub:set_node_config_option("pubsub.example.org", "muc_bans_sha256", "pubsub#publish_model", "open")
+pubsub:set_node_config_option("pubsub.example.org", "muc_bans_domains", "pubsub#publish_model", "open")
+
+pubsub:set_node_config_option("pubsub.example.org", "muc_bans_sha256", "pubsub#max_items", "1000")
+pubsub:set_node_config_option("pubsub.example.org", "muc_bans_domains", "pubsub#max_items", "1000")
+```
+
+Use your configured `RTBL_PUBLISH_SERVICE` and node names instead of the examples above.
+
 ### Avatar & vCard Support
 
 The bot can display a custom avatar and vCard profile via:
@@ -443,11 +538,13 @@ The bot can periodically check the latest GitHub release page and notify the adm
 The `!config` command displays all current bot configuration settings in the admin room:
 - Bot JID and nickname
 - Database path
-- Check intervals (health check, unban check)
-- Feature flags (announcements, ban visibility, user commands)
+- Check intervals (health check, unban check, RTBL refresh, version check)
+- Feature flags (announcements, ban visibility, user commands, RTBL, RTBL publish)
 - Tempban limits (MAX_TEMPBAN_DAYS)
 - Bot version displayed in `!config` and `!status`
 - Examples in this README assume the default `!` prefix; if you set `COMMAND_PREFIX`, commands use that prefix instead
+
+The `!status` command shows a dynamic health headline. It reports problems/warnings such as reconnects in progress, missing admin/owner rights, stopped background workers, missing protected rooms, DB stats failures, pending expired tempbans, and RTBL subscription/publish state.
 
 ---
 
@@ -477,7 +574,7 @@ The `!config` command displays all current bot configuration settings in the adm
 
 ## Database (SQLite)
 
-**`banbot.db`** contains three main tables:
+**`banbot.db`** contains the main moderation tables plus optional RTBL/ignorelist tables:
 
 ### `bans`
 
@@ -516,6 +613,46 @@ The `!config` command displays all current bot configuration settings in the adm
 | Column | Type | Description         |
 | ------ | ---- | ------------------- |
 | `room` | TEXT | Protected room JID  |
+
+### `ignorelist`
+
+| Column        | Type    | Description |
+| ------------- | ------- | ----------- |
+| `id`          | INTEGER | Internal row id |
+| `target`      | TEXT    | Protected JID or domain |
+| `target_type` | TEXT    | `jid` or `domain` |
+| `reason`      | TEXT    | Optional reason |
+| `added_by`    | TEXT    | Admin who added the entry |
+| `created_at`  | INTEGER | Creation timestamp |
+
+### `rtbl_subscriptions`
+
+| Column        | Type    | Description |
+| ------------- | ------- | ----------- |
+| `id`          | INTEGER | Internal row id |
+| `service_jid` | TEXT    | PubSub service JID/domain |
+| `node`        | TEXT    | PubSub node name |
+| `created_at`  | INTEGER | Creation timestamp |
+
+### `rtbl_hashes`
+
+| Column        | Type    | Description |
+| ------------- | ------- | ----------- |
+| `hash`        | TEXT    | SHA-256 hash of a bare JID |
+| `service_jid` | TEXT    | Source PubSub service |
+| `node`        | TEXT    | Source PubSub node |
+| `reason`      | TEXT    | Optional RTBL reason |
+| `created_at`  | INTEGER | Creation timestamp |
+
+### `rtbl_domains`
+
+| Column        | Type    | Description |
+| ------------- | ------- | ----------- |
+| `domain`      | TEXT    | Plain domain from RTBL feed |
+| `service_jid` | TEXT    | Source PubSub service |
+| `node`        | TEXT    | Source PubSub node |
+| `reason`      | TEXT    | Optional RTBL reason |
+| `created_at`  | INTEGER | Creation timestamp |
 
 ---
 
@@ -582,12 +719,34 @@ If you see health check warnings in the admin room, the bot has detected:
 
 Run `!sync` to re-establish connections and verify rights.
 
+### RTBL subscription cannot be added
+
+If `!rtbl add <service> <node>` fails:
+- Verify the service looks like a PubSub service/domain, for example `xmppbl.org` or `pubsub.example.org`
+- Verify the node name has no spaces and exists on the service
+- Ensure the remote service is reachable from the bot account
+- The bot refuses to subscribe to its own configured publish feed nodes
+
+### RTBL publish node create/configure is forbidden
+
+If the bot can publish only after you manually created nodes, create/configure the nodes with the Prosody console as shown in the RTBL section above. The bot treats `forbidden` during node configuration as informational if publishing still succeeds.
+
+### RTBL bans are not being applied
+
+Check:
+- `RTBL_ENABLED=True`
+- `!rtbl list` shows active subscriptions and non-zero hash/domain counts
+- The user is not protected by `!ignore` or admin/owner protection
+- If `RTBL_PERSIST_BANS=True`, stale persisted bans may be removed after retractions or subscription removal
+
 ---
 
 ## Notes
 
 * Temporary bans expire automatically; the bot removes them periodically (configurable interval).  
 * Changes to `config.py` can **usually be applied via your configured command prefix + `reloadconfig`** (examples here use `!reloadconfig`). Startup-only settings such as `JID`, `PASSWORD`, `RESOURCE` / `RESSOURCE`, `ADMIN_ROOM`, `NICK`, and `DB_FILE` require a restart.
-* The bot uses **exponential backoff** (max 5 minutes) if disconnected from the XMPP server.
+* The bot schedules an automatic reconnect after disconnects and restores room/admin state during reconnect.
 * Domain bans are stored as-is (e.g., `*.domain.tld`) and can be searched/unbanned using `!bansearch` and `!unban`
 * Bot prevents banning of admins/owners, even via domain bans
+* RTBL subscription data is stored separately from manual bans unless `RTBL_PERSIST_BANS=True`.
+* The own RTBL publish feed mirrors active local bans; it should not be added back as an inbound RTBL subscription.

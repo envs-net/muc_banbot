@@ -447,8 +447,6 @@ class CommandMixin:
             f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"
             f"{p}syncadmins - update admin list from the admin room\n"
             f"{p}syncbans - sync bans from all rooms into the database and enforce them\n\n"
-            f"{p}export - export all bans to a CSV file\n"
-            f"{p}import <filename> - import bans from a CSV file\n\n"
             f"{p}ignore list [page] - show global ignorelist\n"
             f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
             f"{p}ignore remove <jid|domain> - remove from ignorelist\n\n"
@@ -456,5 +454,7 @@ class CommandMixin:
             f"{p}rtbl add <service> <node> - subscribe to a RTBL node\n"
             f"{p}rtbl delete <service> [node] - remove a RTBL subscription\n"
             f"{p}rtbl publish status - Status of your own RTBL feed\n"
-            f"{p}rtbl publish sync - Publish all current bans to your own feed\n"
+            f"{p}rtbl publish sync - Publish all current bans to your own feed\n\n"
+            f"{p}export - export all bans to a CSV file\n"
+            f"{p}import <filename> - import bans from a CSV file\n"
         )
