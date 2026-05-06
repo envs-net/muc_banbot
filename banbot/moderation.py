@@ -479,12 +479,20 @@ class ModerationMixin:
             )
             return
 
-        # --- RTBL Publish: Update your own ban feed ---
-        # (JID and domain bans only, no nick-only bans)
+        # --- RTBL Publish: Update your own outbound ban feed ---
+        # Publish only permanent JID/domain bans. Nick-only bans and tempbans
+        # are not suitable for RTBL. If an existing permanent ban is converted
+        # to a tempban, retract it from the publish feed.
         if target_type == "jid" and normalized_jid and not normalized_jid.startswith("*."):
-            await self.rtbl_publish_ban(jid=normalized_jid, domain=None, comment=comment)
+            if ts <= 0:
+                await self.rtbl_publish_ban(jid=normalized_jid, domain=None, comment=comment)
+            else:
+                await self.rtbl_retract_ban(jid=normalized_jid, domain=None)
         elif target_type == "domain" and target:
-            await self.rtbl_publish_ban(jid=None, domain=target, comment=comment)
+            if ts <= 0:
+                await self.rtbl_publish_ban(jid=None, domain=target, comment=comment)
+            else:
+                await self.rtbl_retract_ban(jid=None, domain=target)
 
         event_type = "ban_updated" if skip_final_message else "ban_applied"
         log.info("Ban applied: identifier=%s, JID/Nick=%s/%s, until=%s, issuer=%s",
@@ -676,16 +684,16 @@ class ModerationMixin:
 
         row = None
         async with self.db.execute(
-            "SELECT jid, nick FROM bans WHERE target_type = ? AND target = ?",
+            "SELECT jid, nick, until FROM bans WHERE target_type = ? AND target = ?",
             (target_type, target),
         ) as cur:
             row = await cur.fetchone()
 
         if not row and not is_domain_ban and not is_jid:
-            async with self.db.execute("SELECT jid, nick FROM bans WHERE target_type = 'jid'") as cursor:
-                async for jid_db, nick_db in cursor:
+            async with self.db.execute("SELECT jid, nick, until FROM bans WHERE target_type = 'jid'") as cursor:
+                async for jid_db, nick_db, until_db in cursor:
                     if jid_db and self.bare_jid(jid_db).split("@", 1)[0].lower() == identifier:
-                        row = (jid_db, nick_db)
+                        row = (jid_db, nick_db, until_db)
                         target_type = "jid"
                         target = self.bare_jid(jid_db)
                         break
@@ -700,6 +708,7 @@ class ModerationMixin:
 
         ban_jid = row[0] if row and row[0] else None
         ban_nick = row[1] if row and row[1] else None
+        ban_until = int(row[2] or 0) if row else 0
 
         await self.db.execute(
             "DELETE FROM bans WHERE target_type = ? AND target = ?",
@@ -707,11 +716,14 @@ class ModerationMixin:
         )
         await self.db.commit()
 
-        # --- RTBL Publish: Withdraw ban from own feed ---
-        if target_type == "jid" and ban_jid and not (ban_jid or "").startswith("*."):
-            await self.rtbl_retract_ban(jid=ban_jid, domain=None)
-        elif target_type == "domain" and domain:
-            await self.rtbl_retract_ban(jid=None, domain=domain)
+        # --- RTBL Publish: Withdraw permanent bans from own feed ---
+        # Only permanent JID/domain bans are published, so only those need to
+        # be retracted. Tempban expiry/unban should not touch the publish feed.
+        if ban_until <= 0:
+            if target_type == "jid" and ban_jid and not (ban_jid or "").startswith("*."):
+                await self.rtbl_retract_ban(jid=ban_jid, domain=None)
+            elif target_type == "domain" and domain:
+                await self.rtbl_retract_ban(jid=None, domain=domain)
 
         if is_domain_ban and domain:
             self._remove_domain_bans_from_cache(domain)
