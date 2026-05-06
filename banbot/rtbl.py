@@ -1551,9 +1551,25 @@ class RtblMixin:
                 "RTBL Publish: Retracted '%s…' from node '%s'",
                 item_id[:16], node,
             )
-        except (IqError, IqTimeout) as e:
+        except IqError as e:
+            # If the item is not present in the node, the desired final state
+            # is already reached. This can happen when an old permanent ban is
+            # converted to a tempban but was never published successfully, or
+            # when the node was manually recreated. Keep admin logs quiet.
+            if "item-not-found" in str(e).lower():
+                log.info(
+                    "RTBL Publish: Item '%s…' was already absent from node '%s'",
+                    item_id[:16], node,
+                )
+                return
+
             log.warning(
                 "RTBL Publish: Could not retract '%s…' from '%s': %s",
+                item_id[:16], node, e,
+            )
+        except IqTimeout as e:
+            log.warning(
+                "RTBL Publish: Timeout retracting '%s…' from '%s': %s",
                 item_id[:16], node, e,
             )
 
