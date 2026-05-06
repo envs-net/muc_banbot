@@ -224,7 +224,7 @@ class RtblMixin:
         from xml.etree import ElementTree as ET
 
         _PUBSUB = "http://jabber.org/protocol/pubsub"
-        _RSM    = "http://jabber.org/protocol/rsm"
+        _RSM = "http://jabber.org/protocol/rsm"
 
         hash_count = 0
         domain_count = 0
@@ -241,14 +241,14 @@ class RtblMixin:
                 iq = self.make_iq_get(ito=service_jid)
 
                 pubsub_el = ET.Element(f"{{{_PUBSUB}}}pubsub")
-                items_el  = ET.SubElement(pubsub_el, f"{{{_PUBSUB}}}items")
+                items_el = ET.SubElement(pubsub_el, f"{{{_PUBSUB}}}items")
                 items_el.set("node", node)
 
                 rsm_set = ET.SubElement(pubsub_el, f"{{{_RSM}}}set")
-                max_el  = ET.SubElement(rsm_set, f"{{{_RSM}}}max")
+                max_el = ET.SubElement(rsm_set, f"{{{_RSM}}}max")
                 max_el.text = str(page_size)
                 if last_id is not None:
-                    after_el      = ET.SubElement(rsm_set, f"{{{_RSM}}}after")
+                    after_el = ET.SubElement(rsm_set, f"{{{_RSM}}}after")
                     after_el.text = last_id
 
                 for child in list(iq.xml):
@@ -257,7 +257,7 @@ class RtblMixin:
 
                 result = await iq.send()
 
-                result_pubsub   = result.xml.find(f"{{{_PUBSUB}}}pubsub")
+                result_pubsub = result.xml.find(f"{{{_PUBSUB}}}pubsub")
                 if result_pubsub is None:
                     break
                 result_items_el = result_pubsub.find(f"{{{_PUBSUB}}}items")
@@ -279,7 +279,7 @@ class RtblMixin:
                     continue
 
                 payload = item_el[0] if len(item_el) > 0 else None
-                reason  = self._rtbl_extract_reason(payload)
+                reason = self._rtbl_extract_reason(payload)
 
                 if _is_sha256(item_id):
                     async with self.db.execute(
@@ -341,7 +341,7 @@ class RtblMixin:
                     )
 
             await self.db.commit()
-            page   += 1
+            page += 1
             last_id = items[-1].get("id") if items else None
 
             log.debug(
@@ -350,10 +350,10 @@ class RtblMixin:
                 last_id[:12] if last_id else "none",
             )
 
-            rsm_el   = result.xml.find(f".//{{{_RSM}}}set")
+            rsm_el = result.xml.find(f".//{{{_RSM}}}set")
             rsm_last = None
             if rsm_el is not None:
-                last_el  = rsm_el.find(f"{{{_RSM}}}last")
+                last_el = rsm_el.find(f"{{{_RSM}}}last")
                 rsm_last = last_el.text.strip() if last_el is not None and last_el.text else None
 
             log.debug("RTBL: RSM last=%s", rsm_last)
@@ -853,6 +853,46 @@ class RtblMixin:
             text_el.text = comment
         return payload
 
+
+    def _rtbl_is_own_publish_node(self, service_jid: str, node: str) -> bool:
+        """Return True if service/node is one of our own RTBL publish nodes."""
+        if not getattr(self, "rtbl_publish_enabled", False):
+            return False
+
+        publish_service = (getattr(self, "rtbl_publish_service", "") or "").strip().lower()
+        if not publish_service or service_jid.strip().lower() != publish_service:
+            return False
+
+        publish_nodes = {
+            (getattr(self, "rtbl_publish_jid_node", "") or "").strip(),
+            (getattr(self, "rtbl_publish_domain_node", "") or "").strip(),
+        }
+        publish_nodes.discard("")
+
+        return node.strip() in publish_nodes
+
+
+    async def _rtbl_count_active_publish_bans(self) -> tuple[int, int]:
+        """Return the number of active local bans mirrored into the own publish feed."""
+        async with self.db.execute(
+            """SELECT COUNT(*) FROM bans
+               WHERE target_type = 'jid' AND jid IS NOT NULL
+                 AND (until = 0 OR until > strftime('%s','now'))"""
+        ) as cursor:
+            row = await cursor.fetchone()
+            jid_count = int(row[0] or 0) if row else 0
+
+        async with self.db.execute(
+            """SELECT COUNT(*) FROM bans
+               WHERE target_type = 'domain'
+                 AND (until = 0 OR until > strftime('%s','now'))"""
+        ) as cursor:
+            row = await cursor.fetchone()
+            domain_count = int(row[0] or 0) if row else 0
+
+        return jid_count, domain_count
+
+
     # ------------------------------------------------------------------
     # Bot commands: !rtbl list / add / delete / publish
     # ------------------------------------------------------------------
@@ -871,7 +911,7 @@ class RtblMixin:
 
         if not args:
             lines = [
-                f"Usage:",
+                "Usage:",
                 f"  {p}rtbl list",
                 f"  {p}rtbl add <service_jid> <node>",
                 f"  {p}rtbl delete <service_jid> [node]",
@@ -901,24 +941,31 @@ class RtblMixin:
                         (service_jid, node),
                     ) as cursor:
                         row = await cursor.fetchone()
-                        h_count = row[0] if row else 0
+                        h_count = int(row[0] or 0) if row else 0
                     async with self.db.execute(
                         "SELECT COUNT(*) FROM rtbl_domains WHERE service_jid = ? AND node = ?",
                         (service_jid, node),
                     ) as cursor:
                         row = await cursor.fetchone()
-                        d_count = row[0] if row else 0
+                        d_count = int(row[0] or 0) if row else 0
                     lines.append(
                         f"  • {service_jid}  /  {node}"
                         f"  ({h_count} hashes, {d_count} domains)"
                     )
 
             if getattr(self, "rtbl_publish_enabled", False):
+                jid_publish_count, domain_publish_count = await self._rtbl_count_active_publish_bans()
                 lines += [
                     "",
                     "📡 Own publish feed:",
-                    f"  • JID hashes  → {self.rtbl_publish_service} / {self.rtbl_publish_jid_node}",
-                    f"  • Domain bans → {self.rtbl_publish_service} / {self.rtbl_publish_domain_node}",
+                    (
+                        f"  • JID hashes  → {self.rtbl_publish_service} / "
+                        f"{self.rtbl_publish_jid_node}  ({jid_publish_count} hashes)"
+                    ),
+                    (
+                        f"  • Domain bans → {self.rtbl_publish_service} / "
+                        f"{self.rtbl_publish_domain_node}  ({domain_publish_count} domains)"
+                    ),
                 ]
 
             self.send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
@@ -956,6 +1003,19 @@ class RtblMixin:
                     mbody=(
                         f"❌ Invalid RTBL node: {node or '(empty)'}\n"
                         "Node names must be non-empty and must not contain whitespace."
+                    ),
+                    mtype="groupchat",
+                )
+                return
+
+            if self._rtbl_is_own_publish_node(service_jid, node):
+                self.send_message(
+                    mto=room,
+                    mbody=(
+                        f"❌ RTBL: Refusing to subscribe to own publish node "
+                        f"'{node}' @ {service_jid}.\n"
+                        "Own RTBL publish nodes are outbound feeds and should not be "
+                        "subscribed as inbound RTBL sources."
                     ),
                     mtype="groupchat",
                 )
@@ -1023,7 +1083,7 @@ class RtblMixin:
                 return
 
             service_jid = args[1].strip().lower()
-            node        = args[2].strip() if len(args) >= 3 else None
+            node = args[2].strip() if len(args) >= 3 else None
 
             if node:
                 async with self.db.execute(
@@ -1120,7 +1180,6 @@ class RtblMixin:
             self.send_message(mto=room, mbody=msg, mtype="groupchat")
             return
 
-
         # ----------------------------------------------------------------
         # publish
         # ----------------------------------------------------------------
@@ -1139,26 +1198,12 @@ class RtblMixin:
             sub_action = args[1].lower() if len(args) >= 2 else "status"
 
             if sub_action == "status":
-                async with self.db.execute(
-                    """SELECT COUNT(*) FROM bans
-                       WHERE target_type = 'jid' AND jid IS NOT NULL
-                         AND (until = 0 OR until > strftime('%s','now'))"""
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    jid_count = row[0] if row else 0
-
-                async with self.db.execute(
-                    """SELECT COUNT(*) FROM bans
-                       WHERE target_type = 'domain'
-                         AND (until = 0 OR until > strftime('%s','now'))"""
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    domain_count = row[0] if row else 0
-
+                jid_count, domain_count = await self._rtbl_count_active_publish_bans()
                 self.send_message(
                     mto=room,
                     mbody=(
-                        f"📡 RTBL Publish status:\n"
+                        "📡 RTBL Publish status:\n"
+                        f"  Enabled:     {self.rtbl_publish_enabled}\n"
                         f"  Service:     {self.rtbl_publish_service}\n"
                         f"  JID node:    {self.rtbl_publish_jid_node}"
                         f"  ({jid_count} active bans)\n"
@@ -1175,12 +1220,17 @@ class RtblMixin:
                     mbody="📡 RTBL Publish: Syncing all active bans to nodes…",
                     mtype="groupchat",
                 )
-                jid_count, domain_count = await self._rtbl_sync_all_bans_to_nodes()
+                jid_count, domain_count, jid_failures, domain_failures = await self._rtbl_sync_all_bans_to_nodes()
+                status_emoji = "✅" if jid_failures == 0 and domain_failures == 0 else "⚠️"
                 self.send_message(
                     mto=room,
                     mbody=(
-                        f"✅ RTBL Publish: Sync complete — "
+                        f"{status_emoji} RTBL Publish: Sync complete — "
                         f"{jid_count} JID hashes, {domain_count} domain bans published."
+                        + (
+                            f"\nFailures: {jid_failures} JID hashes, {domain_failures} domain bans."
+                            if jid_failures or domain_failures else ""
+                        )
                     ),
                     mtype="groupchat",
                 )
@@ -1188,7 +1238,7 @@ class RtblMixin:
 
             self.send_message(
                 mto=room,
-                mbody=f"❌ Unknown publish sub-command: {sub_action}\nAvailable: status / sync",
+                mbody=f"❌ Unknown RTBL publish action: {sub_action}\nAvailable: status / sync",
                 mtype="groupchat",
             )
             return
@@ -1202,14 +1252,15 @@ class RtblMixin:
             mtype="groupchat",
         )
 
+
     # ------------------------------------------------------------------
     # Own RTBL publish feed
     # ------------------------------------------------------------------
 
     async def setup_rtbl_publish(self) -> None:
         """
-        Create and configure own JID and domain publish nodes, then perform
-        an initial sync of all active bans.
+        Create/configure own JID and domain publish nodes when possible, then
+        perform an initial sync of all active bans.
         Called from start() after setup_rtbl().
         """
         if not getattr(self, "rtbl_publish_enabled", False):
@@ -1217,71 +1268,157 @@ class RtblMixin:
 
         from config import ADMIN_ROOM
 
-        for node in (self.rtbl_publish_jid_node, self.rtbl_publish_domain_node):
-            await self._rtbl_ensure_node(self.rtbl_publish_service, node)
+        jid_node_ready = await self._rtbl_ensure_node(
+            self.rtbl_publish_service,
+            self.rtbl_publish_jid_node,
+        )
+        domain_node_ready = await self._rtbl_ensure_node(
+            self.rtbl_publish_service,
+            self.rtbl_publish_domain_node,
+        )
 
-        jid_count, domain_count = await self._rtbl_sync_all_bans_to_nodes()
+        if not jid_node_ready or not domain_node_ready:
+            log.warning(
+                "RTBL Publish: One or more publish nodes are not ready on %s "
+                "(jid_node_ready=%s, domain_node_ready=%s)",
+                self.rtbl_publish_service,
+                jid_node_ready,
+                domain_node_ready,
+            )
+
+        jid_count, domain_count, jid_failures, domain_failures = await self._rtbl_sync_all_bans_to_nodes()
         log.info(
-            "RTBL Publish: Initial sync complete — %d JID hashes, %d domain bans",
-            jid_count, domain_count,
+            (
+                "RTBL Publish: Initial sync complete — %d JID hashes published, "
+                "%d domain bans published, %d JID failures, %d domain failures"
+            ),
+            jid_count,
+            domain_count,
+            jid_failures,
+            domain_failures,
         )
 
         if self.rtbl_announce:
+            status_emoji = "✅" if jid_failures == 0 and domain_failures == 0 else "⚠️"
             self.send_message(
                 mto=ADMIN_ROOM,
                 mbody=(
-                    f"📡 RTBL Publish: Nodes ready on {self.rtbl_publish_service} — "
+                    f"{status_emoji} RTBL Publish: Nodes ready on {self.rtbl_publish_service} — "
                     f"{jid_count} JID hashes ({self.rtbl_publish_jid_node}), "
                     f"{domain_count} domain bans ({self.rtbl_publish_domain_node})"
+                    + (
+                        f"\nFailures: {jid_failures} JID hashes, {domain_failures} domain bans."
+                        if jid_failures or domain_failures else ""
+                    )
                 ),
                 mtype="groupchat",
             )
 
 
-    async def _rtbl_ensure_node(self, service: str, node: str) -> None:
-        """Create a PubSub node if it does not already exist, then configure it."""
+    async def _rtbl_node_exists(self, service: str, node: str) -> bool:
+        """Return True if a PubSub node exists and is reachable."""
         try:
-            await self.plugin["xep_0060"].create_node(service, node)
-            log.info("RTBL Publish: Created node '%s' on %s", node, service)
+            await self.plugin["xep_0060"].get_node_config(service, node)
+            return True
         except IqError as e:
-            if "conflict" in str(e).lower():
-                log.info("RTBL Publish: Node '%s' already exists on %s", node, service)
-            else:
-                log.warning("RTBL Publish: Could not create node '%s': %s", node, e)
-                return
-        except IqTimeout as e:
-            log.warning("RTBL Publish: Timeout creating node '%s': %s", node, e)
-            return
+            if "item-not-found" in str(e).lower() or "nodeid-required" in str(e).lower():
+                return False
+            # Some services may forbid config reads. Fall back to a cheap item fetch.
+            try:
+                await self.plugin["xep_0060"].get_items(service, node, max_items=1)
+                return True
+            except Exception:
+                log.debug("RTBL Publish: Could not verify node '%s' on %s: %s", node, service, e)
+                return False
+        except IqTimeout:
+            return False
+        except Exception as e:
+            log.debug("RTBL Publish: Node existence check failed for '%s' on %s: %s", node, service, e)
+            return False
+
+
+    def _rtbl_make_node_config_form(self):
+        """Build a XEP-0004 submit form for RTBL publish node configuration."""
+        if "xep_0004" not in self.plugin:
+            self.register_plugin("xep_0004")
+
+        form = self.plugin["xep_0004"].make_form(ftype="submit")
+        form.add_field(var="FORM_TYPE", ftype="hidden", value="http://jabber.org/protocol/pubsub#node_config")
+        form.add_field(var="pubsub#access_model", value="open")
+        form.add_field(var="pubsub#publish_model", value="open")
+        form.add_field(var="pubsub#persist_items", value="1")
+        form.add_field(var="pubsub#max_items", value="1000")
+        form.add_field(var="pubsub#send_last_published_item", value="never")
+        form.add_field(var="pubsub#deliver_payloads", value="1")
+        return form
+
+
+    async def _rtbl_ensure_node(self, service: str, node: str) -> bool:
+        """Create a PubSub node if needed and configure it when permitted."""
+        node_exists = await self._rtbl_node_exists(service, node)
+
+        if node_exists:
+            log.info("RTBL Publish: Node '%s' already exists on %s", node, service)
+        else:
+            try:
+                await self.plugin["xep_0060"].create_node(service, node)
+                node_exists = True
+                log.info("RTBL Publish: Created node '%s' on %s", node, service)
+            except IqError as e:
+                if "conflict" in str(e).lower():
+                    node_exists = True
+                    log.info("RTBL Publish: Node '%s' already exists on %s", node, service)
+                else:
+                    if await self._rtbl_node_exists(service, node):
+                        node_exists = True
+                        log.info(
+                            "RTBL Publish: Node '%s' exists on %s, but create was rejected; continuing",
+                            node,
+                            service,
+                        )
+                    else:
+                        log.warning("RTBL Publish: Could not create node '%s': %s", node, e)
+                        return False
+            except IqTimeout as e:
+                log.warning("RTBL Publish: Timeout creating node '%s': %s", node, e)
+                return False
 
         try:
             await self.plugin["xep_0060"].set_node_config(
                 service,
                 node,
-                config={
-                    "pubsub#access_model":             "open",
-                    "pubsub#publish_model":            "publishers",
-                    "pubsub#persist_items":            True,
-                    "pubsub#max_items":                "256",
-                    "pubsub#send_last_published_item": "never",
-                    "pubsub#deliver_payloads":         True,
-                },
+                config=self._rtbl_make_node_config_form(),
             )
             log.info("RTBL Publish: Node '%s' configured", node)
-        except (IqError, IqTimeout) as e:
-            log.warning("RTBL Publish: Could not configure node '%s': %s", node, e)
+        except IqError as e:
+            if "forbidden" in str(e).lower():
+                log.info(
+                    "RTBL Publish: Node '%s' exists but cannot be configured; using existing node config.",
+                    node,
+                )
+            else:
+                log.warning("RTBL Publish: Could not configure node '%s': %s", node, e)
+        except IqTimeout as e:
+            log.warning("RTBL Publish: Timeout configuring node '%s': %s", node, e)
+        except TypeError as e:
+            log.warning("RTBL Publish: Could not build config form for node '%s': %s", node, e)
+
+        return node_exists
 
 
-    async def _rtbl_sync_all_bans_to_nodes(self) -> tuple[int, int]:
+    async def _rtbl_sync_all_bans_to_nodes(self) -> tuple[int, int, int, int]:
         """
         Publish all active JID bans and domain bans from the main bans table
         to the respective own publish nodes.
-        Returns (jid_count, domain_count).
+        Returns (jid_count, domain_count, jid_failures, domain_failures).
         """
         if not getattr(self, "rtbl_publish_enabled", False):
-            return 0, 0
+            return 0, 0, 0, 0
 
-        jid_count    = 0
+        jid_count = 0
         domain_count = 0
+        jid_failures = 0
+        domain_failures = 0
 
         async with self.db.execute(
             """SELECT jid, comment FROM bans
@@ -1294,8 +1431,10 @@ class RtblMixin:
             bare = self.bare_jid(jid) if jid else None
             if not bare or bare.startswith("*."):
                 continue
-            await self._rtbl_publish_jid_item(bare, comment)
-            jid_count += 1
+            if await self._rtbl_publish_jid_item(bare, comment):
+                jid_count += 1
+            else:
+                jid_failures += 1
 
         async with self.db.execute(
             """SELECT target, comment FROM bans
@@ -1307,10 +1446,12 @@ class RtblMixin:
         for domain, comment in domain_rows:
             if not domain:
                 continue
-            await self._rtbl_publish_domain_item(domain, comment)
-            domain_count += 1
+            if await self._rtbl_publish_domain_item(domain, comment):
+                domain_count += 1
+            else:
+                domain_failures += 1
 
-        return jid_count, domain_count
+        return jid_count, domain_count, jid_failures, domain_failures
 
 
     async def rtbl_publish_ban(
@@ -1361,7 +1502,7 @@ class RtblMixin:
                 await self._rtbl_retract_item(self.rtbl_publish_domain_node, clean)
 
 
-    async def _rtbl_publish_jid_item(self, bare_jid: str, comment: str | None) -> None:
+    async def _rtbl_publish_jid_item(self, bare_jid: str, comment: str | None) -> bool:
         """Publish a single SHA-256 hashed JID to the own JID pubsub node."""
         hash_val = self._rtbl_hash_jid(bare_jid)
         try:
@@ -1375,11 +1516,13 @@ class RtblMixin:
                 "RTBL Publish: JID hash published for %s (%s…)",
                 bare_jid, hash_val[:12],
             )
+            return True
         except (IqError, IqTimeout) as e:
             log.warning("RTBL Publish: Could not publish JID hash for %s: %s", bare_jid, e)
+            return False
 
 
-    async def _rtbl_publish_domain_item(self, domain: str, comment: str | None) -> None:
+    async def _rtbl_publish_domain_item(self, domain: str, comment: str | None) -> bool:
         """Publish a plaintext domain ban to the own domain pubsub node."""
         try:
             await self.plugin["xep_0060"].publish(
@@ -1389,8 +1532,10 @@ class RtblMixin:
                 payload=self._rtbl_build_payload(comment),
             )
             log.debug("RTBL Publish: Domain ban published for *.%s", domain)
+            return True
         except (IqError, IqTimeout) as e:
             log.warning("RTBL Publish: Could not publish domain ban for *.%s: %s", domain, e)
+            return False
 
 
     async def _rtbl_retract_item(self, node: str, item_id: str) -> None:
