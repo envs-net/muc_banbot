@@ -35,7 +35,6 @@ class ConfigCommandMixin:
         config_lines.append(f"🔌 MUC Write Semaphore: {self.muc_write_limit}")
         config_lines.append("")
         config_lines.append(f"🛡️ RTBL Enabled: {self.rtbl_enabled}")
-        config_lines.append(f"💾 RTBL Persist Bans: {getattr(self, 'rtbl_persist_bans', False)}")
         config_lines.append(f"📢 RTBL Announce: {self.rtbl_announce}")
         config_lines.append(f"🔄 RTBL Refresh Interval: {self.rtbl_refresh_interval}s" if self.rtbl_refresh_interval > 0 else "🔄 RTBL Refresh: disabled")
         config_lines.append(f"📡 RTBL Publish Enabled: {getattr(self, 'rtbl_publish_enabled', False)}")
