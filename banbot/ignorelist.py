@@ -121,6 +121,50 @@ class IgnorelistMixin:
         return False
 
 
+    async def _unban_matching_ignore_entries(self, target: str, target_type: str) -> None:
+        """Remove active bans that are now protected by a newly added ignorelist entry."""
+        if target_type == "jid":
+            bare = self.bare_jid(target)
+            if not bare:
+                return
+
+            async with self.db.execute(
+                "SELECT 1 FROM bans WHERE target_type = 'jid' AND target = ? LIMIT 1",
+                (bare,),
+            ) as cursor:
+                if await cursor.fetchone():
+                    await self.unban_all(bare, issuer="ignorelist")
+            return
+
+        domain = target.lstrip("*." ).lower()
+        if not domain:
+            return
+
+        # Remove an exact wildcard-domain ban if one exists.
+        async with self.db.execute(
+            "SELECT 1 FROM bans WHERE target_type = 'domain' AND target = ? LIMIT 1",
+            (domain,),
+        ) as cursor:
+            if await cursor.fetchone():
+                await self.unban_all(f"*.{domain}", issuer="ignorelist")
+
+        # Remove concrete JID bans that were applied from RTBL domain matches.
+        # This lets `!ignore add user@example.org` or `!ignore add *.example.org`
+        # immediately clear already-applied RTBL bans for that target.
+        async with self.db.execute(
+            "SELECT jid FROM bans WHERE issuer = 'rtbl' AND target_type = 'jid' AND jid IS NOT NULL"
+        ) as cursor:
+            rows = [row[0] for row in await cursor.fetchall()]
+
+        for jid in rows:
+            bare = self.bare_jid(jid)
+            if not bare or "@" not in bare:
+                continue
+            user_domain = bare.split("@", 1)[1].lower()
+            if domain_matches(user_domain, domain):
+                await self.unban_all(bare, issuer="ignorelist")
+
+
     async def cmd_ignore(self, args: list[str], room: str, actor: str = "unknown") -> None:
         """
         Manage the global ignorelist.
@@ -223,10 +267,10 @@ class IgnorelistMixin:
 
             # Ensure the ignorelisted target is no longer actively banned.
             try:
-                await self.unban_all(target, issuer="ignorelist")
+                await self._unban_matching_ignore_entries(target, target_type)
             except Exception as e:
                 log.warning(
-                    "Ignorelist: failed to unban %s after adding ignore entry: %s",
+                    "Ignorelist: failed to unban matching entries for %s after adding ignore entry: %s",
                     target,
                     e,
                 )

@@ -4,7 +4,7 @@ Two item types are handled within RTBL nodes:
   - JID bans   : SHA-256 hashed bare JIDs (64 lowercase hex chars)
                  Compatible with xmppbl.org muc_bans_sha256.
   - Domain bans: plaintext domain names (e.g. 'spam.example.org')
-                 Applied as wildcard bans (*.domain).
+                 matched against occupant JID domains.
 
 Item type is detected automatically from the item ID format when receiving
 from any subscribed node.
@@ -15,8 +15,8 @@ Own publish feed (optional, requires a PubSub service on the local server):
 
 Bans from subscribed RTBL feeds are stored in separate lookup tables
 (rtbl_hashes, rtbl_domains). When an RTBL entry is actually applied to a
-protected room, the resulting ban is also persisted in the main bans table so
-!banlist, !why and sync state stay consistent.
+protected room, the resulting local ban is also persisted in the main bans table
+with issuer=rtbl so !banlist, !why and sync state stay consistent.
 Admin/owner protection is always enforced before any RTBL ban is applied.
 """
 

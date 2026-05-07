@@ -26,7 +26,7 @@ It provides central administration via an admin room and protects multiple chat 
 * 🏥 Periodic health checks for room connectivity and admin rights  
 * 🩺 Dynamic `!status` health headline with reconnect, worker, DB, room-rights, and RTBL status  
 * 🛡️ RTBL subscriptions via PubSub for SHA-256 JID hashes and plaintext domain bans  
-* 🧾 Applied RTBL bans are persisted in the main banlist with a shield marker  
+* 🧾 Applied RTBL bans are persisted in the main banlist with a shield marker; domain matches are stored as concrete JID bans  
 * 🔎 Current occupants are scanned immediately after startup/new RTBL subscription fetches  
 * 🔄 Periodic RTBL refresh with quiet/no-change behavior  
 * 📡 Optional own RTBL publish feed for local bans  
@@ -438,8 +438,8 @@ BanBot supports RTBL (Real-Time Block List) PubSub feeds:
 
 - **Inbound subscriptions**: subscribe to external RTBL nodes and apply matching bans at join time or on live PubSub events
 - **JID entries**: SHA-256 hashes of bare JIDs, compatible with `muc_bans_sha256`
-- **Domain entries**: plaintext domains, applied as wildcard domain bans
-- **Applied RTBL persistence**: when an inbound RTBL entry actually matches and is applied, the resulting ban is stored in the main `bans` table with `issuer=rtbl`
+- **Domain entries**: plaintext domains; matching occupants are locally persisted as concrete JID bans with the RTBL domain source in the comment
+- **Applied RTBL persistence**: when an inbound RTBL entry actually matches and is applied, the resulting local ban is stored in the main `bans` table with `issuer=rtbl`
 - **Current occupant scan**: startup fetches and newly added subscriptions immediately scan current occupants so matching users are banned without waiting for a rejoin; periodic refreshes stay quiet and do not rescan unchanged lists
 - **Own publish feed**: publish local non-RTBL bans to your own PubSub service for other bots to consume
 
@@ -458,7 +458,8 @@ Common commands:
 Banlist behavior:
 - `!banlist rtbl` shows the raw RTBL subscription entries from `rtbl_hashes` and `rtbl_domains`.
 - `!banlist` shows applied bans from the main `bans` table. RTBL-applied entries use the 🛡️ icon and `by rtbl`.
-- For RTBL domain matches, the main banlist stores the wildcard domain (for example `*.draugr.de`), not every matched occupant JID.
+- For RTBL domain matches, the main banlist stores the concrete matched JID, for example `picelboi@xmpp.earth`, with a comment such as `RTBL domain ban: *.xmpp.earth`.
+- The RTBL domain rule itself remains in `rtbl_domains`; it is not stored as a local wildcard ban unless it came from an older version.
 - For RTBL JID-hash matches, the main banlist stores the resolved bare JID if the bot can match the hash to a current occupant.
 
 Safety and validation:
@@ -653,7 +654,7 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | Column        | Type    | Description |
 | ------------- | ------- | ----------- |
 | `hash`        | TEXT    | SHA-256 hash of a bare JID |
-| `service_jid` | TEXT    | PubSub service address that provided this hash entry |
+| `service_jid` | TEXT    | PubSub service address that provided this entry |
 | `node`        | TEXT    | Source PubSub node on that service |
 | `reason`      | TEXT    | Optional RTBL reason |
 | `created_at`  | INTEGER | Creation timestamp |
@@ -663,7 +664,7 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | Column        | Type    | Description |
 | ------------- | ------- | ----------- |
 | `domain`      | TEXT    | Plain domain from RTBL feed |
-| `service_jid` | TEXT    | PubSub service address that provided this domain entry |
+| `service_jid` | TEXT    | PubSub service address that provided this entry |
 | `node`        | TEXT    | Source PubSub node on that service |
 | `reason`      | TEXT    | Optional RTBL reason |
 | `created_at`  | INTEGER | Creation timestamp |
@@ -762,5 +763,5 @@ Check:
 * The bot schedules an automatic reconnect after disconnects and restores room/admin state during reconnect.
 * Domain bans are stored as-is (e.g., `*.domain.tld`) and can be searched/unbanned using `!bansearch` and `!unban`
 * Bot prevents banning of admins/owners, even via domain bans
-* RTBL subscription data (`rtbl_hashes`, `rtbl_domains`) is stored separately from applied bans. When an RTBL entry actually matches, the applied ban is stored in the main `bans` table with `issuer=rtbl`.
+* RTBL subscription data (`rtbl_hashes`, `rtbl_domains`) is stored separately from applied bans. When an RTBL entry actually matches, the applied ban is stored in the main `bans` table with `issuer=rtbl`. Domain RTBL matches are stored locally as concrete JID bans so they can be unbanned or ignored per user.
 * The own RTBL publish feed mirrors active local non-RTBL bans; it should not be added back as an inbound RTBL subscription.

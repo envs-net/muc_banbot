@@ -684,16 +684,16 @@ class ModerationMixin:
 
         row = None
         async with self.db.execute(
-            "SELECT jid, nick, until FROM bans WHERE target_type = ? AND target = ?",
+            "SELECT jid, nick, until, issuer FROM bans WHERE target_type = ? AND target = ?",
             (target_type, target),
         ) as cur:
             row = await cur.fetchone()
 
         if not row and not is_domain_ban and not is_jid:
-            async with self.db.execute("SELECT jid, nick, until FROM bans WHERE target_type = 'jid'") as cursor:
-                async for jid_db, nick_db, until_db in cursor:
+            async with self.db.execute("SELECT jid, nick, until, issuer FROM bans WHERE target_type = 'jid'") as cursor:
+                async for jid_db, nick_db, until_db, issuer_db in cursor:
                     if jid_db and self.bare_jid(jid_db).split("@", 1)[0].lower() == identifier:
-                        row = (jid_db, nick_db, until_db)
+                        row = (jid_db, nick_db, until_db, issuer_db)
                         target_type = "jid"
                         target = self.bare_jid(jid_db)
                         break
@@ -709,6 +709,7 @@ class ModerationMixin:
         ban_jid = row[0] if row and row[0] else None
         ban_nick = row[1] if row and row[1] else None
         ban_until = int(row[2] or 0) if row else 0
+        ban_issuer = (row[3] or "") if row and len(row) > 3 else ""
 
         await self.db.execute(
             "DELETE FROM bans WHERE target_type = ? AND target = ?",
@@ -719,7 +720,7 @@ class ModerationMixin:
         # --- RTBL Publish: Withdraw permanent bans from own feed ---
         # Only permanent JID/domain bans are published, so only those need to
         # be retracted. Tempban expiry/unban should not touch the publish feed.
-        if ban_until <= 0:
+        if ban_until <= 0 and ban_issuer != "rtbl":
             if target_type == "jid" and ban_jid and not (ban_jid or "").startswith("*."):
                 await self.rtbl_retract_ban(jid=ban_jid, domain=None)
             elif target_type == "domain" and domain:

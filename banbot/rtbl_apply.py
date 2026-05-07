@@ -59,9 +59,10 @@ class RtblApplyMixin:
         RTBL hash/domain entry. Periodic refresh deliberately does not call this
         helper to avoid noisy re-application of unchanged bans.
 
-        Domain bans are persisted/applied once per matching domain, but all
-        currently matching occupants are counted and will be kicked by
-        _rtbl_apply_ban_domain(), which scans all protected rooms itself.
+        Domain RTBL entries are applied once per matching domain, but the
+        resulting local bans are persisted as concrete JID bans for each
+        matching occupant. This keeps !banlist actionable and allows per-user
+        !unban / !ignore exceptions for domain-list matches.
 
         Returns (matched_jids, matched_domain_occupants).
         """
@@ -154,25 +155,34 @@ class RtblApplyMixin:
         self, domain: str, reason: str | None
     ) -> None:
         """
-        Scan all current occupants of every protected room against a
-        newly received domain ban. Called immediately on pubsub_publish.
+        Scan current occupants for a newly received domain ban.
+
+        _rtbl_apply_ban_domain() scans all protected rooms itself and persists
+        concrete JID bans for every matched occupant, so call it only once with
+        the first matching occupant as announcement/context data.
         """
         for room, occupants in self.occupants.items():
             if room not in self.protected_rooms:
                 continue
+
             for nick, info in list(occupants.items()):
                 jid = info.get("jid")
                 if not jid:
                     continue
+
                 bare = self.bare_jid(jid)
                 if not bare or "@" not in bare:
                     continue
-                user_domain = bare.split("@", 1)[1].lower()
-                # Global ignorelist check
+
                 if self.is_ignored_target(bare):
                     continue
+
+                user_domain = bare.split("@", 1)[1].lower()
                 if domain_matches(user_domain, domain):
-                    await self._rtbl_apply_ban_domain(domain, reason, nick=nick, jid=bare)
+                    await self._rtbl_apply_ban_domain(
+                        domain, reason, nick=nick, jid=bare
+                    )
+                    return
 
 
     async def _rtbl_apply_ban_jid(
@@ -264,12 +274,12 @@ class RtblApplyMixin:
         jid: str | None = None,
     ) -> None:
         """
-        Apply an RTBL domain ban to all currently matching occupants in every
-        protected room via MUC outcast affiliation.
+        Apply an RTBL domain entry to all currently matching occupants.
 
-        Admin/owner protection is always checked first (same as a manual !ban).
-        The applied RTBL ban is persisted in the main bans table immediately
-        so the local banlist and room state stay consistent.
+        The RTBL source rule remains stored in rtbl_domains, but the local
+        applied bans are persisted as concrete JID bans. This makes the normal
+        banlist actionable: admins can !unban or !ignore a specific JID that was
+        matched by a domain RTBL entry without having to ignore the whole domain.
         """
         from config import ADMIN_ROOM
 
@@ -285,76 +295,168 @@ class RtblApplyMixin:
                 )
             return
 
-        protected, protect_reason = await self.is_protected_admin_target(
-            wildcard, nick=nick, jid=jid
-        )
-        if protected:
-            log.warning(
-                "RTBL: Ignoring domain ban *.%s — admin/owner protected: %s",
-                domain, protect_reason,
-            )
-            if self.rtbl_announce:
+        comment = f"RTBL domain ban: {wildcard}"
+        if reason:
+            comment += f" — {reason}"
+        log.info("RTBL: Applying domain ban *.%s (reason: %s)", domain, reason)
+
+        matched: dict[str, tuple[str | None, set[str]]] = {}
+        skipped_protected: list[tuple[str, str | None, str | None]] = []
+
+        for room in self.protected_rooms:
+            for occ_nick, info in list(self.occupants.get(room, {}).items()):
+                occ_jid = info.get("jid")
+                if not occ_jid:
+                    continue
+
+                bare = self.bare_jid(occ_jid)
+                if not bare or "@" not in bare:
+                    continue
+
+                occ_domain = bare.split("@", 1)[1].lower()
+                if not domain_matches(occ_domain, domain):
+                    continue
+
+                if self.is_ignored_target(bare):
+                    log.debug("RTBL: Ignoring matched JID %s for domain *.%s", bare, domain)
+                    continue
+
+                protected, protect_reason = await self.is_protected_admin_target(
+                    bare, nick=occ_nick, jid=bare
+                )
+                if protected:
+                    skipped_protected.append((bare, occ_nick, protect_reason))
+                    log.warning(
+                        "RTBL: Ignoring domain match %s for *.%s — admin/owner protected: %s",
+                        bare, domain, protect_reason,
+                    )
+                    continue
+
+                matched.setdefault(bare, (occ_nick, set()))[1].add(room)
+
+        if not matched:
+            if skipped_protected and self.rtbl_announce:
+                preview = ", ".join(
+                    f"{nick or bare} ({bare})" if nick else bare
+                    for bare, nick, _reason in skipped_protected[:5]
+                )
+                if len(skipped_protected) > 5:
+                    preview += f", … +{len(skipped_protected) - 5} more"
                 self.send_message(
                     mto=ADMIN_ROOM,
                     mbody=(
-                        f"⚠️ RTBL: Ignored domain ban *.{domain} "
-                        f"— protected admin/owner ({protect_reason})"
+                        f"⚠️ RTBL: Ignored domain ban {wildcard} — "
+                        f"only protected admin/owner matches found: {preview}"
                     ),
                     mtype="groupchat",
                 )
             return
 
-        comment = f"RTBL: {reason}" if reason else "RTBL domain ban"
-        log.info("RTBL: Applying domain ban *.%s (reason: %s)", domain, reason)
-
-        await self.upsert_ban_db(
-            jid=f"*.{domain}", nick=None, until=0, issuer="rtbl", comment=comment
+        # Remove legacy persisted wildcard RTBL bans from older versions. RTBL
+        # domain entries are now represented locally as concrete JID bans.
+        await self.db.execute(
+            "DELETE FROM bans WHERE issuer = 'rtbl' AND target_type = 'domain' AND target = ?",
+            (domain,),
         )
+        if hasattr(self, "_remove_domain_bans_from_cache"):
+            self._remove_domain_bans_from_cache(domain)
+
+        for bare, (matched_nick, _rooms) in matched.items():
+            await self.upsert_ban_db(
+                jid=bare, nick=matched_nick, until=0, issuer="rtbl", comment=comment
+            )
         await self.db.commit()
-        log.debug("RTBL: Persisted domain ban *.%s to bans table", domain)
+        log.debug(
+            "RTBL: Persisted %d concrete JID ban(s) for domain *.%s",
+            len(matched), domain,
+        )
 
         if self.rtbl_announce:
-            affected = ""
-            if jid and nick:
-                affected = f"\n   Matched: {nick} ({jid})"
-            elif jid:
-                affected = f"\n   Matched: {jid}"
-            elif nick:
-                affected = f"\n   Matched: {nick}"
+            first_bare, (first_nick, _rooms) = next(iter(matched.items()))
+            affected = f"\n   Matched: {first_nick} ({first_bare})" if first_nick else f"\n   Matched: {first_bare}"
+            if len(matched) > 1:
+                affected += f"\n   Also matched: {len(matched) - 1} more occupant(s)"
 
             self.send_message(
                 mto=ADMIN_ROOM,
                 mbody=(
-                    f"🛡️ RTBL: Domain ban *.{domain}"
+                    f"🛡️ RTBL: Domain ban {wildcard}"
                     f"{affected}"
                     + (f"\n   Reason: {reason}" if reason else "")
                 ),
                 mtype="groupchat",
             )
 
-        self.log_event(
-            logging.INFO, "rtbl_ban_applied",
-            actor="rtbl", identifier=wildcard, target_type="domain",
-            target=domain, jid=wildcard, nick=nick, comment=comment,
-        )
-        await self.audit_event(
-            "rtbl_ban_applied", actor="rtbl", target_type="domain",
-            target=domain, jid=wildcard, nick=nick, comment=comment,
-        )
+        for bare, (matched_nick, _rooms) in matched.items():
+            self.log_event(
+                logging.INFO, "rtbl_ban_applied",
+                actor="rtbl", identifier=wildcard, target_type="jid",
+                target=bare, jid=bare, nick=matched_nick, comment=comment,
+            )
+            await self.audit_event(
+                "rtbl_ban_applied", actor="rtbl", target_type="jid",
+                target=bare, jid=bare, nick=matched_nick, comment=comment,
+                details={"source_type": "domain", "source": wildcard},
+            )
 
-        for room in self.protected_rooms:
-            try:
-                for occ_nick, info in list(self.occupants.get(room, {}).items()):
-                    occ_jid = info.get("jid")
-                    if not occ_jid:
-                        continue
-                    bare = self.bare_jid(occ_jid)
-                    if not bare or "@" not in bare:
-                        continue
-                    occ_domain = bare.split("@", 1)[1].lower()
-                    if domain_matches(occ_domain, domain):
-                        await self.apply_ban_to_room(
-                            room, bare, occ_nick, comment, issuer="rtbl"
-                        )
-            except Exception as e:
-                log.warning("RTBL: Failed to apply domain ban in %s: %s", room, e)
+            for room in self.protected_rooms:
+                try:
+                    await self.apply_ban_to_room(
+                        room, bare, matched_nick, comment, issuer="rtbl"
+                    )
+                except Exception as e:
+                    log.warning("RTBL: Failed to apply domain-derived JID ban in %s: %s", room, e)
+
+
+    async def _rtbl_ban_is_still_covered(self, jid: str | None) -> bool:
+        """Return True if a persisted RTBL JID ban is still covered by active RTBL caches."""
+        if not jid:
+            return False
+
+        bare = self.bare_jid(jid)
+        if not bare or bare.startswith("*." ):
+            return False
+
+        if self._rtbl_hash_jid(bare) in getattr(self, "rtbl_hash_cache", {}):
+            return True
+
+        if "@" in bare:
+            user_domain = bare.split("@", 1)[1].lower()
+            for banned_domain in getattr(self, "rtbl_domain_cache", {}):
+                if domain_matches(user_domain, banned_domain):
+                    return True
+
+        return False
+
+
+    async def _rtbl_cleanup_stale_persisted_bans(self, issuer: str = "rtbl_cleanup") -> int:
+        """
+        Remove persisted issuer=rtbl bans that are no longer backed by active RTBL caches.
+
+        This is called after RTBL retractions or subscription deletion. It also
+        removes legacy wildcard-domain RTBL bans because domain RTBL matches are
+        now stored locally as concrete JID bans.
+        """
+        async with self.db.execute(
+            "SELECT jid FROM bans WHERE issuer = 'rtbl'"
+        ) as cursor:
+            rows = [row[0] for row in await cursor.fetchall()]
+
+        removed = 0
+        for banned_jid in rows:
+            if not banned_jid:
+                continue
+
+            if banned_jid.startswith("*." ):
+                await self.unban_all(banned_jid, issuer=issuer)
+                removed += 1
+                continue
+
+            if not await self._rtbl_ban_is_still_covered(banned_jid):
+                await self.unban_all(banned_jid, issuer=issuer)
+                removed += 1
+
+        if removed:
+            log.info("RTBL: Removed %d stale persisted RTBL ban(s)", removed)
+
+        return removed

@@ -254,20 +254,7 @@ class RtblCommandMixin:
             await self.db.commit()
             await self._load_rtbl_subscriptions_from_db()
 
-            async with self.db.execute(
-                "SELECT jid FROM bans WHERE issuer = 'rtbl'"
-            ) as cursor:
-                rtbl_bans = [row[0] for row in await cursor.fetchall()]
-            for banned_jid in rtbl_bans:
-                if not banned_jid:
-                    continue
-                if banned_jid.startswith("*." ):
-                    domain = banned_jid[2:]
-                    if domain not in self.rtbl_domain_cache:
-                        await self.unban_all(banned_jid, issuer="rtbl_delete")
-                else:
-                    if self._rtbl_hash_jid(banned_jid) not in self.rtbl_hash_cache:
-                        await self.unban_all(banned_jid, issuer="rtbl_delete")
+            await self._rtbl_cleanup_stale_persisted_bans(issuer="rtbl_delete")
 
             self.log_event(
                 logging.INFO, "rtbl_subscription_removed",

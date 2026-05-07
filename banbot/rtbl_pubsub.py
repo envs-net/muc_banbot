@@ -357,13 +357,7 @@ class RtblPubSubMixin:
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_hash_cache.pop(item_id, None)
-                        async with self.db.execute(
-                            "SELECT jid FROM bans WHERE issuer = 'rtbl'"
-                        ) as c:
-                            async for (banned_jid,) in c:
-                                if banned_jid and self._rtbl_hash_jid(banned_jid) == item_id:
-                                    await self.unban_all(banned_jid, issuer="rtbl_retract")
-                                    break
+                        await self._rtbl_cleanup_stale_persisted_bans(issuer="rtbl_retract")
 
             elif _is_domain(item_id):
                 domain = item_id.lstrip("*.")
@@ -377,7 +371,7 @@ class RtblPubSubMixin:
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_domain_cache.pop(domain, None)
-                        await self.unban_all(f"*.{domain}", issuer="rtbl_retract")
+                        await self._rtbl_cleanup_stale_persisted_bans(issuer="rtbl_retract")
 
 
     async def _rtbl_refresh_worker(self) -> None:
