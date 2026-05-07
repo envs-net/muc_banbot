@@ -59,13 +59,6 @@ AUDIT_LOG_RETENTION_DAYS = 365
 # Requires a restart when changed.
 RTBL_ENABLED = False
 
-# If True, RTBL bans are also written to the main bans table (persistent).
-# This means they survive bot restarts and are applied to newly added rooms.
-# When a subscription is deleted (!rtbl delete), persisted bans are NOT
-# automatically removed — use !unban to remove them manually.
-# Default: False (RTBL bans are ephemeral, MUC outcast only).
-RTBL_PERSIST_BANS = False
-
 # True = announce RTBL bans (and skipped admin-protected entries) in the admin room.
 # Can be changed at runtime via !reloadconfig.
 RTBL_ANNOUNCE = True

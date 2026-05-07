@@ -79,7 +79,6 @@ class ConfigMixin:
         "AUDIT_LOG_ENABLED",
         "AUDIT_LOG_RETENTION_DAYS",
         "RTBL_ANNOUNCE",
-        "RTBL_PERSIST_BANS",
         "RTBL_REFRESH_INTERVAL",
         "VERSION_CHECK_ENABLED",
         "VERSION_CHECK_INTERVAL",
@@ -278,8 +277,6 @@ class ConfigMixin:
         # --- RTBL ---
         if not isinstance(getattr(config, "RTBL_ENABLED", False), bool):
             errors.append("RTBL_ENABLED must be True or False")
-        if not isinstance(getattr(config, "RTBL_PERSIST_BANS", False), bool):
-            errors.append("RTBL_PERSIST_BANS must be True or False")
         if not isinstance(getattr(config, "RTBL_ANNOUNCE", True), bool):
             errors.append("RTBL_ANNOUNCE must be True or False")
 
@@ -366,7 +363,6 @@ class ConfigMixin:
         self.version_check_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip() or None
 
         self.rtbl_announce = getattr(config, "RTBL_ANNOUNCE", True)
-        self.rtbl_persist_bans  = getattr(config, "RTBL_PERSIST_BANS", False)
         self.rtbl_refresh_interval  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
 
 

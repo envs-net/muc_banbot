@@ -164,8 +164,7 @@ class BanBot(
         self.ignore_jids: set[str] = set()
         self.ignore_domains: set[str] = set()
         self._rtbl_handlers_registered: bool = False
-        self.rtbl_persist_bans: bool     = getattr(config, "RTBL_PERSIST_BANS", False)
-        self.rtbl_refresh_interval: int  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
+        self.rtbl_refresh_interval: int = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
         self._rtbl_refresh_task: asyncio.Task | None = None
 
         # --- RTBL Publish ---

@@ -13,9 +13,10 @@ Own publish feed (optional, requires a PubSub service on the local server):
   - JID bans    -> RTBL_PUBLISH_JID_NODE    (default: muc_bans_sha256)
   - Domain bans -> RTBL_PUBLISH_DOMAIN_NODE (default: muc_bans_domains)
 
-Bans from subscribed RTBL feeds are stored in separate tables
-(rtbl_hashes, rtbl_domains) and are NEVER written to the main bans table
-unless RTBL_PERSIST_BANS = True.
+Bans from subscribed RTBL feeds are stored in separate lookup tables
+(rtbl_hashes, rtbl_domains). When an RTBL entry is actually applied to a
+protected room, the resulting ban is also persisted in the main bans table so
+!banlist, !why and sync state stay consistent.
 Admin/owner protection is always enforced before any RTBL ban is applied.
 """
 
@@ -213,12 +214,23 @@ class RtblMixin:
         await self._rtbl_fetch_all_items(service_jid, node)
 
 
-    async def _rtbl_fetch_all_items(self, service_jid: str, node: str) -> None:
+    async def _rtbl_fetch_all_items(
+        self,
+        service_jid: str,
+        node: str,
+        scan_occupants: bool = True,
+    ) -> None:
         """
         Fetch all current items from an RTBL node using manual RSM pagination
         (XEP-0059) via fully raw XML IQ construction.
         Items are classified as JID hashes or domain bans by their ID format.
         Unknown formats are skipped with a debug log entry.
+
+        If scan_occupants is True, all currently known occupants are checked
+        against the rebuilt RTBL caches after the fetch. This makes freshly
+        added subscriptions and startup fetches effective immediately without
+        waiting for users to rejoin or for a manual sync. Periodic refresh uses
+        scan_occupants=False to avoid noisy re-application when nothing changed.
         """
         from config import ADMIN_ROOM
         from xml.etree import ElementTree as ET
@@ -402,6 +414,11 @@ class RtblMixin:
                 mtype="groupchat",
             )
 
+        if scan_occupants and (hash_count + domain_count) > 0:
+            await self._rtbl_check_all_occupants_against_caches(
+                source=f"{service_jid}/{node}"
+            )
+
     # ------------------------------------------------------------------
     # PubSub live event handlers
     # ------------------------------------------------------------------
@@ -517,14 +534,13 @@ class RtblMixin:
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_hash_cache.pop(item_id, None)
-                        if getattr(self, "rtbl_persist_bans", False):
-                            async with self.db.execute(
-                                "SELECT jid FROM bans WHERE issuer = 'rtbl'"
-                            ) as c:
-                                async for (banned_jid,) in c:
-                                    if banned_jid and self._rtbl_hash_jid(banned_jid) == item_id:
-                                        await self.unban_all(banned_jid, issuer="rtbl_retract")
-                                        break
+                        async with self.db.execute(
+                            "SELECT jid FROM bans WHERE issuer = 'rtbl'"
+                        ) as c:
+                            async for (banned_jid,) in c:
+                                if banned_jid and self._rtbl_hash_jid(banned_jid) == item_id:
+                                    await self.unban_all(banned_jid, issuer="rtbl_retract")
+                                    break
 
             elif _is_domain(item_id):
                 domain = item_id.lstrip("*.")
@@ -538,8 +554,7 @@ class RtblMixin:
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_domain_cache.pop(domain, None)
-                        if getattr(self, "rtbl_persist_bans", False):
-                            await self.unban_all(f"*.{domain}", issuer="rtbl_retract")
+                        await self.unban_all(f"*.{domain}", issuer="rtbl_retract")
 
     # ------------------------------------------------------------------
     # Join-time check (called from muc_online)
@@ -584,6 +599,83 @@ class RtblMixin:
 
         return False
 
+
+    async def _rtbl_check_all_occupants_against_caches(
+        self, source: str | None = None
+    ) -> tuple[int, int]:
+        """
+        Scan all currently known occupants against the complete RTBL caches.
+
+        This is used after startup fetches and after adding a new subscription so
+        current occupants are banned immediately when they already match a loaded
+        RTBL hash/domain entry. Periodic refresh deliberately does not call this
+        helper to avoid noisy re-application of unchanged bans.
+
+        Domain bans are persisted/applied once per matching domain, but all
+        currently matching occupants are counted and will be kicked by
+        _rtbl_apply_ban_domain(), which scans all protected rooms itself.
+
+        Returns (matched_jids, matched_domain_occupants).
+        """
+        if not getattr(self, "rtbl_enabled", False):
+            return 0, 0
+
+        matched_jids: set[str] = set()
+        matched_domain_occupants: set[tuple[str, str]] = set()
+        domains_to_apply: dict[str, tuple[str | None, str | None, str | None]] = {}
+
+        for room, occupants in list(self.occupants.items()):
+            if room not in self.protected_rooms:
+                continue
+
+            for nick, info in list(occupants.items()):
+                jid = info.get("jid")
+                if not jid:
+                    continue
+
+                bare = self.bare_jid(jid)
+                if not bare:
+                    continue
+
+                if self.is_ignored_target(bare):
+                    continue
+
+                hash_val = self._rtbl_hash_jid(bare)
+                if hash_val in self.rtbl_hash_cache and bare not in matched_jids:
+                    matched_jids.add(bare)
+                    await self._rtbl_apply_ban_jid(
+                        bare, nick, self.rtbl_hash_cache[hash_val]
+                    )
+                    continue
+
+                if "@" not in bare:
+                    continue
+
+                user_domain = bare.split("@", 1)[1].lower()
+                for banned_domain, reason in list(self.rtbl_domain_cache.items()):
+                    if domain_matches(user_domain, banned_domain):
+                        matched_domain_occupants.add((banned_domain, bare))
+                        domains_to_apply.setdefault(banned_domain, (reason, nick, bare))
+                        break
+
+        for banned_domain, (reason, nick, bare) in domains_to_apply.items():
+            await self._rtbl_apply_ban_domain(
+                banned_domain, reason, nick=nick, jid=bare
+            )
+
+        if matched_jids or matched_domain_occupants:
+            log.info(
+                (
+                    "RTBL: Current occupant scan%s matched %d JID(s), "
+                    "%d domain occupant(s) across %d domain(s)"
+                ),
+                f" after {source}" if source else "",
+                len(matched_jids),
+                len(matched_domain_occupants),
+                len(domains_to_apply),
+            )
+
+        return len(matched_jids), len(matched_domain_occupants)
 
     async def _rtbl_check_all_occupants_for_hash(
         self, hash_val: str, reason: str | None
@@ -651,7 +743,8 @@ class RtblMixin:
         silently dropped and, if RTBL_ANNOUNCE is True, a warning is sent to
         the admin room.
 
-        The ban is only written to the main bans table if RTBL_PERSIST_BANS = True.
+        The applied RTBL ban is persisted in the main bans table immediately
+        so the local banlist and room state stay consistent.
         """
         from config import ADMIN_ROOM
 
@@ -687,12 +780,11 @@ class RtblMixin:
         comment = f"RTBL: {reason}" if reason else "RTBL ban"
         log.info("RTBL: Banning JID %s (reason: %s)", jid, reason)
 
-        if getattr(self, "rtbl_persist_bans", False):
-            await self.upsert_ban_db(
-                jid=jid, nick=nick, until=0, issuer="rtbl", comment=comment
-            )
-            await self.db.commit()
-            log.debug("RTBL: Persisted JID ban for %s to bans table", jid)
+        await self.upsert_ban_db(
+            jid=jid, nick=nick, until=0, issuer="rtbl", comment=comment
+        )
+        await self.db.commit()
+        log.debug("RTBL: Persisted JID ban for %s to bans table", jid)
 
         if self.rtbl_announce:
             self.send_message(
@@ -730,7 +822,8 @@ class RtblMixin:
         protected room via MUC outcast affiliation.
 
         Admin/owner protection is always checked first (same as a manual !ban).
-        The ban is only written to the main bans table if RTBL_PERSIST_BANS = True.
+        The applied RTBL ban is persisted in the main bans table immediately
+        so the local banlist and room state stay consistent.
         """
         from config import ADMIN_ROOM
 
@@ -768,12 +861,11 @@ class RtblMixin:
         comment = f"RTBL: {reason}" if reason else "RTBL domain ban"
         log.info("RTBL: Applying domain ban *.%s (reason: %s)", domain, reason)
 
-        if getattr(self, "rtbl_persist_bans", False):
-            await self.upsert_ban_db(
-                jid=f"*.{domain}", nick=None, until=0, issuer="rtbl", comment=comment
-            )
-            await self.db.commit()
-            log.debug("RTBL: Persisted domain ban *.%s to bans table", domain)
+        await self.upsert_ban_db(
+            jid=f"*.{domain}", nick=None, until=0, issuer="rtbl", comment=comment
+        )
+        await self.db.commit()
+        log.debug("RTBL: Persisted domain ban *.%s to bans table", domain)
 
         if self.rtbl_announce:
             affected = ""
@@ -889,7 +981,8 @@ class RtblMixin:
         async with self.db.execute(
             """SELECT COUNT(*) FROM bans
                WHERE target_type = 'jid' AND jid IS NOT NULL
-                 AND (until = 0 OR until > strftime('%s','now'))"""
+                 AND (until = 0 OR until > strftime('%s','now'))
+                 AND COALESCE(issuer, '') != 'rtbl'"""
         ) as cursor:
             row = await cursor.fetchone()
             jid_count = int(row[0] or 0) if row else 0
@@ -897,7 +990,8 @@ class RtblMixin:
         async with self.db.execute(
             """SELECT COUNT(*) FROM bans
                WHERE target_type = 'domain'
-                 AND (until = 0 OR until > strftime('%s','now'))"""
+                 AND (until = 0 OR until > strftime('%s','now'))
+                 AND COALESCE(issuer, '') != 'rtbl'"""
         ) as cursor:
             row = await cursor.fetchone()
             domain_count = int(row[0] or 0) if row else 0
@@ -1155,21 +1249,20 @@ class RtblMixin:
             await self.db.commit()
             await self._load_rtbl_subscriptions_from_db()
 
-            if getattr(self, "rtbl_persist_bans", False):
-                async with self.db.execute(
-                    "SELECT jid FROM bans WHERE issuer = 'rtbl'"
-                ) as cursor:
-                    rtbl_bans = [row[0] for row in await cursor.fetchall()]
-                for banned_jid in rtbl_bans:
-                    if not banned_jid:
-                        continue
-                    if banned_jid.startswith("*."):
-                        domain = banned_jid[2:]
-                        if domain not in self.rtbl_domain_cache:
-                            await self.unban_all(banned_jid, issuer="rtbl_delete")
-                    else:
-                        if self._rtbl_hash_jid(banned_jid) not in self.rtbl_hash_cache:
-                            await self.unban_all(banned_jid, issuer="rtbl_delete")
+            async with self.db.execute(
+                "SELECT jid FROM bans WHERE issuer = 'rtbl'"
+            ) as cursor:
+                rtbl_bans = [row[0] for row in await cursor.fetchall()]
+            for banned_jid in rtbl_bans:
+                if not banned_jid:
+                    continue
+                if banned_jid.startswith("*."):
+                    domain = banned_jid[2:]
+                    if domain not in self.rtbl_domain_cache:
+                        await self.unban_all(banned_jid, issuer="rtbl_delete")
+                else:
+                    if self._rtbl_hash_jid(banned_jid) not in self.rtbl_hash_cache:
+                        await self.unban_all(banned_jid, issuer="rtbl_delete")
 
             self.log_event(
                 logging.INFO, "rtbl_subscription_removed",
@@ -1183,12 +1276,11 @@ class RtblMixin:
                 comment=f"Removed {label}",
             )
 
-            msg = f"✅ RTBL: Removed {label}. All hashes and domains purged from DB."
-            if getattr(self, "rtbl_persist_bans", False):
-                msg += (
-                    "\nℹ️ RTBL_PERSIST_BANS is enabled — persisted RTBL bans that are no "
-                    "longer present in active subscriptions were removed."
-                )
+            msg = (
+                f"✅ RTBL: Removed {label}. All hashes and domains purged from DB."
+                "\n♻️ Persisted RTBL bans that are no longer present in active subscriptions "
+                "were removed."
+            )
             self.send_message(mto=room, mbody=msg, mtype="groupchat")
             return
 
@@ -1435,7 +1527,8 @@ class RtblMixin:
         async with self.db.execute(
             """SELECT jid, comment FROM bans
                WHERE target_type = 'jid' AND jid IS NOT NULL
-                 AND (until = 0 OR until > strftime('%s','now'))"""
+                 AND (until = 0 OR until > strftime('%s','now'))
+                 AND COALESCE(issuer, '') != 'rtbl'"""
         ) as cursor:
             jid_rows = await cursor.fetchall()
 
@@ -1451,7 +1544,8 @@ class RtblMixin:
         async with self.db.execute(
             """SELECT target, comment FROM bans
                WHERE target_type = 'domain'
-                 AND (until = 0 OR until > strftime('%s','now'))"""
+                 AND (until = 0 OR until > strftime('%s','now'))
+                 AND COALESCE(issuer, '') != 'rtbl'"""
         ) as cursor:
             domain_rows = await cursor.fetchall()
 
@@ -1606,7 +1700,9 @@ class RtblMixin:
             log.info("RTBL: Starting periodic refresh (%ds interval)", interval)
             for service_jid, node in list(self.rtbl_subscriptions):
                 try:
-                    await self._rtbl_fetch_all_items(service_jid, node)
+                    await self._rtbl_fetch_all_items(
+                        service_jid, node, scan_occupants=False
+                    )
                 except Exception as e:
                     log.warning(
                         "RTBL: Periodic refresh failed for '%s' @ %s: %s",

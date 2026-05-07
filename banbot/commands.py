@@ -286,8 +286,9 @@ class CommandMixin:
 
         if cmd == "ban":
             if len(args) >= 1:
+                actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
                 comment = " ".join(args[1:]) if len(args) > 1 else None
-                await self.ban_all(args[0], None, nick, comment)
+                await self.ban_all(args[0], None, actor_jid, comment)
             return True
 
         if cmd == "tempban":
@@ -302,13 +303,15 @@ class CommandMixin:
                     )
                     return True
 
+                actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
                 comment = " ".join(args[2:]) if len(args) > 2 else None
-                await self.ban_all(args[0], until, nick, comment)
+                await self.ban_all(args[0], until, actor_jid, comment)
             return True
 
         if cmd == "unban":
             if len(args) >= 1:
-                await self.unban_all(args[0], nick)
+                actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+                await self.unban_all(args[0], actor_jid)
             return True
 
         if cmd == "bansearch":

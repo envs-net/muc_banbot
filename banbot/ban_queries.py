@@ -8,11 +8,33 @@ from .utils import human_time, paginate_lines, resolve_page
 
 
 class BanQueryMixin:
+    @staticmethod
+    def _ban_emoji(until: int, issuer: str | None) -> str:
+        """Return the display icon for a ban entry."""
+        if (issuer or "").lower() == "rtbl":
+            return "🛡️"
+        return "⏳" if until > 0 else "🔒"
+
+
+    @staticmethod
+    def _format_issuer_for_room(issuer: str | None, room: str) -> str:
+        """Show full issuer in the admin room, but anonymize admins in protected rooms."""
+        issuer_display = issuer or "unknown"
+        if room != ADMIN_ROOM and issuer_display.lower() != "rtbl":
+            return "admin"
+        return issuer_display
+
+
     def _format_ban_match(self, jid, nick, until, issuer, comment, now):
         """Format a ban match for display in bansearch results."""
         remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
-        emoji = "⏳" if until > 0 else "🔒"
-        return f"{emoji} {jid or nick or 'Unknown'} ({remaining}, by {issuer}" + (f", {comment}" if comment else "") + ")"
+        emoji = self._ban_emoji(until, issuer)
+        issuer_display = self._format_issuer_for_room(issuer, ADMIN_ROOM)
+        return (
+            f"{emoji} {jid or nick or 'Unknown'} ({remaining}, by {issuer_display}"
+            + (f", {comment}" if comment else "")
+            + ")"
+        )
 
 
     async def cmd_bansearch(self, query: str, page: int = 1) -> None:
@@ -229,7 +251,8 @@ class BanQueryMixin:
                     continue
 
                 remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
-                emoji = "⏳" if until > 0 else "🔒"
+                emoji = self._ban_emoji(until, issuer)
+                issuer_display = self._format_issuer_for_room(issuer, room)
 
                 if jid and jid.startswith("*."):
                     display = jid
@@ -238,7 +261,11 @@ class BanQueryMixin:
                 else:
                     display = nick or (jid.split("@")[0] if jid else "Unknown")
 
-                entry = f"{emoji} {display} ({remaining}, by {issuer}" + (f", {comment}" if comment else "") + ")"
+                entry = (
+                    f"{emoji} {display} ({remaining}, by {issuer_display}"
+                    + (f", {comment}" if comment else "")
+                    + ")"
+                )
                 entries.append(entry)
 
             if not entries:
@@ -365,14 +392,19 @@ class BanQueryMixin:
             jid_db, nick_db, until, issuer, comment = row
             now = int(time.time())
             remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
-            emoji = "⏳" if until > 0 else "🔒"
+            emoji = self._ban_emoji(until, issuer)
+            issuer_display = self._format_issuer_for_room(issuer, room)
 
             if room == ADMIN_ROOM:
                 display = jid_db or nick_db or identifier
             else:
                 display = nick_db or (jid_db.split("@")[0] if jid_db else identifier)
 
-            msg = f"{emoji} {display} ({remaining}, by {issuer}" + (f", {comment}" if comment else "") + ")"
+            msg = (
+                f"{emoji} {display} ({remaining}, by {issuer_display}"
+                + (f", {comment}" if comment else "")
+                + ")"
+            )
         else:
             msg = f"No ban found for {identifier}"
 
