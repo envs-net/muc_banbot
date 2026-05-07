@@ -26,6 +26,8 @@ It provides central administration via an admin room and protects multiple chat 
 * 🏥 Periodic health checks for room connectivity and admin rights  
 * 🩺 Dynamic `!status` health headline with reconnect, worker, DB, room-rights, and RTBL status  
 * 🛡️ RTBL subscriptions via PubSub for SHA-256 JID hashes and plaintext domain bans  
+* 🧾 Applied RTBL bans are persisted in the main banlist with a shield marker  
+* 🔎 Current occupants are scanned immediately after startup/new RTBL subscription fetches  
 * 🔄 Periodic RTBL refresh with quiet/no-change behavior  
 * 📡 Optional own RTBL publish feed for local bans  
 * 📣 Logs ban/unban actions in both admin and protected rooms  
@@ -96,6 +98,7 @@ It provides central administration via an admin room and protects multiple chat 
 > - Permanent bans are **only shown in admin room**.
 > - In protected rooms: only temporary bans are visible (if `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS=True`).
 > - JID information is anonymized in protected rooms (only nick shown).
+> - Admin issuers are anonymized in protected rooms; full admin JIDs are only shown in the admin room. RTBL bans are shown as `by rtbl`.
 > - Public `!help`, `!whoami`, `!why` and `!banlist` are rate-limited per room, nick, and command. Admin-room use is not rate-limited.
 
 ---
@@ -195,7 +198,6 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `MUC_WRITE_SEMAPHORE` (int, default: `5`) - Concurrency limit for XMPP IQ operations
 - `RTBL_ANNOUNCE` (bool, default: `True`) - Announce RTBL changes in the admin room; periodic refreshes stay quiet when nothing changed
-- `RTBL_PERSIST_BANS` (bool, default: `False`) - Persist RTBL bans into the main bans table and remove stale persisted RTBL bans when subscriptions/retractions remove them
 - `RTBL_REFRESH_INTERVAL` (int, default: `3600`) - Seconds between periodic RTBL refreshes; set to `0` to disable periodic refresh
 - `VERSION_CHECK_ENABLED` (bool, default: `False`) - Enable periodic checks for newer GitHub releases
 - `VERSION_CHECK_INTERVAL` (int, default: `3600`) - Seconds between release checks (minimum: 300)
@@ -437,8 +439,9 @@ BanBot supports RTBL (Real-Time Block List) PubSub feeds:
 - **Inbound subscriptions**: subscribe to external RTBL nodes and apply matching bans at join time or on live PubSub events
 - **JID entries**: SHA-256 hashes of bare JIDs, compatible with `muc_bans_sha256`
 - **Domain entries**: plaintext domains, applied as wildcard domain bans
-- **Optional persistence**: with `RTBL_PERSIST_BANS=True`, RTBL bans are also stored in the main `bans` table
-- **Own publish feed**: publish local bans to your own PubSub service for other bots to consume
+- **Applied RTBL persistence**: when an inbound RTBL entry actually matches and is applied, the resulting ban is stored in the main `bans` table with `issuer=rtbl`
+- **Current occupant scan**: startup fetches and newly added subscriptions immediately scan current occupants so matching users are banned without waiting for a rejoin; periodic refreshes stay quiet and do not rescan unchanged lists
+- **Own publish feed**: publish local non-RTBL bans to your own PubSub service for other bots to consume
 
 Common commands:
 
@@ -452,6 +455,12 @@ Common commands:
 !rtbl publish sync
 ```
 
+Banlist behavior:
+- `!banlist rtbl` shows the raw RTBL subscription entries from `rtbl_hashes` and `rtbl_domains`.
+- `!banlist` shows applied bans from the main `bans` table. RTBL-applied entries use the 🛡️ icon and `by rtbl`.
+- For RTBL domain matches, the main banlist stores the wildcard domain (for example `*.draugr.de`), not every matched occupant JID.
+- For RTBL JID-hash matches, the main banlist stores the resolved bare JID if the bot can match the hash to a current occupant.
+
 Safety and validation:
 - `!rtbl add` validates that the service looks like a PubSub service/domain and that the node is non-empty
 - The bot attempts to subscribe before writing the subscription into the database
@@ -459,6 +468,8 @@ Safety and validation:
 - The bot refuses to subscribe to its own configured publish nodes
 - Periodic refreshes only announce when new or updated RTBL entries are found
 - Admin/owner protection and the global ignorelist are checked before any RTBL ban is applied
+- Removing a subscription or receiving RTBL retractions removes stale persisted `issuer=rtbl` bans when they are no longer present in active subscriptions
+- Inbound RTBL bans are not mirrored into the bot's own RTBL publish feed
 
 RTBL publish nodes on Prosody can be created/configured manually if your server does not allow the bot to create nodes:
 
@@ -598,7 +609,7 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | `id`         | INTEGER | Internal row id |
 | `created_at` | INTEGER | Event timestamp |
 | `event_type` | TEXT    | Event name, e.g. `ban_applied`, `unban_applied` |
-| `actor`      | TEXT    | Admin nick or `system` |
+| `actor`      | TEXT    | Admin JID, `rtbl`, `ignorelist`, or `system` |
 | `room`       | TEXT    | Related room if applicable |
 | `target_type`| TEXT    | `jid`, `nick`, or `domain` if applicable |
 | `target`     | TEXT    | Normalized target if applicable |
@@ -630,17 +641,20 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | Column        | Type    | Description |
 | ------------- | ------- | ----------- |
 | `id`          | INTEGER | Internal row id |
-| `service_jid` | TEXT    | PubSub service JID/domain |
-| `node`        | TEXT    | PubSub node name |
+| `service_jid` | TEXT    | PubSub service address that provides the RTBL feed, e.g. `xmppbl.org` or `pubsub.example.org` |
+| `node`        | TEXT    | PubSub node name on that service |
 | `created_at`  | INTEGER | Creation timestamp |
+
+> `service_jid` refers to the PubSub service JID/address, not to the banned user JID.
+> Together, `service_jid` + `node` identify where an RTBL entry came from.
 
 ### `rtbl_hashes`
 
 | Column        | Type    | Description |
 | ------------- | ------- | ----------- |
 | `hash`        | TEXT    | SHA-256 hash of a bare JID |
-| `service_jid` | TEXT    | Source PubSub service |
-| `node`        | TEXT    | Source PubSub node |
+| `service_jid` | TEXT    | PubSub service address that provided this hash entry |
+| `node`        | TEXT    | Source PubSub node on that service |
 | `reason`      | TEXT    | Optional RTBL reason |
 | `created_at`  | INTEGER | Creation timestamp |
 
@@ -649,8 +663,8 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | Column        | Type    | Description |
 | ------------- | ------- | ----------- |
 | `domain`      | TEXT    | Plain domain from RTBL feed |
-| `service_jid` | TEXT    | Source PubSub service |
-| `node`        | TEXT    | Source PubSub node |
+| `service_jid` | TEXT    | PubSub service address that provided this domain entry |
+| `node`        | TEXT    | Source PubSub node on that service |
 | `reason`      | TEXT    | Optional RTBL reason |
 | `created_at`  | INTEGER | Creation timestamp |
 
@@ -737,7 +751,7 @@ Check:
 - `RTBL_ENABLED=True`
 - `!rtbl list` shows active subscriptions and non-zero hash/domain counts
 - The user is not protected by `!ignore` or admin/owner protection
-- If `RTBL_PERSIST_BANS=True`, stale persisted bans may be removed after retractions or subscription removal
+- Startup and newly added subscription fetches scan current occupants immediately; periodic refreshes do not rescan unchanged lists
 
 ---
 
@@ -748,5 +762,5 @@ Check:
 * The bot schedules an automatic reconnect after disconnects and restores room/admin state during reconnect.
 * Domain bans are stored as-is (e.g., `*.domain.tld`) and can be searched/unbanned using `!bansearch` and `!unban`
 * Bot prevents banning of admins/owners, even via domain bans
-* RTBL subscription data is stored separately from manual bans unless `RTBL_PERSIST_BANS=True`.
-* The own RTBL publish feed mirrors active local bans; it should not be added back as an inbound RTBL subscription.
+* RTBL subscription data (`rtbl_hashes`, `rtbl_domains`) is stored separately from applied bans. When an RTBL entry actually matches, the applied ban is stored in the main `bans` table with `issuer=rtbl`.
+* The own RTBL publish feed mirrors active local non-RTBL bans; it should not be added back as an inbound RTBL subscription.
