@@ -1,4 +1,4 @@
-"""Status and identity commands."""
+"""Status command output."""
 
 import asyncio
 import logging
@@ -145,6 +145,10 @@ class StatusMixin:
                 status_lines.append("ℹ️ Notes:")
                 status_lines.extend(f"  • {item}" for item in notes)
 
+        # import info
+        if self.last_import_backup_file:
+            status_lines.append(f"\n💾 Last Import Backup: {self.last_import_backup_file}")
+
         # version
         status_lines.append(f"\n🤖 Bot Version: {__version__}")
         if self.last_version_check_result:
@@ -182,22 +186,23 @@ class StatusMixin:
         except Exception as e:
             log.debug("Could not get CPU info: %s", e)
 
+        # db info
+        db_size_kib = int(db_stats.get("db_size_bytes", 0) or 0) / 1024
+        status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")
+
+        # audit / ban info
         permanent_bans = db_stats.get("permanent_bans", 0)
         temporary_bans = db_stats.get("temporary_bans", 0)
         audit_events = db_stats.get("audit_events", 0)
-        db_size_kib = int(db_stats.get("db_size_bytes", 0) or 0) / 1024
 
         status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
         status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
         status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
-        status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")
         if self.admin_affiliation_query_forbidden_rooms:
             status_lines.append(
                 f"ℹ️ Admin protection fallback rooms: "
                 f"{len(self.admin_affiliation_query_forbidden_rooms)}"
             )
-        if self.last_import_backup_file:
-            status_lines.append(f"💾 Last Import Backup: {self.last_import_backup_file}")
 
         # rtbl
         if getattr(self, "rtbl_enabled", False):
@@ -239,41 +244,3 @@ class StatusMixin:
             status_lines.append("\n⚠️ No protected rooms configured.")
 
         self.send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
-
-
-    async def _cmd_whoami(self, room: str, nick: str) -> None:
-        info = self.occupants.get(room, {}).get(nick, {})
-        affiliation = info.get("affiliation", "none")
-        role = info.get("role", "none")
-        jid = info.get("jid", "unknown")
-
-        permissions = []
-        if affiliation in ("owner", "admin"):
-            permissions.append("✅ Can ban/kick users")
-            permissions.append("✅ Can manage room")
-        elif role == "moderator":
-            permissions.append("✅ Can kick users")
-        else:
-            permissions.append("❌ Regular participant")
-
-        perms_text = "\n".join(permissions)
-
-        if room == ADMIN_ROOM:
-            message = (
-                f"👤 **Your Status:**\n"
-                f"  Nick: {nick}\n"
-                f"  JID: {jid}\n"
-                f"  Affiliation: {affiliation}\n"
-                f"  Role: {role}\n\n"
-                f"**Permissions:**\n{perms_text}"
-            )
-        else:
-            emoji = "🔑" if affiliation in ("owner", "admin") else "👤"
-            message = (
-                f"{emoji} **Your Status:**\n"
-                f"  Affiliation: {affiliation}\n"
-                f"  Role: {role}\n\n"
-                f"**Permissions:**\n{perms_text}"
-            )
-
-        self.send_message(mto=room, mbody=message, mtype="groupchat")

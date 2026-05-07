@@ -1,4 +1,4 @@
-"""MUC connection, presence tracking, and room permission helpers."""
+"""MUC connection, presence tracking, and occupant handling."""
 
 import asyncio
 import logging
@@ -79,41 +79,6 @@ class MucMixin:
         """Notify users in protected rooms if SHOW_BAN_IN_MUC=True"""
         if self.show_ban_in_muc:
             self.send_message(mto=room, mbody=message, mtype="groupchat")
-
-
-    def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
-        """Check if a user is admin or owner in a room."""
-        occ = self.occupants.get(room, {})
-        for n, info in occ.items():
-            if nick and n.lower() == nick.lower():
-                return info.get("affiliation") in ("owner", "admin")
-            if jid and info.get("jid") and self.bare_jid(info["jid"]) == self.bare_jid(jid):
-                return info.get("affiliation") in ("owner", "admin")
-        return False
-
-
-    def is_bot_admin_or_owner(self, room: str) -> bool:
-        """
-        Check if the bot itself is admin or owner in a given room.
-        """
-        occ = self.occupants.get(room, {})
-        bot_info = occ.get(NICK)
-
-        if not bot_info:
-            log.warning("⚠️ Bot nick not found in occupants for room %s", room)
-            return False
-
-        return bot_info.get("affiliation") in ("owner", "admin")
-
-
-    def is_authorized(self, msg) -> bool:
-        """
-        Check if a message sender is authorized to issue admin commands.
-        """
-        if msg["from"].bare != ADMIN_ROOM:
-            return False
-        info = self.occupants.get(ADMIN_ROOM, {}).get(msg["mucnick"])
-        return info and info.get("affiliation") in ("owner", "admin")
 
 
     async def muc_online(self, presence) -> None:

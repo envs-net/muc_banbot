@@ -29,6 +29,7 @@ from .audit import AuditMixin
 from .cache import CacheMixin
 from .db import DatabaseMixin
 from .import_export import ImportExportMixin
+from .admin import AdminMixin
 from .moderation import ModerationMixin
 from .commands import CommandMixin
 from .direct_messages import DirectMessageMixin
@@ -55,6 +56,7 @@ class BanBot(
     CacheMixin,
     DatabaseMixin,
     ImportExportMixin,
+    AdminMixin,
     ModerationMixin,
     CommandMixin,
     DirectMessageMixin,
