@@ -3,7 +3,7 @@ __pycache__/
 *venv/
 
 config.py
-banbot.db*
+banbot*.db*
 bans_export_*.csv
 bans_import_*.csv
 import_*.csv
