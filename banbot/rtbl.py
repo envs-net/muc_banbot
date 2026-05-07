@@ -21,7 +21,7 @@ Admin/owner protection is always enforced before any RTBL ban is applied.
 """
 
 from .rtbl_apply import RtblApplyMixin
-from .rtbl_commands import RtblCommandMixin
+from .rtbl_cmd import RtblCommandMixin
 from .rtbl_db import RtblDatabaseMixin
 from .rtbl_pubsub import RtblPubSubMixin
 from .rtbl_publish import RtblPublishMixin
