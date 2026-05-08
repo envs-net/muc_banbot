@@ -2,7 +2,12 @@
 
 import logging
 
-from .utils import domain_matches, resolve_page
+from .utils import (
+    domain_matches,
+    resolve_page,
+    validate_domain_ban,
+    validate_jid_format,
+)
 
 log = logging.getLogger(__name__)
 
@@ -257,10 +262,33 @@ class IgnorelistMixin:
             reason = " ".join(args[2:]) if len(args) > 2 else None
 
             if "@" in raw_target and not raw_target.startswith("*."):
+                if not validate_jid_format(raw_target):
+                    self.send_message(
+                        mto=room,
+                        mbody=(
+                            f"❌ Invalid JID for {label.lower()}: {raw_target}\n"
+                            "Expected format: user@domain.tld"
+                        ),
+                        mtype="groupchat",
+                    )
+                    return
+
                 target = raw_target
                 target_type = "jid"
             else:
-                target = f"*.{raw_target.lstrip('*.')}"
+                is_valid_domain, _error_msg = validate_domain_ban(raw_target)
+                if not is_valid_domain:
+                    self.send_message(
+                        mto=room,
+                        mbody=(
+                            f"❌ Invalid domain for {label.lower()}: {raw_target}\n"
+                            "Expected format: domain.tld or *.domain.tld"
+                        ),
+                        mtype="groupchat",
+                    )
+                    return
+
+                target = f"*.{raw_target.lstrip('*.').strip('.')}"
                 target_type = "domain"
 
             await self.db.execute(
