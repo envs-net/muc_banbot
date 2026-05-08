@@ -152,11 +152,11 @@ class StatusMixin:
         # version
         status_lines.append(f"\n🤖 Bot Version: {__version__}")
         if self.last_version_check_result:
-            status_lines.append(f"🏷️ Latest Release Version: {self.last_version_check_result}")
+            status_lines.append(f"🏷️ Latest Release Version: {self.last_version_check_result}\n")
 
         # uptime
         bot_uptime = now - int(self.bot_start_time)
-        status_lines.append(f"\n⏱️ Bot Uptime: {human_time(bot_uptime)}")
+        status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
 
         if self.server_connect_time:
             server_uptime = now - int(self.server_connect_time)
@@ -190,19 +190,22 @@ class StatusMixin:
         db_size_kib = int(db_stats.get("db_size_bytes", 0) or 0) / 1024
         status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")
 
-        # audit / ban info
-        permanent_bans = db_stats.get("permanent_bans", 0)
-        temporary_bans = db_stats.get("temporary_bans", 0)
+        # audit info
         audit_events = db_stats.get("audit_events", 0)
-
-        status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
-        status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
         status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
+
+        # affiliation query
         if self.admin_affiliation_query_forbidden_rooms:
             status_lines.append(
-                f"ℹ️ Admin protection fallback rooms: "
+                f"\nℹ️ Admin protection fallback rooms: "
                 f"{len(self.admin_affiliation_query_forbidden_rooms)}"
             )
+
+        # ban info
+        permanent_bans = db_stats.get("permanent_bans", 0)
+        temporary_bans = db_stats.get("temporary_bans", 0)
+        status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
+        status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
 
         # rtbl
         if getattr(self, "rtbl_enabled", False):
