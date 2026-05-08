@@ -480,20 +480,32 @@ Safety and validation:
 - Removing a subscription or receiving RTBL retractions removes stale persisted `issuer=rtbl` bans when they are no longer present in active subscriptions
 - Inbound RTBL bans are not mirrored into the bot's own RTBL publish feed
 
-RTBL publish nodes on Prosody can be created/configured manually if your server does not allow the bot to create nodes:
+RTBL publish nodes on Prosody can be created/configured manually if your server does not allow the bot to create and own nodes itself. Replace `pubsub.example.org`, the node names, and `adminbot@example.org` with your configured `RTBL_PUBLISH_SERVICE`, `RTBL_PUBLISH_JID_NODE`, `RTBL_PUBLISH_DOMAIN_NODE`, and bot bare JID.
 
 ```lua
+-- Optional cleanup when recreating test nodes:
+pubsub:delete_node("pubsub.example.org", "muc_bans_sha256")
+pubsub:delete_node("pubsub.example.org", "muc_bans_domains")
+
+-- Create the publish nodes:
 pubsub:create_node("pubsub.example.org", "muc_bans_sha256")
 pubsub:create_node("pubsub.example.org", "muc_bans_domains")
 
-pubsub:set_node_config_option("pubsub.example.org", "muc_bans_sha256", "pubsub#publish_model", "open")
-pubsub:set_node_config_option("pubsub.example.org", "muc_bans_domains", "pubsub#publish_model", "open")
+-- Make the bot owner/publisher for both nodes:
+local service = hosts["pubsub.example.org"].modules.pubsub.service
+service:set_affiliation("muc_bans_sha256", true, "adminbot@example.org", "owner")
+service:set_affiliation("muc_bans_domains", true, "adminbot@example.org", "owner")
 
+-- Keep publishing restricted to node publishers/owners:
+pubsub:set_node_config_option("pubsub.example.org", "muc_bans_sha256", "pubsub#publish_model", "publishers")
+pubsub:set_node_config_option("pubsub.example.org", "muc_bans_domains", "pubsub#publish_model", "publishers")
+
+-- Allow enough retained RTBL items:
 pubsub:set_node_config_option("pubsub.example.org", "muc_bans_sha256", "pubsub#max_items", "1000")
 pubsub:set_node_config_option("pubsub.example.org", "muc_bans_domains", "pubsub#max_items", "1000")
 ```
 
-Use your configured `RTBL_PUBLISH_SERVICE` and node names instead of the examples above.
+`pubsub#publish_model` should be `publishers`, not `open`, so arbitrary users cannot publish items into your RTBL nodes.
 
 ### Avatar & vCard Support
 
@@ -618,7 +630,7 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | `id`         | INTEGER | Internal row id |
 | `created_at` | INTEGER | Event timestamp |
 | `event_type` | TEXT    | Event name, e.g. `ban_applied`, `unban_applied` |
-| `actor`      | TEXT    | Admin JID, `rtbl`, `ignorelist`, or `system` |
+| `actor`      | TEXT    | Admin nick or `system` |
 | `room`       | TEXT    | Related room if applicable |
 | `target_type`| TEXT    | `jid`, `nick`, or `domain` if applicable |
 | `target`     | TEXT    | Normalized target if applicable |
@@ -650,20 +662,17 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | Column        | Type    | Description |
 | ------------- | ------- | ----------- |
 | `id`          | INTEGER | Internal row id |
-| `service_jid` | TEXT    | PubSub service address that provides the RTBL feed, e.g. `xmppbl.org` or `pubsub.example.org` |
-| `node`        | TEXT    | PubSub node name on that service |
+| `service_jid` | TEXT    | PubSub service JID/domain |
+| `node`        | TEXT    | PubSub node name |
 | `created_at`  | INTEGER | Creation timestamp |
-
-> `service_jid` refers to the PubSub service JID/address, not to the banned user JID.
-> Together, `service_jid` + `node` identify where an RTBL entry came from.
 
 ### `rtbl_hashes`
 
 | Column        | Type    | Description |
 | ------------- | ------- | ----------- |
 | `hash`        | TEXT    | SHA-256 hash of a bare JID |
-| `service_jid` | TEXT    | PubSub service address that provided this entry |
-| `node`        | TEXT    | Source PubSub node on that service |
+| `service_jid` | TEXT    | Source PubSub service |
+| `node`        | TEXT    | Source PubSub node |
 | `reason`      | TEXT    | Optional RTBL reason |
 | `created_at`  | INTEGER | Creation timestamp |
 
@@ -672,8 +681,8 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | Column        | Type    | Description |
 | ------------- | ------- | ----------- |
 | `domain`      | TEXT    | Plain domain from RTBL feed |
-| `service_jid` | TEXT    | PubSub service address that provided this entry |
-| `node`        | TEXT    | Source PubSub node on that service |
+| `service_jid` | TEXT    | Source PubSub service |
+| `node`        | TEXT    | Source PubSub node |
 | `reason`      | TEXT    | Optional RTBL reason |
 | `created_at`  | INTEGER | Creation timestamp |
 

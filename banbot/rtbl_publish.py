@@ -137,7 +137,7 @@ class RtblPublishMixin:
         form = self.plugin["xep_0004"].make_form(ftype="submit")
         form.add_field(var="FORM_TYPE", ftype="hidden", value="http://jabber.org/protocol/pubsub#node_config")
         form.add_field(var="pubsub#access_model", value="open")
-        form.add_field(var="pubsub#publish_model", value="open")
+        form.add_field(var="pubsub#publish_model", value="publishers")
         form.add_field(var="pubsub#persist_items", value="1")
         form.add_field(var="pubsub#max_items", value="1000")
         form.add_field(var="pubsub#send_last_published_item", value="never")
@@ -181,7 +181,7 @@ class RtblPublishMixin:
                 node,
                 config=self._rtbl_make_node_config_form(),
             )
-            log.info("RTBL Publish: Node '%s' configured", node)
+            log.info("RTBL Publish: Node '%s' configured (publish_model=publishers)", node)
         except IqError as e:
             if "forbidden" in str(e).lower():
                 log.info(
