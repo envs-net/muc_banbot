@@ -19,7 +19,7 @@ It provides central administration via an admin room and protects multiple chat 
 * 🔄 Auto-updates nick-only bans to JID when user rejoins  
 * ⚠️ Admins/Owners are protected from accidental bans  
 * ⛔ Prevents ban application if the bot does not have admin/owner rights  
-* 🚫 Global ignorelist (`!ignore`) to protect JIDs/domains from manual and RTBL bans  
+* 🚫 Global ignorelist/whitelist (`!ignore` / `!whitelist`) for exact JIDs and domain-based ban protection  
 * 📦 Sync existing room bans into the database at startup  
 * 🔄 Automatic rejoin and reapplication of bans on restart  
 * 👀 Monitors bot's admin/owner rights per room and reports loss to the admin room  
@@ -70,7 +70,7 @@ It provides central administration via an admin room and protects multiple chat 
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
 | `!syncbans` | Full ban synchronization: syncs outcasts from rooms into DB and applies all active bans | `!syncbans` |
 | `!ignore list [page]` / `!whitelist list [page]` | Shows the global ignorelist | `!ignore list`, `!whitelist list last` |
-| `!ignore add <jid/domain> [reason]` / `!whitelist add <jid/domain> [reason]` | Protects a JID or domain from all bans | `!whitelist add alice@example.com trusted user` |
+| `!ignore add <jid/domain> [reason]` / `!whitelist add <jid/domain> [reason]` | Protects an exact JID from all bans, or a domain from domain-based bans/RTBL domain matches | `!whitelist add alice@example.com trusted admin` |
 | `!ignore remove <jid/domain>` / `!whitelist remove <jid/domain>` | Removes an entry from the global ignorelist | `!whitelist remove alice@example.com` |
 | `!banlist rtbl [page/last]` | Shows RTBL hash and domain entries | `!banlist rtbl`, `!banlist rtbl last` |
 | `!rtbl list` | Shows active RTBL subscriptions and own publish feed counts | `!rtbl list` |
@@ -256,7 +256,7 @@ sudo journalctl -u muc_banbot -f
 * **Domain ban validation** blocks overly generic bans (e.g., `*.com`).
 * CSV imports create a timestamped database backup before any database write is attempted.
 * Audit events are retained for up to 365 days and cleaned up automatically.
-* The global ignorelist protects trusted JIDs/domains from both manual bans and RTBL enforcement.
+* The global ignorelist protects exact JIDs from all bans, and domains from domain-based bans/RTBL domain matches.
 * `!rtbl add` refuses malformed PubSub services/nodes and refuses to subscribe to the bot's own publish nodes.
 * If RTBL publish is enabled, ensure your PubSub service allows the bot to publish to the configured nodes.
 
@@ -416,21 +416,26 @@ Safety behavior:
 
 ### Global Ignorelist
 
-The global ignorelist protects trusted JIDs and domains from **all** bans, including manual bans and RTBL-enforced bans.
+The global ignorelist/whitelist has two protection modes: exact JID entries protect that JID from **all** bans, while domain entries protect against domain-based bans and RTBL domain matches. A domain entry does **not** block an explicit manual ban of an individual JID on that domain. The `!whitelist` command is an alias for `!ignore`.
 
 ```
 !ignore list
 !ignore add alice@example.com trusted user
 !ignore add *.example.org local domain
 !ignore remove alice@example.com
+
+# Alias:
+!whitelist list
+!whitelist add alice@example.com trusted user
+!whitelist remove alice@example.com
 ```
-The `!whitelist` command is an alias for `!ignore`.  
 
 Ignorelist behavior:
-- Exact bare JIDs are protected
-- Wildcard domains such as `*.example.org` are protected
-- Domain suffix matching is used, so `*.example.org` also protects users from subdomains
-- Entries are loaded into memory and checked before bans are written/applied
+- Exact bare JIDs are protected from all bans, including manual bans and RTBL hash/domain matches
+- Wildcard domains such as `*.example.org` protect against domain-based bans and RTBL domain matches
+- Domain suffix matching is used, so `*.example.org` also protects subdomains for domain-based matches
+- Domain entries do not block explicit manual bans of individual JIDs such as `user@example.org`
+- Entries are loaded into memory and checked before matching bans are written/applied
 - Existing legacy RTBL-only ignorelist entries are migrated into the global ignorelist table if present
 
 ### RTBL Subscriptions and Own Publish Feed
@@ -470,6 +475,8 @@ Safety and validation:
 - The bot refuses to subscribe to its own configured publish nodes
 - Periodic refreshes only announce when new or updated RTBL entries are found
 - Admin/owner protection and the global ignorelist are checked before any RTBL ban is applied
+- Exact JID ignorelist entries block RTBL hash and domain matches for that JID
+- Domain ignorelist entries block RTBL domain matches, but do not suppress RTBL hash matches for a specifically listed JID hash
 - Removing a subscription or receiving RTBL retractions removes stale persisted `issuer=rtbl` bans when they are no longer present in active subscriptions
 - Inbound RTBL bans are not mirrored into the bot's own RTBL publish feed
 
@@ -752,7 +759,8 @@ If the bot can publish only after you manually created nodes, create/configure t
 Check:
 - `RTBL_ENABLED=True`
 - `!rtbl list` shows active subscriptions and non-zero hash/domain counts
-- The user is not protected by `!ignore` or admin/owner protection
+- The user is not protected by an exact JID `!ignore` entry or admin/owner protection
+- For RTBL domain matches, the user's domain is not protected by a domain `!ignore` entry
 - Startup and newly added subscription fetches scan current occupants immediately; periodic refreshes do not rescan unchanged lists
 
 ---

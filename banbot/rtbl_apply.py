@@ -12,12 +12,9 @@ class RtblApplyMixin:
         """
         Check a joining user against both in-memory RTBL caches.
 
-        1. SHA-256 hash of the bare JID is looked up in rtbl_hash_cache.
-        2. The user's domain (and all parent domains) is checked against
-           rtbl_domain_cache using suffix matching.
-
-        Returns True if a ban was applied so that muc_online() can skip
-        further processing for this user.
+        Exact JID ignorelist entries protect the user from all RTBL matches.
+        Domain ignorelist entries protect against RTBL domain matches, but do
+        not suppress RTBL hash matches for an explicitly listed JID hash.
         """
         if not getattr(self, "rtbl_enabled", False):
             return False
@@ -26,20 +23,26 @@ class RtblApplyMixin:
         if not bare:
             return False
 
-        # --- Global ignorelist check ---
-        if self.is_ignored_target(bare):
-            log.debug("RTBL: Ignoring JID %s (global ignorelist)", bare)
+        # Exact JID ignorelist entries protect this user from all RTBL bans.
+        if self.is_ignored_jid(bare):
+            log.debug("RTBL: Ignoring JID %s (exact ignorelist match)", bare)
             return False
 
-        # JID hash check
+        # JID hash check. Domain ignorelist entries intentionally do not block
+        # hash-based RTBL bans; only an exact JID ignore entry does.
         h = self._rtbl_hash_jid(bare)
         if h in self.rtbl_hash_cache:
             await self._rtbl_apply_ban_jid(bare, nick, self.rtbl_hash_cache[h])
             return True
 
-        # Domain check
+        # Domain check. Domain ignorelist entries protect against domain-based
+        # RTBL bans for that domain and its subdomains.
         if "@" in bare:
             user_domain = bare.split("@", 1)[1].lower()
+            if self.is_ignored_domain(user_domain):
+                log.debug("RTBL: Ignoring domain match for %s (domain ignorelist)", bare)
+                return False
+
             for banned_domain, reason in self.rtbl_domain_cache.items():
                 if domain_matches(user_domain, banned_domain):
                     await self._rtbl_apply_ban_domain(banned_domain, reason, nick=nick, jid=bare)
@@ -86,7 +89,8 @@ class RtblApplyMixin:
                 if not bare:
                     continue
 
-                if self.is_ignored_target(bare):
+                # Exact JID ignorelist entries protect this user from all RTBL bans.
+                if self.is_ignored_jid(bare):
                     continue
 
                 hash_val = self._rtbl_hash_jid(bare)
@@ -101,6 +105,9 @@ class RtblApplyMixin:
                     continue
 
                 user_domain = bare.split("@", 1)[1].lower()
+                if self.is_ignored_domain(user_domain):
+                    continue
+
                 for banned_domain, reason in list(self.rtbl_domain_cache.items()):
                     if domain_matches(user_domain, banned_domain):
                         matched_domain_occupants.add((banned_domain, bare))
@@ -144,8 +151,7 @@ class RtblApplyMixin:
                 bare = self.bare_jid(jid)
                 if not bare:
                     continue
-                # Global ignorelist check
-                if self.is_ignored_target(bare):
+                if self.is_ignored_jid(bare):
                     continue
                 if self._rtbl_hash_jid(bare) == hash_val:
                     await self._rtbl_apply_ban_jid(bare, nick, reason)
@@ -157,9 +163,8 @@ class RtblApplyMixin:
         """
         Scan current occupants for a newly received domain ban.
 
-        _rtbl_apply_ban_domain() scans all protected rooms itself and persists
-        concrete JID bans for every matched occupant, so call it only once with
-        the first matching occupant as announcement/context data.
+        _rtbl_apply_ban_domain() scans all protected rooms itself, so call it
+        only once with the first matching occupant as announcement context.
         """
         for room, occupants in self.occupants.items():
             if room not in self.protected_rooms:
@@ -174,10 +179,13 @@ class RtblApplyMixin:
                 if not bare or "@" not in bare:
                     continue
 
-                if self.is_ignored_target(bare):
+                if self.is_ignored_jid(bare):
                     continue
 
                 user_domain = bare.split("@", 1)[1].lower()
+                if self.is_ignored_domain(user_domain):
+                    continue
+
                 if domain_matches(user_domain, domain):
                     await self._rtbl_apply_ban_domain(
                         domain, reason, nick=nick, jid=bare
@@ -194,22 +202,18 @@ class RtblApplyMixin:
         """
         Apply an RTBL JID ban via MUC outcast affiliation in all protected rooms.
 
-        Admin/owner protection is always checked first. If the target is an
-        admin or owner in any protected room or the admin room the ban is
-        silently dropped and, if RTBL_ANNOUNCE is True, a warning is sent to
-        the admin room.
-
-        The applied RTBL ban is persisted in the main bans table immediately
-        so the local banlist and room state stay consistent.
+        Admin/owner protection is always checked first. Exact JID ignorelist
+        entries protect the target from RTBL hash bans; domain ignorelist entries
+        do not suppress hash bans for a specifically listed JID hash.
         """
         from config import ADMIN_ROOM
 
-        if self.is_ignored_target(jid):
-            log.info("RTBL: Refusing JID ban for %s — global ignorelist", jid)
+        if self.is_ignored_jid(jid):
+            log.info("RTBL: Refusing JID ban for %s — exact ignorelist match", jid)
             if self.rtbl_announce:
                 self.send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"⛔ RTBL: Ignored ban for {jid} — global ignorelist",
+                    mbody=f"⛔ RTBL: Ignored ban for {jid} — exact ignorelist match",
                     mtype="groupchat",
                 )
             return
@@ -283,14 +287,15 @@ class RtblApplyMixin:
         """
         from config import ADMIN_ROOM
 
+        domain = domain.lstrip("*.").lower()
         wildcard = f"*.{domain}"
 
-        if self.is_ignored_target(wildcard):
-            log.info("RTBL: Refusing domain ban %s — global ignorelist", wildcard)
+        if self.is_ignored_domain(domain):
+            log.info("RTBL: Refusing domain ban %s — domain ignorelist", wildcard)
             if self.rtbl_announce:
                 self.send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"⛔ RTBL: Ignored domain ban {wildcard} — global ignorelist",
+                    mbody=f"⛔ RTBL: Ignored domain ban {wildcard} — domain ignorelist",
                     mtype="groupchat",
                 )
             return
@@ -317,8 +322,14 @@ class RtblApplyMixin:
                 if not domain_matches(occ_domain, domain):
                     continue
 
-                if self.is_ignored_target(bare):
+                # Exact JID ignorelist entries protect that user from all bans.
+                if self.is_ignored_jid(bare):
                     log.debug("RTBL: Ignoring matched JID %s for domain *.%s", bare, domain)
+                    continue
+
+                # More specific ignored subdomains should also be respected.
+                if self.is_ignored_domain(occ_domain):
+                    log.debug("RTBL: Ignoring matched domain %s for *.%s", occ_domain, domain)
                     continue
 
                 protected, protect_reason = await self.is_protected_admin_target(
@@ -414,7 +425,7 @@ class RtblApplyMixin:
             return False
 
         bare = self.bare_jid(jid)
-        if not bare or bare.startswith("*." ):
+        if not bare or bare.startswith("*."):
             return False
 
         if self._rtbl_hash_jid(bare) in getattr(self, "rtbl_hash_cache", {}):
@@ -447,7 +458,7 @@ class RtblApplyMixin:
             if not banned_jid:
                 continue
 
-            if banned_jid.startswith("*." ):
+            if banned_jid.startswith("*."):
                 await self.unban_all(banned_jid, issuer=issuer)
                 removed += 1
                 continue

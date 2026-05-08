@@ -1,4 +1,4 @@
-"""Global ignorelist — protects JIDs and domains from all bans (RTBL and manual)."""
+"""Global ignorelist/whitelist protection for JIDs and domain-based bans."""
 
 import logging
 
@@ -74,54 +74,72 @@ class IgnorelistMixin:
         )
 
 
-    def is_ignored_target(self, jid: str | None) -> bool:
-        """
-        Return True if the target is on the ignorelist.
-
-        Checks:
-        - exact bare JID
-        - wildcard domain bans like *.example.org
-        - plain domains like example.org
-        - JID domain suffixes through domain_matches()
-        """
+    def is_ignored_jid(self, jid: str | None) -> bool:
+        """Return True only for an exact bare-JID ignorelist match."""
         if not jid:
             return False
 
-        ignore_jids = getattr(self, "ignore_jids", set())
-        ignore_domains = getattr(self, "ignore_domains", set())
-
-        candidate = jid.strip().lower()
-        if not candidate:
-            return False
-
-        # Wildcard domain ban e.g. *.example.org
-        if candidate.startswith("*."):
-            domain = candidate[2:].lower()
-            if candidate in ignore_jids or domain in ignore_domains:
-                return True
-            return any(domain_matches(domain, ignored_domain) for ignored_domain in ignore_domains)
-
-        bare = self.bare_jid(candidate) if "@" in candidate else candidate
+        bare = self.bare_jid(jid) if "@" in jid else jid.strip().lower()
         if not bare:
             return False
 
-        bare = bare.lower()
+        return bare.lower() in getattr(self, "ignore_jids", set())
 
-        if bare in ignore_jids:
+
+    def is_ignored_domain(self, domain_or_wildcard: str | None) -> bool:
+        """Return True if a domain/wildcard target is covered by the ignorelist."""
+        if not domain_or_wildcard:
+            return False
+
+        domain = domain_or_wildcard.strip().lower().lstrip("*.")
+        if not domain:
+            return False
+
+        ignore_domains = getattr(self, "ignore_domains", set())
+        if domain in ignore_domains:
             return True
 
-        # Plain domain target, e.g. example.org
-        if "@" not in bare and "." in bare:
-            domain = bare.lstrip("*.").lower()
-            if domain in ignore_domains:
-                return True
-            return any(domain_matches(domain, ignored_domain) for ignored_domain in ignore_domains)
+        return any(domain_matches(domain, ignored_domain) for ignored_domain in ignore_domains)
 
-        # JID domain check
-        if "@" in bare:
-            user_domain = bare.split("@", 1)[1].lower()
-            if any(domain_matches(user_domain, ignored_domain) for ignored_domain in ignore_domains):
+
+    def is_ignored_target(
+        self,
+        target: str | None,
+        *,
+        include_domain_for_jid: bool = False,
+    ) -> bool:
+        """
+        Return True if the target is protected by the ignorelist.
+
+        Semantics:
+        - Exact JID entries protect that JID from all bans.
+        - Domain entries protect domain/wildcard bans and RTBL domain matches.
+        - Domain entries do not block explicit manual JID bans unless
+          include_domain_for_jid=True is requested by the caller.
+        """
+        if not target:
+            return False
+
+        candidate = target.strip().lower()
+        if not candidate:
+            return False
+
+        if candidate.startswith("*."):
+            return self.is_ignored_domain(candidate)
+
+        if "@" in candidate:
+            bare = self.bare_jid(candidate)
+            if not bare:
+                return False
+            if self.is_ignored_jid(bare):
                 return True
+            if include_domain_for_jid and "@" in bare:
+                return self.is_ignored_domain(bare.split("@", 1)[1])
+            return False
+
+        # Plain domain target, e.g. example.org
+        if "." in candidate:
+            return self.is_ignored_domain(candidate)
 
         return False
 
@@ -179,7 +197,9 @@ class IgnorelistMixin:
     ) -> None:
         """
         Manage the global ignorelist.
-        Entries are protected from all bans (RTBL and manual).
+        Exact JID entries are protected from all bans. Domain entries protect
+        against domain-based bans and RTBL domain matches, but not explicit
+        manual bans of individual JIDs on that domain.
 
         !ignore list [page]
         !ignore add <jid|domain> [reason]
