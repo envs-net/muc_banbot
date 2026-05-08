@@ -63,7 +63,7 @@ class IgnorelistMixin:
                 if target_type == "jid":
                     ignore_jids.add(target.lower())
                 elif target_type == "domain":
-                    ignore_domains.add(target.lstrip("*.").lower())
+                    ignore_domains.add(target.lstrip("*." ).lower())
 
         self.ignore_jids = ignore_jids
         self.ignore_domains = ignore_domains
@@ -124,7 +124,7 @@ class IgnorelistMixin:
         if not candidate:
             return False
 
-        if candidate.startswith("*."):
+        if candidate.startswith("*." ):
             return self.is_ignored_domain(candidate)
 
         if "@" in candidate:
@@ -137,7 +137,7 @@ class IgnorelistMixin:
                 return self.is_ignored_domain(bare.split("@", 1)[1])
             return False
 
-        # Plain domain target, e.g. example.org
+        # Plain domain target, e.g. example.org.
         if "." in candidate:
             return self.is_ignored_domain(candidate)
 
@@ -197,6 +197,7 @@ class IgnorelistMixin:
     ) -> None:
         """
         Manage the global ignorelist.
+
         Exact JID entries are protected from all bans. Domain entries protect
         against domain-based bans and RTBL domain matches, but not explicit
         manual bans of individual JIDs on that domain.
@@ -212,6 +213,11 @@ class IgnorelistMixin:
         command = f"{p}{command_name}"
         label = "Whitelist" if command_name == "whitelist" else "Ignorelist"
         sub_action = args[0].lower() if args else "list"
+
+        # The alias is only an entrypoint. Listing should always point users to
+        # the canonical ignorelist command and use the canonical list heading.
+        list_label = "Ignorelist"
+        list_command = f"{p}ignore"
 
         # ----------------------------------------------------------------
         # list
@@ -236,7 +242,7 @@ class IgnorelistMixin:
             if total == 0:
                 self.send_message(
                     mto=room,
-                    mbody=f"🚫 {label}:\n  (none)",
+                    mbody=f"🚫 {list_label}:\n  (none)",
                     mtype="groupchat",
                 )
                 return
@@ -253,7 +259,7 @@ class IgnorelistMixin:
             ) as cursor:
                 rows = await cursor.fetchall()
 
-            lines = [f"🚫 {label} ({total}) - Page {resolved_page}/{total_pages}:"]
+            lines = [f"🚫 {list_label} ({total}) - Page {resolved_page}/{total_pages}:"]
             for target, target_type, reason, added_by in rows:
                 reason_str = f" — {reason}" if reason else ""
                 added_str = f" (by {added_by})" if added_by else ""
@@ -261,7 +267,7 @@ class IgnorelistMixin:
                 lines.append(f"  {emoji} {target}{reason_str}{added_str}")
 
             if resolved_page < total_pages:
-                lines.append(f"\nUse {command} list {resolved_page + 1} for the next page.")
+                lines.append(f"\nUse {list_command} list {resolved_page + 1} for the next page.")
 
             self.send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return
@@ -281,7 +287,7 @@ class IgnorelistMixin:
             raw_target = args[1].strip().lower()
             reason = " ".join(args[2:]) if len(args) > 2 else None
 
-            if "@" in raw_target and not raw_target.startswith("*."):
+            if "@" in raw_target and not raw_target.startswith("*." ):
                 if not validate_jid_format(raw_target):
                     self.send_message(
                         mto=room,
@@ -376,10 +382,15 @@ class IgnorelistMixin:
 
             for t in targets_to_try:
                 async with self.db.execute(
-                    "SELECT target, target_type, reason, added_by FROM ignorelist WHERE target = ?",
+                    """
+                    SELECT target, target_type, reason, added_by
+                    FROM ignorelist
+                    WHERE target = ?
+                    """,
                     (t,),
                 ) as cursor:
                     row = await cursor.fetchone()
+
                 if row:
                     found = row[0]
                     found_type = row[1]
@@ -401,12 +412,17 @@ class IgnorelistMixin:
 
             self.log_event(
                 logging.INFO, "ignorelist_removed",
-                actor=actor, target_type=found_type, target=found,
-                reason=found_reason, added_by=found_added_by,
+                actor=actor,
+                target_type=found_type,
+                target=found,
+                comment=found_reason,
+                previous_added_by=found_added_by,
             )
             await self.audit_event(
                 "ignorelist_removed", actor=actor,
-                target_type=found_type, target=found, comment=found_reason,
+                target_type=found_type,
+                target=found,
+                comment=found_reason,
                 details={"previous_added_by": found_added_by},
             )
 
