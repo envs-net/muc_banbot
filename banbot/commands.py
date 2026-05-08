@@ -225,6 +225,7 @@ class CommandMixin:
             "audit",
             "rtbl",
             "ignore",
+            "whitelist",
         }
 
         if cmd not in admin_commands:
@@ -410,9 +411,9 @@ class CommandMixin:
             await self.cmd_rtbl(args, room, actor=actor_jid)
             return True
 
-        if cmd == "ignore":
+        if cmd in ("ignore", "whitelist"):
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-            await self.cmd_ignore(args, room, actor=actor_jid)
+            await self.cmd_ignore(args, room, actor=actor_jid, command_name=cmd)
             return True
 
         return True
@@ -450,7 +451,7 @@ class CommandMixin:
             f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"
             f"{p}syncadmins - update admin list from the admin room\n"
             f"{p}syncbans - sync bans from all rooms into the database and enforce them\n\n"
-            f"{p}ignore list [page] - show global ignorelist\n"
+            f"{p}ignore list [page] - show global ignorelist (alias: {p}whitelist)\n"
             f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
             f"{p}ignore remove <jid|domain> - remove from ignorelist\n\n"
             f"{p}rtbl list - show active RTBL subscriptions\n"

@@ -69,9 +69,9 @@ It provides central administration via an admin room and protects multiple chat 
 | `!sync` | Full room sync: rejoin rooms, verify admin rights, apply only missing active bans | `!sync` |
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
 | `!syncbans` | Full ban synchronization: syncs outcasts from rooms into DB and applies all active bans | `!syncbans` |
-| `!ignore list [page]` | Shows the global ignorelist | `!ignore list`, `!ignore list last` |
-| `!ignore add <jid/domain> [reason]` | Protects a JID or domain from all bans | `!ignore add alice@example.com trusted admin` |
-| `!ignore remove <jid/domain>` | Removes an entry from the global ignorelist | `!ignore remove alice@example.com` |
+| `!ignore list [page]` / `!whitelist list [page]` | Shows the global ignorelist | `!ignore list`, `!whitelist list last` |
+| `!ignore add <jid/domain> [reason]` / `!whitelist add <jid/domain> [reason]` | Protects a JID or domain from all bans | `!whitelist add alice@example.com trusted user` |
+| `!ignore remove <jid/domain>` / `!whitelist remove <jid/domain>` | Removes an entry from the global ignorelist | `!whitelist remove alice@example.com` |
 | `!banlist rtbl [page/last]` | Shows RTBL hash and domain entries | `!banlist rtbl`, `!banlist rtbl last` |
 | `!rtbl list` | Shows active RTBL subscriptions and own publish feed counts | `!rtbl list` |
 | `!rtbl add <service> <node>` | Subscribes to an RTBL PubSub node after validation | `!rtbl add xmppbl.org muc_bans_sha256` |
@@ -424,6 +424,7 @@ The global ignorelist protects trusted JIDs and domains from **all** bans, inclu
 !ignore add *.example.org local domain
 !ignore remove alice@example.com
 ```
+The `!whitelist` command is an alias for `!ignore`.  
 
 Ignorelist behavior:
 - Exact bare JIDs are protected

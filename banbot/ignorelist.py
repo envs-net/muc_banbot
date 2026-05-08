@@ -136,7 +136,7 @@ class IgnorelistMixin:
                     await self.unban_all(bare, issuer="ignorelist")
             return
 
-        domain = target.lstrip("*." ).lower()
+        domain = target.lstrip("*.").lower()
         if not domain:
             return
 
@@ -149,8 +149,8 @@ class IgnorelistMixin:
                 await self.unban_all(f"*.{domain}", issuer="ignorelist")
 
         # Remove concrete JID bans that were applied from RTBL domain matches.
-        # This lets `!ignore add user@example.org` or `!ignore add *.example.org`
-        # immediately clear already-applied RTBL bans for that target.
+        # This lets `!ignore add user@example.org`, `!ignore add *.example.org`,
+        # or the `!whitelist` alias immediately clear already-applied RTBL bans.
         async with self.db.execute(
             "SELECT jid FROM bans WHERE issuer = 'rtbl' AND target_type = 'jid' AND jid IS NOT NULL"
         ) as cursor:
@@ -165,7 +165,13 @@ class IgnorelistMixin:
                 await self.unban_all(bare, issuer="ignorelist")
 
 
-    async def cmd_ignore(self, args: list[str], room: str, actor: str = "unknown") -> None:
+    async def cmd_ignore(
+        self,
+        args: list[str],
+        room: str,
+        actor: str = "unknown",
+        command_name: str = "ignore",
+    ) -> None:
         """
         Manage the global ignorelist.
         Entries are protected from all bans (RTBL and manual).
@@ -173,8 +179,13 @@ class IgnorelistMixin:
         !ignore list [page]
         !ignore add <jid|domain> [reason]
         !ignore remove <jid|domain>
+
+        !whitelist is accepted as an alias for !ignore.
         """
         p = self.command_prefix
+        command_name = command_name if command_name in ("ignore", "whitelist") else "ignore"
+        command = f"{p}{command_name}"
+        label = "Whitelist" if command_name == "whitelist" else "Ignorelist"
         sub_action = args[0].lower() if args else "list"
 
         # ----------------------------------------------------------------
@@ -200,7 +211,7 @@ class IgnorelistMixin:
             if total == 0:
                 self.send_message(
                     mto=room,
-                    mbody="🚫 Ignorelist:\n  (none)",
+                    mbody=f"🚫 {label}:\n  (none)",
                     mtype="groupchat",
                 )
                 return
@@ -217,7 +228,7 @@ class IgnorelistMixin:
             ) as cursor:
                 rows = await cursor.fetchall()
 
-            lines = [f"🚫 Ignorelist ({total}) - Page {resolved_page}/{total_pages}:"]
+            lines = [f"🚫 {label} ({total}) - Page {resolved_page}/{total_pages}:"]
             for target, target_type, reason, added_by in rows:
                 reason_str = f" — {reason}" if reason else ""
                 added_str = f" (by {added_by})" if added_by else ""
@@ -225,7 +236,7 @@ class IgnorelistMixin:
                 lines.append(f"  {emoji} {target}{reason_str}{added_str}")
 
             if resolved_page < total_pages:
-                lines.append(f"\nUse {p}ignore list {resolved_page + 1} for the next page.")
+                lines.append(f"\nUse {command} list {resolved_page + 1} for the next page.")
 
             self.send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return
@@ -237,7 +248,7 @@ class IgnorelistMixin:
             if len(args) < 2:
                 self.send_message(
                     mto=room,
-                    mbody=f"❌ Usage: {p}ignore add <jid|domain> [reason]",
+                    mbody=f"❌ Usage: {command} add <jid|domain> [reason]",
                     mtype="groupchat",
                 )
                 return
@@ -286,7 +297,7 @@ class IgnorelistMixin:
 
             self.send_message(
                 mto=room,
-                mbody=f"✅ Ignorelist: Added {target}.",
+                mbody=f"✅ {label}: Added {target}.",
                 mtype="groupchat",
             )
             return
@@ -298,7 +309,7 @@ class IgnorelistMixin:
             if len(args) < 2:
                 self.send_message(
                     mto=room,
-                    mbody=f"❌ Usage: {p}ignore remove <jid|domain>",
+                    mbody=f"❌ Usage: {command} remove <jid|domain>",
                     mtype="groupchat",
                 )
                 return
@@ -311,19 +322,27 @@ class IgnorelistMixin:
             ]))
 
             found = None
+            found_type = None
+            found_reason = None
+            found_added_by = None
+
             for t in targets_to_try:
                 async with self.db.execute(
-                    "SELECT target FROM ignorelist WHERE target = ?", (t,)
+                    "SELECT target, target_type, reason, added_by FROM ignorelist WHERE target = ?",
+                    (t,),
                 ) as cursor:
                     row = await cursor.fetchone()
                 if row:
                     found = row[0]
+                    found_type = row[1]
+                    found_reason = row[2]
+                    found_added_by = row[3]
                     break
 
             if not found:
                 self.send_message(
                     mto=room,
-                    mbody=f"⚠️ Ignorelist: {raw_target} was not found.",
+                    mbody=f"⚠️ {label}: {raw_target} was not found.",
                     mtype="groupchat",
                 )
                 return
@@ -332,12 +351,20 @@ class IgnorelistMixin:
             await self.db.commit()
             await self._load_ignorelist_from_db()
 
-            self.log_event(logging.INFO, "ignorelist_removed", actor=actor, target=found)
-            await self.audit_event("ignorelist_removed", actor=actor, target=found)
+            self.log_event(
+                logging.INFO, "ignorelist_removed",
+                actor=actor, target_type=found_type, target=found,
+                reason=found_reason, added_by=found_added_by,
+            )
+            await self.audit_event(
+                "ignorelist_removed", actor=actor,
+                target_type=found_type, target=found, comment=found_reason,
+                details={"previous_added_by": found_added_by},
+            )
 
             self.send_message(
                 mto=room,
-                mbody=f"✅ Ignorelist: Removed {found}.",
+                mbody=f"✅ {label}: Removed {found}.",
                 mtype="groupchat",
             )
             return
