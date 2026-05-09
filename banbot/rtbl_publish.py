@@ -306,7 +306,7 @@ class RtblPublishMixin:
                 id=hash_val,
                 payload=self._rtbl_build_payload(comment),
             )
-            log.info(
+            log.debug(
                 "RTBL Publish: JID hash published for %s (%s…)",
                 bare_jid, hash_val[:12],
             )
@@ -325,7 +325,7 @@ class RtblPublishMixin:
                 id=domain,
                 payload=self._rtbl_build_payload(comment),
             )
-            log.info("RTBL Publish: Domain ban published for *.%s", domain)
+            log.debug("RTBL Publish: Domain ban published for *.%s", domain)
             return True
         except (IqError, IqTimeout) as e:
             log.warning("RTBL Publish: Could not publish domain ban for *.%s: %s", domain, e)
