@@ -198,7 +198,7 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `MUC_WRITE_SEMAPHORE` (int, default: `5`) - Concurrency limit for XMPP IQ operations
 - `RTBL_ANNOUNCE` (bool, default: `True`) - Announce RTBL changes in the admin room; periodic refreshes stay quiet when nothing changed
-- `RTBL_REFRESH_INTERVAL` (int, default: `3600`) - Seconds between periodic RTBL refreshes; set to `0` to disable periodic refresh
+- `RTBL_REFRESH_INTERVAL` (int, default: `3600`) - Seconds between periodic RTBL refreshes; refreshes reconcile the local RTBL cache with the current PubSub node snapshot and unban stale RTBL bans; set to `0` to disable periodic refresh
 - `VERSION_CHECK_ENABLED` (bool, default: `False`) - Enable periodic checks for newer GitHub releases
 - `VERSION_CHECK_INTERVAL` (int, default: `3600`) - Seconds between release checks (minimum: 300)
 - `VERSION_CHECK_URL` (str, default: `https://github.com/envs-net/muc_banbot/releases/latest`) - URL used to detect the latest GitHub release

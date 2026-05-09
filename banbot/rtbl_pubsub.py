@@ -30,7 +30,6 @@ class RtblPubSubMixin:
             log.warning("RTBL: %s", msg)
             return False, msg
 
-
     async def _rtbl_subscribe_and_fetch(self, service_jid: str, node: str) -> None:
         """Subscribe to a PubSub node and fetch all existing items."""
         ok, _error = await self._rtbl_subscribe_node(service_jid, node)
@@ -38,7 +37,6 @@ class RtblPubSubMixin:
             return
 
         await self._rtbl_fetch_all_items(service_jid, node)
-
 
     async def _rtbl_fetch_all_items(
         self,
@@ -49,8 +47,15 @@ class RtblPubSubMixin:
         """
         Fetch all current items from an RTBL node using manual RSM pagination
         (XEP-0059) via fully raw XML IQ construction.
-        Items are classified as JID hashes or domain bans by their ID format.
-        Unknown formats are skipped with a debug log entry.
+
+        RTBL nodes are treated as active snapshots:
+        - items present in the successful fetch stay active
+        - items missing from the successful fetch are removed locally
+        - stale persisted issuer=rtbl bans are unbanned afterwards
+
+        If the fetch fails, times out, returns malformed data, or pagination
+        aborts unexpectedly, stale-entry cleanup is skipped to avoid deleting
+        valid local RTBL state based on an incomplete refresh.
 
         If scan_occupants is True, all currently known occupants are checked
         against the rebuilt RTBL caches after the fetch. This makes freshly
@@ -70,9 +75,20 @@ class RtblPubSubMixin:
         new_domain_count = 0
         updated_hash_count = 0
         updated_domain_count = 0
+        removed_hash_count = 0
+        removed_domain_count = 0
+        removed_stale_bans = 0
+
+        seen_hashes: set[str] = set()
+        seen_domains: set[str] = set()
+
         page = 0
         last_id = None
         page_size = 200
+        seen_rsm_last_ids: set[str] = set()
+
+        fetch_successful = False
+        fetch_failed = False
 
         while True:
             try:
@@ -85,10 +101,12 @@ class RtblPubSubMixin:
                 rsm_set = ET.SubElement(pubsub_el, f"{{{_RSM}}}set")
                 max_el = ET.SubElement(rsm_set, f"{{{_RSM}}}max")
                 max_el.text = str(page_size)
+
                 if last_id is not None:
                     after_el = ET.SubElement(rsm_set, f"{{{_RSM}}}after")
                     after_el.text = last_id
 
+                # Replace generated IQ children with our raw PubSub/RSM payload.
                 for child in list(iq.xml):
                     iq.xml.remove(child)
                 iq.xml.append(pubsub_el)
@@ -97,14 +115,37 @@ class RtblPubSubMixin:
 
                 result_pubsub = result.xml.find(f"{{{_PUBSUB}}}pubsub")
                 if result_pubsub is None:
+                    fetch_failed = True
+                    log.warning(
+                        "RTBL: Invalid fetch response from '%s' @ %s on page %d: missing pubsub element",
+                        node,
+                        service_jid,
+                        page,
+                    )
                     break
+
                 result_items_el = result_pubsub.find(f"{{{_PUBSUB}}}items")
-                items = list(result_items_el) if result_items_el is not None else []
+                if result_items_el is None:
+                    fetch_failed = True
+                    log.warning(
+                        "RTBL: Invalid fetch response from '%s' @ %s on page %d: missing items element",
+                        node,
+                        service_jid,
+                        page,
+                    )
+                    break
+
+                fetch_successful = True
+                items = list(result_items_el)
 
             except (IqError, IqTimeout) as e:
+                fetch_failed = True
                 log.warning(
                     "RTBL: Could not fetch items from '%s' @ %s (page %d): %s",
-                    node, service_jid, page, e,
+                    node,
+                    service_jid,
+                    page,
+                    e,
                 )
                 break
 
@@ -120,6 +161,8 @@ class RtblPubSubMixin:
                 reason = self._rtbl_extract_reason(payload)
 
                 if _is_sha256(item_id):
+                    seen_hashes.add(item_id)
+
                     async with self.db.execute(
                         """
                         SELECT reason FROM rtbl_hashes
@@ -138,15 +181,17 @@ class RtblPubSubMixin:
                         """
                         INSERT INTO rtbl_hashes (hash, service_jid, node, reason)
                         VALUES (?, ?, ?, ?)
-                        ON CONFLICT(hash, service_jid, node) DO UPDATE SET
-                            reason = excluded.reason
+                        ON CONFLICT(hash, service_jid, node)
+                        DO UPDATE SET reason = excluded.reason
                         """,
                         (item_id, service_jid, node, reason),
                     )
                     hash_count += 1
 
                 elif _is_domain(item_id):
-                    domain = item_id.lstrip("*.")
+                    domain = item_id.lstrip("*.").lower()
+                    seen_domains.add(domain)
+
                     async with self.db.execute(
                         """
                         SELECT reason FROM rtbl_domains
@@ -165,8 +210,8 @@ class RtblPubSubMixin:
                         """
                         INSERT INTO rtbl_domains (domain, service_jid, node, reason)
                         VALUES (?, ?, ?, ?)
-                        ON CONFLICT(domain, service_jid, node) DO UPDATE SET
-                            reason = excluded.reason
+                        ON CONFLICT(domain, service_jid, node)
+                        DO UPDATE SET reason = excluded.reason
                         """,
                         (domain, service_jid, node, reason),
                     )
@@ -175,16 +220,21 @@ class RtblPubSubMixin:
                 else:
                     log.debug(
                         "RTBL: Skipping unrecognised item ID '%s' from %s/%s",
-                        item_id, service_jid, node,
+                        item_id,
+                        service_jid,
+                        node,
                     )
 
             await self.db.commit()
+
             page += 1
             last_id = items[-1].get("id") if items else None
 
             log.debug(
                 "RTBL: Page %d — %d hashes, %d domains so far (last: %s…)",
-                page, hash_count, domain_count,
+                page,
+                hash_count,
+                domain_count,
                 last_id[:12] if last_id else "none",
             )
 
@@ -193,35 +243,143 @@ class RtblPubSubMixin:
             if rsm_el is not None:
                 last_el = rsm_el.find(f"{{{_RSM}}}last")
                 rsm_last = last_el.text.strip() if last_el is not None and last_el.text else None
+                log.debug("RTBL: RSM last=%s", rsm_last)
 
-            log.debug("RTBL: RSM last=%s", rsm_last)
-
-            if not rsm_last or len(items) < page_size:
+            if not rsm_last:
+                if len(items) >= page_size:
+                    fetch_failed = True
+                    log.warning(
+                        (
+                            "RTBL: Fetch for '%s' @ %s returned %d items without RSM continuation; "
+                            "treating snapshot as potentially incomplete and skipping stale cleanup"
+                        ),
+                        node,
+                        service_jid,
+                        len(items),
+                    )
                 break
 
+            if len(items) < page_size:
+                break
+
+            # Safety guard: if a server ignores RSM 'after' and repeats the same page,
+            # do not loop forever and do not run stale cleanup from an incomplete fetch.
+            if rsm_last == last_id or rsm_last in seen_rsm_last_ids:
+                fetch_failed = True
+                log.warning(
+                    "RTBL: Pagination loop while fetching '%s' @ %s; repeated RSM last=%s",
+                    node,
+                    service_jid,
+                    rsm_last,
+                )
+                break
+
+            seen_rsm_last_ids.add(rsm_last)
+            last_id = rsm_last
+
+        if fetch_successful and not fetch_failed:
+            async with self.db.execute(
+                """
+                SELECT hash FROM rtbl_hashes
+                WHERE service_jid = ? AND node = ?
+                """,
+                (service_jid, node),
+            ) as cursor:
+                existing_hashes = {row[0] for row in await cursor.fetchall()}
+
+            stale_hashes = existing_hashes - seen_hashes
+            for stale_hash in stale_hashes:
+                await self.db.execute(
+                    """
+                    DELETE FROM rtbl_hashes
+                    WHERE hash = ? AND service_jid = ? AND node = ?
+                    """,
+                    (stale_hash, service_jid, node),
+                )
+                removed_hash_count += 1
+
+            async with self.db.execute(
+                """
+                SELECT domain FROM rtbl_domains
+                WHERE service_jid = ? AND node = ?
+                """,
+                (service_jid, node),
+            ) as cursor:
+                existing_domains = {row[0] for row in await cursor.fetchall()}
+
+            stale_domains = existing_domains - seen_domains
+            for stale_domain in stale_domains:
+                await self.db.execute(
+                    """
+                    DELETE FROM rtbl_domains
+                    WHERE domain = ? AND service_jid = ? AND node = ?
+                    """,
+                    (stale_domain, service_jid, node),
+                )
+                removed_domain_count += 1
+
+            if removed_hash_count or removed_domain_count:
+                await self.db.commit()
+                log.info(
+                    (
+                        "RTBL: Snapshot reconciliation for '%s' @ %s — "
+                        "removed %d stale hashes and %d stale domains"
+                    ),
+                    node,
+                    service_jid,
+                    removed_hash_count,
+                    removed_domain_count,
+                )
+        else:
+            log.warning(
+                "RTBL: Skipping stale-entry cleanup for '%s' @ %s because fetch was not successful",
+                node,
+                service_jid,
+            )
+
         await self._rebuild_rtbl_caches()
+
+        if removed_hash_count or removed_domain_count:
+            removed_stale_bans = await self._rtbl_cleanup_stale_persisted_bans(
+                issuer="rtbl_refresh"
+            )
 
         changed_count = (
             new_hash_count
             + new_domain_count
             + updated_hash_count
             + updated_domain_count
+            + removed_hash_count
+            + removed_domain_count
+            + removed_stale_bans
         )
 
         log.info(
             (
                 "RTBL: Fetched from '%s' @ %s — %d hashes, %d domains (%d pages; "
-                "%d new hashes, %d new domains, %d updated hashes, %d updated domains)"
+                "%d new hashes, %d new domains, %d updated hashes, %d updated domains, "
+                "%d removed hashes, %d removed domains, %d stale bans unbanned)"
             ),
-            node, service_jid, hash_count, domain_count, page,
-            new_hash_count, new_domain_count, updated_hash_count, updated_domain_count,
+            node,
+            service_jid,
+            hash_count,
+            domain_count,
+            page,
+            new_hash_count,
+            new_domain_count,
+            updated_hash_count,
+            updated_domain_count,
+            removed_hash_count,
+            removed_domain_count,
+            removed_stale_bans,
         )
 
         # Only announce refresh results when something actually changed.
         # This keeps the hourly/default periodic refresh quiet when there are
-        # no new RTBL entries or reason updates.
+        # no RTBL changes.
         if self.rtbl_announce and changed_count > 0:
             parts = []
+
             if new_hash_count:
                 parts.append(f"{new_hash_count} new JID hashes")
             if new_domain_count:
@@ -230,6 +388,12 @@ class RtblPubSubMixin:
                 parts.append(f"{updated_hash_count} updated JID hashes")
             if updated_domain_count:
                 parts.append(f"{updated_domain_count} updated domain bans")
+            if removed_hash_count:
+                parts.append(f"{removed_hash_count} removed JID hashes")
+            if removed_domain_count:
+                parts.append(f"{removed_domain_count} removed domain bans")
+            if removed_stale_bans:
+                parts.append(f"{removed_stale_bans} stale RTBL bans unbanned")
 
             self.send_message(
                 mto=ADMIN_ROOM,
@@ -245,12 +409,12 @@ class RtblPubSubMixin:
                 source=f"{service_jid}/{node}"
             )
 
-
     async def _on_rtbl_publish(self, msg) -> None:
         """
         Handle an incoming PubSub publish event.
-        Only processes events from nodes we are subscribed to.
-        Classifies each item and stores/applies it accordingly.
+
+        Only processes events from nodes we are subscribed to. Classifies each item
+        and stores/applies it accordingly.
         """
         if not getattr(self, "rtbl_enabled", False):
             return
@@ -270,6 +434,7 @@ class RtblPubSubMixin:
                 item_id = item["id"].lower().strip()
             except Exception:
                 continue
+
             if not item_id:
                 continue
 
@@ -280,50 +445,65 @@ class RtblPubSubMixin:
                     """
                     INSERT INTO rtbl_hashes (hash, service_jid, node, reason)
                     VALUES (?, ?, ?, ?)
-                    ON CONFLICT(hash, service_jid, node) DO UPDATE SET
-                        reason = excluded.reason
+                    ON CONFLICT(hash, service_jid, node)
+                    DO UPDATE SET reason = excluded.reason
                     """,
                     (item_id, service_jid, node, reason),
                 )
                 await self.db.commit()
+
                 self.rtbl_hash_cache[item_id] = reason
+
                 log.info(
                     "RTBL: New JID hash from %s/%s: %s… (reason: %s)",
-                    service_jid, node, item_id[:12], reason,
+                    service_jid,
+                    node,
+                    item_id[:12],
+                    reason,
                 )
+
                 await self._rtbl_check_all_occupants_for_hash(item_id, reason)
 
             elif _is_domain(item_id):
-                domain = item_id.lstrip("*.")
+                domain = item_id.lstrip("*.").lower()
+
                 await self.db.execute(
                     """
                     INSERT INTO rtbl_domains (domain, service_jid, node, reason)
                     VALUES (?, ?, ?, ?)
-                    ON CONFLICT(domain, service_jid, node) DO UPDATE SET
-                        reason = excluded.reason
+                    ON CONFLICT(domain, service_jid, node)
+                    DO UPDATE SET reason = excluded.reason
                     """,
                     (domain, service_jid, node, reason),
                 )
                 await self.db.commit()
+
                 self.rtbl_domain_cache[domain] = reason
+
                 log.info(
                     "RTBL: New domain ban from %s/%s: *.%s (reason: %s)",
-                    service_jid, node, domain, reason,
+                    service_jid,
+                    node,
+                    domain,
+                    reason,
                 )
+
                 await self._rtbl_check_all_occupants_for_domain(domain, reason)
 
             else:
                 log.debug(
                     "RTBL: Skipping unrecognised item '%s' from %s/%s",
-                    item_id, service_jid, node,
+                    item_id,
+                    service_jid,
+                    node,
                 )
-
 
     async def _on_rtbl_retract(self, msg) -> None:
         """
         Handle a PubSub retract event.
-        Removes the item from DB and from the in-memory cache, but only if
-        no other subscription still references the same entry.
+
+        Removes the item from DB and from the in-memory cache, but only if no
+        other subscription still references the same entry.
         """
         if not getattr(self, "rtbl_enabled", False):
             return
@@ -343,6 +523,7 @@ class RtblPubSubMixin:
                 item_id = item["id"].lower().strip()
             except Exception:
                 continue
+
             if not item_id:
                 continue
 
@@ -352,31 +533,38 @@ class RtblPubSubMixin:
                     (item_id, service_jid, node),
                 )
                 await self.db.commit()
+
                 async with self.db.execute(
-                    "SELECT 1 FROM rtbl_hashes WHERE hash = ? LIMIT 1", (item_id,)
+                    "SELECT 1 FROM rtbl_hashes WHERE hash = ? LIMIT 1",
+                    (item_id,),
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_hash_cache.pop(item_id, None)
-                        await self._rtbl_cleanup_stale_persisted_bans(issuer="rtbl_retract")
+
+                await self._rtbl_cleanup_stale_persisted_bans(issuer="rtbl_retract")
 
             elif _is_domain(item_id):
-                domain = item_id.lstrip("*.")
+                domain = item_id.lstrip("*.").lower()
+
                 await self.db.execute(
                     "DELETE FROM rtbl_domains WHERE domain = ? AND service_jid = ? AND node = ?",
                     (domain, service_jid, node),
                 )
                 await self.db.commit()
+
                 async with self.db.execute(
-                    "SELECT 1 FROM rtbl_domains WHERE domain = ? LIMIT 1", (domain,)
+                    "SELECT 1 FROM rtbl_domains WHERE domain = ? LIMIT 1",
+                    (domain,),
                 ) as cursor:
                     if not await cursor.fetchone():
                         self.rtbl_domain_cache.pop(domain, None)
-                        await self._rtbl_cleanup_stale_persisted_bans(issuer="rtbl_retract")
 
+                await self._rtbl_cleanup_stale_persisted_bans(issuer="rtbl_retract")
 
     async def _rtbl_refresh_worker(self) -> None:
         """
         Periodically re-fetch all items from every subscribed RTBL node.
+
         Interval is controlled by RTBL_REFRESH_INTERVAL (seconds, 0 = disabled).
         Acts as a fallback for missed PubSub events.
         """
@@ -392,14 +580,20 @@ class RtblPubSubMixin:
                 continue
 
             log.info("RTBL: Starting periodic refresh (%ds interval)", interval)
+
             for service_jid, node in list(self.rtbl_subscriptions):
                 try:
                     await self._rtbl_fetch_all_items(
-                        service_jid, node, scan_occupants=False
+                        service_jid,
+                        node,
+                        scan_occupants=False,
                     )
                 except Exception as e:
                     log.warning(
                         "RTBL: Periodic refresh failed for '%s' @ %s: %s",
-                        node, service_jid, e,
+                        node,
+                        service_jid,
+                        e,
                     )
+
             log.info("RTBL: Periodic refresh complete")
