@@ -354,12 +354,12 @@ class RtblPubSubMixin:
             + removed_stale_bans
         )
 
-        log.info(
-            (
-                "RTBL: Fetched from '%s' @ %s — %d hashes, %d domains (%d pages; "
-                "%d new hashes, %d new domains, %d updated hashes, %d updated domains, "
-                "%d removed hashes, %d removed domains, %d stale bans unbanned)"
-            ),
+        log_msg = (
+            "RTBL: Fetched from '%s' @ %s — %d hashes, %d domains (%d pages; "
+            "%d new hashes, %d new domains, %d updated hashes, %d updated domains, "
+            "%d removed hashes, %d removed domains, %d stale bans unbanned)"
+        )
+        log_args = (
             node,
             service_jid,
             hash_count,
@@ -373,6 +373,11 @@ class RtblPubSubMixin:
             removed_domain_count,
             removed_stale_bans,
         )
+
+        if changed_count > 0:
+            log.info(log_msg, *log_args)
+        else:
+            log.debug(log_msg, *log_args)
 
         # Only announce refresh results when something actually changed.
         # This keeps the hourly/default periodic refresh quiet when there are
