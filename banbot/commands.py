@@ -459,6 +459,7 @@ class CommandMixin:
             f"{p}rtbl list - show active RTBL subscriptions\n"
             f"{p}rtbl add <service> <node> - subscribe to a RTBL node\n"
             f"{p}rtbl delete <service> [node] - remove a RTBL subscription\n"
+            f"{p}rtbl refresh [service_jid] [node] - Refresh RTBL subscriptions now\n"
             f"{p}rtbl publish status - Status of your own RTBL feed\n"
             f"{p}rtbl publish sync - Publish all current bans to your own feed\n\n"
             f"{p}export - export all bans to a CSV file\n"
