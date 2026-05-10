@@ -469,7 +469,7 @@ Common commands:
 Banlist behavior:
 - `!banlist rtbl` shows the raw RTBL subscription entries from `rtbl_hashes` and `rtbl_domains`.
 - `!banlist` shows applied bans from the main `bans` table. RTBL-applied entries use the 🛡️ icon and `by rtbl`.
-- For RTBL domain matches, the main banlist stores the concrete matched JID, for example `picelboi@xmpp.earth`, with a comment such as `RTBL domain ban: *.xmpp.earth`.
+- For RTBL domain matches, the main banlist stores the concrete matched JID, for example `alice@xmpp.earth`, with a comment such as `RTBL domain ban: *.xmpp.earth`.
 - The RTBL domain rule itself remains in `rtbl_domains`; it is not stored as a local wildcard ban unless it came from an older version.
 - For RTBL JID-hash matches, the main banlist stores the resolved bare JID if the bot can match the hash to a current occupant.
 
