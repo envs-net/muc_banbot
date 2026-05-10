@@ -28,7 +28,8 @@ It provides central administration via an admin room and protects multiple chat 
 * 🛡️ RTBL subscriptions via PubSub for SHA-256 JID hashes and plaintext domain bans  
 * 🧾 Applied RTBL bans are persisted in the main banlist with a shield marker; domain matches are stored as concrete JID bans  
 * 🔎 Current occupants are scanned immediately after startup/new RTBL subscription fetches  
-* 🔄 Periodic RTBL refresh with quiet/no-change behavior  
+* 🔄 Periodic RTBL refresh with quiet/no-change behavior and snapshot reconciliation  
+* ♻️ Removed RTBL items are cleaned up locally and stale `issuer=rtbl` bans are automatically unbanned  
 * 📡 Optional own RTBL publish feed for local bans  
 * 📣 Logs ban/unban actions in both admin and protected rooms  
 * 🧾 SQLite audit log for moderation actions with automatic 365-day retention  
@@ -76,6 +77,7 @@ It provides central administration via an admin room and protects multiple chat 
 | `!rtbl list` | Shows active RTBL subscriptions and own publish feed counts | `!rtbl list` |
 | `!rtbl add <service> <node>` | Subscribes to an RTBL PubSub node after validation | `!rtbl add xmppbl.org muc_bans_sha256` |
 | `!rtbl delete <service> [node]` | Removes one or all RTBL subscriptions for a service | `!rtbl delete xmppbl.org muc_bans_sha256` |
+| `!rtbl refresh [service] [node]` | Manually refreshes all RTBL subscriptions, one service, or one specific node | `!rtbl refresh xmppbl.org muc_bans_sha256` |
 | `!rtbl publish status` | Shows own RTBL publish feed status and local publish counts | `!rtbl publish status` |
 | `!rtbl publish sync` | Publishes all current local bans to the own RTBL feed | `!rtbl publish sync` |
 | `!export` | Exports all bans to a CSV file (bans_export_TIMESTAMP.csv) | `!export` |
@@ -198,10 +200,10 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `MAX_TEMPBAN_DAYS` (int, default: `30`) - Maximum temporary ban duration in days (1-365)
 - `MUC_WRITE_SEMAPHORE` (int, default: `5`) - Concurrency limit for XMPP IQ operations
 - `RTBL_ANNOUNCE` (bool, default: `True`) - Announce RTBL changes in the admin room; periodic refreshes stay quiet when nothing changed
-- `RTBL_REFRESH_INTERVAL` (int, default: `3600`) - Seconds between periodic RTBL refreshes; refreshes reconcile the local RTBL cache with the current PubSub node snapshot and unban stale RTBL bans; set to `0` to disable periodic refresh
+- `RTBL_REFRESH_INTERVAL` (int, default: `3600`) - Seconds between periodic RTBL refreshes. Successful refreshes reconcile the local RTBL cache with the current PubSub node snapshot and automatically unban stale `issuer=rtbl` bans when RTBL items disappeared. Set to `0` to disable periodic refresh.
 - `VERSION_CHECK_ENABLED` (bool, default: `False`) - Enable periodic checks for newer GitHub releases
 - `VERSION_CHECK_INTERVAL` (int, default: `3600`) - Seconds between release checks (minimum: 300)
-- `VERSION_CHECK_URL` (str, default: `https://github.com/envs-net/muc_banbot/releases/latest`) - URL used to detect the latest GitHub release
+- `VERSION_CHECK_URL` (str, default: `https://github.com/envs-net/muc_banbot/releases/latest`) - GitHub release URL used to detect the latest release. GitHub URLs are checked via the GitHub releases/latest API with a redirect-parser fallback.
 
 ### 6. Test the bot manually
 
@@ -447,6 +449,7 @@ BanBot supports RTBL (Real-Time Block List) PubSub feeds:
 - **Domain entries**: plaintext domains; matching occupants are locally persisted as concrete JID bans with the RTBL domain source in the comment
 - **Applied RTBL persistence**: when an inbound RTBL entry actually matches and is applied, the resulting local ban is stored in the main `bans` table with `issuer=rtbl`
 - **Current occupant scan**: startup fetches and newly added subscriptions immediately scan current occupants so matching users are banned without waiting for a rejoin; periodic refreshes stay quiet and do not rescan unchanged lists
+- **Snapshot reconciliation**: successful refreshes reconcile the local RTBL cache with the current PubSub node snapshot; entries removed from the RTBL node are cleaned up locally and stale `issuer=rtbl` bans are automatically unbanned
 - **Own publish feed**: publish local non-RTBL bans to your own PubSub service for other bots to consume
 
 Common commands:
@@ -456,6 +459,8 @@ Common commands:
 !rtbl add xmppbl.org muc_bans_sha256
 !rtbl add xmppbl.org spam_source_domains
 !rtbl delete xmppbl.org muc_bans_sha256
+!rtbl refresh
+!rtbl refresh xmppbl.org muc_bans_sha256
 !banlist rtbl
 !rtbl publish status
 !rtbl publish sync
@@ -473,11 +478,11 @@ Safety and validation:
 - The bot attempts to subscribe before writing the subscription into the database
 - `!rtbl delete` refuses to report success for non-existing subscriptions
 - The bot refuses to subscribe to its own configured publish nodes
-- Periodic refreshes only announce when new or updated RTBL entries are found
+- Periodic refreshes only announce when new, updated, removed, or cleaned-up RTBL entries are found
 - Admin/owner protection and the global ignorelist are checked before any RTBL ban is applied
 - Exact JID ignorelist entries block RTBL hash and domain matches for that JID
 - Domain ignorelist entries block RTBL domain matches, but do not suppress RTBL hash matches for a specifically listed JID hash
-- Removing a subscription or receiving RTBL retractions removes stale persisted `issuer=rtbl` bans when they are no longer present in active subscriptions
+- Removing a subscription, receiving RTBL retractions, or refreshing a node snapshot removes stale persisted `issuer=rtbl` bans when they are no longer present in active subscriptions
 - Inbound RTBL bans are not mirrored into the bot's own RTBL publish feed
 
 RTBL publish nodes on Prosody can be created/configured manually if your server does not allow the bot to create and own nodes itself. Replace `pubsub.example.org`, the node names, and `adminbot@example.org` with your configured `RTBL_PUBLISH_SERVICE`, `RTBL_PUBLISH_JID_NODE`, `RTBL_PUBLISH_DOMAIN_NODE`, and bot bare JID.
@@ -557,11 +562,11 @@ The bot runs an automatic **unban worker** that:
 
 ### Release Update Checks
 
-The bot can periodically check the latest GitHub release page and notify the admin room when a newer version is available.
+The bot can periodically check the latest GitHub release and notify the admin room when a newer version is available.
 
 - Automatic checks run in the background when `VERSION_CHECK_ENABLED=True`
 - The release check interval is controlled by `VERSION_CHECK_INTERVAL`
-- The release URL is configurable via `VERSION_CHECK_URL`
+- The release URL is configurable via `VERSION_CHECK_URL`; GitHub URLs are checked via the GitHub releases/latest API with a redirect-parser fallback
 - Manual checks are available with `!checkupdate` (or your configured `COMMAND_PREFIX`)
 - When a newer release is found, the bot logs the event and includes the release page URL in the admin-room notification
 

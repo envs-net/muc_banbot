@@ -1,13 +1,23 @@
 """Admin-room !rtbl command handling."""
 
 import logging
+import time
 
+from .utils import human_time
 from .rtbl_utils import _looks_like_pubsub_node, _looks_like_pubsub_service_jid
 
 log = logging.getLogger(__name__)
 
 
 class RtblCommandMixin:
+    def _rtbl_status_age(self, ts: float | None) -> str:
+        """Return a compact human-readable age for RTBL timestamps."""
+        if not ts:
+            return "never"
+
+        age = max(0, int(time.time() - int(ts)))
+        return f"{human_time(age)} ago"
+
     async def cmd_rtbl(self, args: list[str], room: str, actor: str = "unknown") -> None:
         """
         Manage RTBL subscriptions and the optional own publish feed.
@@ -26,6 +36,7 @@ class RtblCommandMixin:
                 f"  {p}rtbl list",
                 f"  {p}rtbl add <service_jid> <node>",
                 f"  {p}rtbl delete <service_jid> [node]",
+                f"  {p}rtbl refresh [service_jid] [node]",
             ]
             if getattr(self, "rtbl_publish_enabled", False):
                 lines += [
@@ -47,21 +58,36 @@ class RtblCommandMixin:
                 lines.append("  (none)")
             else:
                 for service_jid, node in self.rtbl_subscriptions:
+                    key = (service_jid.lower(), node)
+
                     async with self.db.execute(
                         "SELECT COUNT(*) FROM rtbl_hashes WHERE service_jid = ? AND node = ?",
                         (service_jid, node),
                     ) as cursor:
                         row = await cursor.fetchone()
                         h_count = int(row[0] or 0) if row else 0
+
                     async with self.db.execute(
                         "SELECT COUNT(*) FROM rtbl_domains WHERE service_jid = ? AND node = ?",
                         (service_jid, node),
                     ) as cursor:
                         row = await cursor.fetchone()
                         d_count = int(row[0] or 0) if row else 0
+
+                    last_fetch = self._rtbl_status_age(
+                        getattr(self, "rtbl_last_fetch", {}).get(key)
+                    )
+                    last_change = self._rtbl_status_age(
+                        getattr(self, "rtbl_last_change", {}).get(key)
+                    )
+                    last_error = getattr(self, "rtbl_last_error", {}).get(key)
+
                     lines.append(
-                        f"  • {service_jid}  /  {node}"
-                        f"  ({h_count} hashes, {d_count} domains)"
+                        f"  • {service_jid}  /  {node}\n"
+                        f"    Entries: {h_count} hashes, {d_count} domains\n"
+                        f"    Last fetch: {last_fetch}\n"
+                        f"    Last change: {last_change}\n"
+                        f"    Last error: {last_error or 'none'}"
                     )
 
             if getattr(self, "rtbl_publish_enabled", False):
@@ -277,6 +303,74 @@ class RtblCommandMixin:
             return
 
         # ----------------------------------------------------------------
+        # refresh
+        # ----------------------------------------------------------------
+        if action == "refresh":
+            if not self.rtbl_subscriptions:
+                self.send_message(
+                    mto=room,
+                    mbody="⚠️ RTBL: No subscriptions configured.",
+                    mtype="groupchat",
+                )
+                return
+
+            service_filter = args[1].strip().lower() if len(args) >= 2 else None
+            node_filter = args[2].strip() if len(args) >= 3 else None
+
+            selected = []
+            for service_jid, node in self.rtbl_subscriptions:
+                if service_filter and service_jid.lower() != service_filter:
+                    continue
+                if node_filter and node != node_filter:
+                    continue
+                selected.append((service_jid, node))
+
+            if not selected:
+                self.send_message(
+                    mto=room,
+                    mbody="⚠️ RTBL: No matching subscription found.",
+                    mtype="groupchat",
+                )
+                return
+
+            self.send_message(
+                mto=room,
+                mbody=f"🔄 RTBL: Refreshing {len(selected)} subscription(s)…",
+                mtype="groupchat",
+            )
+
+            refreshed = 0
+            failed = 0
+
+            for service_jid, node in selected:
+                try:
+                    await self._rtbl_fetch_all_items(
+                        service_jid,
+                        node,
+                        scan_occupants=True,
+                    )
+                    refreshed += 1
+                except Exception as e:
+                    failed += 1
+                    log.warning(
+                        "RTBL: Manual refresh failed for '%s' @ %s: %s",
+                        node,
+                        service_jid,
+                        e,
+                    )
+
+            status = "✅" if failed == 0 else "⚠️"
+            self.send_message(
+                mto=room,
+                mbody=(
+                    f"{status} RTBL: Refresh complete — "
+                    f"{refreshed} refreshed, {failed} failed."
+                ),
+                mtype="groupchat",
+            )
+            return
+
+        # ----------------------------------------------------------------
         # publish
         # ----------------------------------------------------------------
         if action == "publish":
@@ -343,7 +437,7 @@ class RtblCommandMixin:
             mto=room,
             mbody=(
                 f"❌ Unknown RTBL action: {action}\n"
-                f"Available: list / add / delete / publish"
+                f"Available: list / add / delete / refresh / publish"
             ),
             mtype="groupchat",
         )

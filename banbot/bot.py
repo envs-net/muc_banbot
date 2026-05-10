@@ -163,8 +163,16 @@ class BanBot(
         self.rtbl_subscriptions: list[tuple[str, str]] = []   # loaded from DB
         self.rtbl_hash_cache: dict[str, str | None] = {}      # hash → reason
         self.rtbl_domain_cache: dict[str, str | None] = {}
+        # RTBL runtime status/observability.
+        # Keys are (service_jid.lower(), node).
+        self.rtbl_last_fetch: dict[tuple[str, str], float] = {}
+        self.rtbl_last_change: dict[tuple[str, str], float] = {}
+        self.rtbl_last_error: dict[tuple[str, str], str | None] = {}
+        self.rtbl_last_counts: dict[tuple[str, str], tuple[int, int]] = {}
+
         self.ignore_jids: set[str] = set()
         self.ignore_domains: set[str] = set()
+
         self._rtbl_handlers_registered: bool = False
         self.rtbl_refresh_interval: int = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
         self._rtbl_refresh_task: asyncio.Task | None = None

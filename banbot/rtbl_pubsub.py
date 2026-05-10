@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 
 from slixmpp.exceptions import IqError, IqTimeout
 
@@ -90,6 +91,9 @@ class RtblPubSubMixin:
         fetch_successful = False
         fetch_failed = False
 
+        status_key = (service_jid.lower(), node)
+        fetch_error: str | None = None
+
         while True:
             try:
                 iq = self.make_iq_get(ito=service_jid)
@@ -116,6 +120,7 @@ class RtblPubSubMixin:
                 result_pubsub = result.xml.find(f"{{{_PUBSUB}}}pubsub")
                 if result_pubsub is None:
                     fetch_failed = True
+                    fetch_error = "missing pubsub element"
                     log.warning(
                         "RTBL: Invalid fetch response from '%s' @ %s on page %d: missing pubsub element",
                         node,
@@ -127,6 +132,7 @@ class RtblPubSubMixin:
                 result_items_el = result_pubsub.find(f"{{{_PUBSUB}}}items")
                 if result_items_el is None:
                     fetch_failed = True
+                    fetch_error = "missing items element"
                     log.warning(
                         "RTBL: Invalid fetch response from '%s' @ %s on page %d: missing items element",
                         node,
@@ -140,6 +146,7 @@ class RtblPubSubMixin:
 
             except (IqError, IqTimeout) as e:
                 fetch_failed = True
+                fetch_error = str(e)
                 log.warning(
                     "RTBL: Could not fetch items from '%s' @ %s (page %d): %s",
                     node,
@@ -248,6 +255,7 @@ class RtblPubSubMixin:
             if not rsm_last:
                 if len(items) >= page_size:
                     fetch_failed = True
+                    fetch_error = "snapshot may be incomplete: missing RSM continuation"
                     log.warning(
                         (
                             "RTBL: Fetch for '%s' @ %s returned %d items without RSM continuation; "
@@ -266,6 +274,7 @@ class RtblPubSubMixin:
             # do not loop forever and do not run stale cleanup from an incomplete fetch.
             if rsm_last == last_id or rsm_last in seen_rsm_last_ids:
                 fetch_failed = True
+                fetch_error = f"pagination loop: repeated RSM last={rsm_last}"
                 log.warning(
                     "RTBL: Pagination loop while fetching '%s' @ %s; repeated RSM last=%s",
                     node,
@@ -354,6 +363,16 @@ class RtblPubSubMixin:
             + removed_stale_bans
         )
 
+        if fetch_successful and not fetch_failed:
+            self.rtbl_last_fetch[status_key] = time.time()
+            self.rtbl_last_counts[status_key] = (hash_count, domain_count)
+            self.rtbl_last_error[status_key] = None
+
+            if changed_count > 0:
+                self.rtbl_last_change[status_key] = time.time()
+        else:
+            self.rtbl_last_error[status_key] = fetch_error or "fetch was not successful"
+
         log_msg = (
             "RTBL: Fetched from '%s' @ %s — %d hashes, %d domains (%d pages; "
             "%d new hashes, %d new domains, %d updated hashes, %d updated domains, "
@@ -434,6 +453,8 @@ class RtblPubSubMixin:
         if (service_jid.lower(), node) not in subscribed:
             return
 
+        status_key = (service_jid.lower(), node)
+
         for item in msg["pubsub_event"]["items"]:
             try:
                 item_id = item["id"].lower().strip()
@@ -456,6 +477,9 @@ class RtblPubSubMixin:
                     (item_id, service_jid, node, reason),
                 )
                 await self.db.commit()
+
+                self.rtbl_last_change[status_key] = time.time()
+                self.rtbl_last_error[status_key] = None
 
                 self.rtbl_hash_cache[item_id] = reason
 
@@ -482,6 +506,9 @@ class RtblPubSubMixin:
                     (domain, service_jid, node, reason),
                 )
                 await self.db.commit()
+
+                self.rtbl_last_change[status_key] = time.time()
+                self.rtbl_last_error[status_key] = None
 
                 self.rtbl_domain_cache[domain] = reason
 
@@ -523,6 +550,8 @@ class RtblPubSubMixin:
         if (service_jid.lower(), node) not in subscribed:
             return
 
+        status_key = (service_jid.lower(), node)
+
         for item in msg["pubsub_event"]["items"]:
             try:
                 item_id = item["id"].lower().strip()
@@ -538,6 +567,9 @@ class RtblPubSubMixin:
                     (item_id, service_jid, node),
                 )
                 await self.db.commit()
+
+                self.rtbl_last_change[status_key] = time.time()
+                self.rtbl_last_error[status_key] = None
 
                 async with self.db.execute(
                     "SELECT 1 FROM rtbl_hashes WHERE hash = ? LIMIT 1",
@@ -556,6 +588,9 @@ class RtblPubSubMixin:
                     (domain, service_jid, node),
                 )
                 await self.db.commit()
+
+                self.rtbl_last_change[status_key] = time.time()
+                self.rtbl_last_error[status_key] = None
 
                 async with self.db.execute(
                     "SELECT 1 FROM rtbl_domains WHERE domain = ? LIMIT 1",

@@ -63,8 +63,10 @@ RTBL_ENABLED = False
 # Can be changed at runtime via !reloadconfig.
 RTBL_ANNOUNCE = True
 
-# Periodically re-fetch all items from subscribed RTBL nodes (full refresh).
+# Periodically re-fetch all items from subscribed RTBL nodes.
 # Acts as a fallback in case PubSub events were missed (e.g. after reconnect).
+# Successful refreshes reconcile the local RTBL cache with the current PubSub node
+# snapshot and unban stale issuer=rtbl bans when entries disappeared from the list.
 # Set to 0 to disable. Default: 3600 (once per hour).
 RTBL_REFRESH_INTERVAL = 3600
 
@@ -81,4 +83,6 @@ RTBL_PUBLISH_DOMAIN_NODE = "muc_bans_domains"  # Node for plaintext domain bans
 
 VERSION_CHECK_ENABLED = False  # True = check periodically for new bot releases, False = disabled
 VERSION_CHECK_INTERVAL = 3600  # Interval in seconds for update checks. Default: 3600 (1 hour)
-VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"  # URL used to detect the latest GitHub release
+# GitHub release URL. GitHub URLs are checked via the GitHub releases/latest API
+# with a redirect-parser fallback.
+VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"

@@ -1,9 +1,11 @@
 """GitHub release/version check helpers."""
 
 import asyncio
+import json
 import logging
 import re
 import urllib.request
+from urllib.parse import urlparse
 
 from config import ADMIN_ROOM
 
@@ -17,25 +19,68 @@ class UpdateMixin:
         parts = re.findall(r"\d+", version)
         return tuple(int(p) for p in parts)
 
-
     def _is_remote_version_newer(self, remote_version: str, local_version: str) -> bool:
         return self._parse_version_tuple(remote_version) > self._parse_version_tuple(local_version)
 
+    def _github_api_url_from_release_url(self, release_url: str) -> str | None:
+        """
+        Convert a GitHub releases URL into the releases/latest API endpoint.
 
-    def _fetch_latest_release_version_sync(self) -> str:
+        Example:
+          https://github.com/envs-net/muc_banbot/releases/latest
+        becomes:
+          https://api.github.com/repos/envs-net/muc_banbot/releases/latest
+        """
+        parsed = urlparse(release_url)
+        if parsed.netloc.lower() != "github.com":
+            return None
+
+        parts = [p for p in parsed.path.split("/") if p]
+        if len(parts) < 2:
+            return None
+
+        owner, repo = parts[0], parts[1]
+        return f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+
+    def _fetch_latest_release_version_via_github_api_sync(self) -> str:
+        """Fetch the latest GitHub release tag via the GitHub REST API."""
+        api_url = self._github_api_url_from_release_url(self.version_check_url)
+        if not api_url:
+            raise ValueError("VERSION_CHECK_URL is not a supported GitHub releases URL")
+
+        req = urllib.request.Request(
+            api_url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": f"muc_banbot/{__version__}",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        tag = str(payload.get("tag_name", "")).strip()
+        if not tag:
+            raise ValueError("GitHub API response did not contain tag_name")
+
+        return tag.lstrip("v")
+
+    def _fetch_latest_release_version_via_redirect_sync(self) -> str:
         """
         Fetch the latest GitHub release version by following the /releases/latest redirect.
+
         Example final URL:
-            https://github.com/envs-net/muc_banbot/releases/tag/v1.3.0
+          https://github.com/envs-net/muc_banbot/releases/tag/v1.3.0
+
         Returns:
-            1.3.0
+          1.3.0
         """
         if not self.version_check_url:
             raise ValueError("VERSION_CHECK_URL is not configured")
 
         req = urllib.request.Request(
             self.version_check_url,
-            headers={"User-Agent": f"muc_banbot/{__version__}"}
+            headers={"User-Agent": f"muc_banbot/{__version__}"},
         )
 
         with urllib.request.urlopen(req, timeout=15) as response:
@@ -51,14 +96,35 @@ class UpdateMixin:
 
         return tag.lstrip("v")
 
+    def _fetch_latest_release_version_sync(self) -> str:
+        """
+        Fetch the latest release version.
+
+        Prefer the GitHub API when VERSION_CHECK_URL points to GitHub. Fall back
+        to the old redirect parser so non-API-compatible setups still work.
+        """
+        if not self.version_check_url:
+            raise ValueError("VERSION_CHECK_URL is not configured")
+
+        try:
+            return self._fetch_latest_release_version_via_github_api_sync()
+        except Exception as api_error:
+            log.debug(
+                "Version check via GitHub API failed, falling back to redirect: %s",
+                api_error,
+            )
+
+        return self._fetch_latest_release_version_via_redirect_sync()
 
     async def check_for_updates_once(
         self,
-        announce: bool = True
+        announce: bool = True,
     ) -> tuple[bool, str | None, str | None]:
         """
         Check once whether a newer bot version is available.
-        Returns: (is_update_available, remote_version, error_message)
+
+        Returns:
+            (is_update_available, remote_version, error_message)
         """
         if not self.version_check_enabled or not self.version_check_url:
             return False, None, "Version check is disabled or URL is missing"
@@ -74,7 +140,7 @@ class UpdateMixin:
                     "⬆️ New bot version available: remote=%s local=%s url=%s",
                     remote_version,
                     current_version,
-                    self.version_check_url
+                    self.version_check_url,
                 )
 
                 if announce and self.last_update_notified_version != remote_version:
@@ -85,7 +151,7 @@ class UpdateMixin:
                             f"Current version: {current_version}\n"
                             f"Release page: {self.version_check_url}"
                         ),
-                        mtype="groupchat"
+                        mtype="groupchat",
                     )
                     self.last_update_notified_version = remote_version
 
@@ -97,7 +163,6 @@ class UpdateMixin:
             log.warning("Version check failed: %s", e)
             return False, None, str(e)
 
-
     async def version_check_worker(self) -> None:
         """
         Periodically check whether a newer bot version is available.
@@ -105,11 +170,9 @@ class UpdateMixin:
         while True:
             try:
                 await self.check_for_updates_once(announce=True)
-
             except asyncio.CancelledError:
                 log.info("version_check_worker cancelled")
                 raise
-
             except Exception as e:
                 log.warning("Error in version_check_worker: %s", e)
 
