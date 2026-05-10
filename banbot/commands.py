@@ -62,29 +62,31 @@ class CommandMixin:
 
     async def _handle_unknown_command(self, msg, room: str, cmd: str) -> None:
         """
-        Inform users/admins about unknown commands and point to help.
+        Inform admins about unknown commands and point to help.
+
+        In protected rooms unknown commands are ignored silently. This avoids
+        noisy bot replies for normal chat lines that happen to start with the
+        command prefix, e.g. "!?".
         """
         p = self.command_prefix
 
-        # In admin room: only answer admins
+        # In admin room: only answer admins.
         if room == ADMIN_ROOM:
             if not self.is_authorized(msg):
                 return
 
             self.send_message(
                 mto=room,
-                mbody=f"❌ Unknown command: {p}{cmd}\nUse {p}help to see available admin commands.",
-                mtype="groupchat"
+                mbody=(
+                    f"❌ Unknown command: {p}{cmd}\n"
+                    f"Use {p}help to see available admin commands."
+                ),
+                mtype="groupchat",
             )
             return
 
-        # In protected rooms: only answer if user commands are allowed
-        if self.user_cmds_allowed(room):
-            self.send_message(
-                mto=room,
-                mbody=f"❌ Unknown command: {p}{cmd}\nUse {p}help to see available commands.",
-                mtype="groupchat"
-            )
+        # In protected rooms, unknown commands are intentionally ignored.
+        return
 
 
     def check_public_command_rate_limit(self, room: str, nick: str, cmd: str) -> tuple[bool, int]:
