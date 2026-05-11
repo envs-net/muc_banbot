@@ -1,7 +1,8 @@
 # BanBot - XMPP Multi-Room Ban Management Bot - [![calver](https://img.shields.io/github/v/release/envs-net/muc_banbot)](https://github.com/envs-net/muc_banbot/releases/latest)
 
-BanBot is an XMPP bot for managing bans and temporary bans across multiple MUC rooms (Multi-User Chat).  
-It provides central administration via an admin room and protects multiple chat rooms from unwanted users.
+BanBot is an XMPP bot for centralized ban and temporary-ban management across multiple MUC rooms (Multi-User Chat).
+
+It provides an admin-room based moderation workflow, protects configured rooms from unwanted users, synchronizes bans between rooms, and supports advanced features such as domain bans, audit logging, ignorelists, health checks, and RTBL/PubSub integration.
 
 ---
 
