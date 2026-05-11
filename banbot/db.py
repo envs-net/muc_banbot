@@ -134,6 +134,15 @@ class DatabaseMixin:
             )
         """)
 
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS public_policy (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                enabled INTEGER NOT NULL DEFAULT 0,
+                text TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+            )
+        """)
+
         await self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bans_target ON bans(target_type, target)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_jid ON bans(jid)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_nick ON bans(LOWER(nick))")
@@ -296,3 +305,67 @@ class DatabaseMixin:
         )
         await self.db.commit()
         return cur.rowcount
+
+
+    async def get_public_policy(self) -> tuple[bool, str]:
+        """Return public policy enabled state and text."""
+        async with self.db.execute(
+            "SELECT enabled, text FROM public_policy WHERE id = 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if not row:
+            return False, ""
+
+        return bool(row[0]), row[1] or ""
+
+
+    async def set_public_policy_text(self, text: str, enabled: bool = True) -> None:
+        """Persist public policy text and optionally enable it."""
+        await self.db.execute(
+            """
+            INSERT INTO public_policy (id, enabled, text, updated_at)
+            VALUES (1, ?, ?, strftime('%s','now'))
+            ON CONFLICT(id)
+            DO UPDATE SET
+                enabled = excluded.enabled,
+                text = excluded.text,
+                updated_at = strftime('%s','now')
+            """,
+            (1 if enabled else 0, text),
+        )
+        await self.db.commit()
+
+
+    async def set_public_policy_enabled(self, enabled: bool) -> None:
+        """Enable or disable the public policy command."""
+        _current_enabled, text = await self.get_public_policy()
+
+        await self.db.execute(
+            """
+            INSERT INTO public_policy (id, enabled, text, updated_at)
+            VALUES (1, ?, ?, strftime('%s','now'))
+            ON CONFLICT(id)
+            DO UPDATE SET
+                enabled = excluded.enabled,
+                updated_at = strftime('%s','now')
+            """,
+            (1 if enabled else 0, text),
+        )
+        await self.db.commit()
+
+
+    async def clear_public_policy(self) -> None:
+        """Clear and disable the public policy text."""
+        await self.db.execute(
+            """
+            INSERT INTO public_policy (id, enabled, text, updated_at)
+            VALUES (1, 0, '', strftime('%s','now'))
+            ON CONFLICT(id)
+            DO UPDATE SET
+                enabled = 0,
+                text = '',
+                updated_at = strftime('%s','now')
+            """
+        )
+        await self.db.commit()

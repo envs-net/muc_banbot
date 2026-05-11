@@ -41,6 +41,7 @@ It provides admin-room based moderation, protects configured muc's from unwanted
 * ✅ Startup and runtime config validation with safe reload handling  
 * ⌨️ Configurable command prefix for all chat commands  
 * 🚦 Rate limiting for all public protected-room commands  
+* 📜 Optional public room policy text via `!rules` / `!policy`, managed from the admin room  
 * ⬆️ Periodic GitHub release checks with admin notifications and manual update checks  
 * 🖼️ Avatar support (XEP-0054, XEP-0084, XEP-0153) with vCard customization  
 
@@ -58,6 +59,11 @@ It provides admin-room based moderation, protects configured muc's from unwanted
 | `!status` | Shows bot status, active rooms, uptime, and ban statistics | `!status` |
 | `!checkupdate` | Checks whether a newer GitHub release is available | `!checkupdate` |
 | `!whoami` | Shows your affiliation/role and permissions in the current room | `!whoami` |
+| `!policy show` | Shows the configured public room policy text and current enable state | `!policy show` |
+| `!policy set <text>` | Sets and enables the public room policy text; use literal `\n` for line breaks | `!policy set This room is protected by {bot_name}.\nUse {prefix}why <target>.` |
+| `!policy clear` | Clears and disables the public policy text | `!policy clear` |
+| `!policy enable` | Enables `!rules` / `!policy` in protected rooms if text is configured | `!policy enable` |
+| `!policy disable` | Disables the public policy command without deleting the text | `!policy disable` |
 | `!room add <room>` | Adds a room to the protected list and stores it in the DB | `!room add secretroom@muc.example.com` |
 | `!room remove <room>` | Removes a room from the protected list and DB | `!room remove secretroom@muc.example.com` |
 | `!room list [page]` | Lists all protected rooms with pagination | `!room list` |
@@ -96,13 +102,51 @@ It provides admin-room based moderation, protects configured muc's from unwanted
 | `!whoami`     | Shows your affiliation/role and permissions | `!whoami`  |
 | `!banlist [page/last]` | Shows active temporary bans (if enabled)  | `!banlist`, `!banlist last`   |
 | `!why <jid/nick>` | Shows reason and remaining time for a ban | `!why alice` |
+| `!rules` / `!policy` | Shows the public room moderation policy, if configured | `!rules` |
 
 > ⚠️ **Visibility Rules:**
 > - Permanent bans are **only shown in admin room**.
 > - In protected rooms: only temporary bans are visible (if `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS=True`).
 > - JID information is anonymized in protected rooms (only nick shown).
 > - Admin issuers are anonymized in protected rooms; full admin JIDs are only shown in the admin room. RTBL bans are shown as `by rtbl`.
-> - Public `!help`, `!whoami`, `!why` and `!banlist` are rate-limited per room, nick, and command. Admin-room use is not rate-limited.
+> - Public `!help`, `!whoami`, `!why`, `!banlist`, `!rules`, and `!policy` are rate-limited per room, nick, and command. Admin-room use is not rate-limited.
+
+---
+
+## Public Room Policy
+
+BanBot can expose an optional public moderation policy in protected rooms via:
+
+* `!rules`
+* `!policy`
+
+The policy text is managed from the admin room and stored in the SQLite database, so no `config.py` change or bot restart is required. If the policy is disabled or no text is configured, `!rules` and `!policy` stay quiet in protected rooms.
+
+Admin commands:
+
+```text
+!policy show
+!policy set <text>
+!policy clear
+!policy enable
+!policy disable
+```
+
+Example:
+
+```text
+!policy set This room is protected by {bot_name}.\n\nBans may be synced across protected rooms.\nRTBL-sourced bans may be applied automatically and removed again when source lists remove them.\n\nUseful commands:\n• {prefix}why <jid|nick|domain>\n• {prefix}banlist\n• {prefix}whoami\n\nIf you think something is wrong, please contact the room admins.
+```
+
+Supported placeholders:
+
+* `{prefix}` - Current command prefix
+* `{room}` - Current room JID
+* `{room_count}` - Number of protected rooms
+* `{admin_room}` - Admin room JID
+* `{bot_name}` - Bot name
+
+Use literal `\n` in `!policy set` for line breaks.
 
 ---
 
@@ -190,7 +234,7 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 - `ANNOUNCE_STARTUP` (bool, default: `True`) - Send status messages when bot starts
 - `ANNOUNCE_SYNC_DETAILS` (bool, default: `True`) - Show detailed sync progress messages at startup
 - `SHOW_BAN_IN_MUC` (bool, default: `False`) - Announce bans in protected rooms
-- `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` (bool, default: `True`) - Allow users to run `!help`, `!banlist`, `!why`
+- `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` (bool, default: `True`) - Allow users to run public protected-room commands such as `!help`, `!banlist`, `!why`, `!rules`, and `!policy`
 - `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` (int, default: `30`) - Sliding window in seconds for public protected-room command rate limits
 - `PUBLIC_COMMAND_RATE_LIMIT_MAX` (int, default: `3`) - Max public command uses per nick, room, and command within the rate-limit window
 - `STRUCTURED_EVENT_LOGS` (bool, default: `True`) - Emit important bot events as JSON logs
@@ -663,6 +707,15 @@ The `!status` command shows a dynamic health headline. It reports problems/warni
 | `added_by`    | TEXT    | Admin who added the entry |
 | `created_at`  | INTEGER | Creation timestamp |
 
+### `public_policy`
+
+| Column       | Type    | Description |
+| ------------ | ------- | ----------- |
+| `id`         | INTEGER | Single-row table id, always `1` |
+| `enabled`    | INTEGER | Whether `!rules` / `!policy` are enabled in protected rooms |
+| `text`       | TEXT    | Public policy text shown in protected rooms |
+| `updated_at` | INTEGER | Last update timestamp |
+
 ### `rtbl_subscriptions`
 
 | Column        | Type    | Description |
@@ -757,6 +810,15 @@ If you see health check warnings in the admin room, the bot has detected:
 
 Run `!sync` to re-establish connections and verify rights.
 
+### Public policy is not shown
+
+If `!rules` or `!policy` does not show anything in a protected room:
+- Ensure `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS=True`
+- Check the admin room with `!policy show`
+- Set text with `!policy set <text>` if none is configured
+- Enable it with `!policy enable`
+- Use literal `\n` in `!policy set` for line breaks
+
 ### RTBL subscription cannot be added
 
 If `!rtbl add <service> <node>` fails:
@@ -789,3 +851,4 @@ Check:
 * Bot prevents banning of admins/owners, even via domain bans
 * RTBL subscription data (`rtbl_hashes`, `rtbl_domains`) is stored separately from applied bans. When an RTBL entry actually matches, the applied ban is stored in the main `bans` table with `issuer=rtbl`. Domain RTBL matches are stored locally as concrete JID bans so they can be unbanned or ignored per user.
 * The own RTBL publish feed mirrors active local non-RTBL bans; it should not be added back as an inbound RTBL subscription.
+* Public room policy text is stored in the SQLite `public_policy` table and is managed at runtime with `!policy` from the admin room.

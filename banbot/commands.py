@@ -11,7 +11,7 @@ from .utils import parse_duration
 log = logging.getLogger(__name__)
 
 # PUBLIC_COMMANDS used for ratelimits
-PUBLIC_COMMANDS = {"help", "whoami", "banlist", "why"}
+PUBLIC_COMMANDS = {"help", "whoami", "banlist", "why", "rules", "policy"}
 
 
 class CommandMixin:
@@ -198,6 +198,18 @@ class CommandMixin:
             await self._cmd_whoami(room, nick)
             return True
 
+        if cmd in ("rules", "policy"):
+            # In the admin room, !policy is handled by the admin command below.
+            # In protected rooms, !rules / !policy show the public policy text.
+            if room == ADMIN_ROOM:
+                return False
+
+            if self.user_cmds_allowed(room):
+                await self._cmd_public_policy_show(room)
+                return True
+
+            return True
+
         return False
 
 
@@ -228,6 +240,7 @@ class CommandMixin:
             "rtbl",
             "ignore",
             "whitelist",
+            "policy",
         }
 
         if cmd not in admin_commands:
@@ -418,7 +431,166 @@ class CommandMixin:
             await self.cmd_ignore(args, room, actor=actor_jid, command_name=cmd)
             return True
 
+        if cmd == "policy":
+            await self.cmd_policy(args, room)
+            return True
+
         return True
+
+
+    def _format_public_policy_text(self, text: str, room: str) -> str:
+        """Format public policy text with simple placeholders."""
+        replacements = {
+            "bot_name": "muc_banbot",
+            "prefix": self.command_prefix,
+            "room": room,
+            "room_count": str(len(getattr(self, "protected_rooms", []))),
+            "admin_room": ADMIN_ROOM,
+        }
+
+        formatted = text
+
+        for key, value in replacements.items():
+            formatted = formatted.replace("{" + key + "}", value)
+
+        # Allow admins to enter multiline text via literal \n in chat.
+        formatted = formatted.replace("\\n", "\n")
+
+        return formatted.strip()
+
+    async def _cmd_public_policy_show(self, room: str) -> None:
+        """Show public policy text in a protected room."""
+        enabled, text = await self.get_public_policy()
+
+        # In protected rooms this should be quiet when disabled/unset.
+        # Unknown commands are already silent there, so keep this optional too.
+        if not enabled or not text.strip():
+            return
+
+        self.send_message(
+            mto=room,
+            mbody=self._format_public_policy_text(text, room),
+            mtype="groupchat",
+        )
+
+    async def cmd_policy(self, args: list[str], room: str) -> None:
+        """Admin command to manage the public policy/rules text."""
+        p = self.command_prefix
+
+        if not args or args[0].lower() in {"show", "list"}:
+            enabled, text = await self.get_public_policy()
+
+            if not text.strip():
+                self.send_message(
+                    mto=room,
+                    mbody=(
+                        "ℹ️ No public policy text is configured.\n\n"
+                        f"Usage:\n"
+                        f"  {p}policy set <text>\n"
+                        f"  {p}policy enable\n"
+                        f"  {p}policy disable\n"
+                        f"  {p}policy clear\n\n"
+                        "Supported placeholders:\n"
+                        "  {prefix}, {room}, {room_count}, {admin_room}, {bot_name}\n"
+                        "Use literal \\n for line breaks."
+                    ),
+                    mtype="groupchat",
+                )
+                return
+
+            status = "enabled" if enabled else "disabled"
+            preview = self._format_public_policy_text(text, room)
+
+            self.send_message(
+                mto=room,
+                mbody=(
+                    f"📜 Public policy is currently {status}.\n\n"
+                    f"{preview}\n\n"
+                    f"Commands:\n"
+                    f"  {p}policy set <text>\n"
+                    f"  {p}policy enable\n"
+                    f"  {p}policy disable\n"
+                    f"  {p}policy clear\n\n"
+                    "Supported placeholders:\n"
+                    "  {prefix}, {room}, {room_count}, {admin_room}, {bot_name}\n"
+                    "Use literal \\n for line breaks."
+                ),
+                mtype="groupchat",
+            )
+            return
+
+        action = args[0].lower()
+
+        if action == "set":
+            if len(args) < 2:
+                self.send_message(
+                    mto=room,
+                    mbody=(
+                        f"❌ Usage: {p}policy set <text>\n"
+                        "Use literal \\n for line breaks.\n"
+                        "Placeholders: {prefix}, {room}, {room_count}, {admin_room}, {bot_name}"
+                    ),
+                    mtype="groupchat",
+                )
+                return
+
+            text = " ".join(args[1:]).strip()
+            await self.set_public_policy_text(text, enabled=True)
+
+            self.send_message(
+                mto=room,
+                mbody=(
+                    "✅ Public policy text saved and enabled.\n\n"
+                    f"{self._format_public_policy_text(text, room)}"
+                ),
+                mtype="groupchat",
+            )
+            return
+
+        if action == "enable":
+            _enabled, text = await self.get_public_policy()
+            if not text.strip():
+                self.send_message(
+                    mto=room,
+                    mbody=f"⚠️ No public policy text is configured. Use {p}policy set <text> first.",
+                    mtype="groupchat",
+                )
+                return
+
+            await self.set_public_policy_enabled(True)
+            self.send_message(
+                mto=room,
+                mbody="✅ Public policy command enabled.",
+                mtype="groupchat",
+            )
+            return
+
+        if action == "disable":
+            await self.set_public_policy_enabled(False)
+            self.send_message(
+                mto=room,
+                mbody="✅ Public policy command disabled.",
+                mtype="groupchat",
+            )
+            return
+
+        if action == "clear":
+            await self.clear_public_policy()
+            self.send_message(
+                mto=room,
+                mbody="✅ Public policy text cleared and disabled.",
+                mtype="groupchat",
+            )
+            return
+
+        self.send_message(
+            mto=room,
+            mbody=(
+                f"❌ Unknown policy action: {action}\n"
+                f"Available: show / set / enable / disable / clear"
+            ),
+            mtype="groupchat",
+        )
 
 
     def _user_help_text(self) -> str:
@@ -427,7 +599,8 @@ class CommandMixin:
             f"{p}help - show this help\n"
             f"{p}whoami - show your affiliation/role and permissions\n"
             f"{p}banlist [page] - show temporary bans\n"
-            f"{p}why <nick> - show ban reason"
+            f"{p}why <jid|nick|domain> - show ban reason\n"
+            f"{p}rules / {p}policy - show room moderation policy, if configured"
         )
 
 
@@ -440,6 +613,7 @@ class CommandMixin:
             f"{p}status - show bot health, active rooms, and ban statistics\n"
             f"{p}checkupdate - check if a newer bot release is available\n"
             f"{p}whoami - show your affiliation/role\n"
+            f"{p}policy show/set/clear/enable/disable - manage public rules/policy text\n"
             f"{p}audit [page|last|query] - show recent audit events\n\n"
             f"{p}room add/remove - manage protected rooms\n"
             f"{p}room list [page] - list protected rooms\n\n"
