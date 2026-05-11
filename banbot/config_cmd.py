@@ -27,6 +27,9 @@ class ConfigCommandMixin:
         config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
         config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
         config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
+        policy_enabled, _policy_text = await self.get_public_policy()
+        policy_state = "enabled" if policy_enabled else "disabled"
+        config_lines.append(f"📜 Public Policy: {policy_state}")
         config_lines.append("")
         config_lines.append(f"⏰ Health Check Interval: {self.health_check_interval}s")
         config_lines.append(f"⏱️ Unban Check Interval: {self.unban_check_interval}s")
