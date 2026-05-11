@@ -1,4 +1,4 @@
-# BanBot - XMPP Multi-Room Ban Management Bot
+# BanBot - XMPP Multi-Room Ban Management Bot - [![calver](https://img.shields.io/github/v/release/envs-net/muc_banbot)](https://github.com/envs-net/muc_banbot/releases/latest)
 
 BanBot is an XMPP bot for managing bans and temporary bans across multiple MUC rooms (Multi-User Chat).  
 It provides central administration via an admin room and protects multiple chat rooms from unwanted users.
@@ -66,12 +66,12 @@ It provides central administration via an admin room and protects multiple chat 
 | `!banlist [page/last]` | Shows all active bans with remaining time and comments | `!banlist`, `!banlist last` |
 | `!bansearch <query> [page/last]` | Searches bans by nick, JID, domain, issuer, comment, or RTBL reason | `!bansearch spam`, `!bansearch reason:abuse 2` |
 | `!why <nick/jid>` | Shows the reason and remaining time of a ban; admin-room output also includes recent audit history | `!why bob` |
-| `!audit [page/last/query]` | Shows recent audit events, optionally filtered by text | `!audit`, `!audit last`, `!audit skx` |
+| `!audit [page/last/query]` | Shows recent audit events, optionally filtered by text | `!audit`, `!audit last`, `!audit alice` |
 | `!sync` | Full room sync: rejoin rooms, verify admin rights, apply only missing active bans | `!sync` |
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
 | `!syncbans` | Full ban synchronization: syncs outcasts from rooms into DB and applies all active bans | `!syncbans` |
 | `!ignore list [page]` / `!whitelist list [page]` | Shows the global ignorelist | `!ignore list`, `!whitelist list last` |
-| `!ignore add <jid/domain> [reason]` / `!whitelist add <jid/domain> [reason]` | Protects an exact JID from all bans, or a domain from domain-based bans/RTBL domain matches | `!whitelist add alice@example.com trusted admin` |
+| `!ignore add <jid/domain> [reason]` / `!whitelist add <jid/domain> [reason]` | Protects an exact JID from all bans, or a domain from domain-based bans/RTBL domain matches | `!whitelist add alice@example.com trusted user` |
 | `!ignore remove <jid/domain>` / `!whitelist remove <jid/domain>` | Removes an entry from the global ignorelist | `!whitelist remove alice@example.com` |
 | `!banlist rtbl [page/last]` | Shows RTBL hash and domain entries | `!banlist rtbl`, `!banlist rtbl last` |
 | `!rtbl list` | Shows active RTBL subscriptions and own publish feed counts | `!rtbl list` |
@@ -345,7 +345,7 @@ Use the admin command:
 ```
 !audit
 !audit 2
-!audit skx
+!audit alice
 !audit ban_refused
 ```
 
