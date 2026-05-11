@@ -548,11 +548,20 @@ class CommandMixin:
             return
 
         if action == "enable":
-            _enabled, text = await self.get_public_policy()
+            enabled, text = await self.get_public_policy()
+
             if not text.strip():
                 self.send_message(
                     mto=room,
                     mbody=f"⚠️ No public policy text is configured. Use {p}policy set <text> first.",
+                    mtype="groupchat",
+                )
+                return
+
+            if enabled:
+                self.send_message(
+                    mto=room,
+                    mbody="ℹ️ Public policy command is already enabled.",
                     mtype="groupchat",
                 )
                 return
@@ -566,6 +575,16 @@ class CommandMixin:
             return
 
         if action == "disable":
+            enabled, _text = await self.get_public_policy()
+
+            if not enabled:
+                self.send_message(
+                    mto=room,
+                    mbody="ℹ️ Public policy command is already disabled.",
+                    mtype="groupchat",
+                )
+                return
+
             await self.set_public_policy_enabled(False)
             self.send_message(
                 mto=room,
@@ -575,6 +594,16 @@ class CommandMixin:
             return
 
         if action == "clear":
+            enabled, text = await self.get_public_policy()
+
+            if not enabled and not text.strip():
+                self.send_message(
+                    mto=room,
+                    mbody="ℹ️ No public policy text is configured.",
+                    mtype="groupchat",
+                )
+                return
+
             await self.clear_public_policy()
             self.send_message(
                 mto=room,
