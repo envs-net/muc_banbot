@@ -58,6 +58,51 @@ STRUCTURED_EVENT_LOGS = True
 AUDIT_LOG_ENABLED = True
 AUDIT_LOG_RETENTION_DAYS = 365
 
+# ================= OMEMO ENCRYPTION =================
+
+# Enable OMEMO-encrypted outgoing bot messages.
+# Requires a restart when changed.
+OMEMO_ENABLED = False
+
+# JSON file used to store OMEMO identity, device state and sessions.
+# The bot creates the parent directory with 0700 and the file with 0600.
+# Keep this file persistent and private. Losing it creates a new OMEMO identity.
+OMEMO_STORAGE_FILE = "data/omemo.json"
+
+# Automatically encrypt bot-generated groupchat messages in protected rooms.
+# This includes rooms added later via !room add because protected rooms are
+# loaded from the bot database.
+OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS = True
+
+# Automatically encrypt bot-generated groupchat messages in the admin room.
+# Disabled by default; add the admin room to OMEMO_ENCRYPTED_ROOMS if desired.
+OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
+
+# Optional manual override: MUCs where bot-generated groupchat messages should
+# always be OMEMO encrypted. Use ["*"] to encrypt all groupchat messages.
+OMEMO_ENCRYPTED_ROOMS = []
+
+# Optional manual override: MUCs that should always receive plaintext even when
+# they are protected rooms or match OMEMO_ENCRYPTED_ROOMS.
+OMEMO_PLAINTEXT_ROOMS = []
+
+# False is safer: if encryption fails in an encrypted room, the bot will not
+# leak the message as plaintext. Set True only if you explicitly want fallback.
+OMEMO_PLAINTEXT_FALLBACK = False
+
+# Encrypt direct/chat messages when encrypted=None in bot_send_message().
+# The bot normally rejects DMs, so this is disabled by default.
+OMEMO_ENCRYPT_DIRECT_MESSAGES = False
+
+# Recipient discovery for encrypted MUC messages.
+# Affiliations require enough room privileges; occupants require visible real JIDs.
+OMEMO_INCLUDE_MUC_AFFILIATIONS = True
+OMEMO_INCLUDE_MUC_OCCUPANTS = True
+OMEMO_INCLUDE_OWN_DEVICES = True
+
+# Seconds to wait for slixmpp-omemo initialization before failing an encrypted send.
+OMEMO_READY_TIMEOUT = 15
+
 # ================= RTBL (Real-Time Block List) =================
 
 # Enable RTBL PubSub support.

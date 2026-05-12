@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib
+import importlib.util
 import linecache
 import logging
 import os
@@ -106,6 +107,18 @@ class ConfigMixin:
         "RTBL_PUBLISH_SERVICE",
         "RTBL_PUBLISH_JID_NODE",
         "RTBL_PUBLISH_DOMAIN_NODE",
+        "OMEMO_ENABLED",
+        "OMEMO_STORAGE_FILE",
+        "OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS",
+        "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",
+        "OMEMO_ENCRYPTED_ROOMS",
+        "OMEMO_PLAINTEXT_ROOMS",
+        "OMEMO_PLAINTEXT_FALLBACK",
+        "OMEMO_ENCRYPT_DIRECT_MESSAGES",
+        "OMEMO_INCLUDE_MUC_AFFILIATIONS",
+        "OMEMO_INCLUDE_MUC_OCCUPANTS",
+        "OMEMO_INCLUDE_OWN_DEVICES",
+        "OMEMO_READY_TIMEOUT",
     )
 
 
@@ -150,12 +163,31 @@ class ConfigMixin:
             "ADMIN_ROOM": getattr(config, "ADMIN_ROOM", None),
             "NICK": getattr(config, "NICK", None),
             "DB_FILE": getattr(config, "DB_FILE", None),
+            "OMEMO_ENABLED": getattr(config, "OMEMO_ENABLED", False),
+            "OMEMO_STORAGE_FILE": getattr(config, "OMEMO_STORAGE_FILE", None),
+            "OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS": getattr(config, "OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS", False),
+            "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM": getattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", False),
+            "OMEMO_ENCRYPTED_ROOMS": getattr(config, "OMEMO_ENCRYPTED_ROOMS", None),
+            "OMEMO_PLAINTEXT_ROOMS": getattr(config, "OMEMO_PLAINTEXT_ROOMS", None),
         }
 
 
     def _format_startup_only_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
         changes = []
-        for key in ("JID", "PASSWORD", "RESOURCE", "ADMIN_ROOM", "NICK", "DB_FILE"):
+        for key in (
+            "JID",
+            "PASSWORD",
+            "RESOURCE",
+            "ADMIN_ROOM",
+            "NICK",
+            "DB_FILE",
+            "OMEMO_ENABLED",
+            "OMEMO_STORAGE_FILE",
+            "OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS",
+            "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",
+            "OMEMO_ENCRYPTED_ROOMS",
+            "OMEMO_PLAINTEXT_ROOMS",
+        ):
             old = before.get(key)
             new = after.get(key)
             if old != new:
@@ -307,6 +339,57 @@ class ConfigMixin:
                 errors.append("RTBL_PUBLISH_JID_NODE must not be empty when RTBL_PUBLISH_ENABLED=True")
             if not pub_domain_node:
                 errors.append("RTBL_PUBLISH_DOMAIN_NODE must not be empty when RTBL_PUBLISH_ENABLED=True")
+
+        # --- OMEMO ---
+        omemo_enabled = getattr(config, "OMEMO_ENABLED", False)
+        if not isinstance(omemo_enabled, bool):
+            errors.append("OMEMO_ENABLED must be True or False")
+
+        for name, default in (
+            ("OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS", False),
+            ("OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", False),
+            ("OMEMO_PLAINTEXT_FALLBACK", False),
+            ("OMEMO_ENCRYPT_DIRECT_MESSAGES", False),
+            ("OMEMO_INCLUDE_MUC_AFFILIATIONS", True),
+            ("OMEMO_INCLUDE_MUC_OCCUPANTS", True),
+            ("OMEMO_INCLUDE_OWN_DEVICES", True),
+        ):
+            if not isinstance(getattr(config, name, default), bool):
+                errors.append(f"{name} must be True or False")
+
+        omemo_timeout = getattr(config, "OMEMO_READY_TIMEOUT", 15)
+        if not isinstance(omemo_timeout, int) or omemo_timeout < 0 or omemo_timeout > 300:
+            errors.append("OMEMO_READY_TIMEOUT must be an integer between 0 and 300")
+
+        def validate_omemo_room_list(option_name: str) -> None:
+            rooms = getattr(config, option_name, [])
+            if isinstance(rooms, str):
+                rooms_iter = [rooms]
+            elif isinstance(rooms, (list, tuple, set)):
+                rooms_iter = list(rooms)
+            else:
+                errors.append(f"{option_name} must be a list/set/tuple of room JIDs or '*' entries")
+                return
+
+            for room in rooms_iter:
+                room = str(room).strip()
+                if room == "*":
+                    continue
+                if room and not validate_jid_format(room):
+                    errors.append(f"{option_name} contains invalid room JID: {room}")
+
+        validate_omemo_room_list("OMEMO_ENCRYPTED_ROOMS")
+        validate_omemo_room_list("OMEMO_PLAINTEXT_ROOMS")
+
+        if omemo_enabled:
+            if importlib.util.find_spec("slixmpp_omemo") is None or importlib.util.find_spec("omemo") is None:
+                errors.append("OMEMO_ENABLED=True requires optional dependency slixmpp-omemo>=2,<3")
+
+            omemo_storage = pathlib.Path(str(getattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json"))).expanduser()
+            if not str(omemo_storage):
+                errors.append("OMEMO_STORAGE_FILE must not be empty when OMEMO_ENABLED=True")
+            elif str(omemo_storage.parent) not in ("", ".") and not omemo_storage.parent.exists():
+                warnings.append(f"OMEMO_STORAGE_FILE directory will be created with private permissions if possible: {omemo_storage.parent}")
 
         return errors, warnings
 

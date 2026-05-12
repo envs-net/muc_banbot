@@ -16,7 +16,7 @@ class ConfigCommandMixin:
 
         config_lines.append(f"🤖 Bot Version: {__version__}")
         config_lines.append(f"💾 Database: {DB_FILE}")
-        config_lines.append(f"🔐 JID: {JID}")
+        config_lines.append(f"🪪 JID: {JID}")
         config_lines.append(f"📦 Resource: {get_config_resource() or 'None'}")
         config_lines.append(f"👤 Nick: {NICK}")
         config_lines.append("")
@@ -37,6 +37,12 @@ class ConfigCommandMixin:
         config_lines.append(f"📅 Max Tempban Days: {self.max_tempban_days}")
         config_lines.append(f"🚦 Public Command Rate Limit: {self.public_command_rate_limit_max}/{self.public_command_rate_limit_window}s")
         config_lines.append(f"🔌 MUC Write Semaphore: {self.muc_write_limit}")
+        config_lines.append("")
+        config_lines.append(f"🔐 OMEMO Enabled: {getattr(self, 'omemo_enabled', False)}")
+        if getattr(self, "omemo_enabled", False):
+            config_lines.append(f"   Auto-encrypt protected rooms: {getattr(self, 'omemo_auto_encrypt_protected_rooms', False)}")
+            config_lines.append(f"   Auto-encrypt admin room: {getattr(self, 'omemo_auto_encrypt_admin_room', False)}")
+            config_lines.append(f"   Plaintext fallback: {getattr(self, 'omemo_plaintext_fallback', False)}")
         config_lines.append("")
         config_lines.append(f"🛡️ RTBL Enabled: {self.rtbl_enabled}")
         config_lines.append(f"📢 RTBL Announce: {self.rtbl_announce}")

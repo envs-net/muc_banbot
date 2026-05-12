@@ -45,6 +45,7 @@ from .updates import UpdateMixin
 from .ignorelist import IgnorelistMixin
 from .rtbl import RtblMixin
 from .messaging import MessagingMixin
+from .omemo import OmemoMixin
 
 _log_level_name = str(getattr(config, "LOG_LEVEL", "INFO")).upper()
 _log_level = getattr(logging, _log_level_name, None)
@@ -60,6 +61,7 @@ class BanBot(
     ClientXMPP,
     ConfigMixin,
     MessagingMixin,
+    OmemoMixin,
     AuditMixin,
     CacheMixin,
     DatabaseMixin,
@@ -201,6 +203,9 @@ class BanBot(
         self.register_plugin("xep_0060")  # PubSub (RTBL)
         self.register_plugin('xep_0084')  # Modern Avatar
         self.register_plugin('xep_0153')  # vCard Avatar compatibility
+
+        # --- Optional OMEMO support ---
+        self.configure_omemo()
 
         # --- Event handlers ---
         self.add_event_handler("session_start", self.start)

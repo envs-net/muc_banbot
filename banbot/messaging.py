@@ -25,18 +25,31 @@ class MessagingMixin:
         """
         Send a bot-generated message through the central output layer.
 
-        For now this async wrapper performs a synchronous Slixmpp
-        ``send_message()`` call internally. Keeping the public output layer
-        async makes it ready for OMEMO backends, which need awaitable
-        encryption and recipient/session handling before sending.
-        The ``encrypted`` flag is accepted already so callers do not need to
-        change again when encrypted transports such as OMEMO are implemented.
+        When OMEMO is enabled and selected for the target, this wrapper routes
+        the message through the encrypted send path. Otherwise it performs a
+        normal Slixmpp ``send_message()`` call internally.
         """
-        if encrypted is not None:
-            log.debug(
-                "Encrypted send requested for %s, but no encryption backend is implemented yet",
-                mto,
+        should_encrypt = False
+        if hasattr(self, "_should_encrypt_message"):
+            should_encrypt = self._should_encrypt_message(
+                mto=mto,
+                mtype=mtype,
+                encrypted=encrypted,
             )
+
+        if should_encrypt:
+            try:
+                return await self._send_omemo_message(
+                    mto=mto,
+                    mbody=mbody,
+                    mtype=mtype,
+                    **kwargs,
+                )
+            except Exception as exc:
+                log.warning("Encrypted send to %s failed: %s", mto, exc)
+                if not getattr(self, "omemo_plaintext_fallback", False):
+                    return None
+                log.warning("Falling back to plaintext send for %s", mto)
 
         return self.send_message(
             mto=mto,
