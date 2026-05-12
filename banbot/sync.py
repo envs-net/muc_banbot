@@ -155,6 +155,38 @@ class SyncMixin:
         )
 
 
+    async def _sync_outcast_is_expired_tempban(
+        self,
+        jid_bare: str,
+        now: int,
+    ) -> bool:
+        """
+        Return True if this room outcast belongs to an expired JID tempban.
+
+        This prevents sync from promoting an expired tempban that is still set
+        as a room outcast into a recovered permanent ban.
+        """
+        if not jid_bare:
+            return False
+
+        target = self.bare_jid(jid_bare)
+
+        async with self.db.execute(
+            """
+            SELECT until FROM bans
+            WHERE target_type = 'jid'
+              AND (target = ? OR jid = ?)
+              AND until > 0
+              AND until <= ?
+            LIMIT 1
+            """,
+            (target, target, now),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        return row is not None
+
+
     async def sync_bans_to_rooms_for_single_room(self, room: str) -> None:
         """
         Sync bans for a single room (after !room add or !sync).
@@ -194,11 +226,27 @@ class SyncMixin:
                 outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---
+            # Important: do not promote expired tempbans that are still present
+            # as room outcasts into recovered permanent bans.
             to_insert = []
             for jid_bare in outcasts_bare:
-                if not any(ban_jid and self.bare_jid(ban_jid) == jid_bare for ban_jid, _, _, _ in active_bans):
-                    to_insert.append((jid_bare, None, 0, issuer_tag, "Recovered from room"))
-                    active_bans.append((jid_bare, None, 0, "Recovered from room"))
+                if any(
+                    ban_jid and self.bare_jid(ban_jid) == jid_bare
+                    for ban_jid, _, _, _ in active_bans
+                ):
+                    continue
+
+                if await self._sync_outcast_is_expired_tempban(jid_bare, now):
+                    log.info(
+                        "♻️ Sync: outcast %s in %s belongs to an expired tempban; unbanning instead of recovering as permanent",
+                        jid_bare,
+                        room,
+                    )
+                    await self.unban_all(jid_bare, issuer="system")
+                    continue
+
+                to_insert.append((jid_bare, None, 0, issuer_tag, "Recovered from room"))
+                active_bans.append((jid_bare, None, 0, "Recovered from room"))
 
             if to_insert:
                 for jid_bare, nick, until_value, issuer_value, comment_value in to_insert:
@@ -354,10 +402,26 @@ class SyncMixin:
                 outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---
+            # Important: do not promote expired tempbans that are still present
+            # as room outcasts into recovered permanent bans.
             orphan_bans = []
             for jid_bare in outcasts_bare:
-                if not any(ban_jid and self.bare_jid(ban_jid) == jid_bare for ban_jid, _, _ in active_bans):
-                    orphan_bans.append((jid_bare, None, "Recovered from room"))
+                if any(
+                    ban_jid and self.bare_jid(ban_jid) == jid_bare
+                    for ban_jid, _, _ in active_bans
+                ):
+                    continue
+
+                if await self._sync_outcast_is_expired_tempban(jid_bare, now):
+                    log.info(
+                        "♻️ Sync: outcast %s in %s belongs to an expired tempban; unbanning instead of recovering as permanent",
+                        jid_bare,
+                        room,
+                    )
+                    await self.unban_all(jid_bare, issuer="system")
+                    continue
+
+                orphan_bans.append((jid_bare, None, "Recovered from room"))
 
             if orphan_bans:
                 for jid, nick, comment in orphan_bans:
