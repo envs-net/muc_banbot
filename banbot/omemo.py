@@ -363,6 +363,25 @@ class OmemoMixin:
         return echo
 
 
+    def _message_has_omemo_payload(self, msg: Any) -> bool:
+        """Return True only if the stanza contains an actual OMEMO encrypted payload."""
+        namespaces = (
+            "eu.siacs.conversations.axolotl",
+            "urn:xmpp:omemo:2",
+        )
+
+        try:
+            xml = msg.xml
+        except Exception:
+            return False
+
+        for namespace in namespaces:
+            if xml.find(f".//{{{namespace}}}encrypted") is not None:
+                return True
+
+        return False
+
+
     async def _decrypt_incoming_omemo_message(self, msg: Any) -> tuple[Any | None, bool]:
         """Decrypt an incoming OMEMO message if it is encrypted.
 
@@ -377,6 +396,9 @@ class OmemoMixin:
             return msg, False
 
         omemo = self.plugin["xep_0384"]
+
+        if not self._message_has_omemo_payload(msg):
+            return msg, False
 
         try:
             namespace = omemo.is_encrypted(msg)
