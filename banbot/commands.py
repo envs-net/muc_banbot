@@ -145,7 +145,7 @@ class CommandMixin:
             if room == ADMIN_ROOM and self.is_authorized(msg):
                 text = self._admin_help_text()
             elif self.user_cmds_allowed(room):
-                text = self._user_help_text()
+                text = await self._user_help_text()
             else:
                 return True
 
@@ -622,15 +622,20 @@ class CommandMixin:
         )
 
 
-    def _user_help_text(self) -> str:
+    async def _user_help_text(self) -> str:
         p = self.command_prefix
-        return (
-            f"{p}help - show this help\n"
-            f"{p}whoami - show your affiliation/role and permissions\n"
-            f"{p}banlist [page] - show temporary bans\n"
-            f"{p}why <jid|nick|domain> - show ban reason\n"
-            f"{p}rules / {p}policy - show room moderation policy, if configured"
-        )
+        lines = [
+            f"{p}help - show this help",
+            f"{p}whoami - show your affiliation/role and permissions",
+            f"{p}banlist [page] - show temporary bans",
+            f"{p}why <jid|nick|domain> - show ban reason",
+        ]
+
+        policy_enabled, policy_text = await self.get_public_policy()
+        if policy_enabled and policy_text.strip():
+            lines.append(f"{p}rules / {p}policy - show room moderation policy")
+
+        return "\n".join(lines)
 
 
     def _admin_help_text(self) -> str:
