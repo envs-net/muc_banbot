@@ -60,7 +60,7 @@ AUDIT_LOG_RETENTION_DAYS = 365
 
 # ================= OMEMO ENCRYPTION =================
 
-# Enable OMEMO-encrypted outgoing bot messages.
+# Enable OMEMO support for encrypted incoming commands and outgoing replies.
 # Requires a restart when changed.
 OMEMO_ENABLED = False
 
@@ -69,39 +69,14 @@ OMEMO_ENABLED = False
 # Keep this file persistent and private. Losing it creates a new OMEMO identity.
 OMEMO_STORAGE_FILE = "data/omemo.json"
 
-# Automatically encrypt bot-generated groupchat messages in protected rooms.
-# This includes rooms added later via !room add because protected rooms are
-# loaded from the bot database.
-OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS = False
-
-# Automatically encrypt bot-generated groupchat messages in the admin room.
-# Disabled by default; add the admin room to OMEMO_ENCRYPTED_ROOMS if desired.
+# Automatically encrypt proactive bot-generated groupchat messages in the admin room.
+# Command replies still follow the incoming command: encrypted commands get
+# encrypted replies, plaintext commands get plaintext replies.
 OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
 
-# Optional manual override: MUCs where bot-generated groupchat messages should
-# always be OMEMO encrypted. Use ["*"] to encrypt all groupchat messages.
-OMEMO_ENCRYPTED_ROOMS = []
-
-# Optional manual override: MUCs that should always receive plaintext even when
-# they are protected rooms or match OMEMO_ENCRYPTED_ROOMS.
-OMEMO_PLAINTEXT_ROOMS = []
-
-# False is safer: if encryption fails in an encrypted room, the bot will not
-# leak the message as plaintext. Set True only if you explicitly want fallback.
+# False is safer: if encryption is required and fails, the bot will not leak the
+# message as plaintext. Set True only if you explicitly want fallback.
 OMEMO_PLAINTEXT_FALLBACK = False
-
-# Encrypt direct/chat messages when encrypted=None in bot_send_message().
-# The bot normally rejects DMs, so this is disabled by default.
-OMEMO_ENCRYPT_DIRECT_MESSAGES = False
-
-# Recipient discovery for encrypted MUC messages.
-# Affiliations require enough room privileges; occupants require visible real JIDs.
-OMEMO_INCLUDE_MUC_AFFILIATIONS = True
-OMEMO_INCLUDE_MUC_OCCUPANTS = True
-OMEMO_INCLUDE_OWN_DEVICES = True
-
-# Seconds to wait for slixmpp-omemo initialization before failing an encrypted send.
-OMEMO_READY_TIMEOUT = 15
 
 # ================= RTBL (Real-Time Block List) =================
 

@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -167,36 +168,13 @@ class OmemoMixin:
         self.omemo_storage_file: str = str(
             getattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json")
         )
-        self.omemo_plaintext_fallback: bool = bool(
-            getattr(config, "OMEMO_PLAINTEXT_FALLBACK", False)
-        )
-        self.omemo_encrypt_direct_messages: bool = bool(
-            getattr(config, "OMEMO_ENCRYPT_DIRECT_MESSAGES", False)
-        )
-        self.omemo_auto_encrypt_protected_rooms: bool = bool(
-            getattr(config, "OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS", True)
-        )
         self.omemo_auto_encrypt_admin_room: bool = bool(
             getattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", False)
         )
-        self.omemo_include_affiliations: bool = bool(
-            getattr(config, "OMEMO_INCLUDE_MUC_AFFILIATIONS", True)
+        self.omemo_plaintext_fallback: bool = bool(
+            getattr(config, "OMEMO_PLAINTEXT_FALLBACK", False)
         )
-        self.omemo_include_occupants: bool = bool(
-            getattr(config, "OMEMO_INCLUDE_MUC_OCCUPANTS", True)
-        )
-        self.omemo_include_own_devices: bool = bool(
-            getattr(config, "OMEMO_INCLUDE_OWN_DEVICES", True)
-        )
-        self.omemo_ready_timeout: int = int(getattr(config, "OMEMO_READY_TIMEOUT", 15))
-        self.omemo_encrypted_rooms: set[str] = self._normalize_omemo_rooms(
-            getattr(config, "OMEMO_ENCRYPTED_ROOMS", []),
-            option_name="OMEMO_ENCRYPTED_ROOMS",
-        )
-        self.omemo_plaintext_rooms: set[str] = self._normalize_omemo_rooms(
-            getattr(config, "OMEMO_PLAINTEXT_ROOMS", []),
-            option_name="OMEMO_PLAINTEXT_ROOMS",
-        )
+        self.omemo_ready_timeout: int = 15
         self.omemo_ready: asyncio.Event = asyncio.Event()
 
         if not self.omemo_enabled:
@@ -226,51 +204,9 @@ class OmemoMixin:
         self.add_event_handler("omemo_initialized", self._on_omemo_initialized)
         log.info("OMEMO: enabled with storage %s", self.omemo_storage_file)
 
-
-    def _normalize_omemo_rooms(self, rooms: object, option_name: str) -> set[str]:
-        if rooms is None:
-            return set()
-        if isinstance(rooms, str):
-            rooms = [rooms]
-        try:
-            return {str(room).split("/")[0].lower().strip() for room in rooms if str(room).strip()}
-        except TypeError:
-            log.warning("%s must be a list/set/tuple of room JIDs", option_name)
-            return set()
-
-
     async def _on_omemo_initialized(self, _event: object) -> None:
         log.info("OMEMO: initialized")
         self.omemo_ready.set()
-
-
-    def _omemo_room_is_encrypted(self, room_jid: str) -> bool:
-        """Return whether a MUC should receive OMEMO-encrypted bot output."""
-        import config
-
-        room = str(room_jid).split("/")[0].lower().strip()
-
-        if "*" in self.omemo_plaintext_rooms or room in self.omemo_plaintext_rooms:
-            return False
-
-        if "*" in self.omemo_encrypted_rooms or room in self.omemo_encrypted_rooms:
-            return True
-
-        if getattr(self, "omemo_auto_encrypt_admin_room", False):
-            admin_room = str(getattr(config, "ADMIN_ROOM", "")).split("/")[0].lower().strip()
-            if room and room == admin_room:
-                return True
-
-        if getattr(self, "omemo_auto_encrypt_protected_rooms", True):
-            protected_rooms = {
-                str(protected_room).split("/")[0].lower().strip()
-                for protected_room in getattr(self, "protected_rooms", set())
-            }
-            if room in protected_rooms:
-                return True
-
-        return False
-
 
     def _should_encrypt_message(
         self,
@@ -282,16 +218,24 @@ class OmemoMixin:
         """Return whether this outgoing bot message should be OMEMO encrypted."""
         if encrypted is False:
             return False
-        if encrypted is True:
-            return bool(getattr(self, "omemo_enabled", False))
         if not getattr(self, "omemo_enabled", False):
             return False
-        if mtype == "groupchat":
-            return self._omemo_room_is_encrypted(mto)
-        if mtype in {"chat", "normal"}:
-            return bool(getattr(self, "omemo_encrypt_direct_messages", False))
-        return False
+        if encrypted is True:
+            return True
 
+        # Proactive messages have no incoming-message context.  Keep them
+        # plaintext by default, except for the admin room when explicitly enabled.
+        if mtype == "groupchat" and getattr(self, "omemo_auto_encrypt_admin_room", False):
+            try:
+                import config
+
+                room = str(mto).split("/")[0].lower().strip()
+                admin_room = str(getattr(config, "ADMIN_ROOM", "")).split("/")[0].lower().strip()
+                return bool(room and room == admin_room)
+            except Exception:
+                return False
+
+        return False
 
     async def _wait_for_omemo_ready(self) -> bool:
         if not getattr(self, "omemo_enabled", False):
@@ -305,7 +249,6 @@ class OmemoMixin:
         except asyncio.TimeoutError:
             log.warning("OMEMO: initialization did not complete within %ss", timeout)
             return False
-
 
     async def _send_omemo_message(
         self,
@@ -326,42 +269,103 @@ class OmemoMixin:
         self._apply_message_kwargs(msg, kwargs)
 
         if mtype == "groupchat":
-            recipients = await self._omemo_recipients_for_room(mto)
+            recipients: set[JID] | JID = await self._omemo_recipients_for_room(mto)
         else:
             recipients = JID(JID(mto).bare)
 
         if isinstance(recipients, set) and not recipients:
             raise RuntimeError(f"No OMEMO recipients available for {mto}")
 
-        log.debug("OMEMO: encrypting message for %s", recipients)
-        encrypted_result = await self.plugin["xep_0384"].encrypt_message(msg, recipients)
+        return await self._encrypt_and_send_omemo_message(msg, recipients, mto=mto)
 
-        # slixmpp-omemo versions differ slightly here:
-        # - some return (dict[JID, Message], errors)
-        # - some return (Message, errors) for groupchat messages
-        # - some may return a Message directly
-        errors = None
-        encrypted_messages = encrypted_result
-        if isinstance(encrypted_result, tuple) and len(encrypted_result) == 2:
-            encrypted_messages, errors = encrypted_result
+    async def _encrypt_and_send_omemo_message(
+        self,
+        msg: Any,
+        recipients: set[JID] | JID,
+        *,
+        mto: str,
+    ) -> Any:
+        """Encrypt and send, retrying once without recipients that lack OMEMO devices."""
+        attempt = 0
+        current_recipients: set[JID] | JID = recipients
 
-        if errors:
-            log.warning("OMEMO: encryption errors for %s: %s", mto, errors)
+        while True:
+            attempt += 1
+            log.debug("OMEMO: encrypting message for %s", current_recipients)
 
-        if not encrypted_messages:
-            raise RuntimeError(f"OMEMO produced no encrypted messages for {mto}")
+            try:
+                encrypted_result = await self.plugin["xep_0384"].encrypt_message(
+                    msg,
+                    current_recipients,
+                )
+            except Exception as exc:
+                if attempt > 1 or not isinstance(current_recipients, set):
+                    raise
 
-        echo = None
-        if hasattr(encrypted_messages, "items"):
-            for _jid, encrypted_msg in encrypted_messages.items():
-                echo = encrypted_msg
-                encrypted_msg.send()
-        else:
-            echo = encrypted_messages
-            echo.send()
+                missing = self._extract_unusable_omemo_recipients(exc)
+                if not missing:
+                    raise
 
-        return echo
+                filtered = {
+                    jid
+                    for jid in current_recipients
+                    if self._bare_jid(jid).lower() not in missing
+                }
+                skipped = sorted(
+                    self._bare_jid(jid)
+                    for jid in current_recipients
+                    if self._bare_jid(jid).lower() in missing
+                )
 
+                if not filtered or filtered == current_recipients:
+                    raise
+
+                log.warning(
+                    "OMEMO: skipping recipients without usable OMEMO devices for %s: %s",
+                    mto,
+                    ", ".join(skipped),
+                )
+                current_recipients = filtered
+                continue
+
+            # slixmpp-omemo versions differ slightly here:
+            # - some return (dict[JID, Message], errors)
+            # - some return (Message, errors) for groupchat messages
+            # - some may return a Message directly
+            errors = None
+            encrypted_messages = encrypted_result
+            if isinstance(encrypted_result, tuple) and len(encrypted_result) == 2:
+                encrypted_messages, errors = encrypted_result
+
+            if errors:
+                log.warning("OMEMO: encryption errors for %s: %s", mto, errors)
+
+            if not encrypted_messages:
+                raise RuntimeError(f"OMEMO produced no encrypted messages for {mto}")
+
+            echo = None
+            if hasattr(encrypted_messages, "items"):
+                for _jid, encrypted_msg in encrypted_messages.items():
+                    echo = encrypted_msg
+                    encrypted_msg.send()
+            else:
+                echo = encrypted_messages
+                echo.send()
+
+            return echo
+
+    def _extract_unusable_omemo_recipients(self, exc: Exception) -> set[str]:
+        """Best-effort extraction of recipient JIDs from slixmpp-omemo errors."""
+        text = str(exc)
+        matches = re.findall(r"['\"]([^'\"]+@[^'\"]+)['\"]", text)
+        return {JID(match).bare.lower() for match in matches if JID(match).bare}
+
+    def _bare_jid(self, value: object) -> str:
+        """Return a bare JID string from a JID-like value."""
+        bare = getattr(value, "bare", None)
+        if bare:
+            return str(bare)
+        return JID(str(value)).bare
 
     def _message_has_omemo_payload(self, msg: Any) -> bool:
         """Return True only if the stanza contains an actual OMEMO encrypted payload."""
@@ -380,7 +384,6 @@ class OmemoMixin:
                 return True
 
         return False
-
 
     async def _decrypt_incoming_omemo_message(self, msg: Any) -> tuple[Any | None, bool]:
         """Decrypt an incoming OMEMO message if it is encrypted.
@@ -429,7 +432,6 @@ class OmemoMixin:
             )
             return None, True
 
-
     def _apply_message_kwargs(self, msg: Any, kwargs: dict[str, Any]) -> None:
         """Best-effort transfer of supported send_message kwargs to a Message stanza."""
         for key, value in kwargs.items():
@@ -442,53 +444,26 @@ class OmemoMixin:
             else:
                 log.debug("OMEMO: ignoring unsupported message kwarg for encrypted send: %s", key)
 
-
     async def _omemo_recipients_for_room(self, room_jid: str) -> set[JID]:
-        """Collect real bare JIDs for an encrypted MUC message."""
+        """Collect current real bare JIDs for an encrypted MUC message."""
         room = str(room_jid).split("/")[0].lower().strip()
         recipients: set[JID] = set()
 
-        if getattr(self, "omemo_include_affiliations", True):
-            for affiliation in ("member", "admin", "owner"):
-                try:
-                    affiliation_jids = await self.plugin["xep_0045"].get_affiliation_list(
-                        room,
-                        affiliation,
-                    )
-                except Exception as exc:
-                    log.debug(
-                        "OMEMO: could not fetch %s affiliations for %s: %s",
-                        affiliation,
-                        room,
-                        exc,
-                    )
-                    continue
+        own_bare = self.boundjid.bare if getattr(self, "boundjid", None) is not None else ""
 
-                for jid in self._iter_jids(affiliation_jids):
-                    recipients.add(JID(JID(jid).bare))
+        for info in self.occupants.get(room, {}).values():
+            jid = info.get("jid") if isinstance(info, dict) else None
+            if jid:
+                bare = JID(jid).bare
+                if bare and bare != own_bare:
+                    recipients.add(JID(bare))
 
-        if getattr(self, "omemo_include_occupants", True):
-            for info in self.occupants.get(room, {}).values():
-                jid = info.get("jid") if isinstance(info, dict) else None
-                if jid:
-                    recipients.add(JID(JID(jid).bare))
-
-        if getattr(self, "omemo_include_own_devices", True):
-            recipients.add(JID(self.boundjid.bare))
+        # Include the bot's own devices only when there are actual human/client
+        # recipients.  Otherwise an encrypted MUC reply could be sent only to
+        # the bot itself when real occupant JIDs are not visible.
+        if recipients and own_bare:
+            recipients.add(JID(own_bare))
 
         recipients = {jid for jid in recipients if jid and jid.bare}
         log.debug("OMEMO: recipients for %s: %s", room, recipients)
         return recipients
-
-
-    def _iter_jids(self, value: object):
-        """Yield JID-like values from Slixmpp affiliation-list return shapes."""
-        if value is None:
-            return
-        if isinstance(value, dict):
-            iterable = value.keys()
-        else:
-            iterable = value
-        for jid in iterable:
-            if jid:
-                yield jid

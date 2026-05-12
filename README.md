@@ -2,15 +2,15 @@
 
 BanBot is an XMPP bot for centralized ban management across multiple MUC rooms (Multi-User Chat).
 
-It provides admin-room based moderation, protects configured MUCs from unwanted users, and supports temporary bans, domain bans, ban synchronization, audit logging, ignorelists, health checks, RTBL/PubSub integration, and optional OMEMO-encrypted outgoing bot messages.
+It provides admin-room based moderation, protects configured MUCs from unwanted users, and supports temporary bans, domain bans, ban synchronization, audit logging, ignorelists, health checks, RTBL/PubSub integration, and optional OMEMO support for encrypted commands and replies.
 
 ---
 
 ## Features
 
 * 🛡️ Central admin room for all administrative commands  
-* 🔒 Dynamic addition/removal of protected rooms  
-* 🔐 Optional OMEMO-encrypted bot output for protected rooms and configured overrides
+* 🧩 Dynamic addition/removal of protected rooms  
+* 🔒 Optional OMEMO support: encrypted commands receive encrypted replies
 * ❌ Ban, temporary ban, unban, banlist, bansearch, and why commands  
 * 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain  
 * 📝 Optional comment when banning (e.g., `!tempban user 10m spamming`)  

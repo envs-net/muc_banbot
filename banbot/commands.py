@@ -33,8 +33,9 @@ class CommandMixin:
         if msg["mucnick"].lower() == NICK.lower():
             return  # Ignore own messages
 
+        encrypted = False
         if hasattr(self, "_decrypt_incoming_omemo_message"):
-            msg, _encrypted = await self._decrypt_incoming_omemo_message(msg)
+            msg, encrypted = await self._decrypt_incoming_omemo_message(msg)
             if msg is None:
                 return
 
@@ -54,15 +55,19 @@ class CommandMixin:
         cmd = raw_cmd[len(self.command_prefix):].lower()
         args = parts[1:]
 
-        handled = await self._handle_user_command(msg, room, nick, cmd, args)
-        if handled:
-            return
+        token = self._set_reply_encryption_context(encrypted)
+        try:
+            handled = await self._handle_user_command(msg, room, nick, cmd, args)
+            if handled:
+                return
 
-        handled = await self._handle_admin_command(msg, room, nick, cmd, args)
-        if handled:
-            return
+            handled = await self._handle_admin_command(msg, room, nick, cmd, args)
+            if handled:
+                return
 
-        await self._handle_unknown_command(msg, room, cmd)
+            await self._handle_unknown_command(msg, room, cmd)
+        finally:
+            self._reset_reply_encryption_context(token)
 
 
     async def _handle_unknown_command(self, msg, room: str, cmd: str) -> None:

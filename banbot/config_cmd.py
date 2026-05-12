@@ -40,7 +40,7 @@ class ConfigCommandMixin:
         config_lines.append("")
         config_lines.append(f"🔐 OMEMO Enabled: {getattr(self, 'omemo_enabled', False)}")
         if getattr(self, "omemo_enabled", False):
-            config_lines.append(f"   Auto-encrypt protected rooms: {getattr(self, 'omemo_auto_encrypt_protected_rooms', False)}")
+            config_lines.append(f"   Reply mode: follows incoming command encryption")
             config_lines.append(f"   Auto-encrypt admin room: {getattr(self, 'omemo_auto_encrypt_admin_room', False)}")
             config_lines.append(f"   Plaintext fallback: {getattr(self, 'omemo_plaintext_fallback', False)}")
         config_lines.append("")
