@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *venv/
 
+data/
 config.py
 banbot*.db*
 bans_export_*.csv
