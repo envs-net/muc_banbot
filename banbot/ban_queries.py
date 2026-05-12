@@ -25,6 +25,12 @@ class BanQueryMixin:
         return issuer_display
 
 
+    @staticmethod
+    def _is_active_ban(until: int, now: int) -> bool:
+        """Return True if a ban is permanent or not expired yet."""
+        return until <= 0 or until > now
+
+
     def _format_ban_match(self, jid, nick, until, issuer, comment, now):
         """Format a ban match for display in bansearch results."""
         remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
@@ -79,6 +85,11 @@ class BanQueryMixin:
 
         def add_match(ban):
             jid, nick, until, issuer, comment = ban
+
+            # Keep bansearch consistent with banlist: do not show expired tempbans.
+            if not self._is_active_ban(until, now):
+                return
+
             key = (jid or "", nick or "", until, issuer or "", comment or "")
             if key not in seen:
                 seen.add(key)
@@ -391,20 +402,24 @@ class BanQueryMixin:
         if row:
             jid_db, nick_db, until, issuer, comment = row
             now = int(time.time())
-            remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
-            emoji = self._ban_emoji(until, issuer)
-            issuer_display = self._format_issuer_for_room(issuer, room)
 
-            if room == ADMIN_ROOM:
-                display = jid_db or nick_db or identifier
+            if self._is_active_ban(until, now):
+                remaining = human_time(max(0, until - now)) if until > 0 else "permanent"
+                emoji = self._ban_emoji(until, issuer)
+                issuer_display = self._format_issuer_for_room(issuer, room)
+
+                if room == ADMIN_ROOM:
+                    display = jid_db or nick_db or identifier
+                else:
+                    display = nick_db or (jid_db.split("@")[0] if jid_db else identifier)
+
+                msg = (
+                    f"{emoji} {display} ({remaining}, by {issuer_display}"
+                    + (f", {comment}" if comment else "")
+                    + ")"
+                )
             else:
-                display = nick_db or (jid_db.split("@")[0] if jid_db else identifier)
-
-            msg = (
-                f"{emoji} {display} ({remaining}, by {issuer_display}"
-                + (f", {comment}" if comment else "")
-                + ")"
-            )
+                msg = f"No active ban found for {identifier}"
         else:
             msg = f"No ban found for {identifier}"
 
