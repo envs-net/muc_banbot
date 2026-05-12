@@ -249,4 +249,4 @@ class StatusMixin:
         else:
             status_lines.append("\n⚠️ No protected rooms configured.")
 
-        self.send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")

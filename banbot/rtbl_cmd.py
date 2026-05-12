@@ -43,7 +43,7 @@ class RtblCommandMixin:
                     f"  {p}rtbl publish status",
                     f"  {p}rtbl publish sync",
                 ]
-            self.send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return
 
         action = args[0].lower()
@@ -105,7 +105,7 @@ class RtblCommandMixin:
                     ),
                 ]
 
-            self.send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return
 
         # ----------------------------------------------------------------
@@ -113,7 +113,7 @@ class RtblCommandMixin:
         # ----------------------------------------------------------------
         if action == "add":
             if len(args) < 3:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"❌ Usage: {p}rtbl add <service_jid> <node>",
                     mtype="groupchat",
@@ -124,7 +124,7 @@ class RtblCommandMixin:
             node = args[2].strip()
 
             if not _looks_like_pubsub_service_jid(service_jid):
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         f"❌ Invalid RTBL service JID: {service_jid}\n"
@@ -135,7 +135,7 @@ class RtblCommandMixin:
                 return
 
             if not _looks_like_pubsub_node(node):
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         f"❌ Invalid RTBL node: {node or '(empty)'}\n"
@@ -146,7 +146,7 @@ class RtblCommandMixin:
                 return
 
             if self._rtbl_is_own_publish_node(service_jid, node):
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         f"❌ RTBL: Refusing to subscribe to own publish node "
@@ -159,7 +159,7 @@ class RtblCommandMixin:
                 return
 
             if (service_jid, node) in self.rtbl_subscriptions:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"⚠️ RTBL: Already subscribed to '{node}' @ {service_jid}.",
                     mtype="groupchat",
@@ -168,7 +168,7 @@ class RtblCommandMixin:
 
             subscribed, error = await self._rtbl_subscribe_node(service_jid, node)
             if not subscribed:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         f"❌ RTBL: Could not subscribe to '{node}' @ {service_jid}.\n"
@@ -185,7 +185,7 @@ class RtblCommandMixin:
             await self.db.commit()
             await self._load_rtbl_subscriptions_from_db()
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=(
                     f"✅ RTBL: Added subscription to '{node}' @ {service_jid}. "
@@ -212,7 +212,7 @@ class RtblCommandMixin:
         # ----------------------------------------------------------------
         if action in ("delete", "del", "remove"):
             if len(args) < 2:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"❌ Usage: {p}rtbl delete <service_jid> [node]",
                     mtype="groupchat",
@@ -230,7 +230,7 @@ class RtblCommandMixin:
                     existing = await cursor.fetchone()
 
                 if not existing:
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=room,
                         mbody=f"⚠️ RTBL: Subscription '{node}' @ {service_jid} does not exist.",
                         mtype="groupchat",
@@ -259,7 +259,7 @@ class RtblCommandMixin:
                     existing_count = int(row[0] or 0) if row else 0
 
                 if existing_count <= 0:
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=room,
                         mbody=f"⚠️ RTBL: No subscriptions found for {service_jid}.",
                         mtype="groupchat",
@@ -299,7 +299,7 @@ class RtblCommandMixin:
                 "\n♻️ Persisted RTBL bans that are no longer present in active subscriptions "
                 "were removed."
             )
-            self.send_message(mto=room, mbody=msg, mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody=msg, mtype="groupchat")
             return
 
         # ----------------------------------------------------------------
@@ -307,7 +307,7 @@ class RtblCommandMixin:
         # ----------------------------------------------------------------
         if action == "refresh":
             if not self.rtbl_subscriptions:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody="⚠️ RTBL: No subscriptions configured.",
                     mtype="groupchat",
@@ -326,14 +326,14 @@ class RtblCommandMixin:
                 selected.append((service_jid, node))
 
             if not selected:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody="⚠️ RTBL: No matching subscription found.",
                     mtype="groupchat",
                 )
                 return
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=f"🔄 RTBL: Refreshing {len(selected)} subscription(s)…",
                 mtype="groupchat",
@@ -360,7 +360,7 @@ class RtblCommandMixin:
                     )
 
             status = "✅" if failed == 0 else "⚠️"
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=(
                     f"{status} RTBL: Refresh complete — "
@@ -375,7 +375,7 @@ class RtblCommandMixin:
         # ----------------------------------------------------------------
         if action == "publish":
             if not getattr(self, "rtbl_publish_enabled", False):
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         "❌ RTBL publish is disabled. "
@@ -389,7 +389,7 @@ class RtblCommandMixin:
 
             if sub_action == "status":
                 jid_count, domain_count = await self._rtbl_count_active_publish_bans()
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         "📡 RTBL Publish status:\n"
@@ -405,14 +405,14 @@ class RtblCommandMixin:
                 return
 
             if sub_action == "sync":
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody="📡 RTBL Publish: Syncing all active bans to nodes…",
                     mtype="groupchat",
                 )
                 jid_count, domain_count, jid_failures, domain_failures = await self._rtbl_sync_all_bans_to_nodes()
                 status_emoji = "✅" if jid_failures == 0 and domain_failures == 0 else "⚠️"
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         f"{status_emoji} RTBL Publish: Sync complete — "
@@ -426,14 +426,14 @@ class RtblCommandMixin:
                 )
                 return
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=f"❌ Unknown RTBL publish action: {sub_action}\nAvailable: status / sync",
                 mtype="groupchat",
             )
             return
 
-        self.send_message(
+        await self.bot_send_message(
             mto=room,
             mbody=(
                 f"❌ Unknown RTBL action: {action}\n"

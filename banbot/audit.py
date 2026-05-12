@@ -169,4 +169,4 @@ class AuditMixin:
             if page < total_pages and not query:
                 text += f"\n\nUse {self.command_prefix}audit {page + 1} for the next page."
 
-        self.send_message(mto=room, mbody=text, mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")

@@ -144,7 +144,7 @@ class UpdateMixin:
                 )
 
                 if announce and self.last_update_notified_version != remote_version:
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=ADMIN_ROOM,
                         mbody=(
                             f"⬆️ New bot version available: {remote_version}\n"

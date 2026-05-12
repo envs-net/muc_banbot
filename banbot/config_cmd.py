@@ -20,8 +20,8 @@ class ConfigCommandMixin:
         config_lines.append(f"📦 Resource: {get_config_resource() or 'None'}")
         config_lines.append(f"👤 Nick: {NICK}")
         config_lines.append("")
-        config_lines.append(f"🪵 Log Level: {getattr(self, 'log_level', 'INFO')}")
         config_lines.append(f"🔧 Command Prefix: {self.command_prefix}")
+        config_lines.append(f"🪵 Log Level: {getattr(self, 'log_level', 'INFO')}")
         config_lines.append(f"🧱 Structured Event Logs: {self.structured_event_logs}")
         config_lines.append(f"🧾 Audit Log: {self.audit_log_enabled} ({self.audit_log_retention_days}d retention)")
         config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
@@ -51,7 +51,7 @@ class ConfigCommandMixin:
         config_lines.append(f"🕒 Version Check Interval: {self.version_check_interval}s")
         config_lines.append(f"🌐 Version Check URL: {self.version_check_url or 'None'}")
 
-        self.send_message(
+        await self.bot_send_message(
             mto=room,
             mbody="\n".join(config_lines),
             mtype="groupchat"
@@ -64,7 +64,7 @@ class ConfigCommandMixin:
 
             if errors:
                 msg = self._format_config_validation(errors, warnings)
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"❌ Config reload aborted. Old config is still active.\n\n{msg}",
                     mtype="groupchat"
@@ -84,14 +84,14 @@ class ConfigCommandMixin:
             else:
                 lines.append("\nNo runtime config changes detected.")
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody="\n".join(lines),
                 mtype="groupchat"
             )
             log.info("Config reloaded at runtime. Changes: %s", changes or "none")
         except Exception as e:
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=f"❌ Failed to reload config: {e}",
                 mtype="groupchat"

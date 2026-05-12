@@ -76,7 +76,7 @@ class BanQueryMixin:
             field = "comment"
 
         if not value:
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [page|last]",
                 mtype="groupchat",
@@ -200,7 +200,7 @@ class BanQueryMixin:
             all_entries.extend(rtbl_hash_matches)
 
         if not all_entries:
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"❌ No bans found matching '{raw_query}'.",
                 mtype="groupchat",
@@ -231,7 +231,7 @@ class BanQueryMixin:
         if current_page < total_pages:
             text += f"\n\nUse {self.command_prefix}bansearch {raw_query} {current_page + 1} for the next page."
 
-        self.send_message(mto=ADMIN_ROOM, mbody=text, mtype="groupchat")
+        await self.bot_send_message(mto=ADMIN_ROOM, mbody=text, mtype="groupchat")
 
 
     async def cmd_banlist(self, room: str, page: int = 1) -> None:
@@ -294,7 +294,7 @@ class BanQueryMixin:
                 if current_page < total_pages:
                     text += f"\n\nUse {self.command_prefix}banlist {current_page + 1} for the next page."
 
-        self.send_message(mto=room, mbody=text, mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
 
 
     async def cmd_banlist_rtbl(self, room: str, page: int = 1) -> None:
@@ -303,7 +303,7 @@ class BanQueryMixin:
         Admin room only. Groups entries by subscription source.
         """
         if not getattr(self, "rtbl_enabled", False):
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody="❌ RTBL is disabled.",
                 mtype="groupchat",
@@ -343,7 +343,7 @@ class BanQueryMixin:
             entries.append(f"🌐 *.{domain}  {label}{reason_str}")
 
         if not entries:
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody="🛡️ RTBL Banlist:\nNo RTBL entries in database.",
                 mtype="groupchat",
@@ -363,7 +363,7 @@ class BanQueryMixin:
         if current_page < total_pages:
             text += f"\n\nUse {self.command_prefix}banlist rtbl {current_page + 1} for the next page."
 
-        self.send_message(mto=room, mbody=text, mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
 
 
     async def cmd_why(self, identifier: str, room: str) -> None:
@@ -443,4 +443,4 @@ class BanQueryMixin:
             if audit_rows:
                 msg += "\n\nRecent audit history:\n" + "\n".join(self._format_audit_row(r) for r in audit_rows)
 
-        self.send_message(mto=room, mbody=msg, mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody=msg, mtype="groupchat")

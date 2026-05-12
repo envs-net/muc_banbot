@@ -162,7 +162,7 @@ class AdminMixin:
                 "⚠️ Bot is missing admin/owner rights in the following rooms:\n"
                 + "\n".join(missing)
             )
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=msg,
                 mtype="groupchat"
@@ -170,7 +170,7 @@ class AdminMixin:
             log.warning("Bot missing admin rights in rooms: %s", missing)
         else:
             msg = "✅ Bot has admin/owner rights in all protected rooms."
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=msg,
                 mtype="groupchat"
@@ -214,4 +214,4 @@ class AdminMixin:
                 f"**Permissions:**\n{perms_text}"
             )
 
-        self.send_message(mto=room, mbody=message, mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")

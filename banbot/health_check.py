@@ -32,7 +32,7 @@ class HealthCheckMixin:
                         bot_in_room = any(nick.lower() == NICK.lower() for nick in occ.keys())
                         if not bot_in_room:
                             log.warning("⚠️ Health check: Bot not found in occupants for room %s", room)
-                            self.send_message(
+                            await self.bot_send_message(
                                 mto=ADMIN_ROOM,
                                 mbody=f"⚠️ Health check warning: Bot not in room {room} occupants",
                                 mtype="groupchat"
@@ -42,7 +42,7 @@ class HealthCheckMixin:
                         # Check admin rights
                         if not self.is_bot_admin_or_owner(room):
                             log.warning("⚠️ Health check: Bot lost admin rights in %s", room)
-                            self.send_message(
+                            await self.bot_send_message(
                                 mto=ADMIN_ROOM,
                                 mbody=f"⚠️ Health check: Bot lost admin/owner rights in {room}",
                                 mtype="groupchat"

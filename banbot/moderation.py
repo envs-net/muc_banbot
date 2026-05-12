@@ -43,7 +43,7 @@ class ModerationMixin:
             log.warning("⛔ Cannot apply ban in %s (bot not admin/owner)", room)
 
             if announce_missing_rights:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"⛔ Cannot apply ban in {room} — missing admin/owner rights.",
                     mtype="groupchat",
@@ -138,7 +138,7 @@ class ModerationMixin:
         if room == ADMIN_ROOM:
             display = self.bare_jid(ban_jid) if ban_jid else (ban_nick or "Unknown")
             msg_admin = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + f" by {issuer}"
-            self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
+            await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
         elif room in self.protected_rooms:
             if self.allow_user_cmds and self.show_ban_in_muc:
                 if not ban_nick:
@@ -149,7 +149,7 @@ class ModerationMixin:
                     return
 
                 msg = f"✅ Banned {ban_nick}" + (f" ({comment})" if comment else "")
-                self.send_message(mto=room, mbody=msg, mtype="groupchat")
+                await self.bot_send_message(mto=room, mbody=msg, mtype="groupchat")
 
 
     async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None) -> None:
@@ -168,7 +168,7 @@ class ModerationMixin:
         is_domain = identifier.startswith("*.")
 
         if looks_like_domain(identifier):
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=(
                     f"❌ Invalid domain ban: {identifier}\n"
@@ -181,13 +181,13 @@ class ModerationMixin:
         if is_domain:
             is_valid, error_msg = validate_domain_ban(identifier)
             if not is_valid:
-                self.send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
+                await self.bot_send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
                 return
             ban_jid = identifier
         else:
             is_jid = "@" in identifier
             if is_jid and not validate_jid_format(identifier):
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"❌ Invalid JID format: {identifier}. Expected: user@domain.tld",
                     mtype="groupchat"
@@ -222,7 +222,7 @@ class ModerationMixin:
             duration = until - int(time.time())
 
             if duration <= 0:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody="❌ Invalid duration: must be in the future.",
                     mtype="groupchat"
@@ -230,7 +230,7 @@ class ModerationMixin:
                 return
 
             if duration > max_seconds:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"❌ Tempban duration exceeds MAX_TEMPBAN_DAYS ({max_days} days). Max: {max_days} days.",
                     mtype="groupchat"
@@ -268,7 +268,7 @@ class ModerationMixin:
             new_is_permanent = ts <= 0
 
             if existing_is_permanent and new_is_permanent:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"ℹ️ Ban already exists for {identifier} (permanent)",
                     mtype="groupchat"
@@ -278,7 +278,7 @@ class ModerationMixin:
                 return
             elif existing_is_permanent and not new_is_permanent:
                 log.info("🔄 Converting permanent ban to tempban for %s", identifier)
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"🔄 Converting permanent ban to tempban for {identifier} ({human_time(until - int(time.time()))})",
                     mtype="groupchat"
@@ -286,7 +286,7 @@ class ModerationMixin:
                 skip_final_message = True
             elif not existing_is_permanent and new_is_permanent:
                 log.info("🔄 Converting tempban to permanent ban for %s", identifier)
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"🔄 Converting tempban to permanent ban for {identifier}",
                     mtype="groupchat"
@@ -296,7 +296,7 @@ class ModerationMixin:
                 new_duration = human_time(until - int(time.time()))
                 old_duration = human_time(max(0, existing_until - int(time.time())))
                 log.info("🔄 Updating tempban for %s: %s → %s", identifier, old_duration, new_duration)
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"🔄 Ban updated: {identifier}'s tempban duration changed from {old_duration} to {new_duration}",
                     mtype="groupchat"
@@ -309,7 +309,7 @@ class ModerationMixin:
             jid=normalized_jid,
         )
         if protected:
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"❌ Refusing ban: {reason}",
                 mtype="groupchat",
@@ -322,7 +322,7 @@ class ModerationMixin:
         ignore_candidate = normalized_jid or target or identifier
 
         if self.is_ignored_target(ignore_candidate):
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"⛔ Refusing ban: {ignore_candidate} is on the ignorelist.",
                 mtype="groupchat",
@@ -343,7 +343,7 @@ class ModerationMixin:
             await self.upsert_ban_db(normalized_jid, normalized_nick, ts, issuer, comment)
         except Exception as e:
             log.error("Database error when saving ban: %s", e)
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"❌ Database error: {e}",
                 mtype="groupchat"
@@ -375,7 +375,7 @@ class ModerationMixin:
             display = normalized_jid if normalized_jid else (normalized_nick or "Unknown")
             time_info = f" ({human_time(ts - int(time.time()))})" if ts > 0 else ""
             msg_admin = f"✅ Banned {display}{time_info}" + (f" ({comment})" if comment else "") + f" by {issuer}"
-            self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
+            await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
 
         for room in self.protected_rooms:
             try:
@@ -503,7 +503,7 @@ class ModerationMixin:
             if room == ADMIN_ROOM:
                 display_admin = ban_jid or ban_nick or "Unknown"
                 msg_admin = f"♻️ Unbanned {display_admin}"
-                self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
+                await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
 
             elif self.allow_user_cmds:
                 if not ban_nick:
@@ -514,7 +514,7 @@ class ModerationMixin:
                     return
 
                 msg = f"♻️ Unbanned {ban_nick}"
-                self.notify_protected(room, msg)
+                await self.notify_protected(room, msg)
 
         except (IqError, IqTimeout) as e:
             log.warning("Failed to unban %s in %s: %s", ban_jid or ban_nick, room, e)
@@ -531,7 +531,7 @@ class ModerationMixin:
         identifier = identifier.strip().lower()
 
         if looks_like_domain(identifier):
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=(
                     f"❌ Invalid domain unban: {identifier}\n"
@@ -548,7 +548,7 @@ class ModerationMixin:
         if is_domain_ban:
             is_valid, error_msg = validate_domain_ban(identifier)
             if not is_valid:
-                self.send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
+                await self.bot_send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
                 return
             target_type = "domain"
             target = domain
@@ -576,7 +576,7 @@ class ModerationMixin:
                         break
 
         if not row:
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"❌ No ban found for {identifier}",
                 mtype="groupchat"
@@ -623,7 +623,7 @@ class ModerationMixin:
             msg_admin = f"♻️ Unbanned {identifier} (tempban expired)"
         else:
             msg_admin = f"♻️ Unbanned {identifier}" + (f" by {issuer}" if issuer else "")
-        self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
+        await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
         log.info(msg_admin)
         event_type = "tempban_expired" if issuer == "system" else "unban_applied"
         self.log_event(logging.INFO, event_type, actor=issuer or "system", identifier=identifier, target_type=target_type, target=target, jid=ban_jid, nick=ban_nick)

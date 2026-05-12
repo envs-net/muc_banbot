@@ -75,7 +75,7 @@ class CommandMixin:
             if not self.is_authorized(msg):
                 return
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=(
                     f"❌ Unknown command: {p}{cmd}\n"
@@ -131,7 +131,7 @@ class CommandMixin:
         if room != ADMIN_ROOM and cmd in PUBLIC_COMMANDS and self.user_cmds_allowed(room):
             allowed, retry_after = self.check_public_command_rate_limit(room, nick, cmd)
             if not allowed:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         f"⏳ Rate limit: please wait {retry_after}s before using "
@@ -149,7 +149,7 @@ class CommandMixin:
             else:
                 return True
 
-            self.send_message(mto=room, mbody=text, mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
             return True
 
         if cmd == "banlist" and self.user_cmds_allowed(room):
@@ -164,7 +164,7 @@ class CommandMixin:
                         try:
                             page = max(1, int(args[1]))
                         except ValueError:
-                            self.send_message(
+                            await self.bot_send_message(
                                 mto=room,
                                 mbody=f"❌ Usage: {self.command_prefix}banlist rtbl [page|last]",
                                 mtype="groupchat",
@@ -181,7 +181,7 @@ class CommandMixin:
                     try:
                         page = max(1, int(args[0]))
                     except ValueError:
-                        self.send_message(
+                        await self.bot_send_message(
                             mto=room,
                             mbody=f"❌ Usage: {self.command_prefix}banlist [rtbl] [page|last]",
                             mtype="groupchat",
@@ -250,7 +250,7 @@ class CommandMixin:
             return True
 
         if not self.is_authorized(msg):
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody="❌ You are not authorized to use this admin command.",
                 mtype="groupchat"
@@ -273,13 +273,13 @@ class CommandMixin:
             is_update, remote_version, error_message = await self.check_for_updates_once(announce=False)
 
             if error_message:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"❌ Update check failed: {error_message}",
                     mtype="groupchat"
                 )
             elif is_update:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         f"⬆️ New bot version available: {remote_version} (current: {__version__})\n"
@@ -288,7 +288,7 @@ class CommandMixin:
                     mtype="groupchat"
                 )
             else:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"✅ Bot is up to date ({__version__})",
                     mtype="groupchat"
@@ -312,7 +312,7 @@ class CommandMixin:
                 try:
                     until = int(time.time()) + parse_duration(args[1])
                 except Exception:
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=room,
                         mbody=f"❌ Invalid duration format ({self.command_prefix}tempban user 10m)",
                         mtype="groupchat"
@@ -345,7 +345,7 @@ class CommandMixin:
                     except ValueError:
                         pass  # No page number — use all args as query
                 if not query_args:
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=room,
                         mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [page|last]",
                         mtype="groupchat",
@@ -373,12 +373,12 @@ class CommandMixin:
 
         if cmd == "export":
             success, message = await self.export_bans_to_csv()
-            self.send_message(mto=room, mbody=message, mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
             return True
 
         if cmd == "import":
             if len(args) < 1:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"❌ Usage: {self.command_prefix}import <filename>",
                     mtype="groupchat"
@@ -403,7 +403,7 @@ class CommandMixin:
                 if len(errors) > 10:
                     result_msg += f"\n... and {len(errors) - 10} more errors"
 
-            self.send_message(mto=room, mbody=result_msg, mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody=result_msg, mtype="groupchat")
             log.info(
                 "Import completed: %d successful, %d skipped, %d errors",
                 successful,
@@ -416,7 +416,7 @@ class CommandMixin:
 
         if cmd == "rtbl":
             if not getattr(self, "rtbl_enabled", False):
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody="❌ RTBL is disabled. Set RTBL_ENABLED = True in config.py and restart.",
                     mtype="groupchat",
@@ -467,7 +467,7 @@ class CommandMixin:
         if not enabled or not text.strip():
             return
 
-        self.send_message(
+        await self.bot_send_message(
             mto=room,
             mbody=self._format_public_policy_text(text, room),
             mtype="groupchat",
@@ -481,7 +481,7 @@ class CommandMixin:
             enabled, text = await self.get_public_policy()
 
             if not text.strip():
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         "ℹ️ No public policy text is configured.\n\n"
@@ -501,7 +501,7 @@ class CommandMixin:
             status = "enabled" if enabled else "disabled"
             preview = self._format_public_policy_text(text, room)
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=(
                     f"📜 Public policy is currently {status}.\n\n"
@@ -523,7 +523,7 @@ class CommandMixin:
 
         if action == "set":
             if len(args) < 2:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=(
                         f"❌ Usage: {p}policy set <text>\n"
@@ -537,7 +537,7 @@ class CommandMixin:
             text = " ".join(args[1:]).strip()
             await self.set_public_policy_text(text, enabled=True)
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=(
                     "✅ Public policy text saved and enabled.\n\n"
@@ -551,7 +551,7 @@ class CommandMixin:
             enabled, text = await self.get_public_policy()
 
             if not text.strip():
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"⚠️ No public policy text is configured. Use {p}policy set <text> first.",
                     mtype="groupchat",
@@ -559,7 +559,7 @@ class CommandMixin:
                 return
 
             if enabled:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody="ℹ️ Public policy command is already enabled.",
                     mtype="groupchat",
@@ -567,7 +567,7 @@ class CommandMixin:
                 return
 
             await self.set_public_policy_enabled(True)
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody="✅ Public policy command enabled.",
                 mtype="groupchat",
@@ -578,7 +578,7 @@ class CommandMixin:
             enabled, _text = await self.get_public_policy()
 
             if not enabled:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody="ℹ️ Public policy command is already disabled.",
                     mtype="groupchat",
@@ -586,7 +586,7 @@ class CommandMixin:
                 return
 
             await self.set_public_policy_enabled(False)
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody="✅ Public policy command disabled.",
                 mtype="groupchat",
@@ -597,7 +597,7 @@ class CommandMixin:
             enabled, text = await self.get_public_policy()
 
             if not enabled and not text.strip():
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody="ℹ️ No public policy text is configured.",
                     mtype="groupchat",
@@ -605,14 +605,14 @@ class CommandMixin:
                 return
 
             await self.clear_public_policy()
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody="✅ Public policy text cleared and disabled.",
                 mtype="groupchat",
             )
             return
 
-        self.send_message(
+        await self.bot_send_message(
             mto=room,
             mbody=(
                 f"❌ Unknown policy action: {action}\n"

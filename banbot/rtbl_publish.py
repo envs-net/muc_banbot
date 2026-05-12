@@ -92,7 +92,7 @@ class RtblPublishMixin:
 
         if self.rtbl_announce:
             status_emoji = "✅" if jid_failures == 0 and domain_failures == 0 else "⚠️"
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=(
                     f"{status_emoji} RTBL Publish: Nodes ready on {self.rtbl_publish_service} — "

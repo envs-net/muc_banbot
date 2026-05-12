@@ -75,10 +75,10 @@ class MucMixin:
         return False
 
 
-    def notify_protected(self, room: str, message: str) -> None:
+    async def notify_protected(self, room: str, message: str) -> None:
         """Notify users in protected rooms if SHOW_BAN_IN_MUC=True"""
         if self.show_ban_in_muc:
-            self.send_message(mto=room, mbody=message, mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
 
 
     async def muc_online(self, presence) -> None:
@@ -231,7 +231,7 @@ class MucMixin:
             is_admin_verified = await self.verify_admin_rights(room)
             if not is_admin_verified:
                 log.warning("⚠️ Verified: Bot truly lost admin rights in %s", room)
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"⚠️ Bot lost admin/owner rights in {room}\nAffiliation: {affiliation}\nRole: {role}",
                     mtype="groupchat"
@@ -242,7 +242,7 @@ class MucMixin:
 
         else:
             log.info("✅ Bot regained admin rights in %s", room)
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"✅ Bot regained admin/owner rights in {room}",
                 mtype="groupchat"

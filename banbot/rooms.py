@@ -89,7 +89,7 @@ class RoomMixin:
                 try:
                     page = max(1, int(args[1]))
                 except ValueError:
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=room,
                         mbody=f"❌ Usage: {self.command_prefix}room list [page]",
                         mtype="groupchat"
@@ -110,7 +110,7 @@ class RoomMixin:
             else:
                 text = "🔒 Protected Rooms:\nNo protected rooms."
 
-            self.send_message(mto=room, mbody=text, mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
 
         elif action in ("add", "remove") and len(args) >= 2:
             target = args[1].lower()
@@ -119,7 +119,7 @@ class RoomMixin:
                 # --- Validate Room JID before adding ---
                 is_valid, error_msg = await self.validate_room_jid(target)
                 if not is_valid:
-                    self.send_message(mto=room, mbody=error_msg, mtype="groupchat")
+                    await self.bot_send_message(mto=room, mbody=error_msg, mtype="groupchat")
                     log.warning("Room validation failed for %s: %s", target, error_msg)
                     return
 
@@ -128,7 +128,7 @@ class RoomMixin:
                     self.protected_rooms.add(target)
                     await self.db.execute("INSERT OR REPLACE INTO rooms (room) VALUES (?)", (target,))
                     await self.db.commit()
-                    self.send_message(mto=room, mbody=f"✅ Room added: {target}", mtype="groupchat")
+                    await self.bot_send_message(mto=room, mbody=f"✅ Room added: {target}", mtype="groupchat")
 
                     # --- Event handler for new occupants ---
                     if target not in self.registered_rooms:
@@ -161,7 +161,7 @@ class RoomMixin:
                         other_rooms = self.protected_rooms - {target}
                         if other_rooms:
                             log.info("🔄 Applying existing bans to other rooms due to new room addition")
-                            self.send_message(
+                            await self.bot_send_message(
                                 mto=ADMIN_ROOM,
                                 mbody=f"🔄 Applying existing bans to other rooms due to new room addition",
                                 mtype="groupchat"
@@ -171,13 +171,13 @@ class RoomMixin:
 
                     await wait_for_bot_online()
                 else:
-                    self.send_message(mto=room, mbody=f"⚠️ Room already in protected list: {target}", mtype="groupchat")
+                    await self.bot_send_message(mto=room, mbody=f"⚠️ Room already in protected list: {target}", mtype="groupchat")
 
             elif action == "remove":
                 self.protected_rooms.discard(target)
                 await self.db.execute("DELETE FROM rooms WHERE room=?", (target,))
                 await self.db.commit()
-                self.send_message(mto=room, mbody=f"✅ Room removed: {target}", mtype="groupchat")
+                await self.bot_send_message(mto=room, mbody=f"✅ Room removed: {target}", mtype="groupchat")
 
                 # --- Bot leaves the room immediately ---
                 try:

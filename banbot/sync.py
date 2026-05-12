@@ -22,7 +22,7 @@ class SyncMixin:
         now = int(time.time())
         total_rooms = len(self.protected_rooms)
         if total_rooms == 0:
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody="⚠️ No protected rooms to sync.",
                 mtype="groupchat"
@@ -51,7 +51,7 @@ class SyncMixin:
             # --- Check bot admin/owner rights ---
             if not self.is_bot_admin_or_owner(room):
                 log.warning("⛔ Skipping %s — bot is not admin/owner", room)
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"⛔ Skipping {room} — bot has no admin/owner rights",
                     mtype="groupchat"
@@ -59,7 +59,7 @@ class SyncMixin:
                 return
 
             # --- Announce start of sync ---
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"⏳ Syncing bans in room {room} ({idx}/{total_rooms})...",
                 mtype="groupchat"
@@ -108,7 +108,7 @@ class SyncMixin:
             else:
                 log.info("ℹ️ All bans already applied in %s, nothing to do", room)
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"✅ Finished syncing room {room} ({idx}/{total_rooms}) - {new_bans_count} new bans applied",
                 mtype="groupchat"
@@ -123,7 +123,7 @@ class SyncMixin:
             batch_start = batch_num + 1
             batch_end = min(batch_num + batch_size, len(rooms_list))
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"⏳ Syncing batch {batch_start}-{batch_end}/{total_rooms}...",
                 mtype="groupchat"
@@ -137,7 +137,7 @@ class SyncMixin:
                 ))
             except Exception as e:
                 log.warning("Error in batch %d-%d: %s", batch_start, batch_end, e)
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"⚠️ Error during batch {batch_start}-{batch_end} sync: {e}",
                     mtype="groupchat"
@@ -148,7 +148,7 @@ class SyncMixin:
                 await asyncio.sleep(1)
 
         log.info("✅ Full !sync completed for %d rooms", total_rooms)
-        self.send_message(
+        await self.bot_send_message(
             mto=ADMIN_ROOM,
             mbody=f"✅ Full !sync completed for {total_rooms} rooms in {(len(rooms_list) + batch_size - 1) // batch_size} batches",
             mtype="groupchat"
@@ -218,7 +218,7 @@ class SyncMixin:
         """
         if not await self._wait_for_bot_admin_rights(room):
             log.warning("⛔ Skipping initial sync for %s (bot is not admin/owner)", room)
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"⛔ Cannot sync {room} — bot has no admin/owner rights.",
                 mtype="groupchat",
@@ -357,7 +357,7 @@ class SyncMixin:
                 else:
                     msg = "⚠️ No admins/owners found in Admin-Room."
 
-                self.send_message(mto=ADMIN_ROOM, mbody=msg, mtype="groupchat")
+                await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg, mtype="groupchat")
 
         except Exception as e:
             log.warning("Failed to sync admins: %s", e)
@@ -375,7 +375,7 @@ class SyncMixin:
         """
         if not self.protected_rooms:
             if announce_progress:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody="⚠️ No protected rooms configured for ban sync.",
                     mtype="groupchat"
@@ -397,7 +397,7 @@ class SyncMixin:
         ]
 
         if not active_bans and announce_progress:
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody="✅ No active bans to sync.",
                 mtype="groupchat"
@@ -407,7 +407,7 @@ class SyncMixin:
         # --- Apply bans to each protected room ---
         for idx, room in enumerate(self.protected_rooms, start=1):
             if announce_progress:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"⏳ Syncing bans in room {room} ({idx}/{len(self.protected_rooms)})...",
                     mtype="groupchat"
@@ -417,7 +417,7 @@ class SyncMixin:
             if not await self._wait_for_bot_admin_rights(room, timeout=2.0):
                 log.warning("⛔ Skipping %s — bot not admin/owner", room)
                 if announce_progress:
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=ADMIN_ROOM,
                         mbody=f"⛔ Skipping {room} — bot has no admin/owner rights",
                         mtype="groupchat"
@@ -495,7 +495,7 @@ class SyncMixin:
                 log.info("ℹ️ All bans already applied in %s, nothing to do", room)
 
             if announce_progress:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"✅ Finished syncing room {room} ({idx}/{len(self.protected_rooms)}) - {new_bans_count} new bans applied",
                     mtype="groupchat"
@@ -503,7 +503,7 @@ class SyncMixin:
 
         # --- Final statistics ---
         if announce_progress:
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"✅ Startup ban sync completed: {len(applied_bans_set)} unique bans applied in {len(self.protected_rooms)} rooms",
                 mtype="groupchat"

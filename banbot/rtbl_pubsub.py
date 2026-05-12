@@ -419,7 +419,7 @@ class RtblPubSubMixin:
             if removed_stale_bans:
                 parts.append(f"{removed_stale_bans} stale RTBL bans unbanned")
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=(
                     f"🛡️ RTBL: Updates from {service_jid} (node: {node}) — "

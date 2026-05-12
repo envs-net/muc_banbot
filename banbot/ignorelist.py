@@ -240,7 +240,7 @@ class IgnorelistMixin:
                         pass
 
             if total == 0:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"🚫 {list_label}:\n  (none)",
                     mtype="groupchat",
@@ -269,7 +269,7 @@ class IgnorelistMixin:
             if resolved_page < total_pages:
                 lines.append(f"\nUse {list_command} list {resolved_page + 1} for the next page.")
 
-            self.send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return
 
         # ----------------------------------------------------------------
@@ -277,7 +277,7 @@ class IgnorelistMixin:
         # ----------------------------------------------------------------
         if sub_action == "add":
             if len(args) < 2:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"❌ Usage: {command} add <jid|domain> [reason]",
                     mtype="groupchat",
@@ -289,7 +289,7 @@ class IgnorelistMixin:
 
             if "@" in raw_target and not raw_target.startswith("*." ):
                 if not validate_jid_format(raw_target):
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=room,
                         mbody=(
                             f"❌ Invalid JID for {label.lower()}: {raw_target}\n"
@@ -304,7 +304,7 @@ class IgnorelistMixin:
             else:
                 is_valid_domain, _error_msg = validate_domain_ban(raw_target)
                 if not is_valid_domain:
-                    self.send_message(
+                    await self.bot_send_message(
                         mto=room,
                         mbody=(
                             f"❌ Invalid domain for {label.lower()}: {raw_target}\n"
@@ -349,7 +349,7 @@ class IgnorelistMixin:
                 target_type=target_type, target=target, comment=reason,
             )
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=f"✅ {label}: Added {target}.",
                 mtype="groupchat",
@@ -361,7 +361,7 @@ class IgnorelistMixin:
         # ----------------------------------------------------------------
         if sub_action in ("remove", "del", "delete"):
             if len(args) < 2:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"❌ Usage: {command} remove <jid|domain>",
                     mtype="groupchat",
@@ -399,7 +399,7 @@ class IgnorelistMixin:
                     break
 
             if not found:
-                self.send_message(
+                await self.bot_send_message(
                     mto=room,
                     mbody=f"⚠️ {label}: {raw_target} was not found.",
                     mtype="groupchat",
@@ -426,14 +426,14 @@ class IgnorelistMixin:
                 details={"previous_added_by": found_added_by},
             )
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=room,
                 mbody=f"✅ {label}: Removed {found}.",
                 mtype="groupchat",
             )
             return
 
-        self.send_message(
+        await self.bot_send_message(
             mto=room,
             mbody=f"❌ Unknown sub-command: {sub_action}\nAvailable: list / add / remove",
             mtype="groupchat",

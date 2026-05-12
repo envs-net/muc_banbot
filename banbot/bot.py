@@ -44,6 +44,7 @@ from .vcard import VCardMixin
 from .updates import UpdateMixin
 from .ignorelist import IgnorelistMixin
 from .rtbl import RtblMixin
+from .messaging import MessagingMixin
 
 _log_level_name = str(getattr(config, "LOG_LEVEL", "INFO")).upper()
 _log_level = getattr(logging, _log_level_name, None)
@@ -58,6 +59,7 @@ log = logging.getLogger(__name__)
 class BanBot(
     ClientXMPP,
     ConfigMixin,
+    MessagingMixin,
     AuditMixin,
     CacheMixin,
     DatabaseMixin,
@@ -313,7 +315,7 @@ class BanBot(
         # Send startup notification if enabled
         if self.announce_startup:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"✅ Bot has restarted and synced all bans. ({timestamp})",
                 mtype="groupchat"

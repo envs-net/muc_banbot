@@ -77,7 +77,7 @@ class DirectMessageMixin:
                 "I only listen to admins."
             )
 
-        self.send_message(
+        await self.bot_send_message(
             mto=sender_full if is_muc_pm else sender,
             mbody=response,
             mtype="chat"

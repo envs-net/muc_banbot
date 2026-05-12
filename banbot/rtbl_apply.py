@@ -211,7 +211,7 @@ class RtblApplyMixin:
         if self.is_ignored_jid(jid):
             log.info("RTBL: Refusing JID ban for %s — exact ignorelist match", jid)
             if self.rtbl_announce:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"⛔ RTBL: Ignored ban for {jid} — exact ignorelist match",
                     mtype="groupchat",
@@ -227,7 +227,7 @@ class RtblApplyMixin:
                 jid, protect_reason,
             )
             if self.rtbl_announce:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=(
                         f"⚠️ RTBL: Ignored JID ban for {jid} "
@@ -247,7 +247,7 @@ class RtblApplyMixin:
         log.debug("RTBL: Persisted JID ban for %s to bans table", jid)
 
         if self.rtbl_announce:
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"🛡️ RTBL: Banning {jid}" + (f" — {reason}" if reason else ""),
                 mtype="groupchat",
@@ -293,7 +293,7 @@ class RtblApplyMixin:
         if self.is_ignored_domain(domain):
             log.info("RTBL: Refusing domain ban %s — domain ignorelist", wildcard)
             if self.rtbl_announce:
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=f"⛔ RTBL: Ignored domain ban {wildcard} — domain ignorelist",
                     mtype="groupchat",
@@ -353,7 +353,7 @@ class RtblApplyMixin:
                 )
                 if len(skipped_protected) > 5:
                     preview += f", … +{len(skipped_protected) - 5} more"
-                self.send_message(
+                await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=(
                         f"⚠️ RTBL: Ignored domain ban {wildcard} — "
@@ -388,7 +388,7 @@ class RtblApplyMixin:
             if len(matched) > 1:
                 affected += f"\n   Also matched: {len(matched) - 1} more occupant(s)"
 
-            self.send_message(
+            await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=(
                     f"🛡️ RTBL: Domain ban {wildcard}"
