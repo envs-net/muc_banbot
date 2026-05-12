@@ -187,18 +187,41 @@ class SyncMixin:
         return row is not None
 
 
+    async def _wait_for_bot_admin_rights(
+        self,
+        room: str,
+        timeout: float = 5.0,
+        interval: float = 0.5,
+    ) -> bool:
+        """
+        Wait briefly for MUC presence/affiliation state after joining a room.
+
+        This avoids noisy per-ban failures when a room has not yet delivered
+        the bot's current admin/owner state.
+        """
+        deadline = time.time() + timeout
+
+        while time.time() < deadline:
+            if self.is_bot_admin_or_owner(room):
+                return True
+
+            await asyncio.sleep(interval)
+
+        return self.is_bot_admin_or_owner(room)
+
+
     async def sync_bans_to_rooms_for_single_room(self, room: str) -> None:
         """
         Sync bans for a single room (after !room add or !sync).
         Skips expired temporary bans automatically.
         Only applies bans that are NOT already set (outcast affiliation).
         """
-        if not self.is_bot_admin_or_owner(room):
+        if not await self._wait_for_bot_admin_rights(room):
             log.warning("⛔ Skipping initial sync for %s (bot is not admin/owner)", room)
             self.send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"⛔ Cannot sync {room} — bot has no admin/owner rights.",
-                mtype="groupchat"
+                mtype="groupchat",
             )
             return
 
@@ -268,7 +291,15 @@ class SyncMixin:
                         log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
 
                 if not already_banned:
-                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+                    tasks.append(
+                        self.apply_ban_to_room(
+                            room,
+                            ban_jid,
+                            ban_nick,
+                            comment,
+                            announce_missing_rights=False,
+                        )
+                    )
                     new_bans_count += 1
 
             if tasks:
@@ -383,7 +414,7 @@ class SyncMixin:
                 )
 
             # Skip room if bot not admin/owner
-            if not self.is_bot_admin_or_owner(room):
+            if not await self._wait_for_bot_admin_rights(room, timeout=2.0):
                 log.warning("⛔ Skipping %s — bot not admin/owner", room)
                 if announce_progress:
                     self.send_message(
@@ -444,7 +475,15 @@ class SyncMixin:
                         log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
 
                 if not already_banned:
-                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+                    tasks.append(
+                        self.apply_ban_to_room(
+                            room,
+                            ban_jid,
+                            ban_nick,
+                            comment,
+                            announce_missing_rights=False,
+                        )
+                    )
                     applied_bans_set.add((ban_jid, ban_nick))
                     new_bans_count += 1
 

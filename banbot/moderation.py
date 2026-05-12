@@ -26,7 +26,8 @@ class ModerationMixin:
         ban_jid: str | None,
         ban_nick: str | None,
         comment: str | None,
-        issuer: str | None = None
+        issuer: str | None = None,
+        announce_missing_rights: bool = True,
     ) -> None:
         """
         Apply a ban to a room:
@@ -40,11 +41,14 @@ class ModerationMixin:
         # --- Safety: Do nothing if bot has no admin rights ---
         if not self.is_bot_admin_or_owner(room):
             log.warning("⛔ Cannot apply ban in %s (bot not admin/owner)", room)
-            self.send_message(
-                mto=ADMIN_ROOM,
-                mbody=f"⛔ Cannot apply ban in {room} — missing admin/owner rights.",
-                mtype="groupchat"
-            )
+
+            if announce_missing_rights:
+                self.send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"⛔ Cannot apply ban in {room} — missing admin/owner rights.",
+                    mtype="groupchat",
+                )
+
             return
 
         is_domain = ban_jid and ban_jid.startswith("*.")
