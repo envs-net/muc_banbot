@@ -334,19 +334,78 @@ class OmemoMixin:
             raise RuntimeError(f"No OMEMO recipients available for {mto}")
 
         log.debug("OMEMO: encrypting message for %s", recipients)
-        messages, errors = await self.plugin["xep_0384"].encrypt_message(msg, recipients)
+        encrypted_result = await self.plugin["xep_0384"].encrypt_message(msg, recipients)
+
+        # slixmpp-omemo versions differ slightly here:
+        # - some return (dict[JID, Message], errors)
+        # - some return (Message, errors) for groupchat messages
+        # - some may return a Message directly
+        errors = None
+        encrypted_messages = encrypted_result
+        if isinstance(encrypted_result, tuple) and len(encrypted_result) == 2:
+            encrypted_messages, errors = encrypted_result
+
         if errors:
             log.warning("OMEMO: encryption errors for %s: %s", mto, errors)
 
-        if not messages:
+        if not encrypted_messages:
             raise RuntimeError(f"OMEMO produced no encrypted messages for {mto}")
 
         echo = None
-        for _jid, encrypted_msg in messages.items():
-            echo = encrypted_msg
-            encrypted_msg.send()
+        if hasattr(encrypted_messages, "items"):
+            for _jid, encrypted_msg in encrypted_messages.items():
+                echo = encrypted_msg
+                encrypted_msg.send()
+        else:
+            echo = encrypted_messages
+            echo.send()
 
         return echo
+
+
+    async def _decrypt_incoming_omemo_message(self, msg: Any) -> tuple[Any | None, bool]:
+        """Decrypt an incoming OMEMO message if it is encrypted.
+
+        Returns ``(message, encrypted)``.  ``message`` is ``None`` when the
+        stanza was encrypted but could not be decrypted, in which case callers
+        should stop processing it.
+        """
+        if not getattr(self, "omemo_enabled", False):
+            return msg, False
+
+        if "xep_0384" not in self.plugin:
+            return msg, False
+
+        omemo = self.plugin["xep_0384"]
+
+        try:
+            namespace = omemo.is_encrypted(msg)
+        except Exception as exc:
+            log.warning("OMEMO: could not check incoming message encryption: %s", exc)
+            return msg, False
+
+        if namespace is None:
+            return msg, False
+
+        if not await self._wait_for_omemo_ready():
+            log.warning("OMEMO: encrypted incoming message received before OMEMO was ready")
+            return None, True
+
+        try:
+            result = await omemo.decrypt_message(msg)
+
+            # slixmpp-omemo usually returns (message, device_information),
+            # but keep this tolerant in case versions differ.
+            decrypted_msg = result[0] if isinstance(result, tuple) else result
+            return decrypted_msg, True
+
+        except Exception as exc:
+            log.warning(
+                "OMEMO: failed to decrypt incoming message from %s: %s",
+                msg.get("from"),
+                exc,
+            )
+            return None, True
 
 
     def _apply_message_kwargs(self, msg: Any, kwargs: dict[str, Any]) -> None:

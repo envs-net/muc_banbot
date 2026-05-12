@@ -72,7 +72,7 @@ OMEMO_STORAGE_FILE = "data/omemo.json"
 # Automatically encrypt bot-generated groupchat messages in protected rooms.
 # This includes rooms added later via !room add because protected rooms are
 # loaded from the bot database.
-OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS = True
+OMEMO_AUTO_ENCRYPT_PROTECTED_ROOMS = False
 
 # Automatically encrypt bot-generated groupchat messages in the admin room.
 # Disabled by default; add the admin room to OMEMO_ENCRYPTED_ROOMS if desired.

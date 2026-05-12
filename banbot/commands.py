@@ -33,6 +33,11 @@ class CommandMixin:
         if msg["mucnick"].lower() == NICK.lower():
             return  # Ignore own messages
 
+        if hasattr(self, "_decrypt_incoming_omemo_message"):
+            msg, _encrypted = await self._decrypt_incoming_omemo_message(msg)
+            if msg is None:
+                return
+
         room = msg["from"].bare
         nick = msg["mucnick"]
         body = msg["body"].strip()
