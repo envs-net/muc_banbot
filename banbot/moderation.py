@@ -140,9 +140,15 @@ class ModerationMixin:
             msg_admin = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + f" by {issuer}"
             self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
         elif room in self.protected_rooms:
-            display = ban_nick or "Unknown"
-            msg = f"✅ Banned {display}" + (f" ({comment})" if comment else "")
             if self.allow_user_cmds and self.show_ban_in_muc:
+                if not ban_nick:
+                    log.debug(
+                        "Skipping public ban announcement in %s because no public nick is known",
+                        room,
+                    )
+                    return
+
+                msg = f"✅ Banned {ban_nick}" + (f" ({comment})" if comment else "")
                 self.send_message(mto=room, mbody=msg, mtype="groupchat")
 
 
@@ -500,8 +506,14 @@ class ModerationMixin:
                 self.send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
 
             elif self.allow_user_cmds:
-                display = ban_nick or "Unknown"
-                msg = f"♻️ Unbanned {display}"
+                if not ban_nick:
+                    log.debug(
+                        "Skipping public unban announcement in %s because no public nick is known",
+                        room,
+                    )
+                    return
+
+                msg = f"♻️ Unbanned {ban_nick}"
                 self.notify_protected(room, msg)
 
         except (IqError, IqTimeout) as e:
