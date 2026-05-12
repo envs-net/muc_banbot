@@ -64,6 +64,7 @@ def get_config_resource() -> str | None:
 
 class ConfigMixin:
     CONFIG_KEYS = (
+        "LOG_LEVEL",
         "COMMAND_PREFIX",
         "ANNOUNCE_STARTUP",
         "ANNOUNCE_SYNC_DETAILS",
@@ -111,6 +112,7 @@ class ConfigMixin:
     def _runtime_config_snapshot(self) -> dict[str, object]:
         """Return the currently effective runtime config values."""
         return {
+            "LOG_LEVEL": getattr(self, "log_level", str(getattr(config, "LOG_LEVEL", "INFO")).upper()),
             "COMMAND_PREFIX": self.command_prefix,
             "ANNOUNCE_STARTUP": self.announce_startup,
             "ANNOUNCE_SYNC_DETAILS": self.announce_sync_details,
@@ -202,6 +204,10 @@ class ConfigMixin:
             and config.RESOURCE != config.RESSOURCE
         ):
             warnings.append("Both RESOURCE and legacy RESSOURCE are set; RESOURCE will be used")
+
+        log_level = str(getattr(config, "LOG_LEVEL", "INFO")).upper().strip()
+        if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
 
         command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip()
         if not command_prefix:
@@ -328,6 +334,43 @@ class ConfigMixin:
         return changes
 
 
+    def apply_log_level(self, level_name: str | None = None) -> str:
+        """
+        Apply Python logging level at runtime.
+
+        Returns the effective level name.
+        """
+        if level_name is None:
+            level_name = getattr(config, "LOG_LEVEL", "INFO")
+
+        level_name = str(level_name).upper().strip()
+        level = getattr(logging, level_name, None)
+
+        if not isinstance(level, int):
+            log.warning("Invalid LOG_LEVEL=%r, falling back to INFO", level_name)
+            level_name = "INFO"
+            level = logging.INFO
+
+        old_level = getattr(self, "log_level", None)
+
+        logging.getLogger().setLevel(level)
+        logging.getLogger("banbot").setLevel(level)
+
+        # Keep noisy third-party libraries readable.
+        # In DEBUG mode, keep them at INFO instead of DEBUG.
+        # In WARNING/ERROR mode, follow the configured stricter level.
+        third_party_level = max(level, logging.INFO)
+        logging.getLogger("slixmpp").setLevel(third_party_level)
+        logging.getLogger("aiosqlite").setLevel(third_party_level)
+
+        self.log_level = level_name
+
+        if old_level != level_name:
+            log.info("Log level set to %s", level_name)
+
+        return level_name
+
+
     def apply_runtime_config(self) -> None:
         """Load reloadable runtime settings from config."""
         errors, warnings = self._validate_config()
@@ -342,6 +385,8 @@ class ConfigMixin:
             self.muc_write_limit = new_semaphore_value
             self.muc_write_semaphore = asyncio.Semaphore(new_semaphore_value)
             log.info("🔄 MUC_WRITE_SEMAPHORE updated: %d → %d", old_value, new_semaphore_value)
+
+        self.apply_log_level(getattr(config, "LOG_LEVEL", "INFO"))
 
         self.command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip() or "!"
         self.announce_startup = getattr(config, "ANNOUNCE_STARTUP", True)

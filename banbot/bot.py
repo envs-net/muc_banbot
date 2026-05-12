@@ -45,7 +45,13 @@ from .updates import UpdateMixin
 from .ignorelist import IgnorelistMixin
 from .rtbl import RtblMixin
 
-logging.basicConfig(level=logging.INFO)
+_log_level_name = str(getattr(config, "LOG_LEVEL", "INFO")).upper()
+_log_level = getattr(logging, _log_level_name, None)
+
+if not isinstance(_log_level, int):
+    _log_level = logging.INFO
+
+logging.basicConfig(level=_log_level)
 log = logging.getLogger(__name__)
 
 

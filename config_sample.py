@@ -19,6 +19,12 @@ VCARD_NOTE = "Bot Admin Assistant"   # Notes/description
 
 # ================= BOT SETTINGS =================
 
+# Python logging level.
+# Use DEBUG for detailed troubleshooting, INFO for normal operation.
+# Common values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# Can be changed at runtime via !reloadconfig.
+LOG_LEVEL = "INFO"
+
 COMMAND_PREFIX = "!" # Command prefix used to trigger bot commands in rooms
 ANNOUNCE_STARTUP = True  # True = Show startup messages in the admin room, False = off
 ANNOUNCE_SYNC_DETAILS = True  # True = Show detailed sync progress messages at startup (per-room details), False = off. Manual !sync and !syncbans commands always show details
