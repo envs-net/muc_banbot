@@ -5,11 +5,12 @@ name: pytest
 
 steps:
   - name: build pytest
-    image: python:3.10
+    image: python:3.13
     commands:
       - python -m pip install --upgrade pip
       - pip install -r requirements.txt
       - pip install -r requirements-dev.txt
+      - cp config_sample.py config.py
       - pytest
 
 trigger:

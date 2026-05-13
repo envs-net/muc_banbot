@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
@@ -13,6 +14,35 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+if "config" not in sys.modules:
+    config = types.ModuleType("config")
+
+    config.JID = "adminbot@example.org"
+    config.PASSWORD = "test-password"
+    config.RESOURCE = "test"
+    config.ADMIN_ROOM = "admin@conference.example.org"
+    config.NICK = "BanBot"
+    config.DB_FILE = ":memory:"
+
+    config.COMMAND_PREFIX = "!"
+    config.ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS = True
+
+    config.LOG_LEVEL = "INFO"
+
+    config.OMEMO_ENABLED = False
+    config.OMEMO_STORAGE_FILE = "data/omemo.json"
+    config.OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
+    config.OMEMO_PLAINTEXT_FALLBACK = False
+
+    config.RTBL_ENABLED = True
+    config.RTBL_REFRESH_INTERVAL = 3600
+    config.RTBL_PERSIST_BANS = True
+
+    config.MAX_TEMPBAN_DAYS = 30
+
+    sys.modules["config"] = config
 
 
 class FakeFrom:
