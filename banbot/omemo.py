@@ -138,7 +138,14 @@ if OMEMO_AVAILABLE:
             blindly_trusted: frozenset[DeviceInformation],  # type: ignore[valid-type]
             identifier: str | None,
         ) -> None:
-            log.info("OMEMO: [%s] blindly trusted devices: %s", identifier, blindly_trusted)
+            trusted_jids = sorted({device.bare_jid for device in blindly_trusted})
+            log.info(
+                "OMEMO: [%s] blindly trusted %d device(s) for %d JID(s): %s",
+                identifier,
+                len(blindly_trusted),
+                len(trusted_jids),
+                ", ".join(trusted_jids),
+            )
 
         async def _prompt_manual_trust(
             self,
@@ -285,74 +292,113 @@ class OmemoMixin:
         *,
         mto: str,
     ) -> Any:
-        """Encrypt and send, retrying once without recipients that lack OMEMO devices."""
-        attempt = 0
-        current_recipients: set[JID] | JID = recipients
+        """Encrypt and send, skipping recipients without usable OMEMO devices.
 
-        while True:
-            attempt += 1
-            log.debug("OMEMO: encrypting message for %s", current_recipients)
+        slixmpp-omemo aborts the whole encryption attempt when one or more
+        intended recipients have no active trusted device/session.  For MUC
+        replies we still want the answer to be readable by all occupants for
+        whom OMEMO is usable, so we remove the reported unusable bare JIDs and
+        retry until the send succeeds or no recipients are left.
+        """
+        if not isinstance(recipients, set):
+            return await self._encrypt_and_send_omemo_once(msg, recipients, mto=mto)
+
+        current_recipients: set[JID] = set(recipients)
+        skipped_recipients: set[str] = set()
+        max_attempts = max(1, len(current_recipients) + 1)
+
+        for attempt in range(1, max_attempts + 1):
+            if not current_recipients:
+                raise RuntimeError(f"No usable OMEMO recipients left for {mto}")
 
             try:
-                encrypted_result = await self.plugin["xep_0384"].encrypt_message(
+                return await self._encrypt_and_send_omemo_once(
                     msg,
                     current_recipients,
+                    mto=mto,
                 )
             except Exception as exc:
-                if attempt > 1 or not isinstance(current_recipients, set):
-                    raise
-
                 missing = self._extract_unusable_omemo_recipients(exc)
                 if not missing:
                     raise
 
-                filtered = {
+                before = set(current_recipients)
+                current_recipients = {
                     jid
                     for jid in current_recipients
                     if self._bare_jid(jid).lower() not in missing
                 }
-                skipped = sorted(
-                    self._bare_jid(jid)
-                    for jid in current_recipients
+                removed = {
+                    self._bare_jid(jid).lower()
+                    for jid in before
                     if self._bare_jid(jid).lower() in missing
-                )
+                }
 
-                if not filtered or filtered == current_recipients:
+                if not removed or current_recipients == before:
                     raise
 
+                skipped_recipients.update(removed)
                 log.warning(
-                    "OMEMO: skipping recipients without usable OMEMO devices for %s: %s",
+                    (
+                        "OMEMO: skipping %d recipient(s) without usable OMEMO "
+                        "devices for %s: %s"
+                    ),
+                    len(removed),
                     mto,
-                    ", ".join(skipped),
+                    ", ".join(sorted(removed)),
                 )
-                current_recipients = filtered
-                continue
 
-            # slixmpp-omemo versions differ slightly here:
-            # - some return (dict[JID, Message], errors)
-            # - some return (Message, errors) for groupchat messages
-            # - some may return a Message directly
-            errors = None
-            encrypted_messages = encrypted_result
-            if isinstance(encrypted_result, tuple) and len(encrypted_result) == 2:
-                encrypted_messages, errors = encrypted_result
+                if not current_recipients:
+                    raise RuntimeError(
+                        f"No usable OMEMO recipients left for {mto}; skipped: "
+                        + ", ".join(sorted(skipped_recipients))
+                    ) from exc
 
-            if errors:
-                log.warning("OMEMO: encryption errors for %s: %s", mto, errors)
+        raise RuntimeError(
+            f"Could not encrypt OMEMO message for {mto}; skipped: "
+            + ", ".join(sorted(skipped_recipients))
+        )
 
-            if not encrypted_messages:
-                raise RuntimeError(f"OMEMO produced no encrypted messages for {mto}")
+    async def _encrypt_and_send_omemo_once(
+        self,
+        msg: Any,
+        recipients: set[JID] | JID,
+        *,
+        mto: str,
+    ) -> Any:
+        """Encrypt and send one OMEMO message attempt."""
+        log.debug("OMEMO: encrypting message for %s", recipients)
 
-            echo = None
-            if hasattr(encrypted_messages, "items"):
-                for _jid, encrypted_msg in encrypted_messages.items():
-                    echo = encrypted_msg
-                    encrypted_msg.send()
-            else:
-                echo = encrypted_messages
-                echo.send()
+        encrypted_result = await self.plugin["xep_0384"].encrypt_message(
+            msg,
+            recipients,
+        )
 
-            return echo
+        # slixmpp-omemo versions differ slightly here:
+        # - some return (dict[JID, Message], errors)
+        # - some return (Message, errors) for groupchat messages
+        # - some may return a Message directly
+        errors = None
+        encrypted_messages = encrypted_result
+        if isinstance(encrypted_result, tuple) and len(encrypted_result) == 2:
+            encrypted_messages, errors = encrypted_result
+
+        if errors:
+            log.warning("OMEMO: encryption errors for %s: %s", mto, errors)
+
+        if not encrypted_messages:
+            raise RuntimeError(f"OMEMO produced no encrypted messages for {mto}")
+
+        echo = None
+        if hasattr(encrypted_messages, "items"):
+            for _jid, encrypted_msg in encrypted_messages.items():
+                echo = encrypted_msg
+                encrypted_msg.send()
+        else:
+            echo = encrypted_messages
+            echo.send()
+
+        return echo
 
     def _extract_unusable_omemo_recipients(self, exc: Exception) -> set[str]:
         """Best-effort extraction of recipient JIDs from slixmpp-omemo errors."""
