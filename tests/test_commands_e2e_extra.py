@@ -30,6 +30,9 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
         self.ignore_calls = []
         self.sync_calls = []
         self.policy_calls = []
+        self.banlist_calls = []
+        self.banlist_rtbl_calls = []
+        self.bansearch_calls = []
         self.update_result = (False, "2.2.0", None)
         self.export_result = (True, "export ok")
         self.import_result = (0, 0, [])
@@ -61,6 +64,15 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
 
     async def cmd_room(self, args, room):
         self.room_calls.append((list(args), room))
+
+    async def cmd_banlist(self, room, page=1, show_all=False):
+        self.banlist_calls.append((room, page, show_all))
+
+    async def cmd_banlist_rtbl(self, room, page=1, show_all=False):
+        self.banlist_rtbl_calls.append((room, page, show_all))
+
+    async def cmd_bansearch(self, query, page=1, show_all=False):
+        self.bansearch_calls.append((query, page, show_all))
 
     async def cmd_audit(self, args, room):
         self.audit_calls.append((list(args), room))
@@ -260,3 +272,27 @@ async def test_unauthorized_admin_command_is_rejected(fake_msg_factory, monkeypa
 
     assert bot.ban_calls == []
     assert "not authorized" in bot.sent[-1]["mbody"]
+
+
+
+@pytest.mark.asyncio
+async def test_admin_paged_commands_parse_all_marker(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!banlist all"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!banlist rtbl all"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!bansearch all spam wave"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!bansearch spam wave all"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!audit all spam"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!room list all"))
+
+    assert bot.banlist_calls[-1] == ("admin@conference.example.test", 1, True)
+    assert bot.banlist_rtbl_calls[-1] == ("admin@conference.example.test", 1, True)
+    assert bot.bansearch_calls[-2] == ("spam wave", 1, True)
+    assert bot.bansearch_calls[-1] == ("spam wave", 1, True)
+    assert bot.audit_calls[-1] == (["all", "spam"], "admin@conference.example.test")
+    assert bot.room_calls[-1] == (["list", "all"], "admin@conference.example.test")

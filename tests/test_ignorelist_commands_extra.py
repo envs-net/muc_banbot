@@ -135,3 +135,28 @@ async def test_ignore_invalid_and_unknown_subcommands_report_help(temp_db_path):
         assert "Unknown sub-command" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_ignore_list_all_disables_paging(temp_db_path):
+    bot = await make_bot()
+    try:
+        for idx in range(12):
+            await bot.cmd_ignore(
+                ["add", f"all{idx}@example.org", "reason"],
+                "admin@conference.example.test",
+                actor="admin@example.test",
+            )
+
+        await bot.cmd_ignore(["list", "all"], "admin@conference.example.test")
+        body = bot.sent[-1]["mbody"]
+        assert "Ignorelist (12) - All" in body
+        assert "Page" not in body
+        assert "all0@example.org" in body
+        assert "all11@example.org" in body
+
+        await bot.cmd_ignore(["all"], "admin@conference.example.test", command_name="whitelist")
+        body = bot.sent[-1]["mbody"]
+        assert "Ignorelist (12) - All" in body
+    finally:
+        await bot.db.close()

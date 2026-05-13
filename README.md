@@ -67,21 +67,21 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 | `!policy disable` | Disables the public policy command without deleting the text | `!policy disable` |
 | `!room add <room>` | Adds a room to the protected list and stores it in the DB | `!room add secretroom@muc.example.com` |
 | `!room remove <room>` | Removes a room from the protected list and DB | `!room remove secretroom@muc.example.com` |
-| `!room list [page]` | Lists all protected rooms with pagination | `!room list` |
+| `!room list [all/page]` | Lists protected rooms; `all` disables paging | `!room list`, `!room list all` |
 | `!ban <jid/nick/domain> [comment]` | Bans a user or domain across all protected rooms | `!ban alice@example.com spamming` or `!ban *.evil.com` |
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Temporary ban (limited to MAX_TEMPBAN_DAYS) | `!tempban bob 10m rude behavior` |
 | `!unban <jid/nick/domain>` | Removes a ban | `!unban bob` or `!unban *.evil.com` |
-| `!banlist [page/last]` | Shows all active bans with remaining time and comments | `!banlist`, `!banlist last` |
-| `!bansearch <query> [page/last]` | Searches bans by nick, JID, domain, issuer, comment, or RTBL reason | `!bansearch spam`, `!bansearch reason:abuse 2` |
+| `!banlist [all/page/last]` | Shows all active bans with remaining time and comments; `all` disables paging | `!banlist`, `!banlist all`, `!banlist last` |
+| `!bansearch <query> [all/page/last]` | Searches bans by nick, JID, domain, issuer, comment, or RTBL reason; `all` disables paging | `!bansearch spam`, `!bansearch all reason:abuse`, `!bansearch reason:abuse 2` |
 | `!why <nick/jid>` | Shows the reason and remaining time of a ban; admin-room output also includes recent audit history | `!why bob` |
-| `!audit [page/last/query]` | Shows recent audit events, optionally filtered by text | `!audit`, `!audit last`, `!audit alice` |
+| `!audit [all/page/last/query]` | Shows recent audit events, optionally filtered by text; `all` disables paging | `!audit`, `!audit all`, `!audit all alice`, `!audit last` |
 | `!sync` | Full room sync: rejoin rooms, verify admin rights, apply only missing active bans | `!sync` |
 | `!syncadmins` | Updates the internal admin list from the admin room | `!syncadmins` |
 | `!syncbans` | Full ban synchronization: syncs outcasts from rooms into DB and applies all active bans | `!syncbans` |
-| `!ignore list [page]` / `!whitelist list [page]` | Shows the global ignorelist | `!ignore list`, `!whitelist list last` |
+| `!ignore list [all/page/last]` / `!whitelist list [all/page/last]` | Shows the global ignorelist; `all` disables paging | `!ignore list`, `!ignore list all`, `!whitelist list last` |
 | `!ignore add <jid/domain> [reason]` / `!whitelist add <jid/domain> [reason]` | Protects an exact JID from all bans, or a domain from domain-based bans/RTBL domain matches | `!whitelist add alice@example.com trusted user` |
 | `!ignore remove <jid/domain>` / `!whitelist remove <jid/domain>` | Removes an entry from the global ignorelist | `!whitelist remove alice@example.com` |
-| `!banlist rtbl [page/last]` | Shows RTBL hash and domain entries | `!banlist rtbl`, `!banlist rtbl last` |
+| `!banlist rtbl [all/page/last]` | Shows RTBL hash and domain entries; `all` disables paging | `!banlist rtbl`, `!banlist rtbl all`, `!banlist rtbl last` |
 | `!rtbl list` | Shows active RTBL subscriptions and own publish feed counts | `!rtbl list` |
 | `!rtbl add <service> <node>` | Subscribes to an RTBL PubSub node after validation | `!rtbl add xmppbl.org muc_bans_sha256` |
 | `!rtbl delete <service> [node]` | Removes one or all RTBL subscriptions for a service | `!rtbl delete xmppbl.org muc_bans_sha256` |
@@ -90,6 +90,8 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 | `!rtbl publish sync` | Publishes all current local bans to the own RTBL feed | `!rtbl publish sync` |
 | `!export` | Exports all bans to a CSV file (bans_export_TIMESTAMP.csv) | `!export` |
 | `!import <file>` | Imports bans from a CSV file with validation | `!import bans_export_20240412_120000.csv` |
+
+For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, and `!room list all`.
 
 ---
 
@@ -101,7 +103,7 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 | ------------- | ----------------------------------------- | ------------ |
 | `!help`       | Shows a restricted help message           | `!help`      |
 | `!whoami`     | Shows your affiliation/role and permissions | `!whoami`  |
-| `!banlist [page/last]` | Shows active temporary bans (if enabled)  | `!banlist`, `!banlist last`   |
+| `!banlist [all/page/last]` | Shows active temporary bans (if enabled); `all` disables paging  | `!banlist`, `!banlist all`, `!banlist last`   |
 | `!why <jid/nick>` | Shows reason and remaining time for a ban | `!why alice` |
 | `!rules` / `!policy` | Shows the public room moderation policy, if configured | `!rules` |
 

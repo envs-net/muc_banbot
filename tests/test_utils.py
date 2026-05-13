@@ -12,6 +12,8 @@ from banbot.utils import (
     safe_jid,
     validate_domain_ban,
     validate_jid_format,
+    wants_all_pages,
+    without_all_pages_arg,
 )
 
 
@@ -107,3 +109,11 @@ def test_pagination_helpers():
     assert resolve_page(-1, 25, per_page=10) == 3
     assert resolve_page(99, 25, per_page=10) == 3
     assert resolve_page(0, 25, per_page=10) == 1
+
+
+
+def test_all_pages_arg_helpers():
+    assert wants_all_pages(["all"]) is True
+    assert wants_all_pages(["2", "ALL"]) is True
+    assert wants_all_pages(["small"]) is False
+    assert without_all_pages_arg(["all", "spam", "ALL", "2"]) == ["spam", "2"]

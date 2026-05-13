@@ -7,6 +7,8 @@ from .utils import (
     resolve_page,
     validate_domain_ban,
     validate_jid_format,
+    wants_all_pages,
+    without_all_pages_arg,
 )
 
 log = logging.getLogger(__name__)
@@ -212,6 +214,8 @@ class IgnorelistMixin:
         command_name = command_name if command_name in ("ignore", "whitelist") else "ignore"
         command = f"{p}{command_name}"
         label = "Whitelist" if command_name == "whitelist" else "Ignorelist"
+        if args and args[0].lower() == "all":
+            args = ["list", "all", *args[1:]]
         sub_action = args[0].lower() if args else "list"
 
         # The alias is only an entrypoint. Listing should always point users to
@@ -223,6 +227,9 @@ class IgnorelistMixin:
         # list
         # ----------------------------------------------------------------
         if sub_action == "list":
+            show_all = wants_all_pages(args[1:])
+            args = [args[0], *without_all_pages_arg(args[1:])]
+
             async with self.db.execute(
                 "SELECT COUNT(*) FROM ignorelist"
             ) as cursor:
@@ -248,25 +255,36 @@ class IgnorelistMixin:
                 return
 
             per_page = 10
-            resolved_page = resolve_page(page, total, per_page)
-            offset = (resolved_page - 1) * per_page
-            total_pages = max(1, (total + per_page - 1) // per_page)
+            if show_all:
+                async with self.db.execute(
+                    "SELECT target, target_type, reason, added_by FROM ignorelist "
+                    "ORDER BY target_type, target",
+                ) as cursor:
+                    rows = await cursor.fetchall()
 
-            async with self.db.execute(
-                "SELECT target, target_type, reason, added_by FROM ignorelist "
-                "ORDER BY target_type, target LIMIT ? OFFSET ?",
-                (per_page, offset),
-            ) as cursor:
-                rows = await cursor.fetchall()
+                resolved_page = 1
+                total_pages = 1
+                lines = [f"🚫 {list_label} ({total}) - All:"]
+            else:
+                resolved_page = resolve_page(page, total, per_page)
+                offset = (resolved_page - 1) * per_page
+                total_pages = max(1, (total + per_page - 1) // per_page)
 
-            lines = [f"🚫 {list_label} ({total}) - Page {resolved_page}/{total_pages}:"]
+                async with self.db.execute(
+                    "SELECT target, target_type, reason, added_by FROM ignorelist "
+                    "ORDER BY target_type, target LIMIT ? OFFSET ?",
+                    (per_page, offset),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
+                lines = [f"🚫 {list_label} ({total}) - Page {resolved_page}/{total_pages}:"]
             for target, target_type, reason, added_by in rows:
                 reason_str = f" — {reason}" if reason else ""
                 added_str = f" (by {added_by})" if added_by else ""
                 emoji = "🔑" if target_type == "jid" else "🌐"
                 lines.append(f"  {emoji} {target}{reason_str}{added_str}")
 
-            if resolved_page < total_pages:
+            if not show_all and resolved_page < total_pages:
                 lines.append(f"\nUse {list_command} list {resolved_page + 1} for the next page.")
 
             await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")

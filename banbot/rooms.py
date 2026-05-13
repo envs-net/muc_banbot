@@ -7,7 +7,7 @@ import re
 from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
 
-from .utils import paginate_lines
+from .utils import paginate_lines, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
@@ -84,29 +84,39 @@ class RoomMixin:
         action = args[0].lower()
 
         if action == "list":
+            show_all = wants_all_pages(args[1:])
+            list_args = without_all_pages_arg(args[1:])
             page = 1
-            if len(args) >= 2:
+            if list_args:
                 try:
-                    page = max(1, int(args[1]))
+                    page = max(1, int(list_args[0]))
                 except ValueError:
                     await self.bot_send_message(
                         mto=room,
-                        mbody=f"❌ Usage: {self.command_prefix}room list [page]",
+                        mbody=f"❌ Usage: {self.command_prefix}room list [all|page]",
                         mtype="groupchat"
                     )
                     return
 
             if self.protected_rooms:
                 rooms = sorted(self.protected_rooms)
-                page_lines, current_page, total_pages, total_items = paginate_lines(rooms, page, per_page=10)
+                if show_all:
+                    page_lines = rooms
+                    total_items = len(rooms)
+                    text = (
+                        f"🔒 Protected Rooms ({total_items}) - All:\n"
+                        + "\n".join(page_lines)
+                    )
+                else:
+                    page_lines, current_page, total_pages, total_items = paginate_lines(rooms, page, per_page=10)
 
-                text = (
-                    f"🔒 Protected Rooms ({total_items}) - Page {current_page}/{total_pages}:\n"
-                    + "\n".join(page_lines)
-                )
+                    text = (
+                        f"🔒 Protected Rooms ({total_items}) - Page {current_page}/{total_pages}:\n"
+                        + "\n".join(page_lines)
+                    )
 
-                if current_page < total_pages:
-                    text += f"\n\nUse {self.command_prefix}room list {current_page + 1} for the next page."
+                    if current_page < total_pages:
+                        text += f"\n\nUse {self.command_prefix}room list {current_page + 1} for the next page."
             else:
                 text = "🔒 Protected Rooms:\nNo protected rooms."
 

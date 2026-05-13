@@ -6,7 +6,7 @@ import time
 from config import ADMIN_ROOM, NICK
 
 from ._version import __version__
-from .utils import parse_duration
+from .utils import parse_duration, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
@@ -163,6 +163,8 @@ class CommandMixin:
             return True
 
         if cmd == "banlist" and self.user_cmds_allowed(room):
+            show_all = wants_all_pages(args)
+            args = without_all_pages_arg(args)
             if args and args[0].lower() == "rtbl":
                 if room != ADMIN_ROOM:
                     return True
@@ -176,11 +178,11 @@ class CommandMixin:
                         except ValueError:
                             await self.bot_send_message(
                                 mto=room,
-                                mbody=f"❌ Usage: {self.command_prefix}banlist rtbl [page|last]",
+                                mbody=f"❌ Usage: {self.command_prefix}banlist rtbl [all|page|last]",
                                 mtype="groupchat",
                             )
                             return True
-                await self.cmd_banlist_rtbl(room, page=page)
+                await self.cmd_banlist_rtbl(room, page=page, show_all=show_all)
                 return True
 
             page = 1
@@ -193,11 +195,11 @@ class CommandMixin:
                     except ValueError:
                         await self.bot_send_message(
                             mto=room,
-                            mbody=f"❌ Usage: {self.command_prefix}banlist [rtbl] [page|last]",
+                            mbody=f"❌ Usage: {self.command_prefix}banlist [rtbl] [all|page|last]",
                             mtype="groupchat",
                         )
                         return True
-            await self.cmd_banlist(room, page=page)
+            await self.cmd_banlist(room, page=page, show_all=show_all)
             return True
 
         if cmd == "why" and len(args) >= 1 and self.user_cmds_allowed(room):
@@ -342,13 +344,16 @@ class CommandMixin:
 
         if cmd == "bansearch":
             if len(args) >= 1:
-                # Last arg is page number or "last", rest is query
+                # Last arg is page number or "last", rest is query.  A standalone
+                # "all" disables pagination and may appear before or after query text.
+                show_all = wants_all_pages(args)
+                args = without_all_pages_arg(args)
                 page = 1
                 query_args = args
-                if args[-1].lower() == "last":
+                if args and args[-1].lower() == "last":
                     page = -1
                     query_args = args[:-1]
-                else:
+                elif args:
                     try:
                         page = max(1, int(args[-1]))
                         query_args = args[:-1]
@@ -357,12 +362,12 @@ class CommandMixin:
                 if not query_args:
                     await self.bot_send_message(
                         mto=room,
-                        mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [page|last]",
+                        mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [all|page|last]",
                         mtype="groupchat",
                     )
                     return True
                 query = " ".join(query_args)
-                await self.cmd_bansearch(query, page=page)
+                await self.cmd_bansearch(query, page=page, show_all=show_all)
             return True
 
         if cmd == "sync":
@@ -658,20 +663,20 @@ class CommandMixin:
             f"{p}checkupdate - check if a newer bot release is available\n"
             f"{p}whoami - show your affiliation/role\n"
             f"{p}policy show/set/clear/enable/disable - manage public rules/policy text\n"
-            f"{p}audit [page|last|query] - show recent audit events\n\n"
+            f"{p}audit [all|page|last|query] - show recent audit events\n\n"
             f"{p}room add/remove - manage protected rooms\n"
-            f"{p}room list [page] - list protected rooms\n\n"
+            f"{p}room list [all|page] - list protected rooms\n\n"
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
             f"{p}unban <jid|nick> - remove ban\n\n"
-            f"{p}banlist [page|last] - show all active bans with remaining time and comments\n"
-            f"{p}banlist rtbl [page|last] - show RTBL hash and domain entries\n"
-            f"{p}bansearch <query> [page|last] - search bans by nick, domain, jid or RTBL reason\n"
+            f"{p}banlist [all|page|last] - show all active bans with remaining time and comments\n"
+            f"{p}banlist rtbl [all|page|last] - show RTBL hash and domain entries\n"
+            f"{p}bansearch <query> [all|page|last] - search bans by nick, domain, jid or RTBL reason\n"
             f"{p}why <nick|jid> - show the reason and remaining time for a ban\n\n"
             f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"
             f"{p}syncadmins - update admin list from the admin room\n"
             f"{p}syncbans - sync bans from all rooms into the database and enforce them\n\n"
-            f"{p}ignore list [page] - show global ignorelist (alias: {p}whitelist)\n"
+            f"{p}ignore list [all|page] - show global ignorelist (alias: {p}whitelist)\n"
             f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
             f"{p}ignore remove <jid|domain> - remove from ignorelist\n\n"
             f"{p}rtbl list - show active RTBL subscriptions\n"

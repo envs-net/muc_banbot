@@ -43,7 +43,7 @@ class BanQueryMixin:
         )
 
 
-    async def cmd_bansearch(self, query: str, page: int = 1) -> None:
+    async def cmd_bansearch(self, query: str, page: int = 1, show_all: bool = False) -> None:
         """
         Searches bans by JID, nick, domain, issuer, or comment/reason.
         Also searches RTBL hashes (by hashing the query if it looks like a JID,
@@ -53,7 +53,7 @@ class BanQueryMixin:
         jid:<query>, nick:<query>, domain:<query>, issuer:<query>, by:<query>,
         comment:<query>, reason:<query>
 
-        Usage: !bansearch <query> [page|last]
+        Usage: !bansearch <query> [all|page|last]
         """
         raw_query = query.strip()
         q = raw_query.lower()
@@ -216,27 +216,36 @@ class BanQueryMixin:
         if rtbl_hash_matches:
             section_info.append(f"🔑 RTBL hashes: {len(rtbl_hash_matches)}")
 
-        per_page      = 10
-        resolved_page = resolve_page(page, len(all_entries), per_page)
-        page_lines, current_page, total_pages, total_items = paginate_lines(
-            all_entries, resolved_page, per_page=per_page
-        )
+        if show_all:
+            page_lines = all_entries
+            total_items = len(all_entries)
+            header = (
+                f"🔍 Bansearch '{raw_query}' ({total_items}) - All"
+                f"  [{', '.join(section_info)}]"
+            )
+            text = header + ":\n" + "\n".join(page_lines)
+        else:
+            per_page      = 10
+            resolved_page = resolve_page(page, len(all_entries), per_page)
+            page_lines, current_page, total_pages, total_items = paginate_lines(
+                all_entries, resolved_page, per_page=per_page
+            )
 
-        header = (
-            f"🔍 Bansearch '{raw_query}' ({total_items}) - Page {current_page}/{total_pages}"
-            f"  [{', '.join(section_info)}]"
-        )
-        text = header + ":\n" + "\n".join(page_lines)
+            header = (
+                f"🔍 Bansearch '{raw_query}' ({total_items}) - Page {current_page}/{total_pages}"
+                f"  [{', '.join(section_info)}]"
+            )
+            text = header + ":\n" + "\n".join(page_lines)
 
-        if current_page < total_pages:
-            text += f"\n\nUse {self.command_prefix}bansearch {raw_query} {current_page + 1} for the next page."
+            if current_page < total_pages:
+                text += f"\n\nUse {self.command_prefix}bansearch {raw_query} {current_page + 1} for the next page."
 
         await self.bot_send_message(mto=ADMIN_ROOM, mbody=text, mtype="groupchat")
 
 
-    async def cmd_banlist(self, room: str, page: int = 1) -> None:
+    async def cmd_banlist(self, room: str, page: int = 1, show_all: bool = False) -> None:
         """
-        Show bans with pagination.
+        Show bans with optional pagination.
         Admin Room: full info (all bans)
         Protected Rooms: temporary bans only, anonymized
         """
@@ -282,22 +291,28 @@ class BanQueryMixin:
             if not entries:
                 text = "📋 Banlist:\nNo active temporary bans." if room != ADMIN_ROOM else "📋 Banlist:\nNo active bans."
             else:
-                per_page = 10
-                resolved_page = resolve_page(page, len(entries), per_page)
-                page_lines, current_page, total_pages, total_items = paginate_lines(
-                    entries, resolved_page, per_page=per_page
-                )
+                if show_all:
+                    page_lines = entries
+                    total_items = len(entries)
+                    header = f"📋 Banlist ({total_items}) - All:"
+                    text = header + "\n" + "\n".join(page_lines)
+                else:
+                    per_page = 10
+                    resolved_page = resolve_page(page, len(entries), per_page)
+                    page_lines, current_page, total_pages, total_items = paginate_lines(
+                        entries, resolved_page, per_page=per_page
+                    )
 
-                header = f"📋 Banlist ({total_items}) - Page {current_page}/{total_pages}:"
-                text = header + "\n" + "\n".join(page_lines)
+                    header = f"📋 Banlist ({total_items}) - Page {current_page}/{total_pages}:"
+                    text = header + "\n" + "\n".join(page_lines)
 
-                if current_page < total_pages:
-                    text += f"\n\nUse {self.command_prefix}banlist {current_page + 1} for the next page."
+                    if current_page < total_pages:
+                        text += f"\n\nUse {self.command_prefix}banlist {current_page + 1} for the next page."
 
         await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
 
 
-    async def cmd_banlist_rtbl(self, room: str, page: int = 1) -> None:
+    async def cmd_banlist_rtbl(self, room: str, page: int = 1, show_all: bool = False) -> None:
         """
         Show entries from all RTBL subscriptions (hashes + domains).
         Admin room only. Groups entries by subscription source.
@@ -350,18 +365,26 @@ class BanQueryMixin:
             )
             return
 
-        per_page = 10
-        resolved_page = resolve_page(page, len(entries), per_page)
-        page_lines, current_page, total_pages, total_items = paginate_lines(
-            entries, resolved_page, per_page=per_page
-        )
+        if show_all:
+            page_lines = entries
+            total_items = len(entries)
+            text = (
+                f"🛡️ RTBL Banlist ({total_items}) - All:\n"
+                + "\n".join(page_lines)
+            )
+        else:
+            per_page = 10
+            resolved_page = resolve_page(page, len(entries), per_page)
+            page_lines, current_page, total_pages, total_items = paginate_lines(
+                entries, resolved_page, per_page=per_page
+            )
 
-        text = (
-            f"🛡️ RTBL Banlist ({total_items}) - Page {current_page}/{total_pages}:\n"
-            + "\n".join(page_lines)
-        )
-        if current_page < total_pages:
-            text += f"\n\nUse {self.command_prefix}banlist rtbl {current_page + 1} for the next page."
+            text = (
+                f"🛡️ RTBL Banlist ({total_items}) - Page {current_page}/{total_pages}:\n"
+                + "\n".join(page_lines)
+            )
+            if current_page < total_pages:
+                text += f"\n\nUse {self.command_prefix}banlist rtbl {current_page + 1} for the next page."
 
         await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
 

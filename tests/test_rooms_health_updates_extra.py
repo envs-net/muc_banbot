@@ -159,3 +159,23 @@ async def test_version_check_helpers_and_announcement(monkeypatch):
     assert remote == "99.0.0"
     assert error is None
     assert "New bot version" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_list_all_disables_paging(temp_db_path, monkeypatch):
+    import banbot.rooms as rooms_module
+
+    monkeypatch.setattr(rooms_module, "ADMIN_ROOM", "admin@conference.example.org")
+    monkeypatch.setattr(rooms_module, "NICK", "BanBot")
+    bot = RoomHealthBot()
+    bot.protected_rooms = {f"room{idx}@conference.example.test" for idx in range(12)}
+    await bot.setup_db()
+    try:
+        await bot.cmd_room(["list", "all"], "admin@conference.example.org")
+        body = bot.sent[-1]["mbody"]
+        assert "Protected Rooms (12) - All" in body
+        assert "Page" not in body
+        assert "room0@conference.example.test" in body
+        assert "room11@conference.example.test" in body
+    finally:
+        await bot.db.close()

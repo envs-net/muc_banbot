@@ -214,3 +214,68 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
         assert "Public Policy: enabled" in body
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_all_mode_disables_paging_for_audit_banlists_and_bansearch(temp_db_path):
+    bot = AuditStatusQueryBot()
+    await bot.setup_db()
+    try:
+        for idx in range(12):
+            await bot.audit_event(
+                "ban_applied",
+                actor="admin@example.org",
+                target_type="jid",
+                target=f"user{idx}@example.org",
+                jid=f"user{idx}@example.org",
+                comment="all-mode",
+            )
+            await bot.upsert_ban_db(
+                f"user{idx}@example.org",
+                f"Nick{idx}",
+                0,
+                "admin@example.org",
+                "all-mode",
+            )
+        await bot.load_bans_from_db()
+
+        await bot.db.execute(
+            "INSERT INTO rtbl_domains (domain, service_jid, node, reason) VALUES (?, ?, ?, ?)",
+            ("all.example", "xmppbl.org", "spam_source_domains", "all-mode"),
+        )
+        await bot.db.execute(
+            "INSERT INTO rtbl_hashes (hash, service_jid, node, reason) VALUES (?, ?, ?, ?)",
+            ("b" * 64, "xmppbl.org", "muc_bans_sha256", "all-mode"),
+        )
+        await bot.db.commit()
+
+        await bot.cmd_audit(["all"], "admin@conference.example.org")
+        body = last_body(bot)
+        assert "Audit log (12) - All" in body
+        assert "Page" not in body
+        assert "user0@example.org" in body
+        assert "user11@example.org" in body
+
+        await bot.cmd_banlist("admin@conference.example.org", show_all=True)
+        body = last_body(bot)
+        assert "Banlist (12) - All" in body
+        assert "Page" not in body
+        assert "user0@example.org" in body
+        assert "user11@example.org" in body
+
+        await bot.cmd_banlist_rtbl("admin@conference.example.org", show_all=True)
+        body = last_body(bot)
+        assert "RTBL Banlist (2) - All" in body
+        assert "Page" not in body
+        assert "all.example" in body
+        assert "bbbbbbbbbbbbbbbb" in body
+
+        await bot.cmd_bansearch("all-mode", show_all=True)
+        body = last_body(bot)
+        assert "Bansearch 'all-mode'" in body
+        assert "- All" in body
+        assert "Page" not in body
+        assert "user0@example.org" in body
+        assert "user11@example.org" in body
+    finally:
+        await bot.db.close()

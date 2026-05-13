@@ -135,6 +135,16 @@ def normalize_ban_target(jid: str | None = None, nick: str | None = None) -> tup
     raise ValueError("Ban target requires jid/domain or nick")
 
 
+
+def wants_all_pages(args: list[str]) -> bool:
+    """Return True when command arguments request unpaginated output."""
+    return any(str(arg).lower() == "all" for arg in args)
+
+
+def without_all_pages_arg(args: list[str]) -> list[str]:
+    """Return args with any standalone all-paging marker removed."""
+    return [arg for arg in args if str(arg).lower() != "all"]
+
 def paginate_lines(lines: list[str], page: int, per_page: int = 10) -> tuple[list[str], int, int, int]:
     """
     Paginate a list of lines.
