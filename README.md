@@ -1,4 +1,4 @@
-# BanBot - XMPP Multi-Room Ban Management Bot - [![calver](https://img.shields.io/github/v/release/envs-net/muc_banbot)](https://github.com/envs-net/muc_banbot/releases/latest)
+# BanBot - XMPP Multi-Room Ban Management Bot - [![calver](https://img.shields.io/github/v/release/envs-net/muc_banbot)](https://github.com/envs-net/muc_banbot/releases/latest) - [![Build Status](https://drone.envs.net/api/badges/envs/muc_banbot/status.svg)](https://drone.envs.net/envs/muc_banbot)
 
 BanBot is an XMPP bot for centralized ban management across multiple MUC rooms (Multi-User Chat).
 
