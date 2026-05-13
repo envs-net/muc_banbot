@@ -65,4 +65,5 @@ async def test_muc_pm_from_admin_gets_admin_hint():
         FakeDirectMessage(bare="room@conference.example.org", resource="Admin")
     )
     assert bot.sent[0]["mto"] == "room@conference.example.org/Admin"
-    assert "Nice try, admin" in bot.sent[0]["mbody"]
+    assert "ban management bot" in bot.sent[0]["mbody"]
+    assert "only listen to admins" in bot.sent[0]["mbody"]
