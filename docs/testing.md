@@ -50,13 +50,36 @@ Runtime-heavy entrypoints such as `bot.py` may be excluded from coverage if they
 
 ## Property-Based Tests
 
-Hypothesis property tests cover pure parsing and matching helpers such as:
+Hypothesis property tests cover pure parsing, matching, and normalization helpers. They generate many input variants and check behavior that should stay true across all generated examples.
+
+Current property-test coverage includes helpers such as:
 
 * `parse_duration()`
+* `human_time()`
+* `safe_jid()` / `bare_jid()`
+* `validate_jid_format()`
+* `validate_domain_ban()`
 * `domain_matches()`
+* `looks_like_domain()`
 * `normalize_ban_target()`
+* paging helpers such as `paginate_lines()` and `resolve_page()`
+* RTBL helpers such as JID hashing, SHA-256 detection, domain detection, PubSub service/node validation, payload generation, and reason extraction
 
 They run as part of the normal pytest suite after installing `requirements-dev.txt`.
+
+Run only property-based tests:
+
+```bash
+pytest -m property
+```
+
+Run the property-test files directly:
+
+```bash
+pytest tests/test_utils_properties.py tests/test_rtbl_utils_properties.py -v
+```
+
+When Hypothesis finds a failing example, it prints the smallest counterexample it could shrink to and may write a patch under `.hypothesis/patches/`. Treat these as debugging aids. Do not commit `.hypothesis/` artifacts.
 
 ## Mutation Testing
 

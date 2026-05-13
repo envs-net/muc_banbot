@@ -21,7 +21,7 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 * 📦 Startup and manual synchronization of room bans/admins
 * 🏥 Health checks, reconnect awareness, admin-right monitoring, and dynamic `!status`
 * 🛡️ RTBL subscriptions via PubSub for SHA-256 JID hashes and plaintext domain bans
-* 🔄 Periodic RTBL refresh with quiet/no-change behavior and snapshot reconciliation  
+* 🔄 Periodic RTBL refresh with quiet/no-change behavior and snapshot reconciliation
 * ♻️ RTBL snapshot reconciliation with stale local ban cleanup
 * 📡 Optional own RTBL publish feed for local bans
 * 🧾 SQLite audit log and structured JSON event logs
@@ -32,7 +32,6 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 * ⬆️ Optional GitHub release checks
 * 🖼️ Avatar/vCard support via XEP-0054, XEP-0084, and XEP-0153
 * 🧪 Extensive pytest suite, coverage, property tests, mutation-testing support, and Drone CI
-
 
 ---
 
@@ -166,9 +165,11 @@ Run with coverage:
 pytest --cov=banbot --cov-report=term-missing
 ```
 
+The test suite also includes Hypothesis-based property tests for pure helper logic such as duration parsing, human-readable time formatting, JID/domain normalization, RTBL utilities, paging helpers, and ban-target normalization.
+
 Drone CI runs the offline pytest suite with coverage on pushes and tags to `main`. Live XMPP/Prosody and OMEMO integration tests are opt-in and skipped by default.
 
-See [docs/testing.md](docs/testing.md).
+See [docs/testing.md](docs/testing.md) for the full testing workflow and [tests/README.md](tests/README.md) for the test-suite layout.
 
 ---
 
