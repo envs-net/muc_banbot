@@ -7,11 +7,13 @@ steps:
   - name: build pytest
     image: python:3.13
     commands:
-      - python -m pip install --upgrade pip
+      - python --version
+      - python -m pip install --upgrade pip setuptools wheel
+      - cp config_sample.py config.py
       - pip install -r requirements.txt
       - pip install -r requirements-dev.txt
-      - cp config_sample.py config.py
-      - pytest --cov=banbot --cov-report=term-missing
+      - python -m py_compile banbot/*.py tests/*.py tests/integration/*.py
+      - pytest --cov=banbot --cov-report=term-missing --cov-fail-under=55
 
 trigger:
   branch:
