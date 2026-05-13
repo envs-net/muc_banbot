@@ -12,7 +12,7 @@ $EDITOR config.py
 ```python
 JID = "adminbot@example.org"
 PASSWORD = "secret"
-RESOURCE = "banbot"
+RESOURCE = "service"
 ADMIN_ROOM = "admin@conference.example.org"
 NICK = "BanBot"
 DB_FILE = "banbot.db"
@@ -42,6 +42,10 @@ These require a bot restart. `!reloadconfig` warns if they changed and keeps the
 * `RTBL_PUBLISH_SERVICE`
 * `RTBL_PUBLISH_JID_NODE`
 * `RTBL_PUBLISH_DOMAIN_NODE`
+* `OMEMO_ENABLED`
+* `OMEMO_STORAGE_FILE`
+* `OMEMO_AUTO_ENCRYPT_ADMIN_ROOM`
+* `OMEMO_PLAINTEXT_FALLBACK`
 
 ## Runtime-Reloadable Settings
 
@@ -78,9 +82,21 @@ Common runtime settings:
 
 Boolean aliases such as `true`/`false` are supported by the config loader for convenience.
 
+## vCard / Avatar Settings
+
+```python
+AVATAR_PATH = "avatar.png"
+VCARD_NICKNAME = "BanBot"
+VCARD_FN = "Ban Management Bot"
+VCARD_ORG = "Example"
+VCARD_ROLE = "Moderation Bot"
+VCARD_URL = "https://example.org"
+VCARD_NOTE = "XMPP MUC ban management bot"
+```
+
 ## OMEMO Settings
 
-See [OMEMO](omemo.md) for behavior details.
+OMEMO settings are startup-only and require a bot restart when changed. See [OMEMO](omemo.md) for behavior details.
 
 ```python
 OMEMO_ENABLED = False
@@ -105,25 +121,12 @@ See [RTBL](rtbl.md) for behavior details.
 | `RTBL_ENABLED` | Enable inbound RTBL subscriptions |
 | `RTBL_ANNOUNCE` | Announce RTBL changes in admin room |
 | `RTBL_REFRESH_INTERVAL` | Periodic refresh interval; `0` disables refresh |
-| `RTBL_PERSIST_BANS` | Persist applied RTBL matches into the main ban table |
 | `RTBL_PUBLISH_ENABLED` | Enable own local-ban publish feed |
 | `RTBL_PUBLISH_SERVICE` | PubSub service used for local publish feed |
 | `RTBL_PUBLISH_JID_NODE` | Node for SHA-256 bare-JID hashes |
 | `RTBL_PUBLISH_DOMAIN_NODE` | Node for plaintext domain bans |
 
-Successful RTBL refreshes reconcile the local cache with the current PubSub node snapshot. Stale `issuer=rtbl` bans are automatically unbanned when their RTBL source disappears.
-
-## vCard / Avatar Settings
-
-```python
-AVATAR_PATH = "avatar.png"
-VCARD_NICKNAME = "BanBot"
-VCARD_FN = "Ban Management Bot"
-VCARD_ORG = "Example"
-VCARD_ROLE = "Moderation Bot"
-VCARD_URL = "https://example.org"
-VCARD_NOTE = "XMPP MUC ban management bot"
-```
+Successful RTBL refreshes reconcile the local cache with the current PubSub node snapshot. RTBL matches that are actually applied are stored in the main ban table as `issuer=rtbl`; stale `issuer=rtbl` bans are automatically unbanned when their RTBL source disappears.
 
 Avatar/vCard data is updated on startup and after `!reloadconfig`.
 

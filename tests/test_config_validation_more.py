@@ -102,6 +102,45 @@ def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):
     assert logging.getLogger("banbot").level == logging.ERROR
 
 
+
+
+def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "RTBL_ENABLED", "yes", raising=False)
+    monkeypatch.setattr(config, "RTBL_ANNOUNCE", "yes", raising=False)
+    monkeypatch.setattr(config, "RTBL_REFRESH_INTERVAL", -1, raising=False)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_ENABLED", "yes", raising=False)
+    monkeypatch.setattr(config, "OMEMO_ENABLED", "yes", raising=False)
+    monkeypatch.setattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", "yes", raising=False)
+    monkeypatch.setattr(config, "OMEMO_PLAINTEXT_FALLBACK", "yes", raising=False)
+    bot = ConfigValidationBot()
+
+    errors, _warnings = bot._validate_config()
+
+    assert "RTBL_ENABLED must be True or False" in errors
+    assert "RTBL_ANNOUNCE must be True or False" in errors
+    assert "RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)" in errors
+    assert "RTBL_PUBLISH_ENABLED must be True or False" in errors
+    assert "OMEMO_ENABLED must be True or False" in errors
+    assert "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM must be True or False" in errors
+    assert "OMEMO_PLAINTEXT_FALLBACK must be True or False" in errors
+
+
+def test_validate_config_requires_rtbl_publish_details_when_enabled(monkeypatch):
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_SERVICE", "pubsub", raising=False)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_JID_NODE", "", raising=False)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_DOMAIN_NODE", "", raising=False)
+    bot = ConfigValidationBot()
+
+    errors, _warnings = bot._validate_config()
+
+    assert "RTBL_PUBLISH_SERVICE must be a valid JID like pubsub.domain.tld" in errors
+    assert "RTBL_PUBLISH_JID_NODE must not be empty when RTBL_PUBLISH_ENABLED=True" in errors
+    assert "RTBL_PUBLISH_DOMAIN_NODE must not be empty when RTBL_PUBLISH_ENABLED=True" in errors
+
+
 def test_resource_prefers_resource_over_legacy_ressource(monkeypatch):
     monkeypatch.setattr(config, "RESOURCE", "new", raising=False)
     monkeypatch.setattr(config, "RESSOURCE", "old", raising=False)

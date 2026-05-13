@@ -9,7 +9,7 @@ Inbound RTBL subscriptions can contain:
 * SHA-256 hashes of bare JIDs, compatible with `muc_bans_sha256`
 * Plaintext domains, used for domain-based matches
 
-When an RTBL entry matches a current occupant, BanBot applies the ban and can persist the resulting local ban in the main `bans` table with `issuer=rtbl`.
+When an RTBL entry matches a current occupant, BanBot applies the ban and stores the resulting local ban in the main `bans` table with `issuer=rtbl`.
 
 ## Commands
 

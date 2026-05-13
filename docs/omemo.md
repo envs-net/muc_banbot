@@ -4,6 +4,8 @@ BanBot can optionally send OMEMO-encrypted replies.
 
 ## Configuration
 
+OMEMO configuration is startup-only. Restart the bot after changing any `OMEMO_*` setting.
+
 ```python
 OMEMO_ENABLED = False
 OMEMO_STORAGE_FILE = "data/omemo.json"

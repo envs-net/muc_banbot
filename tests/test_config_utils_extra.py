@@ -35,15 +35,71 @@ def test_apply_log_level_falls_back_to_info_for_invalid_level():
     assert logging.getLogger("banbot").level == logging.INFO
 
 
-def test_format_startup_only_changes_includes_omemo_fields():
+def test_format_startup_only_changes_includes_rtbl_and_omemo_fields():
     bot = ConfigBot()
-    before = {"OMEMO_ENABLED": False, "OMEMO_STORAGE_FILE": "old.json"}
-    after = {"OMEMO_ENABLED": True, "OMEMO_STORAGE_FILE": "new.json"}
+    before = {
+        "RTBL_ENABLED": False,
+        "RTBL_PUBLISH_ENABLED": False,
+        "RTBL_PUBLISH_SERVICE": "pubsub.old.example.org",
+        "RTBL_PUBLISH_JID_NODE": "old_hashes",
+        "RTBL_PUBLISH_DOMAIN_NODE": "old_domains",
+        "OMEMO_ENABLED": False,
+        "OMEMO_STORAGE_FILE": "old.json",
+        "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM": False,
+        "OMEMO_PLAINTEXT_FALLBACK": False,
+    }
+    after = {
+        "RTBL_ENABLED": True,
+        "RTBL_PUBLISH_ENABLED": True,
+        "RTBL_PUBLISH_SERVICE": "pubsub.new.example.org",
+        "RTBL_PUBLISH_JID_NODE": "new_hashes",
+        "RTBL_PUBLISH_DOMAIN_NODE": "new_domains",
+        "OMEMO_ENABLED": True,
+        "OMEMO_STORAGE_FILE": "new.json",
+        "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM": True,
+        "OMEMO_PLAINTEXT_FALLBACK": True,
+    }
 
     changes = bot._format_startup_only_changes(before, after)
 
+    assert "- RTBL_ENABLED: False → True" in changes
+    assert "- RTBL_PUBLISH_ENABLED: False → True" in changes
+    assert "- RTBL_PUBLISH_SERVICE: 'pubsub.old.example.org' → 'pubsub.new.example.org'" in changes
+    assert "- RTBL_PUBLISH_JID_NODE: 'old_hashes' → 'new_hashes'" in changes
+    assert "- RTBL_PUBLISH_DOMAIN_NODE: 'old_domains' → 'new_domains'" in changes
     assert "- OMEMO_ENABLED: False → True" in changes
     assert "- OMEMO_STORAGE_FILE: 'old.json' → 'new.json'" in changes
+    assert "- OMEMO_AUTO_ENCRYPT_ADMIN_ROOM: False → True" in changes
+    assert "- OMEMO_PLAINTEXT_FALLBACK: False → True" in changes
+
+
+
+
+def test_startup_config_snapshot_includes_rtbl_and_omemo(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "RTBL_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_SERVICE", "pubsub.example.org", raising=False)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_JID_NODE", "hashes", raising=False)
+    monkeypatch.setattr(config, "RTBL_PUBLISH_DOMAIN_NODE", "domains", raising=False)
+    monkeypatch.setattr(config, "OMEMO_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "OMEMO_STORAGE_FILE", "data/omemo-test.json", raising=False)
+    monkeypatch.setattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", True, raising=False)
+    monkeypatch.setattr(config, "OMEMO_PLAINTEXT_FALLBACK", False, raising=False)
+    bot = ConfigBot()
+
+    snapshot = bot._startup_config_snapshot()
+
+    assert snapshot["RTBL_ENABLED"] is True
+    assert snapshot["RTBL_PUBLISH_ENABLED"] is True
+    assert snapshot["RTBL_PUBLISH_SERVICE"] == "pubsub.example.org"
+    assert snapshot["RTBL_PUBLISH_JID_NODE"] == "hashes"
+    assert snapshot["RTBL_PUBLISH_DOMAIN_NODE"] == "domains"
+    assert snapshot["OMEMO_ENABLED"] is True
+    assert snapshot["OMEMO_STORAGE_FILE"] == "data/omemo-test.json"
+    assert snapshot["OMEMO_AUTO_ENCRYPT_ADMIN_ROOM"] is True
+    assert snapshot["OMEMO_PLAINTEXT_FALLBACK"] is False
 
 
 def test_format_config_changes_reports_runtime_changes():

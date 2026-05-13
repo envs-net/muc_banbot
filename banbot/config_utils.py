@@ -155,6 +155,11 @@ class ConfigMixin:
             "ADMIN_ROOM": getattr(config, "ADMIN_ROOM", None),
             "NICK": getattr(config, "NICK", None),
             "DB_FILE": getattr(config, "DB_FILE", None),
+            "RTBL_ENABLED": getattr(config, "RTBL_ENABLED", False),
+            "RTBL_PUBLISH_ENABLED": getattr(config, "RTBL_PUBLISH_ENABLED", False),
+            "RTBL_PUBLISH_SERVICE": getattr(config, "RTBL_PUBLISH_SERVICE", None),
+            "RTBL_PUBLISH_JID_NODE": getattr(config, "RTBL_PUBLISH_JID_NODE", None),
+            "RTBL_PUBLISH_DOMAIN_NODE": getattr(config, "RTBL_PUBLISH_DOMAIN_NODE", None),
             "OMEMO_ENABLED": getattr(config, "OMEMO_ENABLED", False),
             "OMEMO_STORAGE_FILE": getattr(config, "OMEMO_STORAGE_FILE", None),
             "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM": getattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", False),
@@ -171,6 +176,11 @@ class ConfigMixin:
             "ADMIN_ROOM",
             "NICK",
             "DB_FILE",
+            "RTBL_ENABLED",
+            "RTBL_PUBLISH_ENABLED",
+            "RTBL_PUBLISH_SERVICE",
+            "RTBL_PUBLISH_JID_NODE",
+            "RTBL_PUBLISH_DOMAIN_NODE",
             "OMEMO_ENABLED",
             "OMEMO_STORAGE_FILE",
             "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",
@@ -456,8 +466,9 @@ class ConfigMixin:
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:
         """Reload config.py, validate it, apply reloadable settings, and return (changes, errors, warnings).
 
-        Startup-only settings (JID, PASSWORD, RESOURCE/RESSOURCE, ADMIN_ROOM, NICK, DB_FILE)
-        are intentionally not applied at runtime. If they changed, the old in-memory
+        Startup-only settings (bot identity, admin room, DB file, RTBL enable/publish
+        setup, and OMEMO setup) are intentionally not applied at runtime. If they
+        changed, the old in-memory
         values remain active and a restart warning is returned.
         """
         before = self._runtime_config_snapshot()

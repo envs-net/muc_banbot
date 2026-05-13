@@ -75,7 +75,7 @@ NICK = "BanBot"
 DB_FILE = "banbot.db"
 ```
 
-Most runtime settings can be reloaded with `!reloadconfig`. Startup-only settings such as `JID`, `PASSWORD`, `RESOURCE`, `ADMIN_ROOM`, `NICK`, and `DB_FILE` require a restart.
+Most runtime settings can be reloaded with `!reloadconfig`. Startup-only settings such as the bot account/room identity, database path, RTBL enable/publish setup, and OMEMO setup require a restart.
 
 See [docs/configuration.md](docs/configuration.md) for the full configuration reference.
 
