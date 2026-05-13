@@ -295,7 +295,9 @@ mutmut show <mutant-id>
 
 The explicit `PYTHONPATH` keeps the local `banbot` package importable inside mutmut's temporary `mutants/` workspace.
 
-The mutation configuration focuses on `banbot/utils.py`, `banbot/moderation.py` and `banbot/rtbl_apply.py`, using the relevant unit/property/mutation-focused tests as the runner. Start by reviewing survived mutants in `banbot/utils.py`, then security-sensitive moderation or RTBL apply mutants. `no coverage` mutants in runtime-heavy XMPP paths are expected and should only be chased when they protect important behavior.
+The mutation configuration focuses on `banbot/utils.py` and `banbot/rtbl_apply.py`, using the relevant unit/property/mutation-focused tests as the runner. These modules provide the best signal-to-noise ratio for mutation testing because they contain pure helper logic and RTBL business rules. Start by reviewing survived mutants in `banbot/utils.py`, then RTBL apply mutants. `no coverage` mutants in runtime-heavy XMPP paths are expected and should only be chased when they protect important behavior.
+
+`banbot/moderation.py` is intentionally not part of the default mutation target set anymore. Its largest paths (`ban_all()` and `apply_ban_to_room()`) are heavily coupled to XMPP room I/O, audit side effects and admin-protection checks, which makes mutation testing noisy. For moderation changes, prefer focused regression tests for the changed behavior and run targeted mutation checks manually only when useful.
 
 The live XMPP/Prosody and OMEMO integration checks are opt-in and are skipped by default. They require real test accounts, test MUCs and credentials:
 

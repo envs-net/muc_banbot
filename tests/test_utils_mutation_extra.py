@@ -143,3 +143,178 @@ def test_paginate_lines_and_resolve_page_edge_cases():
     assert paginate_lines(["a", "b", "c"], 99, per_page=2) == (["c"], 2, 2, 3)
     assert resolve_page(-1, 0, per_page=10) == 1
     assert resolve_page(-1, 21, per_page=10) == 3
+
+
+def test_parse_duration_error_messages_are_specific():
+    with pytest.raises(ValueError, match="Invalid duration format"):
+        parse_duration("10w")
+    with pytest.raises(ValueError, match="Invalid duration number"):
+        parse_duration("xm")
+    with pytest.raises(ValueError, match="greater than zero"):
+        parse_duration("0m")
+    with pytest.raises(ValueError, match="greater than zero"):
+        parse_duration("-5m")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1s", 1),
+        ("1S", 1),
+        ("01m", 60),
+        ("0002h", 7200),
+        ("3D", 259200),
+    ],
+)
+def test_parse_duration_numeric_boundaries_and_case(value, expected):
+    assert parse_duration(value) == expected
+
+
+def test_safe_jid_accepts_non_string_values_and_only_escapes_at_signs():
+    assert safe_jid(None) == "None"
+    assert safe_jid(123) == "123"
+    assert safe_jid("@start@end@") == "@\u200bstart@\u200bend@\u200b"
+
+
+@pytest.mark.parametrize(
+    "jid",
+    [
+        None,
+        "",
+        "userexample.org",
+        "user@@example.org",
+        "user@example.org@evil.org",
+        "@example.org",
+        "user@",
+        "user@example",
+        "user@localhost",
+    ],
+)
+def test_validate_jid_format_rejects_every_required_part_mutation(jid):
+    assert validate_jid_format(jid) is False
+
+
+@pytest.mark.parametrize(
+    "jid",
+    [
+        "a@b.cd",
+        "user.name+tag@sub.example.org",
+        "UPPER@Example.Org",
+    ],
+)
+def test_validate_jid_format_accepts_basic_two_part_domains(jid):
+    assert validate_jid_format(jid) is True
+
+
+@pytest.mark.parametrize(
+    ("domain", "message_part"),
+    [
+        ("", "*."),
+        (".", "*."),
+        ("*.org", "*.org"),
+        ("localhost", "*.localhost"),
+        ("*.", "*."),
+    ],
+)
+def test_validate_domain_ban_rejection_message_contains_normalized_target(domain, message_part):
+    ok, message = validate_domain_ban(domain)
+    assert ok is False
+    assert message_part in message
+    assert "too generic" in message
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "example.org",
+        "*.example.org",
+        "Example.Org.",
+        "..example.org..",
+        "*.deep.sub.example.org",
+    ],
+)
+def test_validate_domain_ban_accepts_two_or_more_labels_after_cleanup(domain):
+    ok, message = validate_domain_ban(domain)
+    assert ok is True
+    assert message == ""
+
+
+@pytest.mark.parametrize(
+    ("user_domain", "banned_domain"),
+    [
+        ("example.org", "example.org"),
+        ("sub.example.org", "example.org"),
+        ("deep.sub.example.org.", "example.org."),
+        ("EXAMPLE.ORG", "example.org"),
+    ],
+)
+def test_domain_matches_positive_boundary_cases(user_domain, banned_domain):
+    assert domain_matches(user_domain, banned_domain) is True
+
+
+@pytest.mark.parametrize(
+    ("user_domain", "banned_domain"),
+    [
+        (None, "example.org"),
+        ("example.org", None),
+        ("", "example.org"),
+        ("example.org", ""),
+        ("badexample.org", "example.org"),
+        ("example.org.evil", "example.org"),
+        ("subexample.org", "example.org"),
+    ],
+)
+def test_domain_matches_negative_boundary_cases(user_domain, banned_domain):
+    assert domain_matches(user_domain, banned_domain) is False
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (" example.org ", True),
+        ("sub.example.org", True),
+        ("example", False),
+        ("*.example.org", False),
+        ("user@example.org", False),
+        ("example.org/resource", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_looks_like_domain_requires_plain_bare_domain_shape(value, expected):
+    assert looks_like_domain(value) is expected
+
+
+def test_normalize_ban_target_empty_jid_falls_back_to_nick():
+    assert normalize_ban_target(jid="", nick=" Nick ") == (
+        "nick",
+        "nick",
+        None,
+        "nick",
+    )
+
+
+def test_normalize_ban_target_domain_strips_target_but_preserves_normalized_jid_marker():
+    target_type, target, normalized_jid, normalized_nick = normalize_ban_target(
+        jid="*.Example.Org.",
+        nick=" Reporter ",
+    )
+    assert target_type == "domain"
+    assert target == "example.org"
+    assert normalized_jid == "*.example.org."
+    assert normalized_nick == "reporter"
+
+
+def test_paginate_lines_exact_multiple_and_single_item_pages():
+    lines = ["a", "b", "c", "d"]
+    assert paginate_lines(lines, 1, per_page=2) == (["a", "b"], 1, 2, 4)
+    assert paginate_lines(lines, 2, per_page=2) == (["c", "d"], 2, 2, 4)
+    assert paginate_lines(lines, 3, per_page=2) == (["c", "d"], 2, 2, 4)
+    assert paginate_lines(lines, 2, per_page=1) == (["b"], 2, 4, 4)
+
+
+def test_resolve_page_clamps_low_high_and_last_for_exact_multiples():
+    assert resolve_page(-1, 20, per_page=10) == 2
+    assert resolve_page(0, 20, per_page=10) == 1
+    assert resolve_page(99, 20, per_page=10) == 2
+    assert resolve_page(2, 20, per_page=10) == 2

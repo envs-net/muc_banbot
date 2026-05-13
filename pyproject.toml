@@ -1,7 +1,6 @@
 [tool.mutmut]
 paths_to_mutate = [
     "banbot/utils.py",
-    "banbot/moderation.py",
     "banbot/rtbl_apply.py",
 ]
 
@@ -16,10 +15,6 @@ pytest_add_cli_args_test_selection = [
     "tests/test_utils.py",
     "tests/test_utils_properties.py",
     "tests/test_utils_mutation_extra.py",
-    "tests/test_moderation_flows.py",
-    "tests/test_moderation_apply_room_extra.py",
-    "tests/test_moderation_mutation_extra.py",
-    "tests/test_admin_protection.py",
     "tests/test_rtbl_apply_extra.py",
     "tests/test_rtbl_apply_db_extra.py",
     "tests/test_rtbl_apply_mutation_extra.py",
