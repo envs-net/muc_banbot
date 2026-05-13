@@ -1,0 +1,160 @@
+# Command Reference
+
+Examples assume the default command prefix `!`. If `COMMAND_PREFIX` is changed, replace `!` accordingly.
+
+## Paging
+
+Several commands support pagination. Use a page number, `last`, or `all`:
+
+```text
+!audit
+!audit 2
+!audit last
+!audit all
+
+!banlist all
+!banlist rtbl all
+!bansearch all spam
+!ignore list all
+!room list all
+```
+
+`all` disables paging and prints the complete result set. Existing page and `last` syntax remain unchanged.
+
+## Admin Room Commands
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `!help` | Shows admin help | `!help` |
+| `!config` | Shows current bot configuration | `!config` |
+| `!reloadconfig` | Reloads runtime config safely | `!reloadconfig` |
+| `!status` | Shows health, rooms, uptime, bans, DB, RTBL, and workers | `!status` |
+| `!checkupdate` | Checks whether a newer GitHub release is available | `!checkupdate` |
+| `!whoami` | Shows affiliation, role, and permissions | `!whoami` |
+
+## Rooms and Sync
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `!room add <room>` | Adds a protected room and stores it in the DB | `!room add secret@conference.example.org` |
+| `!room remove <room>` | Removes a protected room and makes the bot leave | `!room remove secret@conference.example.org` |
+| `!room list [all/page]` | Lists protected rooms | `!room list all` |
+| `!sync` | Rejoins rooms, verifies rights, applies missing active bans | `!sync` |
+| `!syncadmins` | Updates admins from the admin room | `!syncadmins` |
+| `!syncbans` | Reads room outcasts into the DB and reapplies active bans | `!syncbans` |
+
+### Sync differences
+
+* `!sync` is faster and applies only bans that are missing in rooms.
+* `!syncbans` is comprehensive: it also adopts orphan room outcasts into the DB and removes expired tempban outcasts.
+* `sync_bans_startup()` runs internally on startup.
+
+## Ban Management
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `!ban <jid/nick/domain> [comment]` | Bans a JID, nick, or wildcard domain | `!ban alice@example.org spam` / `!ban *.evil.org` |
+| `!tempban <jid/nick> <duration> [comment]` | Adds a temporary ban | `!tempban bob 10m rude behavior` |
+| `!unban <jid/nick/domain>` | Removes a ban | `!unban bob` / `!unban *.evil.org` |
+| `!banlist [all/page/last]` | Shows active bans | `!banlist all` |
+| `!banlist rtbl [all/page/last]` | Shows raw RTBL hashes/domains | `!banlist rtbl all` |
+| `!bansearch [all] <query>` | Searches target, JID, nick, domain, issuer, comment, and RTBL reason | `!bansearch all reason:abuse` |
+| `!why <nick/jid>` | Shows reason and remaining time; admin output includes recent audit history | `!why alice` |
+| `!audit [all/page/last/query]` | Shows audit events, optionally filtered | `!audit all alice` |
+
+### Durations
+
+Temporary bans support duration suffixes:
+
+```text
+10s
+10m
+2h
+1d
+```
+
+`MAX_TEMPBAN_DAYS` limits the maximum allowed duration.
+
+## Ignorelist / Whitelist
+
+`!whitelist` is an alias for `!ignore`.
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `!ignore list [all/page/last]` | Shows ignorelist entries | `!ignore list all` |
+| `!ignore all` | Alias for full list output | `!ignore all` |
+| `!ignore add <jid/domain> [reason]` | Adds a protected exact JID or wildcard domain | `!ignore add alice@example.org trusted user` |
+| `!ignore remove <jid/domain>` | Removes an entry | `!ignore remove alice@example.org` |
+| `!whitelist list [all/page/last]` | Alias for list | `!whitelist list all` |
+| `!whitelist add/remove ...` | Alias for add/remove | `!whitelist add *.example.org local domain` |
+
+Exact JID entries protect that JID from all bans. Domain entries protect against domain-based bans and RTBL domain matches, but do not block explicit manual JID bans on that domain.
+
+## RTBL Commands
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `!rtbl list` | Shows active subscriptions and publish-feed counts | `!rtbl list` |
+| `!rtbl add <service> <node>` | Subscribes to an RTBL PubSub node | `!rtbl add xmppbl.org muc_bans_sha256` |
+| `!rtbl delete <service> [node]` | Removes one or all subscriptions for a service | `!rtbl delete xmppbl.org muc_bans_sha256` |
+| `!rtbl refresh [service] [node]` | Refreshes all, one service, or one node | `!rtbl refresh xmppbl.org muc_bans_sha256` |
+| `!rtbl publish status` | Shows own publish-feed status and local publish counts | `!rtbl publish status` |
+| `!rtbl publish sync` | Publishes current local non-RTBL bans | `!rtbl publish sync` |
+
+See [RTBL](rtbl.md) for behavior details.
+
+## Public Policy Commands
+
+Admin-room management:
+
+| Command | Description |
+| --- | --- |
+| `!policy show` | Shows configured policy text and enable state |
+| `!policy set <text>` | Sets and enables policy text; use literal `\n` for line breaks |
+| `!policy clear` | Clears and disables policy text |
+| `!policy enable` | Enables protected-room `!rules` / `!policy` output |
+| `!policy disable` | Disables public policy output without deleting text |
+
+Protected-room public commands:
+
+```text
+!rules
+!policy
+```
+
+Placeholders supported in policy text:
+
+* `{prefix}` - Current command prefix
+* `{room}` - Current room JID
+* `{room_count}` - Number of protected rooms
+* `{admin_room}` - Admin room JID
+* `{bot_name}` - Bot nickname/name
+
+## Import / Export
+
+| Command | Description |
+| --- | --- |
+| `!export` | Exports all bans to `bans_export_TIMESTAMP.csv` |
+| `!import <file>` | Imports bans from CSV with validation and pre-import DB backup |
+
+See [Import / Export](import-export.md).
+
+## Public Protected-Room Commands
+
+Public commands are restricted and rate-limited in protected rooms:
+
+| Command | Description |
+| --- | --- |
+| `!help` | Shows restricted help |
+| `!whoami` | Shows affiliation/role/permissions |
+| `!banlist [all/page/last]` | Shows active temporary bans if enabled |
+| `!why <jid/nick>` | Shows reason and remaining time for a ban |
+| `!rules` / `!policy` | Shows public moderation policy if configured |
+
+Visibility rules:
+
+* Permanent bans are only shown in the admin room.
+* Protected-room banlists show only temporary bans.
+* JIDs and admin issuers are anonymized in protected rooms.
+* RTBL bans are shown as `by rtbl`.
+* Admin-room use is not rate-limited.
