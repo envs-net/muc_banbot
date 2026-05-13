@@ -1,0 +1,8 @@
+[tool.mutmut]
+paths_to_mutate = [
+    "banbot/utils.py",
+    "banbot/moderation.py",
+    "banbot/rtbl_apply.py",
+]
+tests_dir = ["tests"]
+runner = "python -m pytest tests/test_utils.py tests/test_utils_properties.py tests/test_moderation_flows.py tests/test_moderation_apply_room_extra.py tests/test_rtbl_apply_extra.py tests/test_rtbl_apply_db_extra.py -q"

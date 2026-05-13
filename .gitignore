@@ -10,3 +10,8 @@ bans_export_*.csv
 bans_import_*.csv
 import_*.csv
 *.backup-before-import-*
+
+.hypothesis/
+.mutmut-cache/
+
+mutants/

@@ -283,6 +283,18 @@ Run with coverage details:
 pytest --cov=banbot --cov-report=term-missing
 ```
 
+The test suite also includes property-based tests powered by Hypothesis for pure parsing and matching helpers such as duration parsing, domain matching and ban-target normalization. These run as part of the normal pytest suite once `requirements-dev.txt` is installed.
+
+Mutation testing is available as an optional, slower local quality check for critical business-logic modules. It is intentionally not part of Drone CI by default.
+
+```bash
+mutmut run
+mutmut results
+mutmut show <mutant-id>
+```
+
+The mutation configuration focuses on `banbot/utils.py`, `banbot/moderation.py` and `banbot/rtbl_apply.py`, using the relevant unit/property tests as the runner.
+
 The live XMPP/Prosody and OMEMO integration checks are opt-in and are skipped by default. They require real test accounts, test MUCs and credentials:
 
 ```bash
