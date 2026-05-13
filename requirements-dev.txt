@@ -1,0 +1,5 @@
+pytest>=8
+pytest-asyncio>=0.23
+pytest-mock>=3.12
+coverage>=7
+ruff>=0.6
