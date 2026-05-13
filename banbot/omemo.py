@@ -167,6 +167,28 @@ else:
 class OmemoMixin:
     """Optional OMEMO setup and encrypted send helpers."""
 
+    def _configure_omemo_dependency_logging(self) -> None:
+        """Reduce noisy third-party OMEMO logs during normal bot operation.
+
+        slixmpp-omemo/omemo can emit very noisy warnings for broken, empty or
+        inaccessible device bundles. Those devices/recipients are handled by
+        skipping unusable entries, so keep dependency logs quiet unless the bot
+        is running with DEBUG logging enabled.
+        """
+        root_level = logging.getLogger().getEffectiveLevel()
+
+        # Keep full dependency logging when the operator explicitly asks for DEBUG.
+        if root_level <= logging.DEBUG:
+            return
+
+        for logger_name in (
+            "omemo",
+            "omemo.core",
+            "slixmpp_omemo",
+            "slixmpp_omemo.xep_0384",
+        ):
+            logging.getLogger(logger_name).setLevel(logging.ERROR)
+
     def configure_omemo(self) -> None:
         """Load OMEMO config and register the plugin when enabled."""
         import config
@@ -187,6 +209,8 @@ class OmemoMixin:
         if not self.omemo_enabled:
             log.info("OMEMO: disabled")
             return
+
+        self._configure_omemo_dependency_logging()
 
         if not OMEMO_AVAILABLE or XEP_0384Impl is None:
             log.error(
