@@ -288,12 +288,14 @@ The test suite also includes property-based tests powered by Hypothesis for pure
 Mutation testing is available as an optional, slower local quality check for critical business-logic modules. It is intentionally not part of Drone CI by default.
 
 ```bash
-mutmut run
+PYTHONPATH="$PWD" mutmut run
 mutmut results
 mutmut show <mutant-id>
 ```
 
-The mutation configuration focuses on `banbot/utils.py`, `banbot/moderation.py` and `banbot/rtbl_apply.py`, using the relevant unit/property tests as the runner.
+The explicit `PYTHONPATH` keeps the local `banbot` package importable inside mutmut's temporary `mutants/` workspace.
+
+The mutation configuration focuses on `banbot/utils.py`, `banbot/moderation.py` and `banbot/rtbl_apply.py`, using the relevant unit/property/mutation-focused tests as the runner. Start by reviewing survived mutants in `banbot/utils.py`, then security-sensitive moderation or RTBL apply mutants. `no coverage` mutants in runtime-heavy XMPP paths are expected and should only be chased when they protect important behavior.
 
 The live XMPP/Prosody and OMEMO integration checks are opt-in and are skipped by default. They require real test accounts, test MUCs and credentials:
 
