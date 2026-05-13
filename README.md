@@ -1,4 +1,4 @@
-# BanBot - XMPP Multi-Room Ban Management Bot - [![calver](https://img.shields.io/github/v/release/envs-net/muc_banbot)](https://github.com/envs-net/muc_banbot/releases/latest) - [![Build Status](https://drone.envs.net/api/badges/envs/muc_banbot/status.svg)](https://drone.envs.net/envs/muc_banbot)
+# BanBot - XMPP Multi-Room Ban Management Bot - [![calver](https://img.shields.io/github/v/release/envs-net/muc_banbot)](https://github.com/envs-net/muc_banbot/releases/latest) / [![Build Status](https://drone.envs.net/api/badges/envs/muc_banbot/status.svg)](https://drone.envs.net/envs/muc_banbot)
 
 BanBot is an XMPP bot for centralized ban management across multiple MUC rooms (Multi-User Chat).
 
@@ -256,6 +256,41 @@ You can run `<prefix>reloadconfig` in the admin room to apply most changes immed
 ```bash
 python muc_banbot.py
 ```
+
+### 7. Run the automated tests
+
+BanBot includes a pytest suite covering helpers, database behavior, command routing, moderation flows, RTBL handling, messaging, OMEMO glue, import/export, and optional live integration contracts.
+
+Install the normal and development dependencies in a virtualenv:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
+
+Run the offline test suite:
+
+```bash
+pytest
+```
+
+Run with coverage details:
+
+```bash
+pytest --cov=banbot --cov-report=term-missing
+```
+
+The live XMPP/Prosody and OMEMO integration checks are opt-in and are skipped by default. They require real test accounts, test MUCs and credentials:
+
+```bash
+RUN_XMPP_INTEGRATION=1 pytest -m integration -v
+RUN_OMEMO_INTEGRATION=1 pytest -m omemo -v
+```
+
+Drone CI runs the offline pytest suite with coverage on pushes and tags to `main`.
 
 ---
 
