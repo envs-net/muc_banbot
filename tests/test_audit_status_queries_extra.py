@@ -221,6 +221,30 @@ async def test_all_mode_disables_paging_for_audit_banlists_and_bansearch(temp_db
     bot = AuditStatusQueryBot()
     await bot.setup_db()
     try:
+        await bot.db.execute(
+            """
+            CREATE TABLE rtbl_domains (
+                domain TEXT,
+                service_jid TEXT,
+                node TEXT,
+                reason TEXT,
+                created_at INTEGER DEFAULT 0
+            )
+            """
+        )
+        await bot.db.execute(
+            """
+            CREATE TABLE rtbl_hashes (
+                hash TEXT,
+                service_jid TEXT,
+                node TEXT,
+                reason TEXT,
+                created_at INTEGER DEFAULT 0
+            )
+            """
+        )
+        await bot.db.commit()
+
         for idx in range(12):
             await bot.audit_event(
                 "ban_applied",
