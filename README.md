@@ -290,6 +290,18 @@ RUN_XMPP_INTEGRATION=1 pytest -m integration -v
 RUN_OMEMO_INTEGRATION=1 pytest -m omemo -v
 ```
 
+For the live MUC command smoke test, run BanBot separately in a dedicated test environment and provide a sender account that may join the protected test room:
+
+```bash
+RUN_XMPP_INTEGRATION=1 \
+BANBOT_TEST_SENDER_JID='tester@example.org' \
+BANBOT_TEST_SENDER_PASSWORD='secret' \
+BANBOT_TEST_PROTECTED_ROOM='test@conference.example.org' \
+BANBOT_TEST_COMMAND='!help' \
+BANBOT_TEST_EXPECT='BanBot' \
+pytest tests/integration/test_live_muc_command_flow.py -v
+```
+
 Drone CI runs the offline pytest suite with coverage on pushes and tags to `main`.
 
 ---
