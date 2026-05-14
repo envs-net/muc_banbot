@@ -71,10 +71,9 @@ OMEMO_ENABLED = False
 # Keep this file persistent and private. Losing it creates a new OMEMO identity.
 OMEMO_STORAGE_FILE = "data/omemo.json"
 
-# Automatically encrypt proactive bot-generated groupchat messages in the admin room.
-# Command replies still follow the incoming command: encrypted commands get
-# encrypted replies, plaintext commands get plaintext replies.
-OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
+# Automatically encrypt proactive bot messages to the admin room when OMEMO is enabled.
+# Incoming encrypted commands are always answered encrypted regardless of this setting.
+OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = True
 
 # False is safer: if encryption is required and fails, the bot will not leak the
 # message as plaintext. Set True only if you explicitly want fallback.

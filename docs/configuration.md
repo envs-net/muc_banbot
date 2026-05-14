@@ -103,7 +103,7 @@ OMEMO is optional. The bot can run without `slixmpp-omemo`; if `OMEMO_ENABLED=Tr
 ```python
 OMEMO_ENABLED = False
 OMEMO_STORAGE_FILE = "data/omemo.json"
-OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
+OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = True
 OMEMO_PLAINTEXT_FALLBACK = False
 ```
 

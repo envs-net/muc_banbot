@@ -33,7 +33,7 @@ if "config" not in sys.modules:
 
     config.OMEMO_ENABLED = False
     config.OMEMO_STORAGE_FILE = "data/omemo.json"
-    config.OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
+    config.OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = True
     config.OMEMO_PLAINTEXT_FALLBACK = False
 
     config.RTBL_ENABLED = True

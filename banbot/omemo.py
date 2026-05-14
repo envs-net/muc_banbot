@@ -198,7 +198,7 @@ class OmemoMixin:
             getattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json")
         )
         self.omemo_auto_encrypt_admin_room: bool = bool(
-            getattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", False)
+            getattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", True)
         )
         self.omemo_plaintext_fallback: bool = bool(
             getattr(config, "OMEMO_PLAINTEXT_FALLBACK", False)
@@ -258,7 +258,7 @@ class OmemoMixin:
 
         # Proactive messages have no incoming-message context.  Keep them
         # plaintext by default, except for the admin room when explicitly enabled.
-        if mtype == "groupchat" and getattr(self, "omemo_auto_encrypt_admin_room", False):
+        if mtype == "groupchat" and getattr(self, "omemo_auto_encrypt_admin_room", True):
             try:
                 import config
 

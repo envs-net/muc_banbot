@@ -9,7 +9,7 @@ OMEMO configuration is startup-only. Restart the bot after changing any `OMEMO_*
 ```python
 OMEMO_ENABLED = False
 OMEMO_STORAGE_FILE = "data/omemo.json"
-OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
+OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = True
 OMEMO_PLAINTEXT_FALLBACK = False
 ```
 

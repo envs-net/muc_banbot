@@ -162,7 +162,7 @@ class ConfigMixin:
             "RTBL_PUBLISH_DOMAIN_NODE": getattr(config, "RTBL_PUBLISH_DOMAIN_NODE", None),
             "OMEMO_ENABLED": getattr(config, "OMEMO_ENABLED", False),
             "OMEMO_STORAGE_FILE": getattr(config, "OMEMO_STORAGE_FILE", None),
-            "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM": getattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", False),
+            "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM": getattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", True),
             "OMEMO_PLAINTEXT_FALLBACK": getattr(config, "OMEMO_PLAINTEXT_FALLBACK", False),
         }
 
@@ -344,7 +344,7 @@ class ConfigMixin:
             errors.append("OMEMO_ENABLED must be True or False")
 
         for name, default in (
-            ("OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", False),
+            ("OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", True),
             ("OMEMO_PLAINTEXT_FALLBACK", False),
         ):
             if not isinstance(getattr(config, name, default), bool):
