@@ -252,12 +252,39 @@ def test_paginate_lines_returns_valid_slice_and_metadata(lines, page, per_page):
 
 @settings(max_examples=100)
 @given(
+    lines=st.lists(st.text(max_size=20), max_size=50),
+    page=st.integers(min_value=-100, max_value=0),
+    per_page=st.integers(min_value=1, max_value=20),
+)
+def test_paginate_lines_clamps_non_positive_pages_to_first_page(lines, page, per_page):
+    page_lines, current_page, total_pages, total_items = paginate_lines(lines, page, per_page)
+
+    assert current_page == 1
+    assert total_items == len(lines)
+    assert total_pages == max(1, (len(lines) + per_page - 1) // per_page)
+    assert page_lines == lines[:per_page]
+
+
+@settings(max_examples=100)
+@given(
     total_items=st.integers(min_value=0, max_value=500),
-    page=st.integers(min_value=-10, max_value=200),
+    page=st.integers(min_value=1, max_value=200),
     per_page=st.integers(min_value=1, max_value=50),
 )
-def test_resolve_page_matches_paginate_lines_current_page(total_items, page, per_page):
+def test_resolve_page_matches_paginate_lines_for_positive_pages(total_items, page, per_page):
     lines = [str(i) for i in range(total_items)]
+
     _, current_page, _, _ = paginate_lines(lines, page, per_page)
+
     assert resolve_page(page, total_items, per_page) == current_page
-    assert resolve_page(-1, total_items, per_page) == max(1, (total_items + per_page - 1) // per_page)
+
+
+@settings(max_examples=100)
+@given(
+    total_items=st.integers(min_value=0, max_value=500),
+    per_page=st.integers(min_value=1, max_value=50),
+)
+def test_resolve_page_minus_one_means_last_page(total_items, per_page):
+    expected_last_page = max(1, (total_items + per_page - 1) // per_page)
+
+    assert resolve_page(-1, total_items, per_page) == expected_last_page

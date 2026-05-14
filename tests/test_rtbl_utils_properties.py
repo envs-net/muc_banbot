@@ -21,6 +21,13 @@ from banbot.rtbl_utils import (
 
 _HEX = set("0123456789abcdef")
 
+_DOMAIN_LABEL = st.from_regex(
+    r"[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?",
+    fullmatch=True,
+)
+_TLD = st.from_regex(r"[a-z]{2,8}", fullmatch=True)
+_DOMAIN_HOST = st.builds(lambda label, tld: f"{label}.{tld}", _DOMAIN_LABEL, _TLD)
+
 
 @settings(max_examples=100)
 @given(jid=st.text(min_size=1, max_size=120))
@@ -52,10 +59,7 @@ def test_is_sha256_rejects_wrong_size_or_non_hex_values(value):
 
 
 @settings(max_examples=100)
-@given(
-    label=st.from_regex(r"[a-z0-9][a-z0-9-]{0,20}", fullmatch=True),
-    tld=st.from_regex(r"[a-z]{2,8}", fullmatch=True),
-)
+@given(label=_DOMAIN_LABEL, tld=_TLD)
 def test_is_domain_accepts_plain_and_wildcard_domains(label, tld):
     domain = f"{label}.{tld}"
 
@@ -70,9 +74,7 @@ def test_is_domain_rejects_jids_and_values_without_dot(value):
 
 
 @settings(max_examples=100)
-@given(
-    host=st.from_regex(r"[a-z0-9][a-z0-9-]{0,20}\.[a-z]{2,8}", fullmatch=True),
-)
+@given(host=_DOMAIN_HOST)
 def test_looks_like_pubsub_service_jid_accepts_domains_and_component_jids(host):
     assert _looks_like_pubsub_service_jid(host) is True
     assert _looks_like_pubsub_service_jid(f"pubsub.{host}") is True
@@ -90,6 +92,9 @@ def test_looks_like_pubsub_service_jid_accepts_domains_and_component_jids(host):
         "pubsub.example.1",
         "pub sub.example.org",
         "pubsub.example.org/resource",
+        "0-.aa",
+        "-bad.example.org",
+        "bad-.example.org",
     ],
 )
 def test_looks_like_pubsub_service_jid_rejects_invalid_services(service):
