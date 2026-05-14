@@ -13,7 +13,7 @@ OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
 OMEMO_PLAINTEXT_FALLBACK = False
 ```
 
-## Optional Dependencies
+## Dependencies
 
 OMEMO support is optional. The base `requirements.txt` installs everything needed for plaintext bot operation, but does not require OMEMO libraries.
 

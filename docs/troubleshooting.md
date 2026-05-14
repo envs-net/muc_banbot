@@ -133,7 +133,7 @@ Check:
 * Startup/new subscription fetches scan current occupants; periodic refreshes do not rescan unchanged lists
 
 
-## OMEMO optional dependency installation fails
+## OMEMO dependency installation fails
 
 `slixmpp-omemo` is optional. Plaintext BanBot operation only needs `requirements.txt`. Install OMEMO support only when encrypted command/reply support is needed.
 
