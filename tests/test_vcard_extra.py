@@ -36,10 +36,11 @@ class FakeXep0084:
 
 
 class VCardBot(VCardMixin):
-    def __init__(self):
+    def __init__(self, connected=True):
         self.xep0054 = FakeXep0054()
         self.xep0084 = FakeXep0084()
         self.sent = []
+        self.connected = connected
 
     def __getitem__(self, key):
         if key == "xep_0054":
@@ -50,6 +51,9 @@ class VCardBot(VCardMixin):
 
     def send(self, stanza):
         self.sent.append(stanza)
+
+    def is_connected(self):
+        return self.connected
 
 
 @pytest.mark.asyncio
@@ -103,6 +107,50 @@ async def test_update_vcard_without_avatar_only_publishes_vcard(monkeypatch):
     assert len(bot.xep0054.published) == 1
     assert bot.xep0084.avatars == []
     assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_update_vcard_skips_avatar_hash_presence_without_active_stream(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    import banbot.vcard as vcard_module
+    import config
+
+    avatar = tmp_path / "avatar.png"
+    avatar.write_bytes(b"fake-png-data")
+
+    monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
+    for attr in ("VCARD_NICKNAME", "VCARD_FN", "VCARD_ORG", "VCARD_ROLE", "VCARD_URL", "VCARD_NOTE"):
+        monkeypatch.setattr(config, attr, "", raising=False)
+    monkeypatch.setattr(vcard_module.asyncio, "sleep", lambda delay: _completed_sleep())
+
+    bot = VCardBot(connected=False)
+
+    with caplog.at_level("DEBUG", logger="banbot.vcard"):
+        assert await bot.update_vcard() is True
+
+    assert len(bot.xep0054.published) == 1
+    assert bot.xep0084.avatars == [b"fake-png-data"]
+    assert bot.sent == []
+    assert "Skipping XEP-0153 avatar hash presence" in caplog.text
+
+
+def test_send_avatar_hash_presence_returns_false_without_active_stream():
+    bot = VCardBot(connected=False)
+
+    assert bot._send_avatar_hash_presence("abc123") is False
+    assert bot.sent == []
+
+
+def test_send_avatar_hash_presence_sends_when_stream_is_active():
+    bot = VCardBot(connected=True)
+
+    assert bot._send_avatar_hash_presence("abc123") is True
+
+    presence_xml = bot.sent[0].xml
+    assert presence_xml.find(".//{vcard-temp:x:update}x/photo").text == "abc123"
 
 
 async def _completed_sleep():

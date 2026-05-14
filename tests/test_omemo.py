@@ -179,3 +179,69 @@ async def test_decrypt_incoming_omemo_message_returns_decrypted_message(omemo_pa
     assert result is decrypted
     assert encrypted is True
     assert plugin.decrypt_calls == 1
+
+class FailingDecryptPlugin(FakeDecryptPlugin):
+    def __init__(self, exc):
+        super().__init__()
+        self.exc = exc
+
+    async def decrypt_message(self, msg):
+        self.decrypt_calls += 1
+        raise self.exc
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_decrypt_incoming_omemo_device_info_failures_are_logged_as_info(
+    omemo_payload_xml,
+    caplog,
+):
+    bot = OmemoProbe()
+    plugin = FailingDecryptPlugin(
+        RuntimeError(
+            "Couldn't find public information about the device which sent this message. "
+            "I.e. the device either does not appear in the device list of the sending "
+            "XMPP account, or the bundle of the sending device could not be downloaded."
+        )
+    )
+    bot.plugin = {"xep_0384": plugin}
+    bot.omemo_ready = type("Ready", (), {"is_set": lambda self: True})()
+    msg = type(
+        "Msg",
+        (),
+        {"xml": omemo_payload_xml, "get": lambda self, key: "room@example.test/dan"},
+    )()
+
+    with caplog.at_level("INFO", logger="banbot.omemo"):
+        result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
+
+    assert result is None
+    assert encrypted is True
+    assert plugin.decrypt_calls == 1
+    assert "sender device information is unavailable" in caplog.text
+    assert "failed to decrypt incoming message" not in caplog.text
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_decrypt_incoming_omemo_unexpected_failures_remain_warnings(
+    omemo_payload_xml,
+    caplog,
+):
+    bot = OmemoProbe()
+    plugin = FailingDecryptPlugin(RuntimeError("unexpected decrypt failure"))
+    bot.plugin = {"xep_0384": plugin}
+    bot.omemo_ready = type("Ready", (), {"is_set": lambda self: True})()
+    msg = type(
+        "Msg",
+        (),
+        {"xml": omemo_payload_xml, "get": lambda self, key: "room@example.test/dan"},
+    )()
+
+    with caplog.at_level("WARNING", logger="banbot.omemo"):
+        result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
+
+    assert result is None
+    assert encrypted is True
+    assert "failed to decrypt incoming message" in caplog.text
+    assert "unexpected decrypt failure" in caplog.text

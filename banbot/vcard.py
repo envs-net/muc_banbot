@@ -13,6 +13,48 @@ log = logging.getLogger(__name__)
 
 
 class VCardMixin:
+
+    def _has_active_xmpp_stream(self) -> bool:
+        """Return whether an XMPP stream appears to be connected.
+
+        Slixmpp logs an error if a stanza is sent after the stream is gone.
+        Prefer its is_connected() helper when available, fall back to a
+        connected attribute, and assume true for simple test doubles that do
+        not model connection state.
+        """
+        is_connected = getattr(self, "is_connected", None)
+        if callable(is_connected):
+            try:
+                return bool(is_connected())
+            except Exception:
+                return False
+
+        if hasattr(self, "connected"):
+            try:
+                return bool(getattr(self, "connected"))
+            except Exception:
+                return False
+
+        return True
+
+    def _send_avatar_hash_presence(self, sha1_hex: str) -> bool:
+        """Send the XEP-0153 avatar hash presence if the stream is active."""
+        if not self._has_active_xmpp_stream():
+            log.debug(
+                "Skipping XEP-0153 avatar hash presence because XMPP stream is not connected"
+            )
+            return False
+
+        # Build <x xmlns='vcard-temp:x:update'><photo>HASH</photo></x>
+        x = ET.Element("{vcard-temp:x:update}x")
+        photo = ET.SubElement(x, "photo")
+        photo.text = sha1_hex
+
+        presence = Presence()
+        presence.append(x)
+        self.send(presence)
+        return True
+
     async def update_vcard(self) -> bool:
         """
         Update bot vCard and avatar information.
@@ -86,19 +128,10 @@ class VCardMixin:
                 # SHA1 hex hash (XEP-0153 requires hex)
                 sha1_hex = hashlib.sha1(image_data).hexdigest()
 
-                # Build <x xmlns='vcard-temp:x:update'><photo>HASH</photo></x>
-                x = ET.Element("{vcard-temp:x:update}x")
-                photo = ET.SubElement(x, "photo")
-                photo.text = sha1_hex
-
                 await asyncio.sleep(1)
 
-                # Build a Presence stanza and send
-                presence = Presence()
-                presence.append(x)
-                self.send(presence)
-
-                log.info("✅ XEP-0153 avatar hash updated successfully")
+                if self._send_avatar_hash_presence(sha1_hex):
+                    log.info("✅ XEP-0153 avatar hash updated successfully")
             except Exception as e:
                 log.warning("⚠️ Failed to update XEP-0153 avatar: %s", e)
         else:

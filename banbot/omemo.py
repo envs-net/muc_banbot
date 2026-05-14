@@ -495,12 +495,42 @@ class OmemoMixin:
             return decrypted_msg, True
 
         except Exception as exc:
-            log.warning(
-                "OMEMO: failed to decrypt incoming message from %s: %s",
-                msg.get("from"),
-                exc,
-            )
+            if self._is_expected_omemo_device_info_error(exc):
+                log.info(
+                    (
+                        "OMEMO: could not decrypt incoming message from %s "
+                        "because sender device information is unavailable: %s"
+                    ),
+                    msg.get("from"),
+                    exc,
+                )
+            else:
+                log.warning(
+                    "OMEMO: failed to decrypt incoming message from %s: %s",
+                    msg.get("from"),
+                    exc,
+                )
             return None, True
+
+
+    def _is_expected_omemo_device_info_error(self, exc: Exception) -> bool:
+        """Return True for common sender-device/bundle lookup failures.
+
+        These are usually caused by stale or unpublished OMEMO device metadata
+        on the sender side.  The encrypted message cannot be processed, but the
+        condition is common enough in MUCs that it should not be logged as a bot
+        warning during normal operation.
+        """
+        error_text = str(exc)
+        known_markers = (
+            "Couldn't find public information about the device",
+            "device either does not appear in the device list",
+            "bundle of the sending device could not be downloaded",
+            "Bundle download failed",
+            "Bundle not available",
+            "could not be downloaded",
+        )
+        return any(marker in error_text for marker in known_markers)
 
     def _apply_message_kwargs(self, msg: Any, kwargs: dict[str, Any]) -> None:
         """Best-effort transfer of supported send_message kwargs to a Message stanza."""
