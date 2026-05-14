@@ -248,6 +248,7 @@ async def test_admin_rtbl_ignore_policy_and_room_commands_route_with_actor(fake_
     await bot.on_message(admin_msg(fake_msg_factory, "!rtbl list"))
     await bot.on_message(admin_msg(fake_msg_factory, "!ignore add bad@example.test"))
     await bot.on_message(admin_msg(fake_msg_factory, "!whitelist add good@example.test"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!whitelist"))
     await bot.on_message(admin_msg(fake_msg_factory, "!policy show"))
 
     assert bot.room_calls == [(["add", "room@example.test"], "admin@conference.example.test")]
@@ -255,6 +256,7 @@ async def test_admin_rtbl_ignore_policy_and_room_commands_route_with_actor(fake_
     assert bot.ignore_calls == [
         (["add", "bad@example.test"], "admin@conference.example.test", "admin@example.test/resource", "ignore"),
         (["add", "good@example.test"], "admin@conference.example.test", "admin@example.test/resource", "whitelist"),
+        ([], "admin@conference.example.test", "admin@example.test/resource", "whitelist"),
     ]
     assert bot.policy_calls == [(["show"], "admin@conference.example.test")]
 

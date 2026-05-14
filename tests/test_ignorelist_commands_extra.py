@@ -155,6 +155,14 @@ async def test_ignore_list_all_disables_paging(temp_db_path):
         assert "all0@example.org" in body
         assert "all11@example.org" in body
 
+        await bot.cmd_ignore([], "admin@conference.example.test")
+        body = bot.sent[-1]["mbody"]
+        assert "Ignorelist (12) - Page 1/2" in body
+
+        await bot.cmd_ignore([], "admin@conference.example.test", command_name="whitelist")
+        body = bot.sent[-1]["mbody"]
+        assert "Ignorelist (12) - Page 1/2" in body
+
         await bot.cmd_ignore(["all"], "admin@conference.example.test", command_name="whitelist")
         body = bot.sent[-1]["mbody"]
         assert "Ignorelist (12) - All" in body

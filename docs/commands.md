@@ -16,6 +16,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 !banlist rtbl all
 !bansearch all spam
 !ignore list all
+!whitelist all
 !room list all
 ```
 
@@ -77,15 +78,18 @@ Temporary bans support duration suffixes:
 
 ## Ignorelist / Whitelist
 
-`!whitelist` is an alias for `!ignore`.
+`!whitelist` is an alias for `!ignore`. Without arguments, both commands show the current list.
 
 | Command | Description | Example |
 | --- | --- | --- |
+| `!ignore` | Shows ignorelist entries | `!ignore` |
 | `!ignore list [all/page/last]` | Shows ignorelist entries | `!ignore list all` |
 | `!ignore all` | Alias for full list output | `!ignore all` |
 | `!ignore add <jid/domain> [reason]` | Adds a protected exact JID or wildcard domain | `!ignore add alice@example.org trusted user` |
 | `!ignore remove <jid/domain>` | Removes an entry | `!ignore remove alice@example.org` |
+| `!whitelist` | Alias for list | `!whitelist` |
 | `!whitelist list [all/page/last]` | Alias for list | `!whitelist list all` |
+| `!whitelist all` | Alias for full list output | `!whitelist all` |
 | `!whitelist add/remove ...` | Alias for add/remove | `!whitelist add *.example.org local domain` |
 
 Exact JID entries protect that JID from all bans. Domain entries protect against domain-based bans and RTBL domain matches, but do not block explicit manual JID bans on that domain.

@@ -214,9 +214,17 @@ class IgnorelistMixin:
         command_name = command_name if command_name in ("ignore", "whitelist") else "ignore"
         command = f"{p}{command_name}"
         label = "Whitelist" if command_name == "whitelist" else "Ignorelist"
-        if args and args[0].lower() == "all":
+
+        # Normalize alias/default forms before sub-command handling:
+        #   !ignore / !whitelist      -> list
+        #   !ignore all / !whitelist all -> list all
+        args = list(args)
+        if not args:
+            args = ["list"]
+        elif args[0].lower() == "all":
             args = ["list", "all", *args[1:]]
-        sub_action = args[0].lower() if args else "list"
+
+        sub_action = args[0].lower()
 
         # The alias is only an entrypoint. Listing should always point users to
         # the canonical ignorelist command and use the canonical list heading.

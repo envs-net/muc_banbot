@@ -105,14 +105,14 @@ Examples assume the default command prefix `!`.
 | `!bansearch [all] <query>` | Search bans by target, issuer, comment, or RTBL reason |
 | `!why <nick/jid>` | Explain why a user is banned |
 | `!audit [all/page/last/query]` | Show audit log entries |
-| `!ignore add/list/remove` | Manage the global ignorelist |
-| `!whitelist ...` | Alias for `!ignore ...` |
+| `!ignore [list/all]` / `!ignore add/remove` | Manage the global ignorelist |
+| `!whitelist [list/all]` / `!whitelist add/remove` | Alias for `!ignore ...` |
 | `!rtbl list/add/delete/refresh` | Manage RTBL subscriptions |
 | `!rtbl publish status/sync` | Manage the bot's own RTBL publish feed |
 | `!sync` / `!syncadmins` / `!syncbans` | Rejoin rooms, sync admins, and reconcile bans |
 | `!export` / `!import <file>` | Export/import bans as CSV |
 
-For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, and `!room list all`.
+For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.
 
 Full command reference: [docs/commands.md](docs/commands.md).
 
