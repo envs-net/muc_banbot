@@ -216,13 +216,17 @@ class IgnorelistMixin:
         label = "Whitelist" if command_name == "whitelist" else "Ignorelist"
 
         # Normalize alias/default forms before sub-command handling:
-        #   !ignore / !whitelist      -> list
-        #   !ignore all / !whitelist all -> list all
-        args = list(args)
+        #   !ignore / !whitelist           -> list
+        #   !ignore all / !whitelist all   -> list all
+        #   !ignore list all               -> list all
+        raw_args = list(args or [])
+        show_all = wants_all_pages(raw_args)
+        args = without_all_pages_arg(raw_args)
+
         if not args:
             args = ["list"]
         elif args[0].lower() == "all":
-            args = ["list", "all", *args[1:]]
+            args = ["list"]
 
         sub_action = args[0].lower()
 
@@ -235,9 +239,6 @@ class IgnorelistMixin:
         # list
         # ----------------------------------------------------------------
         if sub_action == "list":
-            show_all = wants_all_pages(args[1:])
-            args = [args[0], *without_all_pages_arg(args[1:])]
-
             async with self.db.execute(
                 "SELECT COUNT(*) FROM ignorelist"
             ) as cursor:

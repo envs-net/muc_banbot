@@ -298,3 +298,45 @@ async def test_admin_paged_commands_parse_all_marker(fake_msg_factory, monkeypat
     assert bot.bansearch_calls[-1] == ("spam wave", 1, True)
     assert bot.audit_calls[-1] == (["all", "spam"], "admin@conference.example.test")
     assert bot.room_calls[-1] == (["list", "all"], "admin@conference.example.test")
+
+
+@pytest.mark.asyncio
+async def test_admin_incomplete_commands_show_usage(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    cases = [
+        ("!ban", "Usage: !ban <jid|nick|*.domain.tld> [comment]"),
+        ("!tempban", "Usage: !tempban <jid|nick> <10m|2h|1d> [comment]"),
+        ("!unban", "Usage: !unban <jid|nick|*.domain.tld>"),
+        ("!bansearch", "Usage: !bansearch <query> [all|page|last]"),
+        ("!bansearch all", "Usage: !bansearch <query> [all|page|last]"),
+        ("!room", "!room list [all|page]"),
+    ]
+
+    for body, expected in cases:
+        before = len(bot.sent)
+        await bot.on_message(admin_msg(fake_msg_factory, body))
+        assert len(bot.sent) == before + 1
+        assert expected in bot.sent[-1]["mbody"]
+
+    assert bot.ban_calls == []
+    assert bot.unban_calls == []
+    assert bot.bansearch_calls == []
+    assert bot.room_calls == []
+
+
+@pytest.mark.asyncio
+async def test_why_without_target_shows_usage_in_admin_room(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!why"))
+
+    assert bot.sent[-1]["mbody"] == "❌ Usage: !why <nick|jid>"

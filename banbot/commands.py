@@ -202,7 +202,15 @@ class CommandMixin:
             await self.cmd_banlist(room, page=page, show_all=show_all)
             return True
 
-        if cmd == "why" and len(args) >= 1 and self.user_cmds_allowed(room):
+        if cmd == "why" and self.user_cmds_allowed(room):
+            if len(args) < 1:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}why <nick|jid>",
+                    mtype="groupchat",
+                )
+                return True
+
             await self.cmd_why(args[0], room)
             return True
 
@@ -308,66 +316,106 @@ class CommandMixin:
             return True
 
         if cmd == "room":
-            if len(args) >= 1:
-                await self.cmd_room(args, room)
+            if len(args) < 1:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=(
+                        "Usage:\n"
+                        f"  {self.command_prefix}room list [all|page]\n"
+                        f"  {self.command_prefix}room add <room_jid>\n"
+                        f"  {self.command_prefix}room remove <room_jid>"
+                    ),
+                    mtype="groupchat",
+                )
+                return True
+
+            await self.cmd_room(args, room)
             return True
 
         if cmd == "ban":
-            if len(args) >= 1:
-                actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-                comment = " ".join(args[1:]) if len(args) > 1 else None
-                await self.ban_all(args[0], None, actor_jid, comment)
+            if len(args) < 1:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}ban <jid|nick|*.domain.tld> [comment]",
+                    mtype="groupchat",
+                )
+                return True
+
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            comment = " ".join(args[1:]) if len(args) > 1 else None
+            await self.ban_all(args[0], None, actor_jid, comment)
             return True
 
         if cmd == "tempban":
-            if len(args) >= 2:
-                try:
-                    until = int(time.time()) + parse_duration(args[1])
-                except Exception:
-                    await self.bot_send_message(
-                        mto=room,
-                        mbody=f"❌ Invalid duration format ({self.command_prefix}tempban user 10m)",
-                        mtype="groupchat"
-                    )
-                    return True
+            if len(args) < 2:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}tempban <jid|nick> <10m|2h|1d> [comment]",
+                    mtype="groupchat",
+                )
+                return True
 
-                actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-                comment = " ".join(args[2:]) if len(args) > 2 else None
-                await self.ban_all(args[0], until, actor_jid, comment)
+            try:
+                until = int(time.time()) + parse_duration(args[1])
+            except Exception:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Invalid duration format ({self.command_prefix}tempban user 10m)",
+                    mtype="groupchat"
+                )
+                return True
+
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            comment = " ".join(args[2:]) if len(args) > 2 else None
+            await self.ban_all(args[0], until, actor_jid, comment)
             return True
 
         if cmd == "unban":
-            if len(args) >= 1:
-                actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-                await self.unban_all(args[0], actor_jid)
+            if len(args) < 1:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}unban <jid|nick|*.domain.tld>",
+                    mtype="groupchat",
+                )
+                return True
+
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            await self.unban_all(args[0], actor_jid)
             return True
 
         if cmd == "bansearch":
-            if len(args) >= 1:
-                # Last arg is page number or "last", rest is query.  A standalone
-                # "all" disables pagination and may appear before or after query text.
-                show_all = wants_all_pages(args)
-                args = without_all_pages_arg(args)
-                page = 1
-                query_args = args
-                if args and args[-1].lower() == "last":
-                    page = -1
+            if len(args) < 1:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [all|page|last]",
+                    mtype="groupchat",
+                )
+                return True
+
+            # Last arg is page number or "last", rest is query.  A standalone
+            # "all" disables pagination and may appear before or after query text.
+            show_all = wants_all_pages(args)
+            args = without_all_pages_arg(args)
+            page = 1
+            query_args = args
+            if args and args[-1].lower() == "last":
+                page = -1
+                query_args = args[:-1]
+            elif args:
+                try:
+                    page = max(1, int(args[-1]))
                     query_args = args[:-1]
-                elif args:
-                    try:
-                        page = max(1, int(args[-1]))
-                        query_args = args[:-1]
-                    except ValueError:
-                        pass  # No page number — use all args as query
-                if not query_args:
-                    await self.bot_send_message(
-                        mto=room,
-                        mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [all|page|last]",
-                        mtype="groupchat",
-                    )
-                    return True
-                query = " ".join(query_args)
-                await self.cmd_bansearch(query, page=page, show_all=show_all)
+                except ValueError:
+                    pass  # No page number — use all args as query
+            if not query_args:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}bansearch <query> [all|page|last]",
+                    mtype="groupchat",
+                )
+                return True
+            query = " ".join(query_args)
+            await self.cmd_bansearch(query, page=page, show_all=show_all)
             return True
 
         if cmd == "sync":
