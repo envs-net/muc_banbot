@@ -340,3 +340,107 @@ async def test_why_without_target_shows_usage_in_admin_room(fake_msg_factory, mo
     await bot.on_message(admin_msg(fake_msg_factory, "!why"))
 
     assert bot.sent[-1]["mbody"] == "❌ Usage: !why <nick|jid>"
+
+
+class PolicyCommandBot(CommandMixin, MessagingMixin):
+    def __init__(self):
+        self.command_prefix = "!"
+        self.protected_rooms = {"room@conference.example.test"}
+        self.allow_user_cmds = True
+        self.public_command_rate_limit_hits = {}
+        self.public_command_rate_limit_window = 30
+        self.public_command_rate_limit_max = 3
+        self.sent = []
+        self.policy_enabled = False
+        self.policy_text = ""
+
+    async def bot_send_message(self, **kwargs):
+        self.sent.append(kwargs)
+
+    async def _decrypt_incoming_omemo_message(self, msg):
+        return msg, False
+
+    def is_authorized(self, msg):
+        return True
+
+    async def get_public_policy(self):
+        return self.policy_enabled, self.policy_text
+
+    async def set_public_policy_text(self, text, enabled=True):
+        self.policy_text = text
+        self.policy_enabled = enabled
+
+    async def set_public_policy_enabled(self, enabled):
+        self.policy_enabled = enabled
+
+    async def clear_public_policy(self):
+        self.policy_enabled = False
+        self.policy_text = ""
+
+
+@pytest.mark.asyncio
+async def test_policy_without_text_shows_usage(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "adminbot")
+    bot = PolicyCommandBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!policy"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "No public policy text is configured" in body
+    assert "Usage:" in body
+    assert "!policy show" in body
+    assert "!policy set <text>" in body
+
+
+@pytest.mark.asyncio
+async def test_policy_help_shows_usage(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "adminbot")
+    bot = PolicyCommandBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!policy help"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "Usage:" in body
+    assert "!policy show" in body
+    assert "!policy clear" in body
+    assert "Supported placeholders" in body
+
+
+@pytest.mark.asyncio
+async def test_policy_set_without_text_shows_usage(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "adminbot")
+    bot = PolicyCommandBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!policy set"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "Usage: !policy set <text>" in body
+    assert "Use literal" in body
+
+
+@pytest.mark.asyncio
+async def test_policy_show_with_existing_text_includes_commands(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "adminbot")
+    bot = PolicyCommandBot()
+    bot.policy_enabled = True
+    bot.policy_text = "Use {prefix}why <nick> in {room}."
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!policy"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "Public policy is currently enabled" in body
+    assert "Use !why <nick> in admin@conference.example.test." in body
+    assert "Commands:" in body
+    assert "!policy disable" in body

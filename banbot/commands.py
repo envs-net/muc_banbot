@@ -536,9 +536,32 @@ class CommandMixin:
             mtype="groupchat",
         )
 
+    def _policy_usage_text(self) -> str:
+        """Return usage text for the admin policy command."""
+        p = self.command_prefix
+        return (
+            f"Usage:\n"
+            f"  {p}policy show\n"
+            f"  {p}policy set <text>\n"
+            f"  {p}policy enable\n"
+            f"  {p}policy disable\n"
+            f"  {p}policy clear\n\n"
+            "Supported placeholders:\n"
+            "  {prefix}, {room}, {room_count}, {admin_room}, {bot_name}\n"
+            "Use literal \\n for line breaks."
+        )
+
     async def cmd_policy(self, args: list[str], room: str) -> None:
         """Admin command to manage the public policy/rules text."""
         p = self.command_prefix
+
+        if args and args[0].lower() in {"help", "usage"}:
+            await self.bot_send_message(
+                mto=room,
+                mbody=self._policy_usage_text(),
+                mtype="groupchat",
+            )
+            return
 
         if not args or args[0].lower() in {"show", "list"}:
             enabled, text = await self.get_public_policy()
@@ -548,14 +571,7 @@ class CommandMixin:
                     mto=room,
                     mbody=(
                         "ℹ️ No public policy text is configured.\n\n"
-                        f"Usage:\n"
-                        f"  {p}policy set <text>\n"
-                        f"  {p}policy enable\n"
-                        f"  {p}policy disable\n"
-                        f"  {p}policy clear\n\n"
-                        "Supported placeholders:\n"
-                        "  {prefix}, {room}, {room_count}, {admin_room}, {bot_name}\n"
-                        "Use literal \\n for line breaks."
+                        f"{self._policy_usage_text()}"
                     ),
                     mtype="groupchat",
                 )
@@ -569,14 +585,7 @@ class CommandMixin:
                 mbody=(
                     f"📜 Public policy is currently {status}.\n\n"
                     f"{preview}\n\n"
-                    f"Commands:\n"
-                    f"  {p}policy set <text>\n"
-                    f"  {p}policy enable\n"
-                    f"  {p}policy disable\n"
-                    f"  {p}policy clear\n\n"
-                    "Supported placeholders:\n"
-                    "  {prefix}, {room}, {room_count}, {admin_room}, {bot_name}\n"
-                    "Use literal \\n for line breaks."
+                    f"{self._policy_usage_text().replace('Usage:', 'Commands:', 1)}"
                 ),
                 mtype="groupchat",
             )
@@ -679,7 +688,7 @@ class CommandMixin:
             mto=room,
             mbody=(
                 f"❌ Unknown policy action: {action}\n"
-                f"Available: show / set / enable / disable / clear"
+                f"Available: show / set / enable / disable / clear / help"
             ),
             mtype="groupchat",
         )
