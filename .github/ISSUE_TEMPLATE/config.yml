@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: https://github.com/envs-net/muc_banbot/security/policy
+    about: Please do not report security vulnerabilities in public issues.
+  - name: envs.net
+    url: https://envs.net
+    about: Learn more about the envs.net community.
