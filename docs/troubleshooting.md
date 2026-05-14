@@ -132,6 +132,20 @@ Check:
 * The user is not an admin/owner
 * Startup/new subscription fetches scan current occupants; periodic refreshes do not rescan unchanged lists
 
+
+## OMEMO optional dependency installation fails
+
+`slixmpp-omemo` is optional. Plaintext BanBot operation only needs `requirements.txt`. Install OMEMO support only when encrypted command/reply support is needed.
+
+If installing OMEMO fails with missing native headers or build errors, install the system libraries first. Raspbian example:
+
+```bash
+sudo apt install libsodium-dev libxeddsa-dev
+pip install -r requirements-omemo.txt
+```
+
+If `OMEMO_ENABLED=True` but the optional OMEMO dependencies are not installed, BanBot starts with OMEMO disabled and logs a warning. Set `OMEMO_ENABLED=False` or install the optional dependencies to remove the warning.
+
 ## OMEMO bundle warnings
 
 Broken, empty, or inaccessible OMEMO bundles are common in public MUCs. BanBot skips unusable recipients and suppresses noisy dependency warnings at normal INFO logging. Use `LOG_LEVEL="DEBUG"` to debug OMEMO dependencies.

@@ -245,3 +245,38 @@ async def test_decrypt_incoming_omemo_unexpected_failures_remain_warnings(
     assert encrypted is True
     assert "failed to decrypt incoming message" in caplog.text
     assert "unexpected decrypt failure" in caplog.text
+
+
+@pytest.mark.omemo
+def test_configure_omemo_missing_optional_dependencies_disables_feature(monkeypatch, caplog):
+    import banbot.omemo as omemo_module
+    import config
+
+    bot = OmemoProbe()
+    bot.registered = []
+    bot.handlers = []
+
+    def register_plugin(*args, **kwargs):
+        bot.registered.append((args, kwargs))
+
+    def add_event_handler(*args, **kwargs):
+        bot.handlers.append((args, kwargs))
+
+    bot.register_plugin = register_plugin
+    bot.add_event_handler = add_event_handler
+
+    monkeypatch.setattr(config, "OMEMO_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json", raising=False)
+    monkeypatch.setattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", False, raising=False)
+    monkeypatch.setattr(config, "OMEMO_PLAINTEXT_FALLBACK", False, raising=False)
+    monkeypatch.setattr(omemo_module, "OMEMO_AVAILABLE", False)
+    monkeypatch.setattr(omemo_module, "XEP_0384Impl", None)
+
+    with caplog.at_level("WARNING", logger="banbot.omemo"):
+        bot.configure_omemo()
+
+    assert bot.omemo_enabled is False
+    assert bot.registered == []
+    assert bot.handlers == []
+    assert "optional dependencies are missing" in caplog.text
+    assert "requirements-omemo.txt" in caplog.text

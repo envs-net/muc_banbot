@@ -51,6 +51,10 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
+# Optional: install OMEMO support after installing system libraries.
+# Raspbian example: sudo apt install libsodium-dev libxeddsa-dev
+# Then: pip install -r requirements-omemo.txt
+
 cp config_sample.py config.py
 $EDITOR config.py
 
@@ -116,7 +120,9 @@ Full command reference: [docs/commands.md](docs/commands.md).
 
 ## OMEMO
 
-BanBot supports optional OMEMO replies. The behavior is dynamic:
+BanBot supports optional OMEMO replies. OMEMO dependencies are not required for normal plaintext operation. If `OMEMO_ENABLED=True` but the optional Python/system libraries are missing, BanBot starts with OMEMO disabled and logs a clear warning.
+
+The behavior is dynamic:
 
 ```text
 plaintext command  -> plaintext reply

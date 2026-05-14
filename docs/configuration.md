@@ -98,6 +98,8 @@ VCARD_NOTE = "XMPP MUC ban management bot"
 
 OMEMO settings are startup-only and require a bot restart when changed. See [OMEMO](omemo.md) for behavior details.
 
+OMEMO is optional. The bot can run without `slixmpp-omemo`; if `OMEMO_ENABLED=True` but optional dependencies are missing, startup continues with OMEMO disabled and a warning in the log. Install `requirements-omemo.txt` after installing the required system libraries when encrypted command/reply support is needed.
+
 ```python
 OMEMO_ENABLED = False
 OMEMO_STORAGE_FILE = "data/omemo.json"

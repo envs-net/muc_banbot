@@ -51,6 +51,11 @@ def set_valid_config(monkeypatch):
         "MUC_WRITE_SEMAPHORE": 5,
         "VERSION_CHECK_INTERVAL": 3600,
         "RTBL_REFRESH_INTERVAL": 3600,
+        "RTBL_ENABLED": False,
+        "RTBL_PUBLISH_ENABLED": False,
+        "OMEMO_ENABLED": False,
+        "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM": False,
+        "OMEMO_PLAINTEXT_FALLBACK": False,
     }
     for key, value in values.items():
         monkeypatch.setattr(config, key, value, raising=False)
@@ -158,3 +163,26 @@ def test_format_config_import_error_for_name_error_includes_hint():
 
     assert "NameError" in rendered
     assert "true/false" in rendered
+
+
+def test_validate_config_warns_but_does_not_error_when_omemo_dependency_missing(monkeypatch):
+    import importlib.util
+
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "OMEMO_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json", raising=False)
+
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name):
+        if name in {"slixmpp_omemo", "omemo"}:
+            return None
+        return real_find_spec(name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+    bot = ConfigValidationBot()
+
+    errors, warnings = bot._validate_config()
+
+    assert "OMEMO_ENABLED=True requires optional dependency slixmpp-omemo>=2,<3" not in errors
+    assert any("OMEMO_ENABLED=True but optional OMEMO dependencies are not installed" in warning for warning in warnings)

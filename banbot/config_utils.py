@@ -352,7 +352,11 @@ class ConfigMixin:
 
         if omemo_enabled:
             if importlib.util.find_spec("slixmpp_omemo") is None or importlib.util.find_spec("omemo") is None:
-                errors.append("OMEMO_ENABLED=True requires optional dependency slixmpp-omemo>=2,<3")
+                warnings.append(
+                    "OMEMO_ENABLED=True but optional OMEMO dependencies are not installed; "
+                    "the bot will start with OMEMO disabled. Install requirements-omemo.txt "
+                    "after installing system libraries such as libsodium-dev and libxeddsa-dev."
+                )
 
             omemo_storage = pathlib.Path(str(getattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json"))).expanduser()
             if not str(omemo_storage):

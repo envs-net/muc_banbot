@@ -13,6 +13,24 @@ OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = False
 OMEMO_PLAINTEXT_FALLBACK = False
 ```
 
+## Optional Dependencies
+
+OMEMO support is optional. The base `requirements.txt` installs everything needed for plaintext bot operation, but does not require OMEMO libraries.
+
+Install the system libraries needed by the OMEMO stack first. On Raspbian systems this is typically:
+
+```bash
+sudo apt install libsodium-dev libxeddsa-dev
+```
+
+Then install the Python OMEMO dependency:
+
+```bash
+pip install -r requirements-omemo.txt
+```
+
+If these optional dependencies are missing while `OMEMO_ENABLED=True`, BanBot continues to start with OMEMO disabled and logs a warning. Plaintext bot functionality is unaffected.
+
 ## Dynamic Reply Behavior
 
 BanBot decides whether to encrypt replies based on the incoming command message:

@@ -213,8 +213,10 @@ class OmemoMixin:
         self._configure_omemo_dependency_logging()
 
         if not OMEMO_AVAILABLE or XEP_0384Impl is None:
-            log.error(
-                "OMEMO: enabled but optional dependencies are missing. Install slixmpp-omemo>=2,<3."
+            log.warning(
+                "OMEMO: enabled but optional dependencies are missing; continuing with OMEMO disabled. "
+                "Install system libraries such as libsodium-dev and libxeddsa-dev, then run "
+                "pip install -r requirements-omemo.txt."
             )
             self.omemo_enabled = False
             return

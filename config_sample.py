@@ -61,7 +61,9 @@ AUDIT_LOG_RETENTION_DAYS = 365
 # ================= OMEMO ENCRYPTION =================
 
 # Enable OMEMO support for encrypted incoming commands and outgoing replies.
-# Requires a restart when changed.
+# Requires optional dependencies from requirements-omemo.txt and a restart when changed.
+# If enabled without the optional dependencies, the bot starts with OMEMO disabled
+# and logs a warning. Plaintext bot functionality is unaffected.
 OMEMO_ENABLED = False
 
 # JSON file used to store OMEMO identity, device state and sessions.
