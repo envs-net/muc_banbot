@@ -85,7 +85,7 @@ class StatusMixin:
 
         admin_infos = self.occupants.get(ADMIN_ROOM, {})
         admins = sorted(set(
-            self.safe_jid(info.get("jid", "unknown"))
+            self.safe_jid(self.bare_jid(info.get("jid")) or "unknown")
             for info in admin_infos.values()
             if info.get("affiliation") in ("owner", "admin")
         ))

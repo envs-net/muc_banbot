@@ -212,6 +212,8 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
         assert "RTBL Entries" in body
         assert "Protected Rooms" in body
         assert "Public Policy: enabled" in body
+        assert "admin@example.org" in body
+        assert "admin@example.org/resource" not in body
     finally:
         await bot.db.close()
 
