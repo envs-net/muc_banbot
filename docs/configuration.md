@@ -171,11 +171,17 @@ By default, the service example above writes logs to `journald`. You can inspect
 sudo journalctl -u muc_banbot -f
 ```
 
-Some installations may prefer classic log files under `/var/log`. In that case, add append-based stdout/stderr logging to the `[Service]` section of `/etc/systemd/system/muc_banbot.service`:
+This is the recommended default.
+
+Some installations may prefer classic log files under `/var/log`. BanBot uses Python logging, and Python logging writes to stderr by default. This means normal `INFO`, `WARNING`, and `ERROR` messages usually appear on stderr.
+
+If you want systemd to write directly to a file, send both stdout and stderr to the same file. This avoids an empty main log file and a misleading separate “error” log.
+
+Add this to the `[Service]` section of `/etc/systemd/system/muc_banbot.service`:
 
 ```ini
 StandardOutput=append:/var/log/muc_banbot.log
-StandardError=append:/var/log/muc_banbot_error.log
+StandardError=append:/var/log/muc_banbot.log
 ```
 
 After changing the service file, reload systemd and restart the bot:
@@ -185,12 +191,12 @@ sudo systemctl daemon-reload
 sudo systemctl restart muc_banbot
 ```
 
-When using `StandardOutput=append:` / `StandardError=append:`, the running process keeps the log files open. Use `copytruncate` in logrotate so rotation does not require restarting the bot.
+When using `append:` logging, logs are written to the file instead of the journal through stdout/stderr. Use `copytruncate` in logrotate so rotation does not require restarting the bot.
 
 Example `/etc/logrotate.d/muc_banbot`:
 
 ```conf
-/var/log/muc_banbot.log /var/log/muc_banbot_error.log {
+/var/log/muc_banbot.log {
     daily
     rotate 7
     copytruncate
@@ -201,4 +207,6 @@ Example `/etc/logrotate.d/muc_banbot`:
 }
 ```
 
-If these `StandardOutput` / `StandardError` options are omitted, BanBot continues to log through `journald` only.
+If your systemd version does not support `append:`, omit `StandardOutput` / `StandardError` and use the default `journald` logging instead.
+
+If you need both `journald` and `/var/log/muc_banbot.log` at the same time, keep systemd logging to the journal and configure your system logger, such as rsyslog, to write selected `muc_banbot` journal/syslog entries to a file.
