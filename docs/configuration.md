@@ -162,3 +162,43 @@ sudo systemctl start muc_banbot
 sudo systemctl enable muc_banbot
 sudo journalctl -u muc_banbot -f
 ```
+
+## Optional File Logging with systemd and logrotate
+
+By default, the service example above writes logs to `journald`. You can inspect them with:
+
+```bash
+sudo journalctl -u muc_banbot -f
+```
+
+Some installations may prefer classic log files under `/var/log`. In that case, add append-based stdout/stderr logging to the `[Service]` section of `/etc/systemd/system/muc_banbot.service`:
+
+```ini
+StandardOutput=append:/var/log/muc_banbot.log
+StandardError=append:/var/log/muc_banbot_error.log
+```
+
+After changing the service file, reload systemd and restart the bot:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart muc_banbot
+```
+
+When using `StandardOutput=append:` / `StandardError=append:`, the running process keeps the log files open. Use `copytruncate` in logrotate so rotation does not require restarting the bot.
+
+Example `/etc/logrotate.d/muc_banbot`:
+
+```conf
+/var/log/muc_banbot.log /var/log/muc_banbot_error.log {
+    daily
+    rotate 7
+    copytruncate
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
+```
+
+If these `StandardOutput` / `StandardError` options are omitted, BanBot continues to log through `journald` only.
