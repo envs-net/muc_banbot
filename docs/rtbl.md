@@ -84,6 +84,19 @@ BanBot can optionally publish local non-RTBL bans to your own PubSub nodes:
 
 Inbound RTBL bans are not mirrored into the bot's own publish feed.
 
+BanBot configures own publish nodes with dynamic `pubsub#max_items` retention.
+The minimum is 1000 items per node. If the number of active local publish bans
+exceeds that, the value is rounded up in 1000-item steps, for example:
+
+```text
+0-1000 active items   -> pubsub#max_items = 1000
+1001-2000 active items -> pubsub#max_items = 2000
+2001-3000 active items -> pubsub#max_items = 3000
+```
+
+The bot also auto-grows the matching node when publishing a new local ban would
+exceed the currently configured retention limit.
+
 Commands:
 
 ```text

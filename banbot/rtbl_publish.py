@@ -7,6 +7,10 @@ from slixmpp.exceptions import IqError, IqTimeout
 log = logging.getLogger(__name__)
 
 
+RTBL_PUBLISH_MIN_MAX_ITEMS = 1000
+RTBL_PUBLISH_MAX_ITEMS_STEP = 1000
+
+
 class RtblPublishMixin:
     def _rtbl_is_own_publish_node(self, service_jid: str, node: str) -> bool:
         """Return True if service/node is one of our own RTBL publish nodes."""
@@ -49,6 +53,61 @@ class RtblPublishMixin:
         return jid_count, domain_count
 
 
+    def _rtbl_publish_required_max_items(self, active_count: int) -> int:
+        """Return PubSub max_items rounded up to 1000-item steps."""
+        count = max(0, int(active_count or 0))
+        wanted = max(RTBL_PUBLISH_MIN_MAX_ITEMS, count)
+        return ((wanted + RTBL_PUBLISH_MAX_ITEMS_STEP - 1) // RTBL_PUBLISH_MAX_ITEMS_STEP) * RTBL_PUBLISH_MAX_ITEMS_STEP
+
+
+    def _rtbl_publish_node_limit_attr(self, node: str) -> str | None:
+        """Return the cached max_items attribute name for an own publish node."""
+        if node == getattr(self, "rtbl_publish_jid_node", None):
+            return "rtbl_publish_jid_max_items"
+        if node == getattr(self, "rtbl_publish_domain_node", None):
+            return "rtbl_publish_domain_max_items"
+        return None
+
+
+    async def _rtbl_ensure_publish_capacity(self, node: str, active_count: int) -> int:
+        """Ensure an own publish node can retain the given number of active items."""
+        max_items = self._rtbl_publish_required_max_items(active_count)
+        attr = self._rtbl_publish_node_limit_attr(node)
+        current = int(getattr(self, attr, 0) or 0) if attr else 0
+
+        if current >= max_items:
+            return current
+
+        await self._rtbl_ensure_node(self.rtbl_publish_service, node, max_items=max_items)
+        return int(getattr(self, attr, 0) or 0) if attr else max_items
+
+
+    async def _rtbl_ensure_publish_capacity_for_counts(
+        self,
+        jid_count: int,
+        domain_count: int,
+    ) -> tuple[int, int]:
+        """Ensure both own publish nodes have enough PubSub retention capacity."""
+        jid_max_items = await self._rtbl_ensure_publish_capacity(
+            self.rtbl_publish_jid_node,
+            jid_count,
+        )
+        domain_max_items = await self._rtbl_ensure_publish_capacity(
+            self.rtbl_publish_domain_node,
+            domain_count,
+        )
+        return jid_max_items, domain_max_items
+
+
+    async def _rtbl_ensure_publish_capacity_for_next_item(self, item_type: str) -> None:
+        """Grow the matching own publish node before publishing one more item."""
+        jid_count, domain_count = await self._rtbl_count_active_publish_bans()
+        if item_type == "jid":
+            await self._rtbl_ensure_publish_capacity(self.rtbl_publish_jid_node, jid_count)
+        elif item_type == "domain":
+            await self._rtbl_ensure_publish_capacity(self.rtbl_publish_domain_node, domain_count)
+
+
     async def setup_rtbl_publish(self) -> None:
         """
         Create/configure own JID and domain publish nodes when possible, then
@@ -60,13 +119,20 @@ class RtblPublishMixin:
 
         from config import ADMIN_ROOM
 
+        jid_active_count, domain_active_count = await self._rtbl_count_active_publish_bans()
+        jid_max_items = self._rtbl_publish_required_max_items(jid_active_count)
+        domain_max_items = self._rtbl_publish_required_max_items(domain_active_count)
+
         jid_node_ready = await self._rtbl_ensure_node(
             self.rtbl_publish_service,
             self.rtbl_publish_jid_node,
+            max_items=jid_max_items,
         )
+
         domain_node_ready = await self._rtbl_ensure_node(
             self.rtbl_publish_service,
             self.rtbl_publish_domain_node,
+            max_items=domain_max_items,
         )
 
         if not jid_node_ready or not domain_node_ready:
@@ -90,7 +156,7 @@ class RtblPublishMixin:
             domain_failures,
         )
 
-        if self.rtbl_announce:
+        if getattr(self, "rtbl_announce", False):
             status_emoji = "✅" if jid_failures == 0 and domain_failures == 0 else "⚠️"
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
@@ -129,7 +195,7 @@ class RtblPublishMixin:
             return False
 
 
-    def _rtbl_make_node_config_form(self):
+    def _rtbl_make_node_config_form(self, max_items: int = RTBL_PUBLISH_MIN_MAX_ITEMS):
         """Build a XEP-0004 submit form for RTBL publish node configuration."""
         if "xep_0004" not in self.plugin:
             self.register_plugin("xep_0004")
@@ -139,13 +205,13 @@ class RtblPublishMixin:
         form.add_field(var="pubsub#access_model", value="open")
         form.add_field(var="pubsub#publish_model", value="publishers")
         form.add_field(var="pubsub#persist_items", value="1")
-        form.add_field(var="pubsub#max_items", value="1000")
+        form.add_field(var="pubsub#max_items", value=str(self._rtbl_publish_required_max_items(max_items)))
         form.add_field(var="pubsub#send_last_published_item", value="never")
         form.add_field(var="pubsub#deliver_payloads", value="1")
         return form
 
 
-    async def _rtbl_ensure_node(self, service: str, node: str) -> bool:
+    async def _rtbl_ensure_node(self, service: str, node: str, max_items: int = RTBL_PUBLISH_MIN_MAX_ITEMS) -> bool:
         """Create a PubSub node if needed and configure it when permitted."""
         node_exists = await self._rtbl_node_exists(service, node)
 
@@ -179,9 +245,17 @@ class RtblPublishMixin:
             await self.plugin["xep_0060"].set_node_config(
                 service,
                 node,
-                config=self._rtbl_make_node_config_form(),
+                config=self._rtbl_make_node_config_form(max_items=max_items),
             )
-            log.info("RTBL Publish: Node '%s' configured (publish_model=publishers)", node)
+            configured_max_items = self._rtbl_publish_required_max_items(max_items)
+            attr = self._rtbl_publish_node_limit_attr(node)
+            if attr:
+                setattr(self, attr, configured_max_items)
+            log.info(
+                "RTBL Publish: Node '%s' configured (publish_model=publishers, max_items=%d)",
+                node,
+                configured_max_items,
+            )
         except IqError as e:
             if "forbidden" in str(e).lower():
                 log.info(
@@ -206,6 +280,9 @@ class RtblPublishMixin:
         """
         if not getattr(self, "rtbl_publish_enabled", False):
             return 0, 0, 0, 0
+
+        jid_active_count, domain_active_count = await self._rtbl_count_active_publish_bans()
+        await self._rtbl_ensure_publish_capacity_for_counts(jid_active_count, domain_active_count)
 
         jid_count = 0
         domain_count = 0
@@ -264,11 +341,13 @@ class RtblPublishMixin:
         if jid:
             bare = self.bare_jid(jid)
             if bare and not bare.startswith("*." ):
+                await self._rtbl_ensure_publish_capacity_for_next_item("jid")
                 await self._rtbl_publish_jid_item(bare, comment)
 
         if domain:
             clean = domain.lstrip("*.")
             if clean:
+                await self._rtbl_ensure_publish_capacity_for_next_item("domain")
                 await self._rtbl_publish_domain_item(clean, comment)
 
 

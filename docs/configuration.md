@@ -128,6 +128,8 @@ See [RTBL](rtbl.md) for behavior details.
 | `RTBL_PUBLISH_JID_NODE` | Node for SHA-256 bare-JID hashes |
 | `RTBL_PUBLISH_DOMAIN_NODE` | Node for plaintext domain bans |
 
+When own RTBL publishing is enabled, BanBot configures PubSub node `pubsub#max_items` dynamically. It keeps at least 1000 items per publish node and auto-grows in 1000-item steps when the number of active local published bans requires more retention.
+
 Successful RTBL refreshes reconcile the local cache with the current PubSub node snapshot. RTBL matches that are actually applied are stored in the main ban table as `issuer=rtbl`; stale `issuer=rtbl` bans are automatically unbanned when their RTBL source disappears.
 
 Avatar/vCard data is updated on startup and after `!reloadconfig`.

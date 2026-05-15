@@ -35,8 +35,16 @@ Use `publishers`, not `open`, so arbitrary users cannot publish into your RTBL f
 
 ## Increase Retained Items
 
+BanBot configures `pubsub#max_items` automatically when it has permission to
+configure the publish nodes. The minimum is 1000 retained items per node, and
+the bot rounds up in 1000-item steps when more local bans need to be published.
+
+If you create or maintain nodes manually, choose a value large enough for the
+number of active local bans you publish. For example, 1000 is enough for small
+installations, while 2000 keeps room for 1001-2000 active published items:
+
 ```lua
-pubsub:set_node_config_option("pubsub.example.org", "muc_bans_sha256", "pubsub#max_items", "1000")
+pubsub:set_node_config_option("pubsub.example.org", "muc_bans_sha256", "pubsub#max_items", "2000")
 pubsub:set_node_config_option("pubsub.example.org", "muc_bans_domains", "pubsub#max_items", "1000")
 ```
 

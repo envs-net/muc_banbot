@@ -14,10 +14,43 @@ from banbot.rtbl_publish import RtblPublishMixin
 from banbot.rtbl_utils import _rtbl_build_payload, _rtbl_hash_jid
 
 
+class FakeForm:
+    def __init__(self):
+        self.fields = []
+
+    def add_field(self, **kwargs):
+        self.fields.append(kwargs)
+
+    def field_value(self, var):
+        for field in self.fields:
+            if field.get("var") == var:
+                return field.get("value")
+        return None
+
+
+class FakeXep0004:
+    def make_form(self, ftype="submit"):
+        return FakeForm()
+
+
 class FakePubSub:
     def __init__(self):
         self.published = []
         self.retracted = []
+        self.configured = []
+        self.created = []
+
+    async def get_node_config(self, service, node):
+        return {}
+
+    async def get_items(self, service, node, max_items=1):
+        return []
+
+    async def create_node(self, service, node):
+        self.created.append((service, node))
+
+    async def set_node_config(self, service, node, config=None):
+        self.configured.append((service, node, config))
 
     async def publish(self, service, node, id=None, payload=None):
         self.published.append((service, node, id, payload))
@@ -46,7 +79,7 @@ class RtblCmdBot(DatabaseMixin, CacheMixin, RtblDatabaseMixin, RtblCommandMixin,
         self.rtbl_publish_service = "pubsub.example.org"
         self.rtbl_publish_jid_node = "muc_bans_sha256"
         self.rtbl_publish_domain_node = "muc_bans_domains"
-        self.plugin = {"xep_0060": FakePubSub()}
+        self.plugin = {"xep_0060": FakePubSub(), "xep_0004": FakeXep0004()}
         self.event_handlers = []
         self.fetched = []
         self.audit_events = []
@@ -64,6 +97,12 @@ class RtblCmdBot(DatabaseMixin, CacheMixin, RtblDatabaseMixin, RtblCommandMixin,
 
     def add_event_handler(self, name, handler):
         self.event_handlers.append((name, handler))
+
+    def register_plugin(self, name):
+        if name == "xep_0004":
+            self.plugin[name] = FakeXep0004()
+        else:
+            raise KeyError(name)
 
     async def _on_rtbl_publish(self, *args, **kwargs):
         pass
@@ -164,3 +203,85 @@ async def test_rtbl_publish_status_sync_and_single_publish_retract(temp_db_path)
         assert any(item[2] == "example.org" for item in bot.plugin["xep_0060"].retracted)
     finally:
         await bot.db.close()
+
+def _last_config_value(bot, node, var):
+    for _service, configured_node, form in reversed(bot.plugin["xep_0060"].configured):
+        if configured_node == node:
+            return form.field_value(var)
+    return None
+
+
+def test_rtbl_publish_required_max_items_rounds_to_1000_steps():
+    bot = RtblCmdBot()
+
+    assert bot._rtbl_publish_required_max_items(0) == 1000
+    assert bot._rtbl_publish_required_max_items(1) == 1000
+    assert bot._rtbl_publish_required_max_items(999) == 1000
+    assert bot._rtbl_publish_required_max_items(1000) == 1000
+    assert bot._rtbl_publish_required_max_items(1001) == 2000
+    assert bot._rtbl_publish_required_max_items(2000) == 2000
+    assert bot._rtbl_publish_required_max_items(2001) == 3000
+
+
+def test_rtbl_make_node_config_form_uses_dynamic_max_items():
+    bot = RtblCmdBot()
+
+    form = bot._rtbl_make_node_config_form(max_items=1001)
+
+    assert form.field_value("pubsub#max_items") == "2000"
+    assert form.field_value("pubsub#persist_items") == "1"
+
+
+@pytest.mark.asyncio
+async def test_setup_rtbl_publish_configures_nodes_for_active_ban_counts(temp_db_path):
+    bot = RtblCmdBot()
+    bot.rtbl_publish_enabled = True
+    await bot.setup_db()
+    try:
+        for index in range(1001):
+            await bot.upsert_ban_db(
+                f"user{index}@example.org",
+                None,
+                0,
+                "admin",
+                "bulk jid",
+            )
+        await bot.upsert_ban_db("*.example.org", None, 0, "admin", "domain")
+
+        await bot.setup_rtbl_publish()
+
+        assert _last_config_value(bot, "muc_bans_sha256", "pubsub#max_items") == "2000"
+        assert _last_config_value(bot, "muc_bans_domains", "pubsub#max_items") == "1000"
+        assert bot.rtbl_publish_jid_max_items == 2000
+        assert bot.rtbl_publish_domain_max_items == 1000
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_rtbl_publish_ban_auto_grows_node_capacity(temp_db_path):
+    bot = RtblCmdBot()
+    bot.rtbl_publish_enabled = True
+    await bot.setup_db()
+    try:
+        # Simulate a node configured at the old floor, then add enough active
+        # local bans so the next single publish needs the node to grow.
+        bot.rtbl_publish_jid_max_items = 1000
+        for index in range(1001):
+            await bot.upsert_ban_db(
+                f"existing{index}@example.org",
+                None,
+                0,
+                "admin",
+                "bulk jid",
+            )
+
+        await bot.rtbl_publish_ban("new@example.org/resource", None, "single")
+
+        assert _last_config_value(bot, "muc_bans_sha256", "pubsub#max_items") == "2000"
+        assert bot.rtbl_publish_jid_max_items == 2000
+        expected_hash = _rtbl_hash_jid("new@example.org")
+        assert any(item[2] == expected_hash for item in bot.plugin["xep_0060"].published)
+    finally:
+        await bot.db.close()
+
