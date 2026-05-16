@@ -1,6 +1,8 @@
 """Own outbound RTBL publish-feed setup and item publish/retract helpers."""
 
+import hashlib
 import logging
+import uuid
 
 from slixmpp.exceptions import IqError, IqTimeout
 
@@ -135,14 +137,36 @@ class RtblPublishMixin:
             max_items=domain_max_items,
         )
 
-        if not jid_node_ready or not domain_node_ready:
-            log.warning(
-                "RTBL Publish: One or more publish nodes are not ready on %s "
-                "(jid_node_ready=%s, domain_node_ready=%s)",
-                self.rtbl_publish_service,
-                jid_node_ready,
-                domain_node_ready,
+        publish_errors = []
+        if not jid_node_ready:
+            publish_errors.append(
+                f"JID node '{self.rtbl_publish_jid_node}' is not ready on {self.rtbl_publish_service}"
             )
+        if not domain_node_ready:
+            publish_errors.append(
+                f"Domain node '{self.rtbl_publish_domain_node}' is not ready on {self.rtbl_publish_service}"
+            )
+
+        if not publish_errors:
+            _check_ok, publish_errors = await self._rtbl_publish_sanity_check()
+
+        if publish_errors:
+            self.rtbl_publish_enabled = False
+            message = (
+                "⚠️ RTBL Publish disabled: startup sanity check failed.\n"
+                + "\n".join(f"- {error}" for error in publish_errors)
+                + "\nCheck PubSub node permissions, publish_model/access_model, "
+                "and bot affiliation."
+            )
+            log.warning(message)
+
+            if getattr(self, "rtbl_announce", False):
+                await self.bot_send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=message,
+                    mtype="groupchat",
+                )
+            return
 
         jid_count, domain_count, jid_failures, domain_failures = await self._rtbl_sync_all_bans_to_nodes()
         log.info(
@@ -270,6 +294,135 @@ class RtblPublishMixin:
             log.warning("RTBL Publish: Could not build config form for node '%s': %s", node, e)
 
         return node_exists
+
+
+    def _rtbl_publish_sanity_item_id(self, node_type: str) -> str:
+        """Return a temporary item ID suitable for the given publish node type."""
+        marker = f"banbot-publish-check:{uuid.uuid4()}"
+        if node_type == "jid":
+            return hashlib.sha256(marker.encode("utf-8")).hexdigest()
+        return f"banbot-publish-check-{uuid.uuid4().hex}.invalid"
+
+
+    def _rtbl_pubsub_result_contains_item(self, result, item_id: str) -> bool:
+        """Best-effort check whether a PubSub get_items result contains item_id."""
+        if result is None:
+            return False
+
+        if isinstance(result, dict):
+            for key in ("id", "item_id"):
+                if result.get(key) == item_id:
+                    return True
+            for value in result.values():
+                if self._rtbl_pubsub_result_contains_item(value, item_id):
+                    return True
+            return False
+
+        if isinstance(result, (list, tuple, set)):
+            return any(self._rtbl_pubsub_result_contains_item(item, item_id) for item in result)
+
+        getter = getattr(result, "get", None)
+        if callable(getter):
+            try:
+                if getter("id") == item_id or getter("item_id") == item_id:
+                    return True
+            except Exception:
+                pass
+
+        xml = getattr(result, "xml", None)
+        if xml is not None and item_id in str(xml):
+            return True
+
+        return item_id in str(result)
+
+
+    async def _rtbl_get_sanity_item(self, node: str, item_id: str):
+        """Fetch a just-published sanity-check item from a publish node."""
+        try:
+            return await self.plugin["xep_0060"].get_items(
+                self.rtbl_publish_service,
+                node,
+                item_ids=[item_id],
+            )
+        except TypeError:
+            # Older/slimmer test doubles or plugin versions may not support
+            # item_ids. Fetch a single latest item; most PubSub services return
+            # the freshly published item first, which is enough for a sanity check.
+            return await self.plugin["xep_0060"].get_items(
+                self.rtbl_publish_service,
+                node,
+                max_items=1,
+            )
+
+
+    async def _rtbl_publish_sanity_check_node(self, node: str, node_type: str) -> tuple[bool, str | None]:
+        """Publish, fetch and retract a temporary item to validate one publish node."""
+        item_id = self._rtbl_publish_sanity_item_id(node_type)
+        published = False
+        primary_error = None
+
+        try:
+            await self.plugin["xep_0060"].publish(
+                self.rtbl_publish_service,
+                node,
+                id=item_id,
+                payload=self._rtbl_build_payload("BanBot RTBL publish sanity check"),
+            )
+            published = True
+
+            try:
+                result = await self._rtbl_get_sanity_item(node, item_id)
+            except (IqError, IqTimeout) as e:
+                primary_error = f"{node}: test item fetch failed: {e}"
+            except Exception as e:
+                primary_error = f"{node}: test item fetch failed: {e}"
+            else:
+                if not self._rtbl_pubsub_result_contains_item(result, item_id):
+                    primary_error = f"{node}: test item was published but not visible when fetched"
+
+        except (IqError, IqTimeout) as e:
+            primary_error = f"{node}: test publish failed: {e}"
+        except Exception as e:
+            primary_error = f"{node}: test publish failed: {e}"
+        finally:
+            if published:
+                try:
+                    await self.plugin["xep_0060"].retract(
+                        self.rtbl_publish_service,
+                        node,
+                        id=item_id,
+                        notify=False,
+                    )
+                except (IqError, IqTimeout) as e:
+                    cleanup_error = f"{node}: test retract failed: {e}"
+                    primary_error = primary_error or cleanup_error
+                    log.warning("RTBL Publish: %s", cleanup_error)
+                except Exception as e:
+                    cleanup_error = f"{node}: test retract failed: {e}"
+                    primary_error = primary_error or cleanup_error
+                    log.warning("RTBL Publish: %s", cleanup_error)
+
+        if primary_error:
+            return False, primary_error
+
+        log.info("RTBL Publish: Sanity check passed for node '%s'", node)
+        return True, None
+
+
+    async def _rtbl_publish_sanity_check(self) -> tuple[bool, list[str]]:
+        """Validate that configured own RTBL publish nodes can publish/read/retract."""
+        checks = [
+            (self.rtbl_publish_jid_node, "jid"),
+            (self.rtbl_publish_domain_node, "domain"),
+        ]
+        errors = []
+
+        for node, node_type in checks:
+            ok, error = await self._rtbl_publish_sanity_check_node(node, node_type)
+            if not ok and error:
+                errors.append(error)
+
+        return not errors, errors
 
 
     async def _rtbl_sync_all_bans_to_nodes(self) -> tuple[int, int, int, int]:

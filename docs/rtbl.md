@@ -137,6 +137,13 @@ exceeds that, the value is rounded up in 1000-item steps, for example:
 The bot also auto-grows the matching node when publishing a new local ban would
 exceed the currently configured retention limit.
 
+On startup, BanBot performs a publish sanity check for the configured publish
+nodes. It publishes a temporary test item, fetches it again, and retracts it.
+If this check fails, own RTBL publishing is disabled for the current runtime,
+but the bot continues to run. This usually indicates a PubSub configuration or
+permission problem, such as missing node ownership, missing publish/retract
+rights, or incompatible access/publish models.
+
 Commands:
 
 ```text

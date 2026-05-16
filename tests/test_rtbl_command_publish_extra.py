@@ -39,12 +39,33 @@ class FakePubSub:
         self.retracted = []
         self.configured = []
         self.created = []
+        self.fail_publish_nodes = set()
+        self.fail_get_items_nodes = set()
+        self.fail_retract_nodes = set()
+        self.hidden_item_ids = set()
 
     async def get_node_config(self, service, node):
         return {}
 
-    async def get_items(self, service, node, max_items=1):
-        return []
+    async def get_items(self, service, node, max_items=1, item_ids=None):
+        if node in self.fail_get_items_nodes:
+            raise RuntimeError("fetch forbidden")
+
+        visible = [
+            {"id": item_id}
+            for published_service, published_node, item_id, _payload in self.published
+            if published_service == service
+            and published_node == node
+            and item_id not in self.hidden_item_ids
+            and (service, node, item_id, False) not in self.retracted
+            and (service, node, item_id, True) not in self.retracted
+        ]
+
+        if item_ids is not None:
+            wanted = set(item_ids)
+            return [item for item in visible if item["id"] in wanted]
+
+        return visible[:max_items]
 
     async def create_node(self, service, node):
         self.created.append((service, node))
@@ -53,9 +74,13 @@ class FakePubSub:
         self.configured.append((service, node, config))
 
     async def publish(self, service, node, id=None, payload=None):
+        if node in self.fail_publish_nodes:
+            raise RuntimeError("publish forbidden")
         self.published.append((service, node, id, payload))
 
     async def retract(self, service, node, id=None, notify=False):
+        if node in self.fail_retract_nodes:
+            raise RuntimeError("retract forbidden")
         self.retracted.append((service, node, id, notify))
 
 
@@ -282,6 +307,65 @@ async def test_rtbl_publish_ban_auto_grows_node_capacity(temp_db_path):
         assert bot.rtbl_publish_jid_max_items == 2000
         expected_hash = _rtbl_hash_jid("new@example.org")
         assert any(item[2] == expected_hash for item in bot.plugin["xep_0060"].published)
+    finally:
+        await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_setup_rtbl_publish_disables_publish_when_sanity_check_publish_fails(temp_db_path):
+    bot = RtblCmdBot()
+    bot.rtbl_publish_enabled = True
+    bot.rtbl_announce = True
+    bot.plugin["xep_0060"].fail_publish_nodes.add("muc_bans_sha256")
+    await bot.setup_db()
+    try:
+        await bot.upsert_ban_db("user@example.org", None, 0, "admin", "local")
+
+        await bot.setup_rtbl_publish()
+
+        assert bot.rtbl_publish_enabled is False
+        assert "RTBL Publish disabled" in bot.sent[-1]["mbody"]
+        expected_hash = _rtbl_hash_jid("user@example.org")
+        assert not any(item[2] == expected_hash for item in bot.plugin["xep_0060"].published)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_rtbl_publish_disables_publish_when_sanity_item_is_not_visible(temp_db_path):
+    bot = RtblCmdBot()
+    bot.rtbl_publish_enabled = True
+    await bot.setup_db()
+    try:
+        # Hide every sanity-check item after it was published. The check should
+        # still attempt cleanup and then disable own RTBL publishing.
+        original_publish = bot.plugin["xep_0060"].publish
+
+        async def publish_and_hide(service, node, id=None, payload=None):
+            await original_publish(service, node, id=id, payload=payload)
+            bot.plugin["xep_0060"].hidden_item_ids.add(id)
+
+        bot.plugin["xep_0060"].publish = publish_and_hide
+
+        await bot.setup_rtbl_publish()
+
+        assert bot.rtbl_publish_enabled is False
+        assert any(item[1] == "muc_bans_sha256" for item in bot.plugin["xep_0060"].retracted)
+        assert any(item[1] == "muc_bans_domains" for item in bot.plugin["xep_0060"].retracted)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_rtbl_publish_disables_publish_when_sanity_retract_fails(temp_db_path):
+    bot = RtblCmdBot()
+    bot.rtbl_publish_enabled = True
+    bot.plugin["xep_0060"].fail_retract_nodes.add("muc_bans_domains")
+    await bot.setup_db()
+    try:
+        await bot.setup_rtbl_publish()
+
+        assert bot.rtbl_publish_enabled is False
+        assert any(item[1] == "muc_bans_sha256" for item in bot.plugin["xep_0060"].retracted)
     finally:
         await bot.db.close()
 

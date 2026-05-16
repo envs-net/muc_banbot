@@ -64,6 +64,29 @@ pubsub:set_node_config_option("pubsub.example.org", "muc_bans_sha256", "pubsub#m
 pubsub:set_node_config_option("pubsub.example.org", "muc_bans_domains", "pubsub#max_items", "1000")
 ```
 
+## Startup Publish Sanity Check
+
+When own RTBL publishing is enabled, BanBot checks the configured publish nodes
+at startup before syncing local bans. For each node it publishes a temporary
+test item, fetches it again, and retracts it.
+
+If the check fails, BanBot disables own RTBL publishing for the current runtime
+and continues to start normally. This protects the bot from silently claiming to
+publish a feed that other instances cannot read.
+
+If the startup sanity check fails, verify:
+
+* the PubSub service exists and is reachable
+* the configured nodes exist or can be created by the bot
+* the bot account may publish and retract items
+* `pubsub#publish_model` allows the bot to publish
+* `pubsub#access_model` allows subscribers to read items
+* the bot has the required affiliation/role on the publish nodes
+
+BanBot can manage subscriptions and publish/retract items, but it is not a
+PubSub server. The required PubSub infrastructure must be provided by the XMPP
+server.
+
 ## Optional Cleanup When Recreating Test Nodes
 
 ```lua
