@@ -153,10 +153,18 @@ async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
 
     monkeypatch.setattr(muc_module, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(muc_module, "NICK", "BanBot")
+
     bot = MucTestBot()
     bot.bot_admin_state["room@conference.example.test"] = True
     bot.room_join_time["room@conference.example.test"] = time.time() - 10
     bot.verify_result = False
+    bot.occupants["room@conference.example.test"] = {
+        "BanBot": {
+            "jid": "bot@example.test/service",
+            "affiliation": "admin",
+            "role": "moderator",
+        }
+    }
 
     await bot.on_muc_presence(
         FakePresence(
@@ -170,6 +178,11 @@ async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
 
     assert bot.bot_admin_state["room@conference.example.test"] is False
     assert "lost admin/owner rights" in bot.sent[-1]["mbody"]
+    assert bot.occupants["room@conference.example.test"]["BanBot"] == {
+        "jid": "bot@example.test/service",
+        "affiliation": "member",
+        "role": "participant",
+    }
 
 
 @pytest.mark.asyncio

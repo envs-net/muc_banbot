@@ -192,12 +192,32 @@ class MucMixin:
         """
         Detect if bot loses or regains admin/owner rights.
         Spam-safe (only reacts on real state changes).
+
+        Also keep the bot's own occupant cache in sync. Affiliation/role
+        changes can arrive as presence updates without going through
+        muc_online(), so status output must not rely on stale cache data.
         """
         room = presence["from"].bare
         nick = presence["from"].resource
 
         if nick != NICK:
             return
+
+        jid = presence["muc"].get("jid")
+        jid_str = str(jid) if jid else None
+        affiliation = presence["muc"]["affiliation"]
+        role = presence["muc"]["role"]
+
+        # Keep our own live occupant cache in sync.
+        #
+        # This is important for status output: if the bot is downgraded
+        # from admin/owner to member/participant, the status admin list is
+        # built from self.occupants and must not keep showing stale rights.
+        self.occupants.setdefault(room, {})[nick] = {
+            "role": role or "none",
+            "affiliation": affiliation or "none",
+            "jid": jid_str,
+        }
 
         # Ignore during reconnect stabilization
         if self.reconnecting and time.time() - self.room_join_time.get(room, 0) < 5:
@@ -207,9 +227,6 @@ class MucMixin:
         join_time = self.room_join_time.get(room)
         if join_time and (time.time() - join_time < 5):
             return
-
-        affiliation = presence["muc"]["affiliation"]
-        role = presence["muc"]["role"]
 
         if not affiliation:
             return
@@ -229,6 +246,7 @@ class MucMixin:
 
         if not is_admin_now:
             is_admin_verified = await self.verify_admin_rights(room)
+
             if not is_admin_verified:
                 log.warning("⚠️ Verified: Bot truly lost admin rights in %s", room)
                 await self.bot_send_message(
@@ -239,7 +257,6 @@ class MucMixin:
             else:
                 log.info("✅ False alarm: server confirms bot is still admin in %s", room)
                 self.bot_admin_state[room] = True  # correct state
-
         else:
             log.info("✅ Bot regained admin rights in %s", room)
             await self.bot_send_message(
