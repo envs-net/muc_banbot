@@ -208,6 +208,9 @@ class MucMixin:
         affiliation = presence["muc"]["affiliation"]
         role = presence["muc"]["role"]
 
+        previous_info = self.occupants.get(room, {}).get(nick, {})
+        previous_affiliation = previous_info.get("affiliation")
+
         # Keep our own live occupant cache in sync.
         #
         # This is important for status output: if the bot is downgraded
@@ -233,6 +236,12 @@ class MucMixin:
 
         is_admin_now = affiliation in ("admin", "owner")
         was_admin = self.bot_admin_state.get(room)
+
+        # If bot_admin_state has not been initialized yet, fall back to the
+        # previously cached affiliation. This catches downgrades that happen
+        # before on_muc_presence() has seen an initial admin/owner presence.
+        if was_admin is None and previous_affiliation:
+            was_admin = previous_affiliation in ("admin", "owner")
 
         # First time → just store
         if was_admin is None:

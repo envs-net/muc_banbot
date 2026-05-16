@@ -186,8 +186,7 @@ async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_muc_presence_warns_when_bot_loses_admin_in_admin_room(monkeypatch, caplog):
-    import logging
+async def test_on_muc_presence_warns_when_admin_room_state_only_exists_in_occupant_cache(monkeypatch):
     import time
     import banbot.muc as muc_module
 
@@ -195,28 +194,37 @@ async def test_on_muc_presence_warns_when_bot_loses_admin_in_admin_room(monkeypa
     monkeypatch.setattr(muc_module, "NICK", "BanBot")
 
     bot = MucTestBot()
-    bot.bot_admin_state["admin@conference.example.test"] = True
     bot.room_join_time["admin@conference.example.test"] = time.time() - 10
     bot.verify_result = False
 
-    with caplog.at_level(logging.WARNING, logger="banbot.muc"):
-        await bot.on_muc_presence(
-            FakePresence(
-                room="admin@conference.example.test",
-                nick="BanBot",
-                jid="bot@example.test/service",
-                affiliation="member",
-                role="participant",
-            )
+    # Simulate status-visible admin rights from the occupant cache, but no
+    # initialized bot_admin_state yet.
+    bot.occupants["admin@conference.example.test"] = {
+        "BanBot": {
+            "jid": "bot@example.test/service",
+            "affiliation": "admin",
+            "role": "moderator",
+        }
+    }
+
+    await bot.on_muc_presence(
+        FakePresence(
+            room="admin@conference.example.test",
+            nick="BanBot",
+            jid="bot@example.test/service",
+            affiliation="member",
+            role="participant",
         )
+    )
 
     assert bot.bot_admin_state["admin@conference.example.test"] is False
-
     assert bot.sent[-1]["mto"] == "admin@conference.example.test"
     assert "lost admin/owner rights in admin room admin@conference.example.test" in bot.sent[-1]["mbody"]
-    assert "Admin commands may no longer work until rights are restored." in bot.sent[-1]["mbody"]
-
-    assert "Bot lost admin/owner rights in ADMIN_ROOM admin@conference.example.test" in caplog.text
+    assert bot.occupants["admin@conference.example.test"]["BanBot"] == {
+        "jid": "bot@example.test/service",
+        "affiliation": "member",
+        "role": "participant",
+    }
 
 
 @pytest.mark.asyncio
