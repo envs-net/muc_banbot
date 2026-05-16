@@ -117,7 +117,7 @@ BanBot treats successful refreshes as snapshots and removes stale local entries 
 
 ## RTBL publish node create/configure is forbidden
 
-Create/configure nodes manually with Prosody shell commands. See [Prosody PubSub Setup](pubsub-setup.md).
+Create/configure nodes manually with Prosody shell commands. See [Prosody PubSub Setup](rtbl_pubsub-setup.md).
 
 `forbidden` during node configuration can be informational if publishing itself still succeeds.
 

@@ -66,13 +66,13 @@ Update as needed:
 * `docs/configuration.md`
 * `docs/commands.md`
 * `docs/rtbl.md`
+* `docs/rtbl_pubsub-setup.md`
 * `docs/omemo.md`
 * `docs/admin-protection.md`
 * `docs/database.md`
 * `docs/testing.md`
 * `docs/import-export.md`
 * `docs/troubleshooting.md`
-* `docs/pubsub-setup.md`
 
 Check that command examples still use the correct default prefix and that paginated commands document `all`, `last`, and page-number behavior.
 

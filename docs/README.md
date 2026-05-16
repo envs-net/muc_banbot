@@ -15,7 +15,7 @@ This directory contains the operator and developer documentation for BanBot.
 * [Database](database.md) - SQLite tables and persisted state
 * [OMEMO](omemo.md) - encrypted command/reply behavior, MUC recipients, fallback behavior, and storage notes
 * [RTBL / PubSub](rtbl.md) - inbound RTBL subscriptions, snapshot reconciliation, stale-ban cleanup, and own publish feed
-* [Prosody PubSub Setup](pubsub-setup.md) - manual setup for RTBL publish nodes on Prosody
+* [Prosody PubSub Setup](rtbl_pubsub-setup.md) - manual setup for RTBL publish nodes on Prosody
 
 ## Development and Release
 
@@ -35,4 +35,4 @@ Operators using RTBL or OMEMO should additionally read:
 
 * [OMEMO](omemo.md)
 * [RTBL / PubSub](rtbl.md)
-* [Prosody PubSub Setup](pubsub-setup.md), if using BanBot's own RTBL publish feed on Prosody
+* [Prosody PubSub Setup](rtbl_pubsub-setup.md), if using BanBot's own RTBL publish feed on Prosody

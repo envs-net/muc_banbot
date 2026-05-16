@@ -11,6 +11,21 @@ Inbound RTBL subscriptions can contain:
 
 When an RTBL entry matches a current occupant, BanBot applies the ban and stores the resulting local ban in the main `bans` table with `issuer=rtbl`.
 
+## Server Requirements
+
+RTBL support depends on PubSub support on the XMPP server side.
+
+For inbound subscriptions, the bot must be able to access and subscribe to PubSub nodes exposed by the RTBL provider. For own RTBL publishing, the bot needs a PubSub service where it can create/configure nodes and publish items.
+
+BanBot can manage subscriptions and publish items, but it cannot provide PubSub functionality by itself. The XMPP server must provide the required PubSub/RTBL infrastructure.
+
+For Prosody setups, make sure a PubSub component is configured and that the bot account has the required permissions for the actions you want to use:
+
+* subscribing to external RTBL nodes
+* fetching PubSub items
+* creating/configuring own publish nodes
+* publishing and retracting own RTBL items
+
 ## Public xmppbl.org RTBL Feeds
 
 BanBot can subscribe to public RTBL feeds such as the lists hosted by `xmppbl.org`.
@@ -129,4 +144,4 @@ Commands:
 !rtbl publish sync
 ```
 
-See [Prosody PubSub Setup](pubsub-setup.md) for manual node creation.
+See [Prosody PubSub Setup](rtbl_pubsub-setup.md) for manual node creation.

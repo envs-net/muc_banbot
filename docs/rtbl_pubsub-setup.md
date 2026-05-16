@@ -9,6 +9,22 @@ Replace these values:
 * `muc_bans_domains` with `RTBL_PUBLISH_DOMAIN_NODE`
 * `adminbot@example.org` with the bot bare JID
 
+## Requirements
+
+Own RTBL publishing requires server-side PubSub support.
+
+On Prosody this means you need a working PubSub component, for example:
+
+```lua
+Component "pubsub.example.org" "pubsub"
+```
+
+The bot account must have enough permissions to create/configure nodes and publish items on the configured PubSub service.
+
+Inbound RTBL subscriptions only require that the remote provider exposes compatible PubSub nodes and that your server/client can access them.
+
+BanBot can manage subscriptions and publish/retract items, but it is not a PubSub server. The required PubSub infrastructure must be provided by the XMPP server.
+
 ## Create Nodes
 
 ```lua

@@ -148,7 +148,7 @@ BanBot can subscribe to RTBL PubSub nodes containing SHA-256 bare-JID hashes and
 
 BanBot can also publish local non-RTBL bans to its own RTBL feed.
 
-See [docs/rtbl.md](docs/rtbl.md) and [docs/pubsub-setup.md](docs/pubsub-setup.md).
+See [docs/rtbl.md](docs/rtbl.md) and [docs/rtbl_pubsub-setup.md](docs/rtbl_pubsub-setup.md).
 
 ---
 
@@ -193,7 +193,7 @@ The full documentation is split into focused guides. Start with the [documentati
 * [Import / Export](docs/import-export.md)
 * [OMEMO](docs/omemo.md)
 * [RTBL / PubSub](docs/rtbl.md)
-* [Prosody PubSub Setup](docs/pubsub-setup.md)
+* [Prosody PubSub Setup](docs/rtbl_pubsub-setup.md)
 
 ---
 
