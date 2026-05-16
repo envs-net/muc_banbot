@@ -218,11 +218,25 @@ class StatusMixin:
             status_lines.append(f"\n🛡️ RTBL Entries: {rtbl_hashes} JID hashes, {rtbl_domains} domains")
             status_lines.append(f"📋 RTBL Subscriptions: {rtbl_subscriptions}")
 
-        if getattr(self, "rtbl_publish_enabled", False):
-            status_lines.append(f"📡 RTBL Publish Enabled: {getattr(self, 'rtbl_publish_enabled', False)}")
-            status_lines.append(f"   Service:     {self.rtbl_publish_service}")
-            status_lines.append(f"   JID node:    {self.rtbl_publish_jid_node}")
-            status_lines.append(f"   Domain node: {self.rtbl_publish_domain_node}")
+        rtbl_publish_runtime_enabled = getattr(self, "rtbl_publish_enabled", False)
+        rtbl_publish_config_enabled = getattr(
+            self,
+            "rtbl_publish_config_enabled",
+            rtbl_publish_runtime_enabled or bool(getattr(self, "rtbl_publish_disabled_reason", None)),
+        )
+        if rtbl_publish_config_enabled or rtbl_publish_runtime_enabled:
+            if rtbl_publish_runtime_enabled:
+                status_lines.append("📡 RTBL Publish: enabled")
+                if getattr(self, "rtbl_publish_sanity_check_ok", None) is True:
+                    status_lines.append("   Sanity Check: ✅ OK")
+                status_lines.append(f"   Service:     {self.rtbl_publish_service}")
+                status_lines.append(f"   JID node:    {self.rtbl_publish_jid_node}")
+                status_lines.append(f"   Domain node: {self.rtbl_publish_domain_node}")
+            else:
+                status_lines.append("📡 RTBL Publish: ⚠️ disabled at runtime (configured: enabled)")
+                reason = getattr(self, "rtbl_publish_disabled_reason", None)
+                if reason:
+                    status_lines.append(f"   Reason: {reason}")
 
         # admins
         status_lines.append(

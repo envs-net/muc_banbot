@@ -57,7 +57,13 @@ class AuditStatusQueryBot(
         self.rtbl_subscriptions = [("xmppbl.org", "muc_bans_sha256")]
         self.rtbl_hash_cache = {"a" * 64: "spam"}
         self.rtbl_domain_cache = {"spam.example": "spam"}
+        self.rtbl_publish_config_enabled = False
         self.rtbl_publish_enabled = False
+        self.rtbl_publish_sanity_check_ok = None
+        self.rtbl_publish_disabled_reason = None
+        self.rtbl_publish_service = "pubsub.example.org"
+        self.rtbl_publish_jid_node = "muc_bans_sha256"
+        self.rtbl_publish_domain_node = "muc_bans_domains"
         self.admin_affiliation_query_forbidden_rooms = set()
         self.bot_admin_state = {"room@conference.example.test": True}
         self.occupants = {
@@ -214,6 +220,69 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
         assert "Public Policy: enabled" in body
         assert "admin@example.org" in body
         assert "admin@example.org/resource" not in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_status_shows_rtbl_publish_runtime_disabled_reason(temp_db_path, monkeypatch):
+    bot = AuditStatusQueryBot()
+    bot.rtbl_publish_config_enabled = True
+    bot.rtbl_publish_enabled = False
+    bot.rtbl_publish_sanity_check_ok = False
+    bot.rtbl_publish_disabled_reason = "muc_bans_sha256: test publish failed: forbidden"
+    await bot.setup_db()
+    try:
+        import banbot.status as status_module
+
+        class FakeProcess:
+            def memory_info(self):
+                return type("Mem", (), {"rss": 42 * 1024 * 1024})()
+
+            def cpu_percent(self, interval):
+                return 0.5
+
+        monkeypatch.setattr(status_module.psutil, "Process", lambda pid: FakeProcess())
+        monkeypatch.setattr(status_module.psutil, "getloadavg", lambda: (0.1, 0.2, 0.3))
+        monkeypatch.setattr(status_module.psutil, "cpu_count", lambda: 8)
+
+        await bot._cmd_status("admin@conference.example.org")
+        body = last_body(bot)
+
+        assert "RTBL Publish: ⚠️ disabled at runtime" in body
+        assert "configured: enabled" in body
+        assert "muc_bans_sha256: test publish failed: forbidden" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_status_shows_rtbl_publish_sanity_check_ok(temp_db_path, monkeypatch):
+    bot = AuditStatusQueryBot()
+    bot.rtbl_publish_config_enabled = True
+    bot.rtbl_publish_enabled = True
+    bot.rtbl_publish_sanity_check_ok = True
+    await bot.setup_db()
+    try:
+        import banbot.status as status_module
+
+        class FakeProcess:
+            def memory_info(self):
+                return type("Mem", (), {"rss": 42 * 1024 * 1024})()
+
+            def cpu_percent(self, interval):
+                return 0.5
+
+        monkeypatch.setattr(status_module.psutil, "Process", lambda pid: FakeProcess())
+        monkeypatch.setattr(status_module.psutil, "getloadavg", lambda: (0.1, 0.2, 0.3))
+        monkeypatch.setattr(status_module.psutil, "cpu_count", lambda: 8)
+
+        await bot._cmd_status("admin@conference.example.org")
+        body = last_body(bot)
+
+        assert "RTBL Publish: enabled" in body
+        assert "Sanity Check: ✅ OK" in body
+        assert "Service:     pubsub.example.org" in body
     finally:
         await bot.db.close()
 

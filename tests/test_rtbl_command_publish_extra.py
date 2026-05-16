@@ -100,7 +100,10 @@ class RtblCmdBot(DatabaseMixin, CacheMixin, RtblDatabaseMixin, RtblCommandMixin,
         self.rtbl_last_fetch = {}
         self.rtbl_last_change = {}
         self.rtbl_last_error = {}
+        self.rtbl_publish_config_enabled = False
         self.rtbl_publish_enabled = False
+        self.rtbl_publish_sanity_check_ok = None
+        self.rtbl_publish_disabled_reason = None
         self.rtbl_publish_service = "pubsub.example.org"
         self.rtbl_publish_jid_node = "muc_bans_sha256"
         self.rtbl_publish_domain_node = "muc_bans_domains"
@@ -279,6 +282,8 @@ async def test_setup_rtbl_publish_configures_nodes_for_active_ban_counts(temp_db
         assert _last_config_value(bot, "muc_bans_domains", "pubsub#max_items") == "1000"
         assert bot.rtbl_publish_jid_max_items == 2000
         assert bot.rtbl_publish_domain_max_items == 1000
+        assert bot.rtbl_publish_sanity_check_ok is True
+        assert bot.rtbl_publish_disabled_reason is None
     finally:
         await bot.db.close()
 
@@ -323,6 +328,10 @@ async def test_setup_rtbl_publish_disables_publish_when_sanity_check_publish_fai
         await bot.setup_rtbl_publish()
 
         assert bot.rtbl_publish_enabled is False
+        assert bot.rtbl_publish_config_enabled is True
+        assert bot.rtbl_publish_sanity_check_ok is False
+        assert "muc_bans_sha256" in bot.rtbl_publish_disabled_reason
+        assert "test publish failed" in bot.rtbl_publish_disabled_reason
         assert "RTBL Publish disabled" in bot.sent[-1]["mbody"]
         expected_hash = _rtbl_hash_jid("user@example.org")
         assert not any(item[2] == expected_hash for item in bot.plugin["xep_0060"].published)

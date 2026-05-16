@@ -140,9 +140,11 @@ exceed the currently configured retention limit.
 On startup, BanBot performs a publish sanity check for the configured publish
 nodes. It publishes a temporary test item, fetches it again, and retracts it.
 If this check fails, own RTBL publishing is disabled for the current runtime,
-but the bot continues to run. This usually indicates a PubSub configuration or
-permission problem, such as missing node ownership, missing publish/retract
-rights, or incompatible access/publish models.
+but the bot continues to run. The runtime-disable reason is shown in `!status`
+so admins can distinguish a configured-disabled publish feed from a feed that
+was disabled because the startup sanity check failed. This usually indicates a
+PubSub configuration or permission problem, such as missing node ownership,
+missing publish/retract rights, or incompatible access/publish models.
 
 Commands:
 

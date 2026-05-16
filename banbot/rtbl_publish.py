@@ -119,6 +119,10 @@ class RtblPublishMixin:
         if not getattr(self, "rtbl_publish_enabled", False):
             return
 
+        self.rtbl_publish_config_enabled = True
+        self.rtbl_publish_sanity_check_ok = None
+        self.rtbl_publish_disabled_reason = None
+
         from config import ADMIN_ROOM
 
         jid_active_count, domain_active_count = await self._rtbl_count_active_publish_bans()
@@ -152,6 +156,8 @@ class RtblPublishMixin:
 
         if publish_errors:
             self.rtbl_publish_enabled = False
+            self.rtbl_publish_sanity_check_ok = False
+            self.rtbl_publish_disabled_reason = "; ".join(publish_errors)
             message = (
                 "⚠️ RTBL Publish disabled: startup sanity check failed.\n"
                 + "\n".join(f"- {error}" for error in publish_errors)
@@ -167,6 +173,9 @@ class RtblPublishMixin:
                     mtype="groupchat",
                 )
             return
+
+        self.rtbl_publish_sanity_check_ok = True
+        self.rtbl_publish_disabled_reason = None
 
         jid_count, domain_count, jid_failures, domain_failures = await self._rtbl_sync_all_bans_to_nodes()
         log.info(

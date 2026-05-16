@@ -72,7 +72,8 @@ test item, fetches it again, and retracts it.
 
 If the check fails, BanBot disables own RTBL publishing for the current runtime
 and continues to start normally. This protects the bot from silently claiming to
-publish a feed that other instances cannot read.
+publish a feed that other instances cannot read. The runtime-disable reason is
+shown in `!status` and logged during startup.
 
 If the startup sanity check fails, verify:
 

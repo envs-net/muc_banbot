@@ -188,10 +188,13 @@ class BanBot(
         self._rtbl_refresh_task: asyncio.Task | None = None
 
         # --- RTBL Publish ---
-        self.rtbl_publish_enabled: bool = getattr(config, "RTBL_PUBLISH_ENABLED", False)
+        self.rtbl_publish_config_enabled: bool = getattr(config, "RTBL_PUBLISH_ENABLED", False)
+        self.rtbl_publish_enabled: bool = self.rtbl_publish_config_enabled
         self.rtbl_publish_service: str = getattr(config, "RTBL_PUBLISH_SERVICE", "")
         self.rtbl_publish_jid_node: str = getattr(config, "RTBL_PUBLISH_JID_NODE", "muc_bans_sha256")
         self.rtbl_publish_domain_node: str = getattr(config, "RTBL_PUBLISH_DOMAIN_NODE", "muc_bans_domains")
+        self.rtbl_publish_sanity_check_ok: bool | None = None
+        self.rtbl_publish_disabled_reason: str | None = None
 
         # --- apply config ---
         self.apply_runtime_config()
