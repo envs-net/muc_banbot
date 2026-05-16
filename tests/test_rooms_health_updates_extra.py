@@ -179,3 +179,122 @@ async def test_room_list_all_disables_paging(temp_db_path, monkeypatch):
         assert "room11@conference.example.test" in body
     finally:
         await bot.db.close()
+
+
+def test_github_api_url_rejects_non_github_and_short_paths():
+    bot = RoomHealthBot()
+    assert bot._github_api_url_from_release_url("https://example.org/releases/latest") is None
+    assert bot._github_api_url_from_release_url("https://github.com/only-owner") is None
+
+
+@pytest.mark.asyncio
+async def test_version_check_disabled_returns_explanatory_error():
+    bot = RoomHealthBot()
+    bot.version_check_enabled = False
+    update_available, remote, error = await bot.check_for_updates_once()
+    assert update_available is False
+    assert remote is None
+    assert "disabled" in error
+
+
+@pytest.mark.asyncio
+async def test_version_check_same_version_does_not_announce(monkeypatch):
+    import banbot.updates as updates_module
+
+    bot = RoomHealthBot()
+    local = updates_module.__version__.lstrip("v").strip()
+    monkeypatch.setattr(bot, "_fetch_latest_release_version_sync", lambda: local)
+
+    update_available, remote, error = await bot.check_for_updates_once(announce=True)
+
+    assert update_available is False
+    assert remote == local
+    assert error is None
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_version_check_error_is_returned(monkeypatch):
+    bot = RoomHealthBot()
+
+    def fail_fetch():
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(bot, "_fetch_latest_release_version_sync", fail_fetch)
+    update_available, remote, error = await bot.check_for_updates_once(announce=True)
+
+    assert update_available is False
+    assert remote is None
+    assert "network down" in error
+
+
+def test_fetch_latest_release_uses_github_api(monkeypatch):
+    import banbot.updates as updates_module
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"tag_name": "v9.8.7"}'
+
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["url"] = req.full_url
+        seen["timeout"] = timeout
+        return FakeResponse()
+
+    bot = RoomHealthBot()
+    monkeypatch.setattr(updates_module.urllib.request, "urlopen", fake_urlopen)
+
+    assert bot._fetch_latest_release_version_via_github_api_sync() == "9.8.7"
+    assert seen["url"] == "https://api.github.com/repos/envs-net/muc_banbot/releases/latest"
+    assert seen["timeout"] == 15
+
+
+def test_fetch_latest_release_falls_back_to_redirect(monkeypatch):
+    import banbot.updates as updates_module
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def geturl(self):
+            return "https://github.com/envs-net/muc_banbot/releases/tag/v7.6.5"
+
+    def fake_urlopen(req, timeout):
+        return FakeResponse()
+
+    bot = RoomHealthBot()
+    bot.version_check_url = "https://example.org/latest"
+    monkeypatch.setattr(updates_module.urllib.request, "urlopen", fake_urlopen)
+
+    assert bot._fetch_latest_release_version_via_redirect_sync() == "7.6.5"
+
+
+def test_fetch_latest_release_reports_bad_redirect(monkeypatch):
+    import banbot.updates as updates_module
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def geturl(self):
+            return "https://github.com/envs-net/muc_banbot/releases"
+
+    bot = RoomHealthBot()
+    bot.version_check_url = "https://example.org/latest"
+    monkeypatch.setattr(updates_module.urllib.request, "urlopen", lambda req, timeout: FakeResponse())
+
+    with pytest.raises(ValueError, match="Unexpected release redirect URL"):
+        bot._fetch_latest_release_version_via_redirect_sync()

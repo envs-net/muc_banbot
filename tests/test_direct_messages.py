@@ -1,6 +1,6 @@
 import pytest
 
-from banbot.direct_messages import DirectMessageMixin
+from banbot.direct_messages import ADMIN_ROOM, DirectMessageMixin
 from banbot.utils import bare_jid
 
 
@@ -26,7 +26,7 @@ class DirectBot(DirectMessageMixin):
         self.boundjid = FakeJid("bot@example.org", "res")
         self.protected_rooms = {"room@conference.example.org"}
         self.occupants = {
-            "admin@conference.envs.net": {
+            ADMIN_ROOM: {
                 "Admin": {"jid": "admin@example.org/res", "affiliation": "owner"}
             },
             "room@conference.example.org": {
@@ -65,5 +65,44 @@ async def test_muc_pm_from_admin_gets_admin_hint():
         FakeDirectMessage(bare="room@conference.example.org", resource="Admin")
     )
     assert bot.sent[0]["mto"] == "room@conference.example.org/Admin"
+    assert "Nice try, admin" in bot.sent[0]["mbody"]
+    assert ADMIN_ROOM in bot.sent[0]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_direct_message_ignores_groupchat_messages():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="user@example.org", msg_type="groupchat"))
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_regular_dm_from_admin_gets_admin_room_hint():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop"))
+    assert bot.sent[0]["mto"] == "admin@example.org"
+    assert "Nice try, admin" in bot.sent[0]["mbody"]
+    assert ADMIN_ROOM in bot.sent[0]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_muc_pm_admin_detection_falls_back_to_admin_room_real_jid():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="room@conference.example.org", resource="Admin")
+    )
+    # Admin is only a member in the protected room, but their real JID is owner
+    # in ADMIN_ROOM, so the fallback should treat the MUC PM as admin.
+    assert bot.sent[0]["mto"] == "room@conference.example.org/Admin"
+    assert "Nice try, admin" in bot.sent[0]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_muc_pm_from_regular_user_gets_rejection():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="room@conference.example.org", resource="User")
+    )
+    assert bot.sent[0]["mto"] == "room@conference.example.org/User"
     assert "ban management bot" in bot.sent[0]["mbody"]
     assert "only listen to admins" in bot.sent[0]["mbody"]

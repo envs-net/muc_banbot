@@ -305,3 +305,67 @@ async def test_all_mode_disables_paging_for_audit_banlists_and_bansearch(temp_db
         assert "user11@example.org" in body
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_reloadconfig_reports_changes_warnings_errors_and_exceptions():
+    bot = AuditStatusQueryBot()
+    bot._format_config_validation = lambda errors, warnings: "\n".join([*(f"❌ {e}" for e in errors), *(f"⚠️ {w}" for w in warnings)])
+
+    async def reload_success():
+        return ["COMMAND_PREFIX: ! -> ."], ["invalid value"], ["restart required"]
+
+    bot.reload_runtime_config = reload_success
+    await bot._cmd_reloadconfig("admin@conference.example.org")
+    assert "Config reload aborted" in last_body(bot)
+    assert "invalid value" in last_body(bot)
+
+    async def reload_with_changes():
+        return ["COMMAND_PREFIX: ! -> ."], [], ["restart required"]
+
+    bot.reload_runtime_config = reload_with_changes
+    await bot._cmd_reloadconfig("admin@conference.example.org")
+    assert "Config reloaded successfully" in last_body(bot)
+    assert "Warnings" in last_body(bot)
+    assert "COMMAND_PREFIX" in last_body(bot)
+
+    async def reload_no_changes():
+        return [], [], []
+
+    bot.reload_runtime_config = reload_no_changes
+    await bot._cmd_reloadconfig("admin@conference.example.org")
+    assert "No runtime config changes detected" in last_body(bot)
+
+    async def reload_raises():
+        raise RuntimeError("boom")
+
+    bot.reload_runtime_config = reload_raises
+    await bot._cmd_reloadconfig("admin@conference.example.org")
+    assert "Failed to reload config: boom" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_config_output_includes_omemo_and_rtbl_publish_details():
+    bot = AuditStatusQueryBot()
+    bot.omemo_enabled = True
+    bot.omemo_auto_encrypt_admin_room = True
+    bot.omemo_plaintext_fallback = False
+    bot.rtbl_publish_enabled = True
+    bot.rtbl_publish_service = "pubsub.example.org"
+    bot.rtbl_publish_jid_node = "muc_bans_sha256"
+    bot.rtbl_publish_domain_node = "muc_bans_domains"
+
+    async def fake_get_public_policy():
+        return False, ""
+
+    bot.get_public_policy = fake_get_public_policy
+
+    await bot._cmd_config("admin@conference.example.org")
+    body = last_body(bot)
+
+    assert "Reply mode: follows incoming command encryption" in body
+    assert "Auto-encrypt admin room: True" in body
+    assert "Plaintext fallback: False" in body
+    assert "Service:     pubsub.example.org" in body
+    assert "JID node:    muc_bans_sha256" in body
+    assert "Domain node: muc_bans_domains" in body
