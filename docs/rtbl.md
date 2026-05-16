@@ -11,6 +11,31 @@ Inbound RTBL subscriptions can contain:
 
 When an RTBL entry matches a current occupant, BanBot applies the ban and stores the resulting local ban in the main `bans` table with `issuer=rtbl`.
 
+## Public xmppbl.org RTBL Feeds
+
+BanBot can subscribe to public RTBL feeds such as the lists hosted by `xmppbl.org`.
+
+Commonly useful nodes are:
+
+```text
+xmppbl.org / muc_bans_sha256
+```
+
+SHA-256 hashes of JIDs that have been identified as sources of spam in public channels.
+
+```text
+xmppbl.org / spam_source_domains
+```
+
+XMPP domains that have been identified as recently sending unsolicited spam to users.
+
+Example subscriptions:
+
+```text
+!rtbl add xmppbl.org muc_bans_sha256
+!rtbl add xmppbl.org spam_source_domains
+```
+
 ## Commands
 
 ```text
