@@ -249,14 +249,40 @@ class MucMixin:
 
             if not is_admin_verified:
                 log.warning("⚠️ Verified: Bot truly lost admin rights in %s", room)
-                await self.bot_send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=f"⚠️ Bot lost admin/owner rights in {room}\nAffiliation: {affiliation}\nRole: {role}",
-                    mtype="groupchat"
-                )
+
+                if room == ADMIN_ROOM:
+                    log.warning(
+                        "⚠️ Bot lost admin/owner rights in ADMIN_ROOM %s "
+                        "(affiliation=%s, role=%s); warning message may not be deliverable there",
+                        room,
+                        affiliation,
+                        role,
+                    )
+
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=(
+                            f"⚠️ Bot lost admin/owner rights in admin room {room}\n"
+                            f"Affiliation: {affiliation}\n"
+                            f"Role: {role}\n"
+                            "Admin commands may no longer work until rights are restored."
+                        ),
+                        mtype="groupchat",
+                    )
+                else:
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=(
+                            f"⚠️ Bot lost admin/owner rights in {room}\n"
+                            f"Affiliation: {affiliation}\n"
+                            f"Role: {role}"
+                        ),
+                        mtype="groupchat",
+                    )
             else:
                 log.info("✅ False alarm: server confirms bot is still admin in %s", room)
                 self.bot_admin_state[room] = True  # correct state
+
         else:
             log.info("✅ Bot regained admin rights in %s", room)
             await self.bot_send_message(
