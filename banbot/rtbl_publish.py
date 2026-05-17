@@ -333,7 +333,7 @@ class RtblPublishMixin:
         getter = getattr(result, "get", None)
         if callable(getter):
             try:
-                if getter("id") == item_id or getter("item_id") == item_id:
+                if getter("id") == item_id:
                     return True
             except Exception:
                 pass
