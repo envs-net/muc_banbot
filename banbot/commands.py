@@ -246,6 +246,7 @@ class CommandMixin:
             "reloadconfig",
             "status",
             "checkupdate",
+            "updatecheck",
             "room",
             "ban",
             "tempban",
@@ -289,7 +290,7 @@ class CommandMixin:
             await self._cmd_status(room)
             return True
 
-        if cmd == "checkupdate":
+        if cmd in ("checkupdate", "updatecheck"):
             is_update, remote_version, error_message = await self.check_for_updates_once(announce=False)
 
             if error_message:
@@ -717,7 +718,7 @@ class CommandMixin:
             f"{p}config - show current configuration\n"
             f"{p}reloadconfig - reload config.py at runtime\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"
-            f"{p}checkupdate - check if a newer bot release is available\n"
+            f"{p}checkupdate / {p}updatecheck - check if a newer bot release is available\n"
             f"{p}whoami - show your affiliation/role\n"
             f"{p}policy show/set/clear/enable/disable - manage public rules/policy text\n"
             f"{p}audit [all|page|last|query] - show recent audit events\n\n"

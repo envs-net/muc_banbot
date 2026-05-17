@@ -30,7 +30,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!config` | Shows current bot configuration | `!config` |
 | `!reloadconfig` | Reloads runtime config safely | `!reloadconfig` |
 | `!status` | Shows health, rooms, uptime, bans, DB, RTBL, and workers | `!status` |
-| `!checkupdate` | Checks whether a newer GitHub release is available | `!checkupdate` |
+| `!checkupdate` / `!updatecheck` | Checks whether a newer GitHub release is available | `!updatecheck` |
 | `!whoami` | Shows affiliation, role, and permissions | `!whoami` |
 
 ## Rooms and Sync

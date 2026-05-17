@@ -222,6 +222,25 @@ async def test_admin_import_without_filename_shows_usage(fake_msg_factory, monke
 
 
 @pytest.mark.asyncio
+async def test_admin_updatecheck_alias_routes_like_checkupdate(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+    bot.update_result = (True, "2.3.0", None)
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!updatecheck"))
+
+    assert "New bot version available: 2.3.0" in bot.sent[-1]["mbody"]
+
+    bot.update_result = (False, "2.2.0", None)
+    await bot.on_message(admin_msg(fake_msg_factory, "!checkupdate"))
+
+    assert "Bot is up to date" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
 async def test_admin_rtbl_disabled_reports_config_hint(fake_msg_factory, monkeypatch):
     import banbot.commands as commands
 
