@@ -13,7 +13,9 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 !audit all
 
 !banlist all
+!blacklist all
 !banlist rtbl all
+!blacklist rtbl all
 !bansearch all spam
 !ignore list all
 !whitelist all
@@ -57,8 +59,8 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!ban <jid/nick/domain> [comment]` | Bans a JID, nick, or wildcard domain | `!ban alice@example.org spam` / `!ban *.evil.org` |
 | `!tempban <jid/nick> <duration> [comment]` | Adds a temporary ban | `!tempban bob 10m rude behavior` |
 | `!unban <jid/nick/domain>` | Removes a ban | `!unban bob` / `!unban *.evil.org` |
-| `!banlist [all/page/last]` | Shows active bans | `!banlist all` |
-| `!banlist rtbl [all/page/last]` | Shows raw RTBL hashes/domains | `!banlist rtbl all` |
+| `!banlist` / `!blacklist [all/page/last]` | Shows active bans | `!blacklist all` |
+| `!banlist` / `!blacklist rtbl [all/page/last]` | Shows raw RTBL hashes/domains | `!blacklist rtbl all` |
 | `!bansearch [all] <query>` | Searches target, JID, nick, domain, issuer, comment, and RTBL reason | `!bansearch all reason:abuse` |
 | `!why <nick/jid>` | Shows reason and remaining time; admin output includes recent audit history | `!why alice` |
 | `!audit [all/page/last/query]` | Shows audit events, optionally filtered | `!audit all alice` |
@@ -151,14 +153,14 @@ Public commands are restricted and rate-limited in protected rooms:
 | --- | --- |
 | `!help` | Shows restricted help |
 | `!whoami` | Shows affiliation/role/permissions |
-| `!banlist [all/page/last]` | Shows active temporary bans if enabled |
+| `!banlist` / `!blacklist [all/page/last]` | Shows active temporary bans if enabled |
 | `!why <jid/nick>` | Shows reason and remaining time for a ban |
 | `!rules` / `!policy` | Shows public moderation policy if configured |
 
 Visibility rules:
 
 * Permanent bans are only shown in the admin room.
-* Protected-room banlists show only temporary bans.
+* Protected-room banlists show only temporary bans. `!blacklist` is an alias for `!banlist`.
 * JIDs and admin issuers are anonymized in protected rooms.
 * RTBL bans are shown as `by rtbl`.
 * Admin-room use is not rate-limited.

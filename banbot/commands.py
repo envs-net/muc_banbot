@@ -11,7 +11,7 @@ from .utils import parse_duration, wants_all_pages, without_all_pages_arg
 log = logging.getLogger(__name__)
 
 # PUBLIC_COMMANDS used for ratelimits
-PUBLIC_COMMANDS = {"help", "whoami", "banlist", "why", "rules", "policy"}
+PUBLIC_COMMANDS = {"help", "whoami", "banlist", "blacklist", "why", "rules", "policy"}
 
 
 class CommandMixin:
@@ -162,7 +162,7 @@ class CommandMixin:
             await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
             return True
 
-        if cmd == "banlist" and self.user_cmds_allowed(room):
+        if cmd in ("banlist", "blacklist") and self.user_cmds_allowed(room):
             show_all = wants_all_pages(args)
             args = without_all_pages_arg(args)
             if args and args[0].lower() == "rtbl":
@@ -178,7 +178,7 @@ class CommandMixin:
                         except ValueError:
                             await self.bot_send_message(
                                 mto=room,
-                                mbody=f"❌ Usage: {self.command_prefix}banlist rtbl [all|page|last]",
+                                mbody=f"❌ Usage: {self.command_prefix}{cmd} rtbl [all|page|last]",
                                 mtype="groupchat",
                             )
                             return True
@@ -195,7 +195,7 @@ class CommandMixin:
                     except ValueError:
                         await self.bot_send_message(
                             mto=room,
-                            mbody=f"❌ Usage: {self.command_prefix}banlist [rtbl] [all|page|last]",
+                            mbody=f"❌ Usage: {self.command_prefix}{cmd} [rtbl] [all|page|last]",
                             mtype="groupchat",
                         )
                         return True
@@ -700,7 +700,7 @@ class CommandMixin:
         lines = [
             f"{p}help - show this help",
             f"{p}whoami - show your affiliation/role and permissions",
-            f"{p}banlist [page] - show temporary bans",
+            f"{p}banlist / {p}blacklist [page] - show temporary bans",
             f"{p}why <jid|nick|domain> - show ban reason",
         ]
 
@@ -727,8 +727,8 @@ class CommandMixin:
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
             f"{p}unban <jid|nick> - remove ban\n\n"
-            f"{p}banlist [all|page|last] - show all active bans with remaining time and comments\n"
-            f"{p}banlist rtbl [all|page|last] - show RTBL hash and domain entries\n"
+            f"{p}banlist / {p}blacklist [all|page|last] - show all active bans with remaining time and comments\n"
+            f"{p}banlist / {p}blacklist rtbl [all|page|last] - show RTBL hash and domain entries\n"
             f"{p}bansearch <query> [all|page|last] - search bans by nick, domain, jid or RTBL reason\n"
             f"{p}why <nick|jid> - show the reason and remaining time for a ban\n\n"
             f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"

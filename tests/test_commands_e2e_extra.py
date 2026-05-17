@@ -306,11 +306,15 @@ async def test_admin_paged_commands_parse_all_marker(fake_msg_factory, monkeypat
 
     await bot.on_message(admin_msg(fake_msg_factory, "!banlist all"))
     await bot.on_message(admin_msg(fake_msg_factory, "!banlist rtbl all"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!blacklist all"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!blacklist rtbl all"))
     await bot.on_message(admin_msg(fake_msg_factory, "!bansearch all spam wave"))
     await bot.on_message(admin_msg(fake_msg_factory, "!bansearch spam wave all"))
     await bot.on_message(admin_msg(fake_msg_factory, "!audit all spam"))
     await bot.on_message(admin_msg(fake_msg_factory, "!room list all"))
 
+    assert bot.banlist_calls[-2] == ("admin@conference.example.test", 1, True)
+    assert bot.banlist_rtbl_calls[-2] == ("admin@conference.example.test", 1, True)
     assert bot.banlist_calls[-1] == ("admin@conference.example.test", 1, True)
     assert bot.banlist_rtbl_calls[-1] == ("admin@conference.example.test", 1, True)
     assert bot.bansearch_calls[-2] == ("spam wave", 1, True)
