@@ -1,5 +1,6 @@
 """Own outbound RTBL publish-feed setup and item publish/retract helpers."""
 
+import asyncio
 import hashlib
 import logging
 import uuid
@@ -378,16 +379,27 @@ class RtblPublishMixin:
                 payload=self._rtbl_build_payload("BanBot RTBL publish sanity check"),
             )
             published = True
+            fetch_error = None
 
-            try:
-                result = await self._rtbl_get_sanity_item(node, item_id)
-            except (IqError, IqTimeout) as e:
-                primary_error = f"{node}: test item fetch failed: {e}"
-            except Exception as e:
-                primary_error = f"{node}: test item fetch failed: {e}"
-            else:
-                if not self._rtbl_pubsub_result_contains_item(result, item_id):
-                    primary_error = f"{node}: test item was published but not visible when fetched"
+            for attempt in range(3):
+                try:
+                    result = await self._rtbl_get_sanity_item(node, item_id)
+                except (IqError, IqTimeout) as e:
+                    fetch_error = f"{node}: test item fetch failed: {e}"
+                except Exception as e:
+                    fetch_error = f"{node}: test item fetch failed: {e}"
+                else:
+                    if self._rtbl_pubsub_result_contains_item(result, item_id):
+                        fetch_error = None
+                        break
+
+                    fetch_error = f"{node}: test item was published but not visible when fetched"
+
+                if attempt < 2:
+                    await asyncio.sleep(0.3)
+
+            if fetch_error:
+                primary_error = fetch_error
 
         except (IqError, IqTimeout) as e:
             primary_error = f"{node}: test publish failed: {e}"
