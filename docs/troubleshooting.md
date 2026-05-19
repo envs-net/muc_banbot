@@ -109,18 +109,6 @@ Check:
 * Remote service is reachable
 * The bot is not trying to subscribe to its own publish node
 
-## RTBL fetch returns only 100 items
-
-Some RTBL nodes intentionally retain only a rolling window of recent active items. If the provider confirms only the last 100 are retained, then those are all current entries.
-
-BanBot treats successful refreshes as snapshots and removes stale local entries only after a successful fetch. Failed or suspicious pagination skips stale cleanup.
-
-## RTBL publish node create/configure is forbidden
-
-Create/configure nodes manually with Prosody shell commands. See [Prosody PubSub Setup](rtbl_pubsub-setup.md).
-
-`forbidden` during node configuration can be informational if publishing itself still succeeds.
-
 ## RTBL bans not applied
 
 Check:
@@ -131,6 +119,41 @@ Check:
 * The user's domain is not protected by a domain ignorelist entry for domain matches
 * The user is not an admin/owner
 * Startup/new subscription fetches scan current occupants; periodic refreshes do not rescan unchanged lists
+
+## RTBL fetch returns only 100 items
+
+Some RTBL nodes intentionally retain only a rolling window of recent active items. If the provider confirms only the last 100 are retained, then those are all current entries.
+
+BanBot treats successful refreshes as snapshots and removes stale local entries only after a successful fetch. Failed or suspicious pagination skips stale cleanup.
+
+## PubSub / RTBL fetch loops or repeated pages
+
+Some PubSub services ignore RSM pagination or repeat the same page. BanBot detects suspicious pagination loops and skips stale cleanup for that refresh to avoid deleting valid local RTBL state based on incomplete data.
+
+Check `!rtbl list`, run `!rtbl refresh <service> <node>`, and ask the list provider whether the node is a rolling window or an archive-style list.
+
+## RTBL publish node create/configure is forbidden
+
+Create/configure nodes manually with Prosody shell commands. See [Prosody PubSub Setup](rtbl_pubsub-setup.md).
+
+`forbidden` during node configuration can be informational if publishing itself still succeeds.
+
+## RTBL Publish disabled at runtime
+
+If `RTBL_PUBLISH_ENABLED=True` but `!status` shows that RTBL Publish was disabled at runtime, the startup publish sanity check failed.
+
+BanBot publishes a temporary test item, fetches it again, and retracts it before syncing local bans. If one of these steps fails, publishing is disabled for the current runtime while the bot continues to run.
+
+Check:
+
+* The PubSub service exists and is reachable
+* The configured publish nodes exist or can be created by the bot
+* The bot account may publish and retract items
+* `pubsub#publish_model` allows the bot to publish
+* `pubsub#access_model` allows subscribers to read items
+* The bot has the required affiliation on the publish nodes
+
+See [Prosody PubSub Setup](rtbl_pubsub-setup.md).
 
 
 ## OMEMO dependency installation fails
@@ -170,12 +193,6 @@ chmod 600 data/omemo.json
 ```
 
 If the file is corrupt during testing, stop the bot and move the file aside before creating a fresh OMEMO identity. Be aware that this changes the bot's OMEMO identity.
-
-## PubSub / RTBL fetch loops or repeated pages
-
-Some PubSub services ignore RSM pagination or repeat the same page. BanBot detects suspicious pagination loops and skips stale cleanup for that refresh to avoid deleting valid local RTBL state based on incomplete data.
-
-Check `!rtbl list`, run `!rtbl refresh <service> <node>`, and ask the list provider whether the node is a rolling window or an archive-style list.
 
 ## Drone fails because `config.py` is missing
 

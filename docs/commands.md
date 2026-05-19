@@ -115,11 +115,11 @@ Admin-room management:
 
 | Command | Description |
 | --- | --- |
-| `!policy show` | Shows configured policy text and enable state |
-| `!policy set <text>` | Sets and enables policy text; use literal `\n` for line breaks |
-| `!policy clear` | Clears and disables policy text |
-| `!policy enable` | Enables protected-room `!rules` / `!policy` output |
-| `!policy disable` | Disables public policy output without deleting text |
+| `!policy show` / `!rules show` | Shows configured policy text and enable state |
+| `!policy set <text>` / `!rules set <text>` | Sets and enables policy text; use literal `\n` for line breaks |
+| `!policy clear` / `!rules clear` | Clears and disables policy text |
+| `!policy enable` / `!rules enable` | Enables protected-room `!rules` / `!policy` output |
+| `!policy disable` / `!rules disable` | Disables public policy output without deleting text |
 
 Protected-room public commands:
 
