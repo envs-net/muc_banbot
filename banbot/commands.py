@@ -262,6 +262,7 @@ class CommandMixin:
             "ignore",
             "whitelist",
             "policy",
+            "rules",
         }
 
         if cmd not in admin_commands:
@@ -495,7 +496,7 @@ class CommandMixin:
             await self.cmd_ignore(args, room, actor=actor_jid, command_name=cmd)
             return True
 
-        if cmd == "policy":
+        if cmd in ("policy", "rules"):
             await self.cmd_policy(args, room)
             return True
 
@@ -720,10 +721,10 @@ class CommandMixin:
             f"{p}status - show bot health, active rooms, and ban statistics\n"
             f"{p}checkupdate / {p}updatecheck - check if a newer bot release is available\n"
             f"{p}whoami - show your affiliation/role\n"
-            f"{p}policy show/set/clear/enable/disable - manage public rules/policy text\n"
             f"{p}audit [all|page|last|query] - show recent audit events\n\n"
             f"{p}room add/remove - manage protected rooms\n"
-            f"{p}room list [all|page] - list protected rooms\n\n"
+            f"{p}room list [all|page] - list protected rooms\n"
+            f"{p}policy / {p}rules show/set/clear/enable/disable - manage public rules/policy text\n\n"
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
             f"{p}unban <jid|nick> - remove ban\n\n"

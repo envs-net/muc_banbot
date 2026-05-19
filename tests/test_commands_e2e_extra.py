@@ -269,6 +269,7 @@ async def test_admin_rtbl_ignore_policy_and_room_commands_route_with_actor(fake_
     await bot.on_message(admin_msg(fake_msg_factory, "!whitelist add good@example.test"))
     await bot.on_message(admin_msg(fake_msg_factory, "!whitelist"))
     await bot.on_message(admin_msg(fake_msg_factory, "!policy show"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!rules show"))
 
     assert bot.room_calls == [(["add", "room@example.test"], "admin@conference.example.test")]
     assert bot.rtbl_calls == [(["list"], "admin@conference.example.test", "admin@example.test/resource")]
@@ -277,7 +278,10 @@ async def test_admin_rtbl_ignore_policy_and_room_commands_route_with_actor(fake_
         (["add", "good@example.test"], "admin@conference.example.test", "admin@example.test/resource", "whitelist"),
         ([], "admin@conference.example.test", "admin@example.test/resource", "whitelist"),
     ]
-    assert bot.policy_calls == [(["show"], "admin@conference.example.test")]
+    assert bot.policy_calls == [
+        (["show"], "admin@conference.example.test"),
+        (["show"], "admin@conference.example.test"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -467,3 +471,20 @@ async def test_policy_show_with_existing_text_includes_commands(fake_msg_factory
     assert "Use !why <nick> in admin@conference.example.test." in body
     assert "Commands:" in body
     assert "!policy disable" in body
+
+@pytest.mark.asyncio
+async def test_rules_alias_works_in_admin_room(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "adminbot")
+
+    bot = PolicyCommandBot()
+    bot.policy_enabled = True
+    bot.policy_text = "Please read the rules."
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!rules"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "Public policy is currently enabled" in body
+    assert "Please read the rules." in body
