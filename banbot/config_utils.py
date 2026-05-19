@@ -133,6 +133,7 @@ class ConfigMixin:
             "AUDIT_LOG_ENABLED": self.audit_log_enabled,
             "AUDIT_LOG_RETENTION_DAYS": self.audit_log_retention_days,
             "RTBL_ANNOUNCE": self.rtbl_announce,
+            "RTBL_REFRESH_INTERVAL": self.rtbl_refresh_interval,
             "VERSION_CHECK_ENABLED": self.version_check_enabled,
             "VERSION_CHECK_INTERVAL": self.version_check_interval,
             "VERSION_CHECK_URL": self.version_check_url,

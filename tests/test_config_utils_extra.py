@@ -20,6 +20,7 @@ class ConfigBot(ConfigMixin):
         self.audit_log_enabled = True
         self.audit_log_retention_days = 365
         self.rtbl_announce = True
+        self.rtbl_refresh_interval = 3600
         self.version_check_enabled = False
         self.version_check_interval = 3600
         self.version_check_url = None
@@ -100,6 +101,15 @@ def test_startup_config_snapshot_includes_rtbl_and_omemo(monkeypatch):
     assert snapshot["OMEMO_STORAGE_FILE"] == "data/omemo-test.json"
     assert snapshot["OMEMO_AUTO_ENCRYPT_ADMIN_ROOM"] is True
     assert snapshot["OMEMO_PLAINTEXT_FALLBACK"] is False
+
+
+def test_runtime_config_snapshot_includes_rtbl_refresh_interval():
+    bot = ConfigBot()
+    bot.rtbl_refresh_interval = 3600
+
+    snapshot = bot._runtime_config_snapshot()
+
+    assert snapshot["RTBL_REFRESH_INTERVAL"] == 3600
 
 
 def test_format_config_changes_reports_runtime_changes():
