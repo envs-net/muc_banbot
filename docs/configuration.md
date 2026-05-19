@@ -76,6 +76,8 @@ Common runtime settings:
 | `UNBAN_CHECK_INTERVAL` | `60` | Expired tempban check interval |
 | `MAX_TEMPBAN_DAYS` | `30` | Max temporary ban duration; 1-365 |
 | `MUC_WRITE_SEMAPHORE` | `5` | Concurrent XMPP IQ operation limit |
+| `RTBL_ANNOUNCE` | `True` | Announce RTBL bans and skipped admin-protected entries in the admin room |
+| `RTBL_REFRESH_INTERVAL` | `3600` | RTBL subscription refresh interval in seconds; `0` disables periodic refresh |
 | `VERSION_CHECK_ENABLED` | `False` | Enable GitHub release checks |
 | `VERSION_CHECK_INTERVAL` | `3600` | Release check interval; minimum 300 seconds |
 | `VERSION_CHECK_URL` | GitHub latest release URL | URL used to discover latest release |
@@ -93,6 +95,8 @@ VCARD_ROLE = "Moderation Bot"
 VCARD_URL = "https://example.org"
 VCARD_NOTE = "XMPP MUC ban management bot"
 ```
+
+Avatar/vCard data is updated on startup and after `!reloadconfig`.
 
 ## OMEMO Settings
 
@@ -132,7 +136,7 @@ When own RTBL publishing is enabled, BanBot configures PubSub node `pubsub#max_i
 
 Successful RTBL refreshes reconcile the local cache with the current PubSub node snapshot. RTBL matches that are actually applied are stored in the main ban table as `issuer=rtbl`; stale `issuer=rtbl` bans are automatically unbanned when their RTBL source disappears.
 
-Avatar/vCard data is updated on startup and after `!reloadconfig`.
+`RTBL_ANNOUNCE` and `RTBL_REFRESH_INTERVAL` are runtime-reloadable via `!reloadconfig`; enabling/disabling RTBL itself and changing own publish feed settings require a restart.
 
 ## Systemd Service
 
