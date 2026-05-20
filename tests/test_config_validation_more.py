@@ -71,7 +71,7 @@ def test_validate_config_accepts_valid_values(monkeypatch):
     assert warnings == []
 
 
-def test_validate_config_reports_multiple_errors_and_placeholder_warning(monkeypatch):
+def test_validate_config_reports_multiple_errors_and_placeholder_credentials(monkeypatch):
     set_valid_config(monkeypatch)
     monkeypatch.setattr(config, "JID", "not-a-jid", raising=False)
     monkeypatch.setattr(config, "PASSWORD", "changeme", raising=False)
@@ -88,7 +88,22 @@ def test_validate_config_reports_multiple_errors_and_placeholder_warning(monkeyp
     assert "COMMAND_PREFIX must not contain whitespace" in errors
     assert "LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL" in errors
     assert any("HEALTH_CHECK_INTERVAL" in error for error in errors)
-    assert "PASSWORD still looks like a placeholder" in warnings
+    assert "PASSWORD still looks like a placeholder" in errors
+
+
+def test_validate_config_rejects_sample_config_identity_values(monkeypatch):
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "JID", "adminbot@domain.tld", raising=False)
+    monkeypatch.setattr(config, "PASSWORD", "yourpassword", raising=False)
+    monkeypatch.setattr(config, "ADMIN_ROOM", "admin@muc.domain.tld", raising=False)
+
+    bot = ConfigValidationBot()
+    errors, warnings = bot._validate_config()
+
+    assert "JID still looks like the sample config value" in errors
+    assert "PASSWORD still looks like a placeholder" in errors
+    assert "ADMIN_ROOM still looks like the sample config value" in errors
+    assert "PASSWORD still looks like a placeholder" not in warnings
 
 
 def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):

@@ -233,12 +233,24 @@ class ConfigMixin:
 
         if jid and not validate_jid_format(jid):
             errors.append("JID must be a valid bare JID like bot@example.org")
+
         if admin_room and not validate_jid_format(admin_room):
             errors.append("ADMIN_ROOM must be a valid room JID like admin@muc.example.org")
+
         if nick and any(ch.isspace() for ch in nick):
             errors.append("NICK must not contain whitespace")
-        if password in {"yourpassword", "password", "changeme"}:
-            warnings.append("PASSWORD still looks like a placeholder")
+
+        placeholder_values = {"yourpassword", "password", "changeme", "change-me"}
+
+        if password.lower() in placeholder_values:
+            errors.append("PASSWORD still looks like a placeholder")
+
+        if jid.lower() == "adminbot@domain.tld":
+            errors.append("JID still looks like the sample config value")
+
+        if admin_room.lower() == "admin@muc.domain.tld":
+            errors.append("ADMIN_ROOM still looks like the sample config value")
+
         if (
             hasattr(config, "RESOURCE")
             and config.RESOURCE is not None
