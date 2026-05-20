@@ -1,6 +1,6 @@
 import logging
 
-from banbot.config_utils import ConfigMixin, format_config_import_error
+from banbot.config_utils import ConfigMixin, ConfigError, format_config_import_error
 
 
 class ConfigBot(ConfigMixin):
@@ -121,6 +121,16 @@ def test_format_config_changes_reports_runtime_changes():
 
     assert "- COMMAND_PREFIX: '!' → '.'" in changes
     assert "- RTBL_REFRESH_INTERVAL: 3600 → 0" in changes
+
+
+def test_format_config_import_error_for_missing_config():
+    exc = ModuleNotFoundError("No module named 'config'", name="config")
+
+    message = format_config_import_error(exc)
+
+    assert "config.py is missing" in message
+    assert "cp config_sample.py config.py" in message
+    assert "Then edit config.py and start the bot again." in message
 
 
 def test_format_config_import_error_includes_syntax_location():

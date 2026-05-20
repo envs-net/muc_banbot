@@ -9,7 +9,13 @@ import os
 import pathlib
 import builtins
 
-import config
+try:
+    import config
+except ModuleNotFoundError as exc:
+    if exc.name != "config":
+        raise
+    config = None
+
 from .utils import validate_jid_format
 
 # Allow config.py to use lowercase boolean aliases like in YAML/JSON/TOML.
@@ -51,6 +57,12 @@ def format_config_import_error(exc: BaseException) -> str:
 
     if isinstance(exc, NameError):
         lines.append("Hint: Python booleans are True/False. This bot also accepts lowercase true/false.")
+
+    if isinstance(exc, ModuleNotFoundError) and getattr(exc, "name", None) == "config":
+        lines.append("Hint: config.py is missing.")
+        lines.append("Create it from the sample config first:")
+        lines.append("  cp config_sample.py config.py")
+        lines.append("Then edit config.py and start the bot again.")
 
     return "\n".join(lines)
 

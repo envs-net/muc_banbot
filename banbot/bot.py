@@ -17,7 +17,7 @@ try:
 except Exception as exc:
     from .config_utils import format_config_import_error
     sys.stderr.write("Failed to load config.py\n" + format_config_import_error(exc) + "\n")
-    raise
+    raise SystemExit(1) from None
 
 import aiosqlite
 from slixmpp import ClientXMPP
