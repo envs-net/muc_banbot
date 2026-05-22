@@ -35,6 +35,7 @@ from .commands import CommandMixin
 from .direct_messages import DirectMessageMixin
 from .rooms import RoomMixin
 from .room_invites import RoomInviteMixin
+from .redaction import RedactionMixin
 from .ban_queries import BanQueryMixin
 from .status import StatusMixin
 from .config_cmd import ConfigCommandMixin
@@ -73,6 +74,7 @@ class BanBot(
     DirectMessageMixin,
     RoomMixin,
     RoomInviteMixin,
+    RedactionMixin,
     BanQueryMixin,
     StatusMixin,
     ConfigCommandMixin,
@@ -169,6 +171,11 @@ class BanBot(
         self.version_check_url: str | None = None
         self.last_version_check_result: str | None = None
         self.last_update_notified_version: str | None = None
+
+        # --- Redaction ---
+        self.redaction_enabled: bool = getattr(config, "REDACTION_ENABLED", False)
+        self.redaction_index_retention_days: int = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
+        self.redaction_auto_reasons: list[str] = list(getattr(config, "REDACTION_AUTO_REASONS", []))
 
         # --- RTBL ---
         self.rtbl_enabled: bool = getattr(config, "RTBL_ENABLED", False)

@@ -43,6 +43,9 @@ class CommandMixin:
         nick = msg["mucnick"]
         body = msg["body"].strip()
 
+        if hasattr(self, "_redaction_index_message"):
+            await self._redaction_index_message(msg)
+
         if not body:
             return
 
@@ -259,6 +262,7 @@ class CommandMixin:
             "import",
             "audit",
             "rtbl",
+            "redact",
             "ignore",
             "whitelist",
             "policy",
@@ -731,6 +735,9 @@ class CommandMixin:
             f"{p}room invite accept/decline <id> - accept or decline a room invite\n"
             f"{p}policy / {p}rules show/set/clear/enable/disable - manage public rules/policy text\n\n"
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
+            f"{p}redact <jid> [reason] - redact indexed messages from a JID in protected rooms\n"
+            f"{p}redact id <room_jid> <stanza_id> [reason] - redact one known stanza ID\n"
+            f"{p}redact cleanup - cleanup old redaction index entries\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
             f"{p}unban <jid|nick> - remove ban\n\n"
             f"{p}banlist / {p}blacklist [all|page|last] - show all active bans with remaining time and comments\n"

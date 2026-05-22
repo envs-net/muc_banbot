@@ -53,6 +53,9 @@ def set_valid_config(monkeypatch):
         "MUC_WRITE_SEMAPHORE": 5,
         "VERSION_CHECK_INTERVAL": 3600,
         "RTBL_REFRESH_INTERVAL": 3600,
+        "REDACTION_ENABLED": False,
+        "REDACTION_INDEX_RETENTION_DAYS": 30,
+        "REDACTION_AUTO_REASONS": [],
         "RTBL_ENABLED": False,
         "RTBL_PUBLISH_ENABLED": False,
         "OMEMO_ENABLED": False,
@@ -106,6 +109,20 @@ def test_validate_config_rejects_sample_config_identity_values(monkeypatch):
     assert "PASSWORD still looks like a placeholder" in errors
     assert "ADMIN_ROOM still looks like the sample config value" in errors
     assert "PASSWORD still looks like a placeholder" not in warnings
+
+
+def test_validate_config_rejects_invalid_redaction_settings(monkeypatch):
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "REDACTION_ENABLED", "yes", raising=False)
+    monkeypatch.setattr(config, "REDACTION_INDEX_RETENTION_DAYS", -1, raising=False)
+    monkeypatch.setattr(config, "REDACTION_AUTO_REASONS", ["spam", 123], raising=False)
+
+    bot = ConfigValidationBot()
+    errors, _warnings = bot._validate_config()
+
+    assert "REDACTION_ENABLED must be True or False" in errors
+    assert "REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)" in errors
+    assert "REDACTION_AUTO_REASONS must be a list of strings" in errors
 
 
 def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):

@@ -77,6 +77,13 @@ Accepting an invite uses the normal `!room add` flow, including room JID validat
 | `!bansearch [all] <query>` | Searches target, JID, nick, domain, issuer, comment, and RTBL reason | `!bansearch all reason:abuse` |
 | `!why <nick/jid>` | Shows reason and remaining time; admin output includes recent audit history | `!why alice` |
 | `!audit [all/page/last/query]` | Shows audit events, optionally filtered | `!audit all alice` |
+| `!redact <jid> [reason]` | Redacts all indexed messages from a bare JID in protected rooms | `!redact spammer@example.org spam` |
+| `!redact id <room_jid> <stanza_id> [reason]` | Redacts one specific stanza ID in a protected room | `!redact id room@conference.example.org abc123 spam` |
+| `!redact cleanup` | Deletes old redaction index entries according to retention settings | `!redact cleanup` |
+
+### Redaction notes
+
+Redaction only works for messages whose room-assigned stanza IDs are known to BanBot. BanBot indexes live messages and any join history it receives after `REDACTION_ENABLED=True`. It stores metadata only, not message bodies.
 
 ### Durations
 

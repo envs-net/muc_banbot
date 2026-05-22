@@ -11,7 +11,7 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 * 🛡️ Central admin room for all administrative commands
 * 🧩 Dynamic addition/removal of protected rooms
 * 🔒 Optional OMEMO support: encrypted commands receive encrypted replies
-* ❌ Ban, temporary ban, unban, banlist, bansearch, and why commands
+* ❌ Ban, temporary ban, unban, banlist, bansearch, why, and redaction commands
 * 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain
 * ⏱️ Automatic temporary ban expiration with human-readable durations
 * 📊 Smart duplicate ban handling with automatic conversion between permanent and temporary bans
@@ -105,6 +105,7 @@ Examples assume the default command prefix `!`.
 | `!bansearch [all] <query>` | Search bans by target, issuer, comment, or RTBL reason |
 | `!why <nick/jid>` | Explain why a user is banned |
 | `!audit [all/page/last/query]` | Show audit log entries |
+| `!redact <jid> [reason]` / `!redact cleanup` | Redact indexed messages or clean old redaction index entries |
 | `!ignore [list/all]` / `!ignore add/remove` | Manage the global ignorelist |
 | `!whitelist [list/all]` / `!whitelist add/remove` | Alias for `!ignore ...` |
 | `!rtbl list/add/delete/refresh` | Manage RTBL subscriptions |
@@ -116,7 +117,18 @@ For paginated commands, the standalone `all` argument disables paging and prints
 
 Full command reference: [docs/commands.md](docs/commands.md).
 
+
 ---
+
+## Room Invite Service
+
+When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites for potential protected rooms. Invites are announced in the admin room and must be accepted or declined with `!room invite` commands. BanBot does not auto-join invited rooms.
+
+## Message Redaction
+
+Optional redaction support indexes room-assigned stanza IDs for messages BanBot sees in protected rooms. Message bodies are not stored. Admins can redact all known messages from a bare JID with `!redact <jid> [reason]` or target a specific stanza ID with `!redact id <room_jid> <stanza_id> [reason]`.
+
+See [docs/commands.md](docs/commands.md) and [docs/configuration.md](docs/configuration.md#redaction-settings).
 
 ## OMEMO
 

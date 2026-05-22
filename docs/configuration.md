@@ -79,11 +79,27 @@ Common runtime settings:
 | `MUC_WRITE_SEMAPHORE` | `5` | Concurrent XMPP IQ operation limit |
 | `RTBL_ANNOUNCE` | `True` | Announce RTBL bans and skipped admin-protected entries in the admin room |
 | `RTBL_REFRESH_INTERVAL` | `3600` | RTBL subscription refresh interval in seconds; `0` disables periodic refresh |
+| `REDACTION_ENABLED` | `False` | Enable protected-room message redaction indexing and commands |
+| `REDACTION_INDEX_RETENTION_DAYS` | `30` | Days to retain indexed stanza IDs; `0` keeps them indefinitely |
+| `REDACTION_AUTO_REASONS` | `[]` | Ban-comment reason strings that trigger automatic redaction |
 | `VERSION_CHECK_ENABLED` | `False` | Enable GitHub release checks |
 | `VERSION_CHECK_INTERVAL` | `3600` | Release check interval; minimum 300 seconds |
 | `VERSION_CHECK_URL` | GitHub latest release URL | URL used to discover latest release |
 
 Boolean aliases such as `true`/`false` are supported by the config loader for convenience.
+
+
+## Room Invite Service
+
+When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them in the admin room as pending protected-room requests. The bot does not auto-join invited rooms. Admins must explicitly accept or decline each invite:
+
+```text
+!room invite list [all|page|last]
+!room invite accept <id>
+!room invite decline <id>
+```
+
+Incoming invite room JIDs are validated before they are shown as pending protected-room requests. Repeated invites from the same inviter for the same room are deduplicated.
 
 ## vCard / Avatar Settings
 
@@ -98,18 +114,6 @@ VCARD_NOTE = "XMPP MUC ban management bot"
 ```
 
 Avatar/vCard data is updated on startup and after `!reloadconfig`.
-
-## Room Invite Service
-
-When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them in the admin room as pending protected-room requests. The bot does not auto-join invited rooms. Admins must explicitly accept or decline each invite:
-
-```text
-!room invite list [all|page|last]
-!room invite accept <id>
-!room invite decline <id>
-```
-
-Incoming invite room JIDs are validated before they are shown as pending protected-room requests. Repeated invites from the same inviter for the same room are deduplicated.
 
 ## OMEMO Settings
 
@@ -150,6 +154,18 @@ When own RTBL publishing is enabled, BanBot configures PubSub node `pubsub#max_i
 Successful RTBL refreshes reconcile the local cache with the current PubSub node snapshot. RTBL matches that are actually applied are stored in the main ban table as `issuer=rtbl`; stale `issuer=rtbl` bans are automatically unbanned when their RTBL source disappears.
 
 `RTBL_ANNOUNCE` and `RTBL_REFRESH_INTERVAL` are runtime-reloadable via `!reloadconfig`; enabling/disabling RTBL itself and changing own publish feed settings require a restart.
+
+## Redaction Settings
+
+```python
+REDACTION_ENABLED = False
+REDACTION_INDEX_RETENTION_DAYS = 30
+REDACTION_AUTO_REASONS = ["spam", "harassment"]
+```
+
+When enabled, BanBot indexes room-assigned stanza IDs for messages it sees in protected rooms. Message bodies are not stored. `!redact <jid>` redacts all known, not-yet-redacted indexed messages for that bare JID. `REDACTION_INDEX_RETENTION_DAYS = 0` keeps the index indefinitely.
+
+`REDACTION_AUTO_REASONS` is matched case-insensitively against ban comments. Matching JID bans trigger automatic redaction for the banned bare JID.
 
 ## Systemd Service
 

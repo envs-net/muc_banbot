@@ -156,6 +156,21 @@ Check:
 See [Prosody PubSub Setup](rtbl_pubsub-setup.md).
 
 
+
+## Redaction finds no messages
+
+`!redact <jid>` can only retract messages whose room-assigned stanza IDs are known to BanBot.
+
+Check:
+
+* `REDACTION_ENABLED=True` and `!reloadconfig` was run after changing it
+* The target message was seen by BanBot after redaction indexing was enabled
+* The room sends XEP-0359 stanza IDs for MUC messages
+* The bot can resolve the occupant's real bare JID in the room
+* The bot has moderation rights required for message retraction
+
+BanBot stores message metadata only, not message bodies. Old messages that were never indexed cannot be redacted by JID, but a specific known stanza ID can still be targeted with `!redact id <room_jid> <stanza_id> [reason]`.
+
 ## OMEMO dependency installation fails
 
 `slixmpp-omemo` is optional. Plaintext BanBot operation only needs `requirements.txt`. Install OMEMO support only when encrypted command/reply support is needed.

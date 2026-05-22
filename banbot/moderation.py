@@ -371,6 +371,9 @@ class ModerationMixin:
         self.log_event(logging.INFO, event_type, actor=issuer, identifier=identifier, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment)
         await self.audit_event(event_type, actor=issuer, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment, details={"identifier": identifier})
 
+        if hasattr(self, "maybe_auto_redact_after_ban") and normalized_jid and target_type == "jid":
+            await self.maybe_auto_redact_after_ban(normalized_jid, comment, actor=issuer)
+
         if not skip_final_message:
             display = normalized_jid if normalized_jid else (normalized_nick or "Unknown")
             time_info = f" ({human_time(ts - int(time.time()))})" if ts > 0 else ""

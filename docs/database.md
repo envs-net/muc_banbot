@@ -55,6 +55,24 @@ The database path is configured with `DB_FILE` in `config.py`.
 | `added_by` | TEXT | Admin who added the entry |
 | `created_at` | INTEGER | Creation timestamp |
 
+
+### `redaction_index`
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | INTEGER | Internal row id |
+| `room_jid` | TEXT | Protected room where the message was seen |
+| `sender_jid` | TEXT | Bare JID resolved from the MUC occupant |
+| `sender_nick` | TEXT | Nickname seen in the room |
+| `stanza_id` | TEXT | Room-assigned XEP-0359 stanza ID used for redaction |
+| `message_id` | TEXT | Optional client message id, if present |
+| `created_at` | INTEGER | Time the message ID was indexed |
+| `redacted_at` | INTEGER | Time redaction was attempted successfully |
+| `redacted_by` | TEXT | Admin/system actor that triggered redaction |
+| `redact_reason` | TEXT | Reason sent with the moderation retraction |
+
+Message bodies are not stored.
+
 ### `public_policy`
 
 | Column | Type | Description |
@@ -111,3 +129,4 @@ This allows recovery from bad import files or operator mistakes.
 * Expired temporary bans are removed by the unban worker.
 * RTBL subscription data is separate from locally applied bans.
 * Applied RTBL bans in the main `bans` table use `issuer=rtbl`.
+* Redaction index cleanup is controlled by `REDACTION_INDEX_RETENTION_DAYS`; `0` keeps indexed stanza IDs indefinitely.

@@ -95,6 +95,9 @@ class ConfigMixin:
         "AUDIT_LOG_RETENTION_DAYS",
         "RTBL_ANNOUNCE",
         "RTBL_REFRESH_INTERVAL",
+        "REDACTION_ENABLED",
+        "REDACTION_INDEX_RETENTION_DAYS",
+        "REDACTION_AUTO_REASONS",
         "VERSION_CHECK_ENABLED",
         "VERSION_CHECK_INTERVAL",
         "VERSION_CHECK_URL",
@@ -148,6 +151,9 @@ class ConfigMixin:
             "AUDIT_LOG_RETENTION_DAYS": self.audit_log_retention_days,
             "RTBL_ANNOUNCE": self.rtbl_announce,
             "RTBL_REFRESH_INTERVAL": self.rtbl_refresh_interval,
+            "REDACTION_ENABLED": self.redaction_enabled,
+            "REDACTION_INDEX_RETENTION_DAYS": self.redaction_index_retention_days,
+            "REDACTION_AUTO_REASONS": tuple(self.redaction_auto_reasons),
             "VERSION_CHECK_ENABLED": self.version_check_enabled,
             "VERSION_CHECK_INTERVAL": self.version_check_interval,
             "VERSION_CHECK_URL": self.version_check_url,
@@ -309,6 +315,7 @@ class ConfigMixin:
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
             "ROOM_INVITES_ENABLED",
             "VERSION_CHECK_ENABLED",
+            "REDACTION_ENABLED",
         )
         bool_defaults = {
             "ANNOUNCE_STARTUP": True,
@@ -319,6 +326,7 @@ class ConfigMixin:
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": True,
             "ROOM_INVITES_ENABLED": False,
             "VERSION_CHECK_ENABLED": False,
+            "REDACTION_ENABLED": False,
         }
         for name in bool_names:
             if not isinstance(getattr(config, name, bool_defaults.get(name)), bool):
@@ -348,6 +356,14 @@ class ConfigMixin:
         rtbl_refresh = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
         if not isinstance(rtbl_refresh, int) or rtbl_refresh < 0:
             errors.append("RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)")
+
+        # --- Redaction ---
+        redaction_retention = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
+        if not isinstance(redaction_retention, int) or redaction_retention < 0:
+            errors.append("REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)")
+        redaction_reasons = getattr(config, "REDACTION_AUTO_REASONS", [])
+        if not isinstance(redaction_reasons, (list, tuple)) or not all(isinstance(item, str) for item in redaction_reasons):
+            errors.append("REDACTION_AUTO_REASONS must be a list of strings")
 
         # --- RTBL Publish ---
         rtbl_pub = getattr(config, "RTBL_PUBLISH_ENABLED", False)
@@ -495,6 +511,10 @@ class ConfigMixin:
 
         self.rtbl_announce = getattr(config, "RTBL_ANNOUNCE", True)
         self.rtbl_refresh_interval  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
+
+        self.redaction_enabled = getattr(config, "REDACTION_ENABLED", False)
+        self.redaction_index_retention_days = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
+        self.redaction_auto_reasons = list(getattr(config, "REDACTION_AUTO_REASONS", []))
 
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:

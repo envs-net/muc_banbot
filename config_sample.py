@@ -118,3 +118,35 @@ VERSION_CHECK_INTERVAL = 3600  # Interval in seconds for update checks. Default:
 # GitHub release URL. GitHub URLs are checked via the GitHub releases/latest API
 # with a redirect-parser fallback.
 VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"
+
+# ================= REDACTION =================
+
+# Optional protected-room message redaction support. When enabled, BanBot
+# indexes room-assigned stanza IDs for messages it sees in protected rooms.
+# Message bodies are not stored. Can be changed at runtime via !reloadconfig.
+REDACTION_ENABLED = False
+
+# How long to keep indexed stanza IDs. 0 = keep indefinitely.
+REDACTION_INDEX_RETENTION_DAYS = 30
+
+# Ban comments matching one of these strings trigger automatic redaction for
+# JID bans. Matching is case-insensitive.
+REDACTION_AUTO_REASONS = [
+    "code of conduct violations",
+    "open-reg",
+    "spam",
+    "advertising",
+    "impersonation",
+    "disagreement",
+    "harassment",
+    "hate speech",
+    "doxxing",
+    "violence",
+    "terrorism",
+    "csam",
+    "gore",
+    "troll",
+    "racist",
+    "cp",
+    "nsfw",
+]

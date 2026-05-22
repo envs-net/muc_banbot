@@ -22,6 +22,9 @@ class ConfigBot(ConfigMixin):
         self.audit_log_retention_days = 365
         self.rtbl_announce = True
         self.rtbl_refresh_interval = 3600
+        self.redaction_enabled = False
+        self.redaction_index_retention_days = 30
+        self.redaction_auto_reasons = []
         self.version_check_enabled = False
         self.version_check_interval = 3600
         self.version_check_url = None
@@ -131,6 +134,19 @@ def test_runtime_config_snapshot_includes_room_invites_enabled():
     snapshot = bot._runtime_config_snapshot()
 
     assert snapshot["ROOM_INVITES_ENABLED"] is True
+
+
+def test_runtime_config_snapshot_includes_redaction_settings():
+    bot = ConfigBot()
+    bot.redaction_enabled = True
+    bot.redaction_index_retention_days = 0
+    bot.redaction_auto_reasons = ["spam", "abuse"]
+
+    snapshot = bot._runtime_config_snapshot()
+
+    assert snapshot["REDACTION_ENABLED"] is True
+    assert snapshot["REDACTION_INDEX_RETENTION_DAYS"] == 0
+    assert snapshot["REDACTION_AUTO_REASONS"] == ("spam", "abuse")
 
 
 def test_format_config_import_error_for_missing_config():

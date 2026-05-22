@@ -135,6 +135,22 @@ class DatabaseMixin:
         """)
 
         await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS redaction_index (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_jid TEXT NOT NULL,
+                sender_jid TEXT NOT NULL,
+                sender_nick TEXT,
+                stanza_id TEXT NOT NULL,
+                message_id TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                redacted_at INTEGER,
+                redacted_by TEXT,
+                redact_reason TEXT,
+                UNIQUE(room_jid, stanza_id)
+            )
+        """)
+
+        await self.db.execute("""
             CREATE TABLE IF NOT EXISTS public_policy (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 enabled INTEGER NOT NULL DEFAULT 0,
@@ -152,6 +168,10 @@ class DatabaseMixin:
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log(event_type)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_log(target_type, target)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_redaction_sender ON redaction_index(sender_jid)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_redaction_room ON redaction_index(room_jid)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_redaction_created_at ON redaction_index(created_at)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_redaction_redacted_at ON redaction_index(redacted_at)")
         await self.db.commit()
         log.info("✅ Database schema and indexes created/verified")
 

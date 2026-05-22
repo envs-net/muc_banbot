@@ -5,7 +5,7 @@ This directory contains the operator and developer documentation for BanBot.
 ## Operator Guides
 
 * [Configuration](configuration.md) - required settings, runtime reload behavior, startup-only options, and systemd setup
-* [Commands](commands.md) - full admin-room and protected-room command reference, including paging and `all` mode
+* [Commands](commands.md) - full admin-room and protected-room command reference, including paging, `all` mode, room invites, and redaction commands
 * [Admin Protection](admin-protection.md) - how BanBot protects admins/owners from manual, domain, nick-based, and RTBL bans
 * [Import / Export](import-export.md) - CSV backup, migration, validation, duplicate handling, and restore workflow
 * [Troubleshooting](troubleshooting.md) - common runtime, config, RTBL, OMEMO, and room-rights issues
