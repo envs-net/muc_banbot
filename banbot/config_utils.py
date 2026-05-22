@@ -83,6 +83,7 @@ class ConfigMixin:
         "ANNOUNCE_SYNC_DETAILS",
         "SHOW_BAN_IN_MUC",
         "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
+        "ROOM_INVITES_ENABLED",
         "HEALTH_CHECK_INTERVAL",
         "UNBAN_CHECK_INTERVAL",
         "MAX_TEMPBAN_DAYS",
@@ -135,6 +136,7 @@ class ConfigMixin:
             "ANNOUNCE_SYNC_DETAILS": self.announce_sync_details,
             "SHOW_BAN_IN_MUC": self.show_ban_in_muc,
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": self.allow_user_cmds,
+            "ROOM_INVITES_ENABLED": self.room_invites_enabled,
             "HEALTH_CHECK_INTERVAL": self.health_check_interval,
             "UNBAN_CHECK_INTERVAL": self.unban_check_interval,
             "MAX_TEMPBAN_DAYS": self.max_tempban_days,
@@ -305,6 +307,7 @@ class ConfigMixin:
             "AUDIT_LOG_ENABLED",
             "SHOW_BAN_IN_MUC",
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
+            "ROOM_INVITES_ENABLED",
             "VERSION_CHECK_ENABLED",
         )
         bool_defaults = {
@@ -314,6 +317,7 @@ class ConfigMixin:
             "AUDIT_LOG_ENABLED": True,
             "SHOW_BAN_IN_MUC": False,
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": True,
+            "ROOM_INVITES_ENABLED": False,
             "VERSION_CHECK_ENABLED": False,
         }
         for name in bool_names:
@@ -477,6 +481,7 @@ class ConfigMixin:
         self.audit_log_retention_days = getattr(config, "AUDIT_LOG_RETENTION_DAYS", 365)
         self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", False)
         self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
+        self.room_invites_enabled = getattr(config, "ROOM_INVITES_ENABLED", False)
 
         self.health_check_interval = getattr(config, "HEALTH_CHECK_INTERVAL", 300)
         self.unban_check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)

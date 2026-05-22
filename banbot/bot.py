@@ -34,6 +34,7 @@ from .moderation import ModerationMixin
 from .commands import CommandMixin
 from .direct_messages import DirectMessageMixin
 from .rooms import RoomMixin
+from .room_invites import RoomInviteMixin
 from .ban_queries import BanQueryMixin
 from .status import StatusMixin
 from .config_cmd import ConfigCommandMixin
@@ -71,6 +72,7 @@ class BanBot(
     CommandMixin,
     DirectMessageMixin,
     RoomMixin,
+    RoomInviteMixin,
     BanQueryMixin,
     StatusMixin,
     ConfigCommandMixin,
@@ -123,6 +125,7 @@ class BanBot(
         self.occupants: dict[str, dict] = {}
         self.protected_rooms: set[str] = set()
         self.registered_rooms: set[str] = set()
+        self.init_room_invite_state()
         self.room_join_time: dict[str, float] = {}
         self.reconnecting = False
         self.last_reconnect_time: float | None = None
@@ -213,6 +216,7 @@ class BanBot(
         # --- Event handlers ---
         self.add_event_handler("session_start", self.start)
         self.add_event_handler("message", self.on_direct_message)
+        self.add_event_handler("groupchat_invite", self.on_room_invite)
         self.add_event_handler("groupchat_message", self.on_message)
         self.add_event_handler("groupchat_presence", self.on_muc_presence)
         self.add_event_handler("disconnected", self.on_disconnect)

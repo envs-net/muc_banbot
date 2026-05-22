@@ -17,6 +17,7 @@ class ConfigValidationBot(ConfigMixin):
         self.announce_sync_details = True
         self.show_ban_in_muc = False
         self.allow_user_cmds = True
+        self.room_invites_enabled = False
         self.health_check_interval = 300
         self.unban_check_interval = 60
         self.max_tempban_days = 30
@@ -44,6 +45,7 @@ def set_valid_config(monkeypatch):
         "COMMAND_PREFIX": "!",
         "AUDIT_LOG_RETENTION_DAYS": 365,
         "HEALTH_CHECK_INTERVAL": 300,
+        "ROOM_INVITES_ENABLED": False,
         "UNBAN_CHECK_INTERVAL": 60,
         "MAX_TEMPBAN_DAYS": 30,
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
@@ -118,6 +120,7 @@ def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):
 
     assert bot.command_prefix == "."
     assert bot.announce_startup is False
+    assert bot.room_invites_enabled is False
     assert bot.rtbl_refresh_interval == 0
     assert logging.getLogger("banbot").level == logging.ERROR
 
@@ -126,6 +129,7 @@ def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):
 
 def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
     set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "ROOM_INVITES_ENABLED", "yes", raising=False)
     monkeypatch.setattr(config, "RTBL_ENABLED", "yes", raising=False)
     monkeypatch.setattr(config, "RTBL_ANNOUNCE", "yes", raising=False)
     monkeypatch.setattr(config, "RTBL_REFRESH_INTERVAL", -1, raising=False)
@@ -137,6 +141,7 @@ def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
 
     errors, _warnings = bot._validate_config()
 
+    assert "ROOM_INVITES_ENABLED must be True or False" in errors
     assert "RTBL_ENABLED must be True or False" in errors
     assert "RTBL_ANNOUNCE must be True or False" in errors
     assert "RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)" in errors

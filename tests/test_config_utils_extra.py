@@ -10,6 +10,7 @@ class ConfigBot(ConfigMixin):
         self.announce_sync_details = True
         self.show_ban_in_muc = False
         self.allow_user_cmds = True
+        self.room_invites_enabled = False
         self.health_check_interval = 300
         self.unban_check_interval = 60
         self.max_tempban_days = 30
@@ -121,6 +122,15 @@ def test_format_config_changes_reports_runtime_changes():
 
     assert "- COMMAND_PREFIX: '!' → '.'" in changes
     assert "- RTBL_REFRESH_INTERVAL: 3600 → 0" in changes
+
+
+def test_runtime_config_snapshot_includes_room_invites_enabled():
+    bot = ConfigBot()
+    bot.room_invites_enabled = True
+
+    snapshot = bot._runtime_config_snapshot()
+
+    assert snapshot["ROOM_INVITES_ENABLED"] is True
 
 
 def test_format_config_import_error_for_missing_config():

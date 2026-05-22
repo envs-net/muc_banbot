@@ -72,7 +72,7 @@ class RoomMixin:
     async def cmd_room(self, args: list[str], room: str) -> None:
         """
         Manage protected rooms.
-        Commands: list, add <room>, remove <room>
+        Commands: list, add <room>, remove <room>, invite ...
 
         The `add` command now validates:
         - JID format (name@domain.tld)
@@ -82,6 +82,10 @@ class RoomMixin:
             return
 
         action = args[0].lower()
+
+        if action == "invite":
+            await self.cmd_room_invite(args[1:], room)
+            return
 
         if action == "list":
             show_all = wants_all_pages(args[1:])

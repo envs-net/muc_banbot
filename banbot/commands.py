@@ -325,7 +325,10 @@ class CommandMixin:
                         "Usage:\n"
                         f"  {self.command_prefix}room list [all|page]\n"
                         f"  {self.command_prefix}room add <room_jid>\n"
-                        f"  {self.command_prefix}room remove <room_jid>"
+                        f"  {self.command_prefix}room remove <room_jid>\n"
+                        f"  {self.command_prefix}room invite list [all|page|last]\n"
+                        f"  {self.command_prefix}room invite accept <id>\n"
+                        f"  {self.command_prefix}room invite decline <id>"
                     ),
                     mtype="groupchat",
                 )
@@ -724,6 +727,8 @@ class CommandMixin:
             f"{p}audit [all|page|last|query] - show recent audit events\n\n"
             f"{p}room add/remove - manage protected rooms\n"
             f"{p}room list [all|page] - list protected rooms\n"
+            f"{p}room invite list [all|page|last] - list pending room invites\n"
+            f"{p}room invite accept/decline <id> - accept or decline a room invite\n"
             f"{p}policy / {p}rules show/set/clear/enable/disable - manage public rules/policy text\n\n"
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"

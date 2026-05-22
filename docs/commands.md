@@ -20,6 +20,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 !ignore list all
 !whitelist all
 !room list all
+!room invite list all
 ```
 
 `all` disables paging and prints the complete result set. Existing page and `last` syntax remain unchanged.
@@ -42,6 +43,9 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!room add <room>` | Adds a protected room and stores it in the DB | `!room add secret@conference.example.org` |
 | `!room remove <room>` | Removes a protected room and makes the bot leave | `!room remove secret@conference.example.org` |
 | `!room list [all/page]` | Lists protected rooms | `!room list all` |
+| `!room invite list [all/page/last]` | Lists pending protected-room invites | `!room invite list all` |
+| `!room invite accept <id>` | Accepts a pending invite and adds the room | `!room invite accept 3` |
+| `!room invite decline <id>` | Declines a pending invite | `!room invite decline 3` |
 | `!sync` | Rejoins rooms, verifies rights, applies missing active bans | `!sync` |
 | `!syncadmins` | Updates admins from the admin room | `!syncadmins` |
 | `!syncbans` | Reads room outcasts into the DB and reapplies active bans | `!syncbans` |
@@ -51,6 +55,15 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 * `!sync` is faster and applies only bans that are missing in rooms.
 * `!syncbans` is comprehensive: it also adopts orphan room outcasts into the DB and removes expired tempban outcasts.
 * `sync_bans_startup()` runs internally on startup.
+
+
+### Protected-Room Invite Workflow
+
+When `ROOM_INVITES_ENABLED=True`, BanBot can be invited to potential protected rooms. Invites are announced in the admin room and stay pending until an admin accepts or declines them.
+
+The admin-room invite message includes the room JID, inviter JID, optional invite reason, and the accept/decline commands. Duplicate invites from the same inviter for the same room are ignored.
+
+Accepting an invite uses the normal `!room add` flow, including room JID validation, DB persistence, joining the room, ban sync, and RTBL occupant checks.
 
 ## Ban Management
 

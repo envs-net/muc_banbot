@@ -67,6 +67,7 @@ Common runtime settings:
 | `ANNOUNCE_SYNC_DETAILS` | `True` | Show detailed startup sync output |
 | `SHOW_BAN_IN_MUC` | `False` | Announce bans in protected rooms |
 | `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` | `True` | Enable public protected-room commands |
+| `ROOM_INVITES_ENABLED` | `False` | Enable admin-reviewed protected-room invite workflow |
 | `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` | `30` | Rate-limit window in seconds |
 | `PUBLIC_COMMAND_RATE_LIMIT_MAX` | `3` | Max public command uses per nick/room/command/window |
 | `STRUCTURED_EVENT_LOGS` | `True` | Emit JSON logs for important events |
@@ -97,6 +98,18 @@ VCARD_NOTE = "XMPP MUC ban management bot"
 ```
 
 Avatar/vCard data is updated on startup and after `!reloadconfig`.
+
+## Room Invite Service
+
+When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them in the admin room as pending protected-room requests. The bot does not auto-join invited rooms. Admins must explicitly accept or decline each invite:
+
+```text
+!room invite list [all|page|last]
+!room invite accept <id>
+!room invite decline <id>
+```
+
+Incoming invite room JIDs are validated before they are shown as pending protected-room requests. Repeated invites from the same inviter for the same room are deduplicated.
 
 ## OMEMO Settings
 

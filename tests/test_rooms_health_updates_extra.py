@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from xml.etree import ElementTree as ET
 
 import pytest
 
@@ -12,6 +13,8 @@ aiosqlite = pytest.importorskip("aiosqlite")
 from banbot.db import DatabaseMixin
 from banbot.health_check import HealthCheckMixin
 from banbot.rooms import RoomMixin
+from banbot.room_invites import RoomInviteMixin
+from banbot.utils import bare_jid
 from banbot.updates import UpdateMixin
 
 
@@ -35,10 +38,11 @@ class FakeMucPlugin:
         self.left.append((room, nick))
 
 
-class RoomHealthBot(DatabaseMixin, RoomMixin, HealthCheckMixin, UpdateMixin):
+class RoomHealthBot(DatabaseMixin, RoomMixin, RoomInviteMixin, HealthCheckMixin, UpdateMixin):
     def __init__(self):
         self.protected_rooms = {"room@conference.example.test"}
         self.registered_rooms = set()
+        self.init_room_invite_state()
         self.event_handlers = []
         self.occupants = {"room@conference.example.test": {"BanBot": {"jid": "bot@example.org"}}}
         self.plugin = {
@@ -47,6 +51,7 @@ class RoomHealthBot(DatabaseMixin, RoomMixin, HealthCheckMixin, UpdateMixin):
         }
         self.sent = []
         self.command_prefix = "!"
+        self.room_invites_enabled = True
         self.rtbl_enabled = False
         self.health_check_interval = 0
         self.last_audit_cleanup_run = 0
@@ -60,6 +65,9 @@ class RoomHealthBot(DatabaseMixin, RoomMixin, HealthCheckMixin, UpdateMixin):
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
+
+    def bare_jid(self, jid):
+        return bare_jid(jid)
 
     def add_event_handler(self, name, handler):
         self.event_handlers.append((name, handler))
@@ -298,3 +306,193 @@ def test_fetch_latest_release_reports_bad_redirect(monkeypatch):
 
     with pytest.raises(ValueError, match="Unexpected release redirect URL"):
         bot._fetch_latest_release_version_via_redirect_sync()
+
+
+@pytest.mark.asyncio
+async def test_room_invite_creates_pending_invite_and_announces_admin_room(fake_msg_factory, monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    message_xml = ET.Element("message")
+    ET.SubElement(
+        message_xml,
+        "{jabber:x:conference}x",
+        {"jid": "new@conference.example.test", "reason": "please protect this room"},
+    )
+    msg = fake_msg_factory(room="alice@example.org", full_from="alice@example.org/laptop", xml=message_xml)
+
+    handled = await bot.handle_room_invite_message(msg)
+
+    assert handled is True
+    assert len(bot.pending_room_invites) == 1
+    invite = bot.pending_room_invites[1]
+    assert invite["room_jid"] == "new@conference.example.test"
+    assert invite["inviter"] == "alice@example.org"
+    body = bot.sent[-1]["mbody"]
+    assert "New protected-room invite" in body
+    assert "new@conference.example.test" in body
+    assert "alice@\u200bexample.org" in body
+    assert "!room invite accept 1" in body
+
+
+@pytest.mark.asyncio
+async def test_room_invite_deduplicates_same_room_and_inviter(fake_msg_factory, monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    message_xml = ET.Element("message")
+    ET.SubElement(message_xml, "{jabber:x:conference}x", {"jid": "new@conference.example.test"})
+    msg = fake_msg_factory(room="alice@example.org", full_from="alice@example.org/laptop", xml=message_xml)
+
+    await bot.handle_room_invite_message(msg)
+    await bot.handle_room_invite_message(msg)
+
+    assert len(bot.pending_room_invites) == 1
+    assert len(bot.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_room_invite_same_room_from_different_inviter_gets_separate_entry(fake_msg_factory, monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    xml_one = ET.Element("message")
+    xml_two = ET.Element("message")
+    ET.SubElement(xml_one, "{jabber:x:conference}x", {"jid": "new@conference.example.test"})
+    ET.SubElement(xml_two, "{jabber:x:conference}x", {"jid": "new@conference.example.test"})
+
+    await bot.handle_room_invite_message(fake_msg_factory(room="alice@example.org", xml=xml_one))
+    await bot.handle_room_invite_message(fake_msg_factory(room="bob@example.org", xml=xml_two))
+
+    assert len(bot.pending_room_invites) == 2
+
+
+@pytest.mark.asyncio
+async def test_room_invite_invalid_room_jid_is_reported(fake_msg_factory, monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    message_xml = ET.Element("message")
+    ET.SubElement(message_xml, "{jabber:x:conference}x", {"jid": "not-a-room"})
+    msg = fake_msg_factory(room="alice@example.org", xml=message_xml)
+
+    await bot.handle_room_invite_message(msg)
+
+    assert bot.pending_room_invites == {}
+    assert "Ignored invalid protected-room invite" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_invite_service_disabled_consumes_invite_without_admin_spam(fake_msg_factory):
+    bot = RoomHealthBot()
+    bot.room_invites_enabled = False
+    message_xml = ET.Element("message")
+    ET.SubElement(message_xml, "{jabber:x:conference}x", {"jid": "new@conference.example.test"})
+    msg = fake_msg_factory(room="alice@example.org", xml=message_xml)
+
+    handled = await bot.handle_room_invite_message(msg)
+
+    assert handled is True
+    assert bot.pending_room_invites == {}
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_room_invite_list_supports_all_last_and_paging(monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    bot.pending_room_invites = {
+        idx: {"id": idx, "room_jid": f"room{idx}@conference.example.test", "inviter": "alice@example.org", "reason": "", "created_at": 0}
+        for idx in range(1, 13)
+    }
+    bot.pending_room_invite_index = {
+        (str(invite["room_jid"]), str(invite["inviter"])): idx
+        for idx, invite in bot.pending_room_invites.items()
+    }
+
+    await bot.cmd_room_invite(["list", "all"], "admin@conference.example.org")
+    assert "Pending Room Invites (12) - All" in bot.sent[-1]["mbody"]
+    assert "room12@conference.example.test" in bot.sent[-1]["mbody"]
+
+    await bot.cmd_room_invite(["list", "last"], "admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+    assert "Page 2/2" in body
+    assert "room11@conference.example.test" in body
+
+
+@pytest.mark.asyncio
+async def test_room_invite_accept_uses_existing_room_add_flow(temp_db_path, monkeypatch):
+    import banbot.room_invites as invite_module
+    import banbot.rooms as rooms_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    monkeypatch.setattr(rooms_module, "ADMIN_ROOM", "admin@conference.example.org")
+    monkeypatch.setattr(rooms_module, "NICK", "BanBot")
+    bot = RoomHealthBot()
+    bot.protected_rooms = set()
+    bot.occupants["new@conference.example.test"] = {"BanBot": {"jid": "bot@example.org"}}
+    bot.pending_room_invites = {
+        1: {"id": 1, "room_jid": "new@conference.example.test", "inviter": "alice@example.org", "reason": "", "created_at": 0}
+    }
+    bot.pending_room_invite_index = {("new@conference.example.test", "alice@example.org"): 1}
+    await bot.setup_db()
+    try:
+        await bot.cmd_room_invite(["accept", "1"], "admin@conference.example.org")
+        assert "new@conference.example.test" in bot.protected_rooms
+        assert bot.pending_room_invites == {}
+        assert bot.plugin["xep_0045"].joined
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_room_invite_decline_removes_pending_invite(monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    bot.pending_room_invites = {
+        1: {"id": 1, "room_jid": "new@conference.example.test", "inviter": "alice@example.org", "reason": "", "created_at": 0}
+    }
+    bot.pending_room_invite_index = {("new@conference.example.test", "alice@example.org"): 1}
+
+    await bot.cmd_room_invite(["decline", "1"], "admin@conference.example.org")
+
+    assert bot.pending_room_invites == {}
+    assert "Declined protected-room invite #1" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_mediated_room_invite_is_detected(fake_msg_factory, monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    message_xml = ET.Element("message")
+    x_el = ET.SubElement(message_xml, "{http://jabber.org/protocol/muc#user}x")
+    invite_el = ET.SubElement(x_el, "{http://jabber.org/protocol/muc#user}invite", {"from": "alice@example.org/laptop"})
+    reason_el = ET.SubElement(invite_el, "{http://jabber.org/protocol/muc#user}reason")
+    reason_el.text = "please add"
+    msg = fake_msg_factory(room="mediated@conference.example.test", full_from="mediated@conference.example.test", xml=message_xml)
+
+    await bot.handle_room_invite_message(msg)
+
+    assert bot.pending_room_invites[1]["room_jid"] == "mediated@conference.example.test"
+    assert bot.pending_room_invites[1]["inviter"] == "alice@example.org"
+    assert bot.pending_room_invites[1]["reason"] == "please add"
+
+
+@pytest.mark.asyncio
+async def test_room_invite_command_reports_disabled_service():
+    bot = RoomHealthBot()
+    bot.room_invites_enabled = False
+
+    await bot.cmd_room_invite(["list"], "admin@conference.example.org")
+
+    assert "Room invite service is disabled" in bot.sent[-1]["mbody"]

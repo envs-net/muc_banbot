@@ -31,6 +31,11 @@ ANNOUNCE_SYNC_DETAILS = True  # True = Show detailed sync progress messages at s
 SHOW_BAN_IN_MUC = False  # True = visible ban/kick in protected rooms, False = hidden
 ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS = True  # True = Commands are enabled, False = deactivated
 
+# Enable protected-room invite workflow. When enabled, incoming MUC invites are
+# announced in the admin room and can be accepted/declined with !room invite.
+# Can be changed at runtime via !reloadconfig.
+ROOM_INVITES_ENABLED = False
+
 HEALTH_CHECK_INTERVAL = 300  # Interval (seconds) for health checks of bot rights in rooms. Minimum: 60. Default: 300
 UNBAN_CHECK_INTERVAL = 60  # Interval (seconds) for checking expired temporary bans. Lower = faster unbans but more DB queries. Default: 60
 MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default: 30
