@@ -55,7 +55,6 @@ The database path is configured with `DB_FILE` in `config.py`.
 | `added_by` | TEXT | Admin who added the entry |
 | `created_at` | INTEGER | Creation timestamp |
 
-
 ### `redaction_index`
 
 | Column | Type | Description |
@@ -72,6 +71,18 @@ The database path is configured with `DB_FILE` in `config.py`.
 | `redact_reason` | TEXT | Reason sent with the moderation retraction |
 
 Message bodies are not stored.
+
+### `room_invites`
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | INTEGER | Pending invite id shown to admins |
+| `room_jid` | TEXT | Invited room JID |
+| `inviter` | TEXT | Bare JID or occupant JID that invited the bot |
+| `reason` | TEXT | Optional invite reason |
+| `created_at` | INTEGER | Creation timestamp |
+
+Pending room invites are persisted so they survive bot restarts. Entries are removed when accepted, declined/rejected, or cleared with `!room invite cleanup`.
 
 ### `public_policy`
 

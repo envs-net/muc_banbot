@@ -206,9 +206,6 @@ class StatusMixin:
         temporary_bans = db_stats.get("temporary_bans", 0)
         status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
         status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
-        policy_enabled, _policy_text = await self.get_public_policy()
-        policy_state = "enabled" if policy_enabled else "disabled"
-        status_lines.append(f"📜 Public Policy: {policy_state}")
 
         # rtbl
         if getattr(self, "rtbl_enabled", False):

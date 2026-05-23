@@ -88,7 +88,6 @@ Common runtime settings:
 
 Boolean aliases such as `true`/`false` are supported by the config loader for convenience.
 
-
 ## Room Invite Service
 
 When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them in the admin room as pending protected-room requests. The bot does not auto-join invited rooms. Admins must explicitly accept or decline each invite:
@@ -97,9 +96,12 @@ When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them 
 !room invite list [all|page|last]
 !room invite accept <id>
 !room invite decline <id>
+!room invite cleanup
 ```
 
 Incoming invite room JIDs are validated before they are shown as pending protected-room requests. Repeated invites from the same inviter for the same room are deduplicated.
+
+Pending invites are persisted in SQLite. BanBot does not automatically expire or delete them. They are removed only when accepted, declined/rejected, or when an admin runs `!room invite cleanup`.
 
 ## vCard / Avatar Settings
 

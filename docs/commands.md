@@ -46,6 +46,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!room invite list [all/page/last]` | Lists pending protected-room invites | `!room invite list all` |
 | `!room invite accept <id>` | Accepts a pending invite and adds the room | `!room invite accept 3` |
 | `!room invite decline <id>` | Declines a pending invite | `!room invite decline 3` |
+| `!room invite cleanup` | Deletes all pending protected-room invites | `!room invite cleanup` |
 | `!sync` | Rejoins rooms, verifies rights, applies missing active bans | `!sync` |
 | `!syncadmins` | Updates admins from the admin room | `!syncadmins` |
 | `!syncbans` | Reads room outcasts into the DB and reapplies active bans | `!syncbans` |
@@ -56,12 +57,13 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 * `!syncbans` is comprehensive: it also adopts orphan room outcasts into the DB and removes expired tempban outcasts.
 * `sync_bans_startup()` runs internally on startup.
 
-
 ### Protected-Room Invite Workflow
 
 When `ROOM_INVITES_ENABLED=True`, BanBot can be invited to potential protected rooms. Invites are announced in the admin room and stay pending until an admin accepts or declines them.
 
 The admin-room invite message includes the room JID, inviter JID, optional invite reason, and the accept/decline commands. Duplicate invites from the same inviter for the same room are ignored.
+
+Pending invites are stored in SQLite and survive bot restarts. They are removed only when accepted, declined/rejected, or cleared with `!room invite cleanup`.
 
 Accepting an invite uses the normal `!room add` flow, including room JID validation, DB persistence, joining the room, ban sync, and RTBL occupant checks.
 

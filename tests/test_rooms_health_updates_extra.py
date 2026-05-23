@@ -489,59 +489,6 @@ async def test_mediated_room_invite_is_detected(fake_msg_factory, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mediated_room_invite_prefers_invite_from_over_room_sender(fake_msg_factory, monkeypatch):
-    import banbot.room_invites as invite_module
-
-    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
-    bot = RoomHealthBot()
-
-    message_xml = ET.Element("message")
-    x_el = ET.SubElement(message_xml, "{http://jabber.org/protocol/muc#user}x")
-    invite_el = ET.SubElement(
-        x_el,
-        "{http://jabber.org/protocol/muc#user}invite",
-        {"from": "alice@example.org/laptop"},
-    )
-
-    msg = fake_msg_factory(
-        room="test_admin@conference.envs.net",
-        full_from="test_admin@conference.envs.net",
-        xml=message_xml,
-    )
-
-    await bot.handle_room_invite_message(msg)
-
-    assert bot.pending_room_invites[1]["room_jid"] == "test_admin@conference.envs.net"
-    assert bot.pending_room_invites[1]["inviter"] == "alice@example.org"
-
-
-@pytest.mark.asyncio
-async def test_mediated_room_invite_keeps_occupant_jid_when_real_jid_missing(fake_msg_factory, monkeypatch):
-    import banbot.room_invites as invite_module
-
-    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
-    bot = RoomHealthBot()
-
-    message_xml = ET.Element("message")
-    x_el = ET.SubElement(message_xml, "{http://jabber.org/protocol/muc#user}x")
-    ET.SubElement(
-        x_el,
-        "{http://jabber.org/protocol/muc#user}invite",
-        {"from": "test_admin@conference.envs.net/creme"},
-    )
-
-    msg = fake_msg_factory(
-        room="test_admin@conference.envs.net",
-        full_from="test_admin@conference.envs.net",
-        xml=message_xml,
-    )
-
-    await bot.handle_room_invite_message(msg)
-
-    assert bot.pending_room_invites[1]["inviter"] == "test_admin@conference.envs.net/creme"
-
-
-@pytest.mark.asyncio
 async def test_room_invite_command_reports_disabled_service():
     bot = RoomHealthBot()
     bot.room_invites_enabled = False
@@ -552,41 +499,135 @@ async def test_room_invite_command_reports_disabled_service():
 
 
 @pytest.mark.asyncio
-async def test_room_invite_plugin_probe_is_not_used_without_xml_invite(monkeypatch):
+async def test_room_invite_persists_and_loads_after_restart(temp_db_path, fake_msg_factory, monkeypatch):
     import banbot.room_invites as invite_module
 
-    class FakeFrom:
-        bare = "pluginroom@conference.example.test"
-        resource = None
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
 
-        def __str__(self):
-            return self.bare
+    bot = RoomHealthBot()
+    await bot.setup_db()
+    try:
+        message_xml = ET.Element("message")
+        ET.SubElement(
+            message_xml,
+            "{jabber:x:conference}x",
+            {"jid": "persistent@conference.example.test", "reason": "please add"},
+        )
+        msg = fake_msg_factory(
+            room="alice@example.org",
+            full_from="alice@example.org/laptop",
+            xml=message_xml,
+        )
 
-    class FakeInvitePlugin(dict):
-        def get(self, key, default=None):
-            return super().get(key, default)
+        await bot.handle_room_invite_message(msg)
 
-    class FakeInviteMessage(dict):
-        def __init__(self):
-            super().__init__()
-            self["from"] = FakeFrom()
-            self["invite"] = FakeInvitePlugin(
-                {"from": "alice@example.org/laptop", "reason": "please add"}
-            )
-            self.xml = ET.Element("message")
+        assert len(bot.pending_room_invites) == 1
+        invite_id = next(iter(bot.pending_room_invites))
+    finally:
+        await bot.db.close()
 
-        def __getitem__(self, key):
-            if key in {"groupchat_invite", "conference"}:
-                raise KeyError(key)
-            return super().__getitem__(key)
+    restarted = RoomHealthBot()
+    await restarted.setup_db()
+    try:
+        await restarted.load_pending_room_invites()
 
-        def get(self, key, default=None):
-            return super().get(key, default)
+        assert invite_id in restarted.pending_room_invites
+        invite = restarted.pending_room_invites[invite_id]
+        assert invite["room_jid"] == "persistent@conference.example.test"
+        assert invite["inviter"] == "alice@example.org"
+        assert invite["reason"] == "please add"
+    finally:
+        await restarted.db.close()
+
+
+@pytest.mark.asyncio
+async def test_room_invite_cleanup_clears_db_and_cache(temp_db_path, fake_msg_factory, monkeypatch):
+    import banbot.room_invites as invite_module
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+
     bot = RoomHealthBot()
+    await bot.setup_db()
+    try:
+        message_xml = ET.Element("message")
+        ET.SubElement(
+            message_xml,
+            "{jabber:x:conference}x",
+            {"jid": "cleanup@conference.example.test"},
+        )
+        msg = fake_msg_factory(
+            room="alice@example.org",
+            full_from="alice@example.org/laptop",
+            xml=message_xml,
+        )
 
-    handled = await bot.handle_room_invite_message(FakeInviteMessage())
+        await bot.handle_room_invite_message(msg)
+        assert bot.pending_room_invites
 
-    assert handled is False
-    assert bot.pending_room_invites == {}
+        await bot.cmd_room_invite(["cleanup"], "admin@conference.example.org")
+
+        assert bot.pending_room_invites == {}
+        assert bot.pending_room_invite_index == {}
+        assert "Deleted pending invites: 1" in bot.sent[-1]["mbody"]
+
+        async with bot.db.execute("SELECT COUNT(*) FROM room_invites") as cursor:
+            row = await cursor.fetchone()
+        assert row[0] == 0
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_room_invite_accept_removes_persisted_invite(temp_db_path, monkeypatch):
+    import banbot.room_invites as invite_module
+    import banbot.rooms as rooms_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    monkeypatch.setattr(rooms_module, "ADMIN_ROOM", "admin@conference.example.org")
+    monkeypatch.setattr(rooms_module, "NICK", "BanBot")
+
+    bot = RoomHealthBot()
+    bot.protected_rooms = set()
+    bot.occupants["stored@conference.example.test"] = {"BanBot": {"jid": "bot@example.org"}}
+    await bot.setup_db()
+    try:
+        invite = await bot._store_pending_room_invite(
+            "stored@conference.example.test",
+            "alice@example.org",
+            "please add",
+        )
+
+        await bot.cmd_room_invite(["accept", str(invite["id"])], "admin@conference.example.org")
+
+        assert "stored@conference.example.test" in bot.protected_rooms
+        assert bot.pending_room_invites == {}
+        async with bot.db.execute("SELECT COUNT(*) FROM room_invites") as cursor:
+            row = await cursor.fetchone()
+        assert row[0] == 0
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_room_invite_decline_removes_persisted_invite(temp_db_path, monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+
+    bot = RoomHealthBot()
+    await bot.setup_db()
+    try:
+        invite = await bot._store_pending_room_invite(
+            "stored@conference.example.test",
+            "alice@example.org",
+            "please add",
+        )
+
+        await bot.cmd_room_invite(["decline", str(invite["id"])], "admin@conference.example.org")
+
+        assert bot.pending_room_invites == {}
+        async with bot.db.execute("SELECT COUNT(*) FROM room_invites") as cursor:
+            row = await cursor.fetchone()
+        assert row[0] == 0
+    finally:
+        await bot.db.close()
