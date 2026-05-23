@@ -71,7 +71,7 @@ class FakeIncomingMessage:
             "mucnick": nick,
             "body": body,
         }
-        self.xml = xml or ET.Element("message")
+        self.xml = xml if xml is not None else ET.Element("message")
 
     def __getitem__(self, key: str):
         return self._data[key]
