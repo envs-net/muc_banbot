@@ -6,6 +6,7 @@ import os
 import time
 
 import psutil
+import config
 from config import ADMIN_ROOM
 
 from ._version import __version__
@@ -154,6 +155,12 @@ class StatusMixin:
         if self.last_version_check_result:
             status_lines.append(f"🏷️ Latest Release Version: {self.last_version_check_result}\n")
 
+        # connection
+        connect_host = getattr(config, "CONNECT_HOST", None) or getattr(self.boundjid, "host", None) or "JID domain"
+        connect_port = getattr(config, "CONNECT_PORT", 5222)
+        connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
+        status_lines.append(f"🌐 Connection: {connect_host}:{connect_port} ({connect_mode})")
+
         # uptime
         bot_uptime = now - int(self.bot_start_time)
         status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
@@ -190,6 +197,30 @@ class StatusMixin:
         db_size_kib = int(db_stats.get("db_size_bytes", 0) or 0) / 1024
         status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")
 
+        # redaction index info
+        try:
+            redaction_total = 0
+            redaction_redacted = 0
+            if getattr(self, "db", None):
+                async with self.db.execute(
+                    """
+                    SELECT
+                        COUNT(*),
+                        COALESCE(SUM(CASE WHEN redacted_at IS NOT NULL THEN 1 ELSE 0 END), 0)
+                    FROM redaction_index
+                    """
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if row:
+                        redaction_total = int(row[0] or 0)
+                        redaction_redacted = int(row[1] or 0)
+            if getattr(self, "redaction_enabled", False) or redaction_total > 0:
+                status_lines.append(
+                    f"🧹 Redaction Index: {redaction_total} tracked, {redaction_redacted} redacted"
+                )
+        except Exception as e:
+            log.debug("Could not get redaction index stats: %s", e)
+
         # audit info
         audit_events = db_stats.get("audit_events", 0)
         status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
@@ -206,6 +237,10 @@ class StatusMixin:
         temporary_bans = db_stats.get("temporary_bans", 0)
         status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
         status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
+
+        # room invite info
+        pending_invites = len(getattr(self, "pending_room_invites", {}) or {})
+        status_lines.append(f"📨 Pending Room Invites: {pending_invites}")
 
         # rtbl
         if getattr(self, "rtbl_enabled", False):

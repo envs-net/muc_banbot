@@ -33,7 +33,9 @@ class ConfigCommandMixin:
         config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
         config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
         config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
-        config_lines.append(f"📨 Room Invite Service: {getattr(self, 'room_invites_enabled', False)}")
+        invite_enabled = getattr(self, "room_invites_enabled", False)
+        pending_invites = len(getattr(self, "pending_room_invites", {}) or {})
+        config_lines.append(f"📨 Room Invite Service: {invite_enabled} ({pending_invites} pending)")
         policy_enabled, _policy_text = await self.get_public_policy()
         policy_state = "enabled" if policy_enabled else "disabled"
         config_lines.append(f"📜 Public Policy: {policy_state}")
@@ -44,13 +46,16 @@ class ConfigCommandMixin:
         config_lines.append(f"🚦 Public Command Rate Limit: {self.public_command_rate_limit_max}/{self.public_command_rate_limit_window}s")
         config_lines.append(f"🔌 MUC Write Semaphore: {self.muc_write_limit}")
         config_lines.append("")
-        config_lines.append(f"🧹 Redaction Enabled: {getattr(self, 'redaction_enabled', False)}")
-        if getattr(self, "redaction_enabled", False):
-            retention = getattr(self, "redaction_index_retention_days", 30)
-            retention_text = "keep forever" if retention == 0 else f"{retention}d retention"
-            reasons = getattr(self, "redaction_auto_reasons", []) or []
-            config_lines.append(f"   Index: {retention_text}")
-            config_lines.append(f"   Auto reasons: {len(reasons)} configured")
+        redaction_enabled = getattr(self, "redaction_enabled", False)
+        retention = getattr(self, "redaction_index_retention_days", 30)
+        retention_text = "keep forever" if retention == 0 else f"{retention}d retention"
+        reasons = getattr(self, "redaction_auto_reasons", []) or []
+        if redaction_enabled:
+            config_lines.append(
+                f"🧹 Redaction Enabled: True ({retention_text}, {len(reasons)} auto reasons)"
+            )
+        else:
+            config_lines.append("🧹 Redaction Enabled: False")
         config_lines.append("")
         config_lines.append(f"🔐 OMEMO Enabled: {getattr(self, 'omemo_enabled', False)}")
         if getattr(self, "omemo_enabled", False):
