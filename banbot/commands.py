@@ -427,6 +427,23 @@ class CommandMixin:
             await self.cmd_bansearch(query, page=page, show_all=show_all)
             return True
 
+        if cmd == "redact":
+            if len(args) < 1:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=(
+                        "Usage:\n"
+                        f"  {self.command_prefix}redact <jid> [reason]\n"
+                        f"  {self.command_prefix}redact id <room_jid> <stanza_id> [reason]\n"
+                        f"  {self.command_prefix}redact cleanup"
+                    ),
+                    mtype="groupchat",
+                )
+                return True
+
+            await self.cmd_redact(room, args)
+            return True
+
         if cmd == "sync":
             await self.sync_rooms_and_bans()
             return True

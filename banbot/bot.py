@@ -128,6 +128,8 @@ class BanBot(
         self.protected_rooms: set[str] = set()
         self.registered_rooms: set[str] = set()
         self.init_room_invite_state()
+        self.pending_room_invites = {}
+        self.pending_room_invite_counter = 0
         self.room_join_time: dict[str, float] = {}
         self.reconnecting = False
         self.last_reconnect_time: float | None = None
