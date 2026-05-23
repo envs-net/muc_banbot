@@ -160,7 +160,6 @@ class StatusMixin:
         connect_host = (
             getattr(config, "CONNECT_HOST", None)
             or getattr(boundjid, "host", None)
-            or getattr(boundjid, "domain", None)
             or "JID domain"
         )
         connect_port = getattr(config, "CONNECT_PORT", 5222)
@@ -205,6 +204,9 @@ class StatusMixin:
 
         # redaction index info
         try:
+            if hasattr(self, "flush_redaction_index"):
+                await self.flush_redaction_index()
+
             redaction_total = 0
             redaction_redacted = 0
             if getattr(self, "db", None):

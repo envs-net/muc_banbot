@@ -102,7 +102,7 @@ class RedactionMixin:
         except Exception:
             message_id = None
 
-        await self.db.execute(
+        cursor = await self.db.execute(
             """
             INSERT OR IGNORE INTO redaction_index
                 (room_jid, sender_jid, sender_nick, stanza_id, message_id, created_at)
@@ -110,8 +110,44 @@ class RedactionMixin:
             """,
             (room, sender_jid, nick or None, stanza_id, message_id, int(time.time())),
         )
-        await self.db.commit()
+
+        if cursor.rowcount:
+            await self._redaction_maybe_commit_index()
+
         return True
+
+
+    async def _redaction_maybe_commit_index(self, force: bool = False) -> None:
+        """Batch redaction-index commits to avoid one SQLite commit per message."""
+        if not getattr(self, "db", None):
+            return
+
+        now = time.monotonic()
+        pending = getattr(self, "_redaction_index_pending_writes", 0)
+        last_commit = getattr(self, "_redaction_index_last_commit", 0.0)
+
+        if not force:
+            pending += 1
+            self._redaction_index_pending_writes = pending
+
+        commit_every = int(getattr(self, "redaction_index_commit_every", 50) or 50)
+        commit_interval = float(getattr(self, "redaction_index_commit_interval", 2.0) or 2.0)
+
+        if (
+            force
+            or pending >= commit_every
+            or last_commit <= 0
+            or now - last_commit >= commit_interval
+        ):
+            await self.db.commit()
+            self._redaction_index_pending_writes = 0
+            self._redaction_index_last_commit = now
+
+
+    async def flush_redaction_index(self) -> None:
+        """Flush pending redaction-index writes."""
+        if getattr(self, "_redaction_index_pending_writes", 0) > 0:
+            await self._redaction_maybe_commit_index(force=True)
 
 
     async def _redaction_fetch_targets_for_jid(self, jid: str) -> list[tuple[int, str, str]]:
@@ -254,6 +290,7 @@ class RedactionMixin:
     ) -> dict[str, int]:
         """Redact all indexed messages for a bare JID in protected rooms."""
         target = bare_jid(jid)
+        await self.flush_redaction_index()
         rows = await self._redaction_fetch_targets_for_jid(target)
         summary = await self._redaction_redact_rows(rows, reason, actor)
 

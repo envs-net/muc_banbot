@@ -391,6 +391,11 @@ class BanBot(
         if self.version_check_enabled and self.version_check_url:
             self.version_check_task = asyncio.create_task(self.version_check_worker())
 
+        # Flush batched redaction-index writes from startup room history before
+        # moving on to vCard/startup announcements.
+        if hasattr(self, "flush_redaction_index"):
+            await self.flush_redaction_index()
+
         # --- Set Bot vCard ---
         await self.update_vcard()
 
