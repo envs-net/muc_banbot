@@ -191,6 +191,33 @@ class RedactionMixin:
         return summary
 
 
+    async def _audit_redaction_event(
+        self,
+        event_type: str,
+        actor: str | None = None,
+        room: str | None = None,
+        target_type: str | None = None,
+        target: str | None = None,
+        jid: str | None = None,
+        comment: str | None = None,
+        details: dict | None = None,
+    ) -> None:
+        """Write a redaction audit event when audit logging is available."""
+        if not hasattr(self, "audit_event"):
+            return
+
+        await self.audit_event(
+            event_type,
+            actor=actor,
+            room=room,
+            target_type=target_type,
+            target=target,
+            jid=jid,
+            comment=comment,
+            details=details or {},
+        )
+
+
     def _redaction_summary_text(
         self,
         title: str,
@@ -231,6 +258,22 @@ class RedactionMixin:
         rows = await self._redaction_fetch_targets_for_jid(target)
         summary = await self._redaction_redact_rows(rows, reason, actor)
 
+        await self._audit_redaction_event(
+            "auto_redact_jid" if title.startswith("Auto-redaction") else "redact_jid",
+            actor=actor,
+            target_type="jid",
+            target=target,
+            jid=target,
+            comment=reason,
+            details={
+                "found": summary.get("found", 0),
+                "redacted": summary.get("redacted", 0),
+                "failed": summary.get("failed", 0),
+                "skipped": summary.get("skipped", 0),
+                "announce": announce,
+            },
+        )
+
         if announce:
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
@@ -267,6 +310,21 @@ class RedactionMixin:
             await self.db.commit()
             summary["redacted"] = 1
 
+        await self._audit_redaction_event(
+            "redact_stanza",
+            actor=actor,
+            room=room_jid,
+            target_type="stanza_id",
+            target=stanza_id,
+            comment=reason,
+            details={
+                "room_jid": room_jid,
+                "stanza_id": stanza_id,
+                "redacted": summary.get("redacted", 0),
+                "failed": summary.get("failed", 0),
+            },
+        )
+
         await self.bot_send_message(
             mto=ADMIN_ROOM,
             mbody=(
@@ -282,7 +340,7 @@ class RedactionMixin:
         return summary
 
 
-    async def redact_cleanup(self, room: str) -> None:
+    async def redact_cleanup(self, room: str, actor: str | None = None) -> None:
         """Delete old redaction index rows according to configured retention."""
         if not getattr(self, "redaction_enabled", False):
             await self.bot_send_message(
@@ -297,6 +355,14 @@ class RedactionMixin:
 
         days = int(getattr(self, "redaction_index_retention_days", 30) or 0)
         if days <= 0:
+            await self._audit_redaction_event(
+                "redact_cleanup",
+                actor=actor,
+                target_type="redaction_index",
+                target="cleanup",
+                comment="retention disabled; keep forever",
+                details={"retention_days": days, "deleted": 0},
+            )
             await self.bot_send_message(
                 mto=room,
                 mbody=(
@@ -315,6 +381,16 @@ class RedactionMixin:
         )
         deleted = cur.rowcount or 0
         await self.db.commit()
+
+        await self._audit_redaction_event(
+            "redact_cleanup",
+            actor=actor,
+            target_type="redaction_index",
+            target="cleanup",
+            comment=f"retention {days} days",
+            details={"retention_days": days, "deleted": deleted},
+        )
+
         await self.bot_send_message(
             mto=room,
             mbody=(
@@ -354,7 +430,7 @@ class RedactionMixin:
 
         subcmd = args[0].lower()
         if subcmd == "cleanup":
-            await self.redact_cleanup(room)
+            await self.redact_cleanup(room, actor=actor)
             return
 
         if subcmd == "id":
