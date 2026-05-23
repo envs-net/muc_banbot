@@ -496,3 +496,44 @@ async def test_room_invite_command_reports_disabled_service():
     await bot.cmd_room_invite(["list"], "admin@conference.example.org")
 
     assert "Room invite service is disabled" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_slixmpp_plugin_room_invite_is_detected(monkeypatch):
+    import banbot.room_invites as invite_module
+
+    class FakeFrom:
+        bare = "pluginroom@conference.example.test"
+        resource = None
+
+        def __str__(self):
+            return self.bare
+
+    class FakeInvitePlugin(dict):
+        def get(self, key, default=None):
+            return super().get(key, default)
+
+    class FakeInviteMessage(dict):
+        def __init__(self):
+            super().__init__()
+            self["from"] = FakeFrom()
+            self["invite"] = FakeInvitePlugin({"from": "alice@example.org/laptop", "reason": "please add"})
+            self.xml = ET.Element("message")
+
+        def __getitem__(self, key):
+            if key == "groupchat_invite" or key == "conference":
+                raise KeyError(key)
+            return super().__getitem__(key)
+
+        def get(self, key, default=None):
+            return super().get(key, default)
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+
+    handled = await bot.handle_room_invite_message(FakeInviteMessage())
+
+    assert handled is True
+    assert bot.pending_room_invites[1]["room_jid"] == "pluginroom@conference.example.test"
+    assert bot.pending_room_invites[1]["inviter"] == "alice@example.org"
+    assert bot.pending_room_invites[1]["reason"] == "please add"

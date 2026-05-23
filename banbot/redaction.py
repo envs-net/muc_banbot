@@ -12,8 +12,7 @@ from .utils import bare_jid, safe_jid, validate_jid_format
 
 log = logging.getLogger(__name__)
 
-FASTEN_NS = "urn:xmpp:fasten:0"
-MODERATE_NS = "urn:xmpp:message-moderate:0"
+MODERATE_NS = "urn:xmpp:message-moderate:1"
 RETRACT_NS = "urn:xmpp:message-retract:1"
 SID_NS = "urn:xmpp:sid:0"
 
@@ -151,16 +150,16 @@ class RedactionMixin:
 
 
     async def _redaction_send_retract(self, room_jid: str, stanza_id: str, reason: str | None) -> None:
-        """Send a XEP-0425 message moderation retraction for one stanza-id."""
-        msg = self.make_message(mto=room_jid, mtype="groupchat")
-        apply_to = ET.Element(f"{{{FASTEN_NS}}}apply-to", {"id": stanza_id})
-        moderated = ET.SubElement(apply_to, f"{{{MODERATE_NS}}}moderated")
-        ET.SubElement(moderated, f"{{{RETRACT_NS}}}retract")
+        """Send a XEP-0425 moderated message retraction IQ for one stanza-id."""
+        moderate = ET.Element(f"{{{MODERATE_NS}}}moderate", {"id": stanza_id})
+        ET.SubElement(moderate, f"{{{RETRACT_NS}}}retract")
         if reason:
-            reason_el = ET.SubElement(moderated, f"{{{MODERATE_NS}}}reason")
+            reason_el = ET.SubElement(moderate, f"{{{MODERATE_NS}}}reason")
             reason_el.text = reason
-        msg.append(apply_to)
-        msg.send()
+
+        iq = self.make_iq_set(ito=room_jid)
+        iq.append(moderate)
+        await iq.send(timeout=10)
 
 
     async def _redaction_redact_rows(

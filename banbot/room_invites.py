@@ -50,8 +50,48 @@ class RoomInviteMixin:
         return ""
 
 
+
+    def _room_invite_plugin_values(self, msg) -> dict[str, str] | None:
+        """Extract invite data from Slixmpp stanza plugins when available."""
+        for plugin_name in ("invite", "groupchat_invite", "conference"):
+            try:
+                plugin = msg[plugin_name]
+            except Exception:
+                continue
+
+            try:
+                room_jid = str(plugin.get("jid") or plugin.get("room") or plugin.get("to") or "").strip().lower()
+            except Exception:
+                room_jid = ""
+            if not room_jid:
+                try:
+                    room_jid = self._jid_bare(msg["from"])
+                except Exception:
+                    room_jid = ""
+
+            try:
+                inviter = self._jid_bare(plugin.get("from"))
+            except Exception:
+                inviter = ""
+            if not inviter:
+                inviter = self._jid_bare(msg["from"])
+
+            try:
+                reason = str(plugin.get("reason") or "").strip()
+            except Exception:
+                reason = ""
+
+            if room_jid:
+                return {"room_jid": room_jid, "inviter": inviter, "reason": reason}
+
+        return None
+
     def _extract_room_invite(self, msg) -> dict[str, str] | None:
         """Extract room/inviter/reason from direct or mediated MUC invite messages."""
+        plugin_invite = self._room_invite_plugin_values(msg)
+        if plugin_invite:
+            return plugin_invite
+
         xml = getattr(msg, "xml", None)
         if xml is None:
             return None
@@ -108,7 +148,9 @@ class RoomInviteMixin:
 
     async def on_room_invite(self, msg) -> None:
         """Event handler wrapper for Slixmpp MUC invite events."""
-        await self.handle_room_invite_message(msg)
+        handled = await self.handle_room_invite_message(msg)
+        if not handled:
+            log.warning("Room invite event received but no room JID could be extracted: %s", getattr(msg, "xml", msg))
 
 
     async def _handle_pending_room_invite(self, room_jid: str, inviter: str, reason: str = "") -> None:

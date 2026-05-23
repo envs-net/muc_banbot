@@ -34,7 +34,7 @@ class FakeMessage(dict):
             )
 
 
-class FakeOutgoingMessage:
+class FakeOutgoingIq:
     def __init__(self, sent):
         self.sent = sent
         self.children = []
@@ -43,8 +43,10 @@ class FakeOutgoingMessage:
     def append(self, element):
         self.children.append(element)
 
-    def send(self):
+    async def send(self, timeout=None):
+        self.timeout = timeout
         self.sent.append(self)
+        return self
 
 
 class RedactionBot(DatabaseMixin, RedactionMixin):
@@ -67,10 +69,10 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
 
-    def make_message(self, **kwargs):
-        msg = FakeOutgoingMessage(self.redaction_stanzas)
-        msg.kwargs = kwargs
-        return msg
+    def make_iq_set(self, **kwargs):
+        iq = FakeOutgoingIq(self.redaction_stanzas)
+        iq.kwargs = kwargs
+        return iq
 
 
 @pytest.mark.asyncio
@@ -101,6 +103,8 @@ async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
         await bot.cmd_redact(["alice@example.org", "spam"], "admin@conference.example.test", actor="admin@example.org")
 
         assert len(bot.redaction_stanzas) == 2
+        assert all(stanza.kwargs["ito"] == "room@conference.example.test" for stanza in bot.redaction_stanzas)
+        assert bot.redaction_stanzas[0].children[0].tag == "{urn:xmpp:message-moderate:1}moderate"
         assert "Messages found: 2" in bot.sent[-1]["mbody"]
         assert "Redacted: 2" in bot.sent[-1]["mbody"]
         async with bot.db.execute("SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL") as cursor:
@@ -122,7 +126,12 @@ async def test_redact_id_retracts_single_stanza(temp_db_path):
         )
 
         assert len(bot.redaction_stanzas) == 1
-        assert bot.redaction_stanzas[0].kwargs["mto"] == "room@conference.example.test"
+        iq = bot.redaction_stanzas[0]
+        assert iq.kwargs["ito"] == "room@conference.example.test"
+        assert iq.timeout == 10
+        assert iq.children[0].tag == "{urn:xmpp:message-moderate:1}moderate"
+        assert iq.children[0].attrib["id"] == "stanza-1"
+        assert iq.children[0].find("{urn:xmpp:message-retract:1}retract") is not None
         assert "Stanza ID: stanza-1" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
