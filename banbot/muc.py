@@ -16,7 +16,11 @@ class MucMixin:
         # During the initial connection/STARTTLS negotiation Slixmpp may emit a
         # disconnect-like event before session_start completed. Do not start a
         # reconnect loop there; the original connection may still finish.
-        if not getattr(self, "server_connect_time", None) and not getattr(self, "reconnecting", False):
+        if (
+            hasattr(self, "server_connect_time")
+            and getattr(self, "server_connect_time", None) is None
+            and not getattr(self, "reconnecting", False)
+        ):
             log.info("Disconnect event received before session_start completed; ignoring")
             return
 

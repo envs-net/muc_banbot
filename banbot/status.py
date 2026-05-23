@@ -156,7 +156,13 @@ class StatusMixin:
             status_lines.append(f"🏷️ Latest Release Version: {self.last_version_check_result}\n")
 
         # connection
-        connect_host = getattr(config, "CONNECT_HOST", None) or getattr(self.boundjid, "host", None) or "JID domain"
+        boundjid = getattr(self, "boundjid", None)
+        connect_host = (
+            getattr(config, "CONNECT_HOST", None)
+            or getattr(boundjid, "host", None)
+            or getattr(boundjid, "domain", None)
+            or "JID domain"
+        )
         connect_port = getattr(config, "CONNECT_PORT", 5222)
         connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
         status_lines.append(f"🌐 Connection: {connect_host}:{connect_port} ({connect_mode})")
