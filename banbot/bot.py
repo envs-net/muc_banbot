@@ -267,6 +267,7 @@ class BanBot(
         await self.stop_background_tasks()
 
         await self.setup_db()
+        await self.load_pending_room_invites()
         await self.load_bans_from_db()
         await self.cleanup_old_audit_logs()
         await self.setup_ignorelist()
