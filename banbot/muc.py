@@ -13,12 +13,18 @@ log = logging.getLogger(__name__)
 
 class MucMixin:
     async def on_disconnect(self, _) -> None:
+        # During the initial connection/STARTTLS negotiation Slixmpp may emit a
+        # disconnect-like event before session_start completed. Do not start a
+        # reconnect loop there; the original connection may still finish.
+        if not getattr(self, "server_connect_time", None) and not getattr(self, "reconnecting", False):
+            log.info("Disconnect event received before session_start completed; ignoring")
+            return
+
         if self.reconnect_task and not self.reconnect_task.done():
             log.info("🔄 Disconnect event received while reconnect is already scheduled")
             return
 
-        log.warning("⚠️ Disconnected from server")
-
+        log.warning("⚠️  Disconnected from server")
         self.reconnecting = True
 
         # runtime state reset
@@ -34,7 +40,12 @@ class MucMixin:
             delay = 5
             log.info("🔄 Attempting reconnect in %ds...", delay)
             await asyncio.sleep(delay)
-            self.connect()
+            connect_with_config = getattr(self, "connect_with_config", None)
+            if connect_with_config:
+                connect_with_config()
+            else:
+                self.connect()
+
             log.info("🔌 Reconnect initiated")
         except Exception as e:
             log.error("Reconnect error: %s", e)

@@ -244,6 +244,55 @@ class BanBot(
         self.add_event_handler("connection_failed", self.on_disconnect)
 
 
+    def connect_with_config(self) -> bool:
+        """Connect using optional config.py host/port/direct-TLS settings."""
+        host = getattr(config, "CONNECT_HOST", None)
+        port = getattr(config, "CONNECT_PORT", 5222)
+        direct_tls = getattr(config, "CONNECT_DIRECT_TLS", False)
+
+        # Prefer an explicit CONNECT_HOST. Otherwise use the bound JID domain,
+        # and finally fall back to the configured JID domain for lightweight tests.
+        configured_jid_domain = str(getattr(config, "JID", "")).split("@", 1)[-1].split("/", 1)[0]
+        boundjid = getattr(self, "boundjid", None)
+        bound_host = (
+            getattr(boundjid, "host", None)
+            or getattr(boundjid, "domain", None)
+        )
+        connect_host = host or bound_host or configured_jid_domain
+        connect_port = int(port)
+
+        signature = inspect.signature(self.connect)
+        parameters = signature.parameters
+        kwargs = {}
+
+        # Current Slixmpp accepts address=(host, port). Some older versions used
+        # host=/port=. Keep both forms compatible without passing unknown kwargs.
+        if "address" in parameters:
+            kwargs["address"] = (connect_host, connect_port)
+        else:
+            kwargs["host"] = connect_host
+            kwargs["port"] = connect_port
+
+        # Direct TLS / legacy SSL mode. For normal STARTTLS connections, do not
+        # force STARTTLS here; let Slixmpp negotiate stream features itself.
+        # Forcing STARTTLS explicitly can cause early disconnect events on some
+        # Slixmpp versions during initial setup.
+        if "use_ssl" in parameters:
+            kwargs["use_ssl"] = bool(direct_tls)
+        if direct_tls and "force_starttls" in parameters:
+            kwargs["force_starttls"] = False
+
+        kwargs = {key: value for key, value in kwargs.items() if key in parameters}
+
+        log.info(
+            "Connecting to XMPP server %s:%s (%s)",
+            connect_host,
+            connect_port,
+            "direct TLS" if direct_tls else "STARTTLS",
+        )
+        return self.connect(**kwargs)
+
+
     async def stop_background_tasks(self) -> None:
         """Cancel running background tasks before starting new ones."""
         for task in (self.unban_task, self.health_check_task, self.version_check_task):
@@ -358,46 +407,6 @@ class BanBot(
         log.info("✅ Bot started, all rooms joined and bans applied")
 
 
-def connect_xmpp(xmpp: BanBot) -> bool:
-    """Connect using optional startup-only host/port/direct-TLS settings."""
-    host = getattr(config, "CONNECT_HOST", None)
-    port = getattr(config, "CONNECT_PORT", 5222)
-    direct_tls = getattr(config, "CONNECT_DIRECT_TLS", False)
-
-    # Prefer the explicit CONNECT_HOST. Otherwise use the bound JID domain,
-    # and finally fall back to the configured JID domain for lightweight tests.
-    jid_domain = str(getattr(config, "JID", "")).split("@", 1)[-1].split("/", 1)[0]
-    bound_host = getattr(getattr(xmpp, "boundjid", None), "host", None)
-    connect_host = host or bound_host or jid_domain
-    connect_port = int(port)
-
-    signature = inspect.signature(xmpp.connect)
-    parameters = signature.parameters
-
-    kwargs = {
-        "use_ssl": bool(direct_tls),
-        "force_starttls": not bool(direct_tls),
-    }
-
-    # Current Slixmpp accepts address=(host, port). Some older versions used
-    # host=/port=. Keep both forms compatible without passing unknown kwargs.
-    if "address" in parameters:
-        kwargs["address"] = (connect_host, connect_port)
-    else:
-        kwargs["host"] = connect_host
-        kwargs["port"] = connect_port
-
-    kwargs = {key: value for key, value in kwargs.items() if key in parameters}
-
-    log.info(
-        "Connecting to XMPP server %s:%s (%s)",
-        connect_host,
-        connect_port,
-        "direct TLS" if direct_tls else "STARTTLS",
-    )
-    return xmpp.connect(**kwargs)
-
-
 def main() -> None:
     """Entry point for the BanBot."""
     resource = get_config_resource()
@@ -416,7 +425,7 @@ def main() -> None:
         log.error("Startup config validation failed: %s", e)
         raise SystemExit(1)
 
-    if connect_xmpp(xmpp):
+    if xmpp.connect_with_config():
         log.info("Connected successfully. Starting event loop...")
         try:
             xmpp.loop.run_forever()

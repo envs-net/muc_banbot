@@ -8,9 +8,7 @@ PASSWORD = "yourpassword"
 ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
 
-# ======================
-# CONNECTION
-# ======================
+# ================= CONNECTION =================
 
 # Optional connection host override. None uses the domain from JID.
 CONNECT_HOST = None
