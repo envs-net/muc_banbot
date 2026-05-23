@@ -13,11 +13,12 @@ class DirectMessageMixin:
         if msg["from"].bare == self.boundjid.bare:
             return
 
-        if hasattr(self, "handle_room_invite_message") and await self.handle_room_invite_message(msg):
-            return
-
         # Only process direct messages
         if msg["type"] not in ("chat", "normal"):
+            return
+
+        # Direct MUC invites are normal/chat messages and are handled separately.
+        if hasattr(self, "handle_room_invite_message") and await self.handle_room_invite_message(msg):
             return
 
         sender = msg["from"].bare

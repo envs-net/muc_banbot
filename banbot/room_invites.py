@@ -66,67 +66,20 @@ class RoomInviteMixin:
         return bare or raw.lower()
 
 
-    def _room_invite_plugin_values(self, msg) -> dict[str, str] | None:
-        """Extract invite data from Slixmpp stanza plugins when available."""
-        for plugin_name in ("invite", "groupchat_invite", "conference"):
-            try:
-                plugin = msg[plugin_name]
-            except Exception:
-                continue
-
-            try:
-                room_jid = str(
-                    plugin.get("jid")
-                    or plugin.get("room")
-                    or plugin.get("to")
-                    or ""
-                ).strip().lower()
-            except Exception:
-                room_jid = ""
-
-            if not room_jid:
-                try:
-                    room_jid = self._jid_bare(msg["from"])
-                except Exception:
-                    room_jid = ""
-
-            try:
-                inviter = self._room_invite_inviter_from_attr(plugin.get("from"), room_jid)
-            except Exception:
-                inviter = ""
-
-            try:
-                reason = str(plugin.get("reason") or "").strip()
-            except Exception:
-                reason = ""
-
-            # Do not return a plugin invite if the only inviter we could infer
-            # is the room itself. Let raw XML parsing try <invite from="...">.
-            if room_jid and inviter and inviter != room_jid:
-                return {"room_jid": room_jid, "inviter": inviter, "reason": reason}
-
-            if room_jid and plugin_name == "conference":
-                try:
-                    sender = self._jid_bare(msg["from"])
-                except Exception:
-                    sender = ""
-                if sender and sender != room_jid:
-                    return {"room_jid": room_jid, "inviter": sender, "reason": reason}
-
-        return None
-
     def _extract_room_invite(self, msg) -> dict[str, str] | None:
         """Extract room/inviter/reason from direct or mediated MUC invite messages."""
         xml = getattr(msg, "xml", None)
         if xml is None:
-            return self._room_invite_plugin_values(msg)
+            return None
 
-        # XEP-0249 direct invite: <x xmlns='jabber:x:conference' jid='room@conference'>
+        # XEP-0249 direct invite:
+        # <x xmlns='jabber:x:conference' jid='room@conference'>
         for direct in xml.findall(f".//{{{_DIRECT_INVITE_NS}}}x"):
             room_jid = (direct.attrib.get("jid") or "").strip().lower()
             if not room_jid:
                 continue
-            inviter = self._jid_bare(msg["from"])
+
+            inviter = self._jid_bare(msg["from"]) or "unknown"
             return {
                 "room_jid": room_jid,
                 "inviter": inviter,
@@ -134,13 +87,18 @@ class RoomInviteMixin:
             }
 
         # XEP-0045 mediated invite: message from the room with
-        # <x xmlns='http://jabber.org/protocol/muc#user'><invite from='...'/></x>
+        # <x xmlns='http://jabber.org/protocol/muc#user'>
+        #   <invite from='user@example.org'/>
+        # </x>
         for invite in xml.findall(f".//{{{_MUC_USER_NS}}}invite"):
             room_jid = self._jid_bare(msg["from"])
             if not room_jid:
                 continue
 
-            inviter = self._room_invite_inviter_from_attr(invite.attrib.get("from"), room_jid)
+            inviter = self._room_invite_inviter_from_attr(
+                invite.attrib.get("from"),
+                room_jid,
+            )
             if not inviter:
                 inviter = "unknown"
 
@@ -150,7 +108,8 @@ class RoomInviteMixin:
                 "reason": self._room_invite_reason_from_invite(invite),
             }
 
-        return self._room_invite_plugin_values(msg)
+        return None
+
 
     async def handle_room_invite_message(self, msg) -> bool:
         """Handle a MUC invite message if present. Return True when consumed."""

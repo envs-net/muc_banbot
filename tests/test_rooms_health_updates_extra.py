@@ -552,7 +552,7 @@ async def test_room_invite_command_reports_disabled_service():
 
 
 @pytest.mark.asyncio
-async def test_slixmpp_plugin_room_invite_is_detected(monkeypatch):
+async def test_room_invite_plugin_probe_is_not_used_without_xml_invite(monkeypatch):
     import banbot.room_invites as invite_module
 
     class FakeFrom:
@@ -570,11 +570,13 @@ async def test_slixmpp_plugin_room_invite_is_detected(monkeypatch):
         def __init__(self):
             super().__init__()
             self["from"] = FakeFrom()
-            self["invite"] = FakeInvitePlugin({"from": "alice@example.org/laptop", "reason": "please add"})
+            self["invite"] = FakeInvitePlugin(
+                {"from": "alice@example.org/laptop", "reason": "please add"}
+            )
             self.xml = ET.Element("message")
 
         def __getitem__(self, key):
-            if key == "groupchat_invite" or key == "conference":
+            if key in {"groupchat_invite", "conference"}:
                 raise KeyError(key)
             return super().__getitem__(key)
 
@@ -586,7 +588,5 @@ async def test_slixmpp_plugin_room_invite_is_detected(monkeypatch):
 
     handled = await bot.handle_room_invite_message(FakeInviteMessage())
 
-    assert handled is True
-    assert bot.pending_room_invites[1]["room_jid"] == "pluginroom@conference.example.test"
-    assert bot.pending_room_invites[1]["inviter"] == "alice@example.org"
-    assert bot.pending_room_invites[1]["reason"] == "please add"
+    assert handled is False
+    assert bot.pending_room_invites == {}
