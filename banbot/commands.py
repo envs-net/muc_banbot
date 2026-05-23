@@ -428,20 +428,8 @@ class CommandMixin:
             return True
 
         if cmd == "redact":
-            if len(args) < 1:
-                await self.bot_send_message(
-                    mto=room,
-                    mbody=(
-                        "Usage:\n"
-                        f"  {self.command_prefix}redact <jid> [reason]\n"
-                        f"  {self.command_prefix}redact id <room_jid> <stanza_id> [reason]\n"
-                        f"  {self.command_prefix}redact cleanup"
-                    ),
-                    mtype="groupchat",
-                )
-                return True
-
-            await self.cmd_redact(room, args)
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            await self.cmd_redact(args, room, actor=actor_jid)
             return True
 
         if cmd == "sync":
