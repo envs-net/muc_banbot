@@ -423,11 +423,6 @@ class RoomInviteMixin:
         """Handle a MUC invite message if present. Return True when consumed."""
         invite = self._extract_room_invite(msg)
         if not invite:
-            log.debug(
-                "Room invite handler saw message without invite payload: from=%s type=%s",
-                msg.get("from"),
-                msg.get("type"),
-            )
             return False
 
         log.info(
@@ -453,7 +448,20 @@ class RoomInviteMixin:
 
 
     async def on_room_invite_message(self, msg) -> None:
-        """Inspect normal message stanzas for direct or mediated MUC invites."""
+        """Inspect direct/normal message stanzas for MUC invites.
+
+        Do not scan regular groupchat messages here. The dedicated
+        groupchat_invite handler covers mediated MUC invites, and scanning every
+        groupchat/history message adds unnecessary overhead on busy rooms.
+        """
+        try:
+            msg_type = msg["type"]
+        except Exception:
+            msg_type = msg.get("type", "")
+
+        if msg_type not in ("chat", "normal"):
+            return
+
         await self.handle_room_invite_message(msg)
 
 
