@@ -67,7 +67,7 @@ class RoomInviteMixin:
 
 
     def _safe_get_plugin(self, stanza, plugin_name: str):
-        """Return an already-registered stanza plugin without probing unknown interfaces."""
+        """Return a registered stanza plugin without probing unknown interfaces."""
         getter = getattr(stanza, "get_plugin", None)
         if not callable(getter):
             return None
@@ -99,10 +99,11 @@ class RoomInviteMixin:
         return str(value or "").strip()
 
 
-    def _room_invite_from_plugins(self, msg) -> dict[str, str] | None:
-        """Extract invite data from registered Slixmpp plugins without msg[...] probes."""
-        # XEP-0249 direct invites, provided by slixmpp.plugins.xep_0249.
-        # Access this only through get_plugin() to avoid unknown-interface warnings.
+    def _room_invite_plugin_values(self, msg) -> dict[str, str] | None:
+        """Extract invite data from registered Slixmpp plugins safely."""
+        # XEP-0249 direct invites can be exposed as the groupchat_invite
+        # plugin when xep_0249 is registered. Do not use msg[...] here:
+        # unknown stanza interfaces emit root logger warnings.
         direct = self._safe_get_plugin(msg, "groupchat_invite")
         if direct is not None:
             room_jid = self._room_invite_plugin_value(direct, "jid").lower()
@@ -113,11 +114,16 @@ class RoomInviteMixin:
                     "reason": self._room_invite_plugin_value(direct, "reason"),
                 }
 
-        # XEP-0045 mediated invites are nested below the MUC user plugin:
-        # message/muc/invite. Slixmpp registers this as msg.get_plugin("muc")
-        # with a nested get_plugin("invite") below it.
-        muc = self._safe_get_plugin(msg, "muc")
-        invite = self._safe_get_plugin(muc, "invite") if muc is not None else None
+        # XEP-0045 mediated invites are registered by Slixmpp directly on
+        # MUCMessage as the invite plugin. This is what the groupchat_invite
+        # event usually carries.
+        invite = self._safe_get_plugin(msg, "invite")
+        if invite is None:
+            # Defensive fallback for older/custom Slixmpp variants which may
+            # expose the invite below a MUC-user plugin.
+            muc = self._safe_get_plugin(msg, "muc")
+            invite = self._safe_get_plugin(muc, "invite") if muc is not None else None
+
         if invite is not None:
             room_jid = self._jid_bare(msg["from"])
             if room_jid:
@@ -137,48 +143,39 @@ class RoomInviteMixin:
     def _extract_room_invite(self, msg) -> dict[str, str] | None:
         """Extract room/inviter/reason from direct or mediated MUC invite messages."""
         xml = getattr(msg, "xml", None)
-        if xml is not None:
-            # XEP-0249 direct invite:
-            # <x xmlns='jabber:x:conference' jid='room@conference'>
-            for direct in xml.findall(f".//{{{_DIRECT_INVITE_NS}}}x"):
-                room_jid = (direct.attrib.get("jid") or "").strip().lower()
-                if not room_jid:
-                    continue
+        if xml is None:
+            return self._room_invite_plugin_values(msg)
 
-                inviter = self._jid_bare(msg["from"]) or "unknown"
-                return {
-                    "room_jid": room_jid,
-                    "inviter": inviter,
-                    "reason": (direct.attrib.get("reason") or "").strip(),
-                }
+        # XEP-0249 direct invite: <x xmlns='jabber:x:conference' jid='room@conference'>
+        for direct in xml.findall(f".//{{{_DIRECT_INVITE_NS}}}x"):
+            room_jid = (direct.attrib.get("jid") or "").strip().lower()
+            if not room_jid:
+                continue
+            inviter = self._jid_bare(msg["from"])
+            return {
+                "room_jid": room_jid,
+                "inviter": inviter,
+                "reason": (direct.attrib.get("reason") or "").strip(),
+            }
 
-            # XEP-0045 mediated invite: message from the room with
-            # <x xmlns='http://jabber.org/protocol/muc#user'>
-            #   <invite from='user@example.org'/>
-            # </x>
-            for invite in xml.findall(f".//{{{_MUC_USER_NS}}}invite"):
-                room_jid = self._jid_bare(msg["from"])
-                if not room_jid:
-                    continue
+        # XEP-0045 mediated invite: message from the room with
+        # <x xmlns='http://jabber.org/protocol/muc#user'><invite from='...'/></x>
+        for invite in xml.findall(f".//{{{_MUC_USER_NS}}}invite"):
+            room_jid = self._jid_bare(msg["from"])
+            if not room_jid:
+                continue
 
-                inviter = self._room_invite_inviter_from_attr(
-                    invite.attrib.get("from"),
-                    room_jid,
-                )
-                if not inviter:
-                    inviter = "unknown"
+            inviter = self._room_invite_inviter_from_attr(invite.attrib.get("from"), room_jid)
+            if not inviter:
+                inviter = "unknown"
 
-                return {
-                    "room_jid": room_jid,
-                    "inviter": inviter,
-                    "reason": self._room_invite_reason_from_invite(invite),
-                }
+            return {
+                "room_jid": room_jid,
+                "inviter": inviter,
+                "reason": self._room_invite_reason_from_invite(invite),
+            }
 
-        # If no XML invite payload is visible, fall back to registered Slixmpp
-        # plugins via get_plugin(). This keeps live groupchat_invite events
-        # working without reintroducing msg[...] unknown-interface warnings.
-        return self._room_invite_from_plugins(msg)
-
+        return self._room_invite_plugin_values(msg)
 
     async def handle_room_invite_message(self, msg) -> bool:
         """Handle a MUC invite message if present. Return True when consumed."""
