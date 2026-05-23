@@ -155,6 +155,14 @@ class StatusMixin:
         if self.last_version_check_result:
             status_lines.append(f"🏷️ Latest Release Version: {self.last_version_check_result}\n")
 
+        # uptime
+        bot_uptime = now - int(self.bot_start_time)
+        status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
+
+        if self.server_connect_time:
+            server_uptime = now - int(self.server_connect_time)
+            status_lines.append(f"🌐 Server Connected: {human_time(server_uptime)}")
+
         # connection
         boundjid = getattr(self, "boundjid", None)
         connect_host = (
@@ -165,14 +173,6 @@ class StatusMixin:
         connect_port = getattr(config, "CONNECT_PORT", 5222)
         connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
         status_lines.append(f"🌐 Connection: {connect_host}:{connect_port} ({connect_mode})")
-
-        # uptime
-        bot_uptime = now - int(self.bot_start_time)
-        status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
-
-        if self.server_connect_time:
-            server_uptime = now - int(self.server_connect_time)
-            status_lines.append(f"🌐 Server Connected: {human_time(server_uptime)}")
 
         # mem info
         try:
