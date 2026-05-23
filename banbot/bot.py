@@ -216,16 +216,29 @@ class BanBot(
         self.register_plugin("xep_0060")  # PubSub (RTBL)
         self.register_plugin('xep_0084')  # Modern Avatar
         self.register_plugin('xep_0153')  # vCard Avatar compatibility
+        self.register_plugin("xep_0249")  # Direct MUC invites
 
         # --- Optional OMEMO support ---
         self.configure_omemo()
 
         # --- Event handlers ---
         self.add_event_handler("session_start", self.start)
-        self.add_event_handler("message", self.on_direct_message)
+
+        # Inspect raw message stanzas for direct/mediated MUC invite payloads.
+        # This catches invites that do not reliably trigger a Slixmpp invite event.
+        self.add_event_handler("message", self.on_room_invite_message)
+
+        # Slixmpp invite events:
+        # - groupchat_invite: mediated MUC invite via XEP-0045
+        # - groupchat_direct_invite: direct MUC invite via XEP-0249
         self.add_event_handler("groupchat_invite", self.on_room_invite)
+        self.add_event_handler("groupchat_direct_invite", self.on_room_invite)
+
+        # Normal direct and groupchat handling.
+        self.add_event_handler("message", self.on_direct_message)
         self.add_event_handler("groupchat_message", self.on_message)
         self.add_event_handler("groupchat_presence", self.on_muc_presence)
+
         self.add_event_handler("disconnected", self.on_disconnect)
         self.add_event_handler("connection_failed", self.on_disconnect)
 
