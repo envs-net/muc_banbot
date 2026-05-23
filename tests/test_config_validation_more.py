@@ -41,6 +41,9 @@ def set_valid_config(monkeypatch):
         "ADMIN_ROOM": "admin@conference.example.org",
         "NICK": "BanBot",
         "DB_FILE": "banbot.sqlite3",
+        "CONNECT_HOST": None,
+        "CONNECT_PORT": 5222,
+        "CONNECT_DIRECT_TLS": False,
         "LOG_LEVEL": "INFO",
         "COMMAND_PREFIX": "!",
         "AUDIT_LOG_RETENTION_DAYS": 365,
@@ -109,6 +112,20 @@ def test_validate_config_rejects_sample_config_identity_values(monkeypatch):
     assert "PASSWORD still looks like a placeholder" in errors
     assert "ADMIN_ROOM still looks like the sample config value" in errors
     assert "PASSWORD still looks like a placeholder" not in warnings
+
+
+def test_validate_config_rejects_invalid_connection_settings(monkeypatch):
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "CONNECT_HOST", 123, raising=False)
+    monkeypatch.setattr(config, "CONNECT_PORT", 70000, raising=False)
+    monkeypatch.setattr(config, "CONNECT_DIRECT_TLS", "yes", raising=False)
+
+    bot = ConfigValidationBot()
+    errors, _warnings = bot._validate_config()
+
+    assert "CONNECT_HOST must be a string or None" in errors
+    assert "CONNECT_PORT must be an integer between 1 and 65535" in errors
+    assert "CONNECT_DIRECT_TLS must be True or False" in errors
 
 
 def test_validate_config_rejects_invalid_redaction_settings(monkeypatch):

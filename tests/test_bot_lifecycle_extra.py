@@ -215,6 +215,62 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
     assert "Bot has restarted" in bot.sent[-1]["mbody"]
 
 
+def test_connect_xmpp_uses_configured_address_and_direct_tls(monkeypatch):
+    class FakeBoundJid:
+        host = "jid-domain.example.org"
+
+    class FakeXMPP:
+        boundjid = FakeBoundJid()
+
+        def __init__(self):
+            self.connect_kwargs = None
+
+        def connect(self, address=None, use_ssl=False, force_starttls=True):
+            self.connect_kwargs = {
+                "address": address,
+                "use_ssl": use_ssl,
+                "force_starttls": force_starttls,
+            }
+            return True
+
+    monkeypatch.setattr(bot_module.config, "CONNECT_HOST", "xmpp.example.org", raising=False)
+    monkeypatch.setattr(bot_module.config, "CONNECT_PORT", 5223, raising=False)
+    monkeypatch.setattr(bot_module.config, "CONNECT_DIRECT_TLS", True, raising=False)
+
+    xmpp = FakeXMPP()
+
+    assert bot_module.connect_xmpp(xmpp) is True
+    assert xmpp.connect_kwargs == {
+        "address": ("xmpp.example.org", 5223),
+        "use_ssl": True,
+        "force_starttls": False,
+    }
+
+
+def test_connect_xmpp_keeps_older_connect_signatures_compatible(monkeypatch):
+    class FakeBoundJid:
+        host = "jid-domain.example.org"
+
+    class FakeXMPP:
+        boundjid = FakeBoundJid()
+
+        def __init__(self):
+            self.called = False
+
+        def connect(self):
+            self.called = True
+            return False
+
+    monkeypatch.setattr(bot_module.config, "CONNECT_HOST", None, raising=False)
+    monkeypatch.setattr(bot_module.config, "CONNECT_PORT", 443, raising=False)
+    monkeypatch.setattr(bot_module.config, "CONNECT_DIRECT_TLS", True, raising=False)
+
+    xmpp = FakeXMPP()
+
+    assert bot_module.connect_xmpp(xmpp) is False
+    assert xmpp.called is True
+
+
 def test_main_logs_validation_and_returns_when_connect_fails(monkeypatch):
     class FakeLoop:
         def run_forever(self):  # pragma: no cover - should not be reached

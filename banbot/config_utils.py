@@ -118,6 +118,9 @@ class ConfigMixin:
         "ADMIN_ROOM",
         "NICK",
         "DB_FILE",
+        "CONNECT_HOST",
+        "CONNECT_PORT",
+        "CONNECT_DIRECT_TLS",
         "RTBL_ENABLED",
         "RTBL_PUBLISH_ENABLED",
         "RTBL_PUBLISH_SERVICE",
@@ -316,6 +319,7 @@ class ConfigMixin:
             "ROOM_INVITES_ENABLED",
             "VERSION_CHECK_ENABLED",
             "REDACTION_ENABLED",
+            "CONNECT_DIRECT_TLS",
         )
         bool_defaults = {
             "ANNOUNCE_STARTUP": True,
@@ -327,6 +331,7 @@ class ConfigMixin:
             "ROOM_INVITES_ENABLED": False,
             "VERSION_CHECK_ENABLED": False,
             "REDACTION_ENABLED": False,
+            "CONNECT_DIRECT_TLS": False,
         }
         for name in bool_names:
             if not isinstance(getattr(config, name, bool_defaults.get(name)), bool):
@@ -346,6 +351,15 @@ class ConfigMixin:
             db_parent = pathlib.Path(db_file).expanduser().parent
             if str(db_parent) not in ("", ".") and not db_parent.exists():
                 errors.append(f"DB_FILE directory does not exist: {db_parent}")
+
+        # --- Connection ---
+        connect_host = getattr(config, "CONNECT_HOST", None)
+        if connect_host is not None and not isinstance(connect_host, str):
+            errors.append("CONNECT_HOST must be a string or None")
+
+        connect_port = getattr(config, "CONNECT_PORT", 5222)
+        if not isinstance(connect_port, int) or not (1 <= connect_port <= 65535):
+            errors.append("CONNECT_PORT must be an integer between 1 and 65535")
 
         # --- RTBL ---
         if not isinstance(getattr(config, "RTBL_ENABLED", False), bool):

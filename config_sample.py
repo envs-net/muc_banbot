@@ -8,6 +8,24 @@ PASSWORD = "yourpassword"
 ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
 
+# ======================
+# CONNECTION
+# ======================
+
+# Optional connection host override. None uses the domain from JID.
+CONNECT_HOST = None
+
+# XMPP client-to-server port.
+# 5222 = normal C2S with STARTTLS
+# 5223 = direct TLS / legacy SSL
+# 443  = direct TLS only if your server offers native XMPP there
+CONNECT_PORT = 5222
+
+# Direct TLS connection mode.
+# False = normal STARTTLS on CONNECT_PORT, usually 5222
+# True  = direct TLS, usually 5223
+CONNECT_DIRECT_TLS = False
+
 # ================= vCARD SETTINGS =================
 AVATAR_PATH = "avatar.png"           # Path to avatar file (PNG/JPG), None disables avatar
 VCARD_NICKNAME = "My Bot Nickname"   # Optional nickname for vCard

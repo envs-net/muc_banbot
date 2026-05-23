@@ -37,6 +37,9 @@ These require a bot restart. `!reloadconfig` warns if they changed and keeps the
 * `ADMIN_ROOM`
 * `NICK`
 * `DB_FILE`
+* `CONNECT_HOST`
+* `CONNECT_PORT`
+* `CONNECT_DIRECT_TLS`
 * `RTBL_ENABLED`
 * `RTBL_PUBLISH_ENABLED`
 * `RTBL_PUBLISH_SERVICE`
@@ -247,3 +250,30 @@ Example `/etc/logrotate.d/muc_banbot`:
 If your systemd version does not support `append:`, omit `StandardOutput` / `StandardError` and use the default `journald` logging instead.
 
 If you need both `journald` and `/var/log/muc_banbot.log` at the same time, keep systemd logging to the journal and configure your system logger, such as rsyslog, to write selected `muc_banbot` journal/syslog entries to a file.
+
+## Connection Settings
+
+Connection settings are startup-only and require a bot restart when changed.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `CONNECT_HOST` | `None` | Optional host override; `None` uses the JID domain |
+| `CONNECT_PORT` | `5222` | TCP port for the XMPP connection |
+| `CONNECT_DIRECT_TLS` | `False` | Use direct TLS instead of STARTTLS |
+
+Examples:
+
+```python
+# Default STARTTLS C2S
+CONNECT_HOST = None
+CONNECT_PORT = 5222
+CONNECT_DIRECT_TLS = False
+
+# Direct TLS / legacy SSL
+CONNECT_PORT = 5223
+CONNECT_DIRECT_TLS = True
+
+# Native XMPP over direct TLS on 443
+CONNECT_PORT = 443
+CONNECT_DIRECT_TLS = True
+```

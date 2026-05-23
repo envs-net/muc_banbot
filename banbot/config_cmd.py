@@ -2,6 +2,7 @@
 
 import logging
 
+import config
 from config import DB_FILE, JID, NICK
 
 from ._version import __version__
@@ -19,6 +20,10 @@ class ConfigCommandMixin:
         config_lines.append(f"🪪 JID: {JID}")
         config_lines.append(f"📦 Resource: {get_config_resource() or 'None'}")
         config_lines.append(f"👤 Nick: {NICK}")
+        connect_host = getattr(config, "CONNECT_HOST", None) or "JID domain"
+        connect_port = getattr(config, "CONNECT_PORT", 5222)
+        connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
+        config_lines.append(f"🌐 Connection: {connect_host}:{connect_port} ({connect_mode})")
         config_lines.append("")
         config_lines.append(f"🔧 Command Prefix: {self.command_prefix}")
         config_lines.append(f"🪵 Log Level: {getattr(self, 'log_level', 'INFO')}")
