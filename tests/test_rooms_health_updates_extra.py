@@ -489,6 +489,59 @@ async def test_mediated_room_invite_is_detected(fake_msg_factory, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mediated_room_invite_prefers_invite_from_over_room_sender(fake_msg_factory, monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+
+    message_xml = ET.Element("message")
+    x_el = ET.SubElement(message_xml, "{http://jabber.org/protocol/muc#user}x")
+    invite_el = ET.SubElement(
+        x_el,
+        "{http://jabber.org/protocol/muc#user}invite",
+        {"from": "alice@example.org/laptop"},
+    )
+
+    msg = fake_msg_factory(
+        room="test_admin@conference.envs.net",
+        full_from="test_admin@conference.envs.net",
+        xml=message_xml,
+    )
+
+    await bot.handle_room_invite_message(msg)
+
+    assert bot.pending_room_invites[1]["room_jid"] == "test_admin@conference.envs.net"
+    assert bot.pending_room_invites[1]["inviter"] == "alice@example.org"
+
+
+@pytest.mark.asyncio
+async def test_mediated_room_invite_keeps_occupant_jid_when_real_jid_missing(fake_msg_factory, monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+
+    message_xml = ET.Element("message")
+    x_el = ET.SubElement(message_xml, "{http://jabber.org/protocol/muc#user}x")
+    ET.SubElement(
+        x_el,
+        "{http://jabber.org/protocol/muc#user}invite",
+        {"from": "test_admin@conference.envs.net/creme"},
+    )
+
+    msg = fake_msg_factory(
+        room="test_admin@conference.envs.net",
+        full_from="test_admin@conference.envs.net",
+        xml=message_xml,
+    )
+
+    await bot.handle_room_invite_message(msg)
+
+    assert bot.pending_room_invites[1]["inviter"] == "test_admin@conference.envs.net/creme"
+
+
+@pytest.mark.asyncio
 async def test_room_invite_command_reports_disabled_service():
     bot = RoomHealthBot()
     bot.room_invites_enabled = False
