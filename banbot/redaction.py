@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from xml.etree import ElementTree as ET
@@ -206,21 +207,49 @@ class RedactionMixin:
     ) -> dict[str, int]:
         """Retract all rows and return summary counts."""
         summary = {"found": len(rows), "redacted": 0, "failed": 0, "skipped": 0}
-        for row_id, room_jid, stanza_id in rows:
-            try:
-                await self._redaction_send_retract(room_jid, stanza_id, reason)
-            except Exception as exc:
-                summary["failed"] += 1
-                log.warning(
-                    "Redaction failed for stanza %s in %s: %s",
-                    stanza_id,
-                    room_jid,
-                    exc,
-                )
-                continue
+        if not rows:
+            return summary
 
-            await self._redaction_mark_row(row_id, actor, reason)
-            summary["redacted"] += 1
+        concurrency = int(getattr(self, "redaction_retract_concurrency", 3) or 3)
+        concurrency = max(1, min(concurrency, 10))
+        semaphore = asyncio.Semaphore(concurrency)
+        changed_rows: list[int] = []
+
+        async def redact_one(row: tuple[int, str, str]) -> tuple[bool, int | None]:
+            row_id, room_jid, stanza_id = row
+            async with semaphore:
+                try:
+                    await self._redaction_send_retract(room_jid, stanza_id, reason)
+                except Exception as exc:
+                    log.warning(
+                        "Redaction failed for stanza %s in %s: %s",
+                        stanza_id,
+                        room_jid,
+                        exc,
+                    )
+                    return False, None
+
+                return True, row_id
+
+        results = await asyncio.gather(*(redact_one(row) for row in rows))
+
+        for ok, row_id in results:
+            if ok and row_id is not None:
+                summary["redacted"] += 1
+                changed_rows.append(row_id)
+            else:
+                summary["failed"] += 1
+
+        if changed_rows:
+            now = int(time.time())
+            await self.db.executemany(
+                """
+                UPDATE redaction_index
+                SET redacted_at = ?, redacted_by = ?, redact_reason = ?
+                WHERE id = ?
+                """,
+                [(now, actor, reason, row_id) for row_id in changed_rows],
+            )
 
         await self.db.commit()
         return summary

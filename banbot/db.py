@@ -172,6 +172,11 @@ class DatabaseMixin:
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_redaction_room ON redaction_index(room_jid)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_redaction_created_at ON redaction_index(created_at)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_redaction_redacted_at ON redaction_index(redacted_at)")
+        await self.db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_redaction_lookup_active
+            ON redaction_index(sender_jid, room_jid, created_at, id)
+            WHERE redacted_at IS NULL
+        """)
         await self.db.commit()
         log.info("✅ Database schema and indexes created/verified")
 

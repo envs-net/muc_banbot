@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from xml.etree import ElementTree as ET
 
@@ -35,16 +36,22 @@ class FakeMessage(dict):
 
 
 class FakeOutgoingIq:
-    def __init__(self, sent):
+    def __init__(self, sent, delay: float = 0.0, fail: bool = False):
         self.sent = sent
         self.children = []
         self.kwargs = {}
+        self.delay = delay
+        self.fail = fail
 
     def append(self, element):
         self.children.append(element)
 
     async def send(self, timeout=None):
         self.timeout = timeout
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.fail:
+            raise RuntimeError("simulated retract failure")
         self.sent.append(self)
         return self
 
@@ -63,6 +70,9 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.sent = []
         self.redaction_stanzas = []
         self.command_prefix = "!"
+        self.redaction_retract_concurrency = 3
+        self.redaction_iq_delay = 0.0
+        self.fail_stanza_ids = set()
 
     bare_jid = staticmethod(lambda jid: jid.split("/", 1)[0].lower() if jid else None)
 
@@ -70,8 +80,17 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.sent.append(kwargs)
 
     def make_iq_set(self, **kwargs):
-        iq = FakeOutgoingIq(self.redaction_stanzas)
+        iq = FakeOutgoingIq(self.redaction_stanzas, delay=self.redaction_iq_delay)
         iq.kwargs = kwargs
+        original_append = iq.append
+
+        def append_with_failure_marker(element):
+            original_append(element)
+            stanza_id = element.attrib.get("id")
+            if stanza_id in self.fail_stanza_ids:
+                iq.fail = True
+
+        iq.append = append_with_failure_marker
         return iq
 
 
@@ -184,3 +203,68 @@ def test_auto_reason_matching_is_case_insensitive():
 
     assert bot._redaction_auto_reason_matches("Confirmed SPAM wave") == "spam"
     assert bot._redaction_auto_reason_matches("ordinary moderation note") is None
+
+@pytest.mark.asyncio
+async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db_path):
+    bot = RedactionBot()
+    bot.redaction_retract_concurrency = 2
+    bot.redaction_iq_delay = 0.05
+    await bot.setup_db()
+    try:
+        for i in range(4):
+            await bot._redaction_index_message(
+                FakeMessage("room@conference.example.test", "Alice", f"stanza-{i}")
+            )
+
+        start = time.monotonic()
+        summary = await bot.redact_jid_messages(
+            "alice@example.org",
+            reason="spam",
+            actor="admin@example.org",
+            announce=False,
+        )
+        elapsed = time.monotonic() - start
+
+        assert summary["found"] == 4
+        assert summary["redacted"] == 4
+        assert summary["failed"] == 0
+        assert len(bot.redaction_stanzas) == 4
+        # With concurrency=2 and four 50ms sends, this should complete in about
+        # two batches instead of four fully serial round trips.
+        assert elapsed < 0.18
+
+        async with bot.db.execute("SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL") as cursor:
+            row = await cursor.fetchone()
+        assert row[0] == 4
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_db_path):
+    bot = RedactionBot()
+    bot.fail_stanza_ids = {"stanza-2"}
+    await bot.setup_db()
+    try:
+        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
+        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+
+        summary = await bot.redact_jid_messages(
+            "alice@example.org",
+            reason="spam",
+            actor="admin@example.org",
+            announce=False,
+        )
+
+        assert summary["found"] == 2
+        assert summary["redacted"] == 1
+        assert summary["failed"] == 1
+
+        async with bot.db.execute(
+            "SELECT stanza_id FROM redaction_index WHERE redacted_at IS NOT NULL"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        assert rows == [("stanza-1",)]
+    finally:
+        await bot.db.close()
+
