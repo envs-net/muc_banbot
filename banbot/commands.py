@@ -1,7 +1,9 @@
 """XMPP groupchat command routing and help text."""
 
+import asyncio
 import inspect
 import logging
+import os
 import time
 
 from config import ADMIN_ROOM, NICK
@@ -546,22 +548,41 @@ class CommandMixin:
             encrypted=False,
         )
 
-        if hasattr(self, "flush_redaction_index"):
-            await self.flush_redaction_index()
+        asyncio.create_task(self._restart_process())
 
-        if hasattr(self, "stop_background_tasks"):
-            await self.stop_background_tasks()
 
-        disconnect = getattr(self, "disconnect", None)
-        if callable(disconnect):
-            try:
-                result = disconnect(wait=False)
-            except TypeError:
-                result = disconnect()
-            if inspect.isawaitable(result):
-                await result
+    async def _restart_process(self) -> None:
+        """Flush state, disconnect, and terminate the process for supervisor restart."""
+        # Give the confirmation message a short chance to leave the XMPP stream.
+        await asyncio.sleep(0.5)
 
-        raise SystemExit(0)
+        try:
+            if hasattr(self, "flush_redaction_index"):
+                await self.flush_redaction_index()
+        except Exception as exc:
+            log.warning("Restart: failed to flush redaction index: %s", exc)
+
+        try:
+            if hasattr(self, "stop_background_tasks"):
+                await self.stop_background_tasks()
+        except Exception as exc:
+            log.warning("Restart: failed to stop background tasks cleanly: %s", exc)
+
+        try:
+            disconnect = getattr(self, "disconnect", None)
+            if callable(disconnect):
+                try:
+                    result = disconnect(wait=False)
+                except TypeError:
+                    result = disconnect()
+
+                if inspect.isawaitable(result):
+                    await result
+        except Exception as exc:
+            log.warning("Restart: failed to disconnect cleanly: %s", exc)
+
+        log.info("Restart: exiting process now")
+        os._exit(0)
 
 
     def _format_public_policy_text(self, text: str, room: str) -> str:

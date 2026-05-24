@@ -287,14 +287,35 @@ async def test_admin_restart_confirm_flushes_stops_disconnects_and_exits(fake_ms
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
+
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+        return object()
+
+    async def fake_sleep(_delay):
+        return None
+
+    def fake_exit(code=0):
+        raise SystemExit(code)
+
+    monkeypatch.setattr(commands.asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(commands.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(commands.os, "_exit", fake_exit)
+
     bot = CommandE2EBot()
 
-    with pytest.raises(SystemExit) as excinfo:
-        await bot.on_message(admin_msg(fake_msg_factory, "!restart confirm"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!restart confirm"))
 
-    assert excinfo.value.code == 0
     assert "Restart confirmed" in bot.sent[-1]["mbody"]
     assert bot.sent[-1]["encrypted"] is False
+    assert len(created_tasks) == 1
+
+    with pytest.raises(SystemExit) as excinfo:
+        await created_tasks[0]
+
+    assert excinfo.value.code == 0
     assert bot.flushed_redaction is True
     assert bot.stopped_background_tasks is True
     assert bot.disconnect_calls == [False]
