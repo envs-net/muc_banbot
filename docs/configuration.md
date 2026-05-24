@@ -91,20 +91,32 @@ Common runtime settings:
 
 Boolean aliases such as `true`/`false` are supported by the config loader for convenience.
 
-## Room Invite Service
+## Connection Settings
 
-When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them in the admin room as pending protected-room requests. The bot does not auto-join invited rooms. Admins must explicitly accept or decline each invite:
+Connection settings are startup-only and require a bot restart when changed.
 
-```text
-!room invite list [all|page|last]
-!room invite accept <id>
-!room invite decline <id>
-!room invite cleanup
+| Setting | Default | Description |
+| --- | --- | --- |
+| `CONNECT_HOST` | `None` | Optional host override; `None` uses the JID domain |
+| `CONNECT_PORT` | `5222` | TCP port for the XMPP connection |
+| `CONNECT_DIRECT_TLS` | `False` | Use direct TLS instead of STARTTLS |
+
+Examples:
+
+```python
+# Default STARTTLS C2S
+CONNECT_HOST = None
+CONNECT_PORT = 5222
+CONNECT_DIRECT_TLS = False
+
+# Direct TLS / legacy SSL
+CONNECT_PORT = 5223
+CONNECT_DIRECT_TLS = True
+
+# Native XMPP over direct TLS on 443
+CONNECT_PORT = 443
+CONNECT_DIRECT_TLS = True
 ```
-
-Incoming invite room JIDs are validated before they are shown as pending protected-room requests. Repeated invites from the same inviter for the same room are deduplicated.
-
-Pending invites are persisted in SQLite. BanBot does not automatically expire or delete them. They are removed only when accepted, declined/rejected, or when an admin runs `!room invite cleanup`.
 
 ## vCard / Avatar Settings
 
@@ -119,6 +131,21 @@ VCARD_NOTE = "XMPP MUC ban management bot"
 ```
 
 Avatar/vCard data is updated on startup and after `!reloadconfig`.
+
+## Room Invite Service
+
+When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them in the admin room as pending protected-room requests. The bot does not auto-join invited rooms. Admins must explicitly accept or decline each invite:
+
+```text
+!room invite list [all|page|last]
+!room invite accept <id>
+!room invite decline <id>
+!room invite cleanup
+```
+
+Incoming invite room JIDs are validated before they are shown as pending protected-room requests. Repeated invites from the same inviter for the same room are deduplicated.
+
+Pending invites are persisted in SQLite. BanBot does not automatically expire or delete them. They are removed only when accepted, declined/rejected, or when an admin runs `!room invite cleanup`.
 
 ## OMEMO Settings
 
@@ -250,30 +277,3 @@ Example `/etc/logrotate.d/muc_banbot`:
 If your systemd version does not support `append:`, omit `StandardOutput` / `StandardError` and use the default `journald` logging instead.
 
 If you need both `journald` and `/var/log/muc_banbot.log` at the same time, keep systemd logging to the journal and configure your system logger, such as rsyslog, to write selected `muc_banbot` journal/syslog entries to a file.
-
-## Connection Settings
-
-Connection settings are startup-only and require a bot restart when changed.
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `CONNECT_HOST` | `None` | Optional host override; `None` uses the JID domain |
-| `CONNECT_PORT` | `5222` | TCP port for the XMPP connection |
-| `CONNECT_DIRECT_TLS` | `False` | Use direct TLS instead of STARTTLS |
-
-Examples:
-
-```python
-# Default STARTTLS C2S
-CONNECT_HOST = None
-CONNECT_PORT = 5222
-CONNECT_DIRECT_TLS = False
-
-# Direct TLS / legacy SSL
-CONNECT_PORT = 5223
-CONNECT_DIRECT_TLS = True
-
-# Native XMPP over direct TLS on 443
-CONNECT_PORT = 443
-CONNECT_DIRECT_TLS = True
-```
