@@ -1,5 +1,6 @@
 """XMPP groupchat command routing and help text."""
 
+import inspect
 import logging
 import time
 
@@ -246,7 +247,9 @@ class CommandMixin:
     ) -> bool:
         admin_commands = {
             "config",
+            "reload",
             "reloadconfig",
+            "restart",
             "status",
             "checkupdate",
             "updatecheck",
@@ -287,8 +290,12 @@ class CommandMixin:
             await self._cmd_config(room)
             return True
 
-        if cmd == "reloadconfig":
+        if cmd in ("reload", "reloadconfig"):
             await self._cmd_reloadconfig(room)
+            return True
+
+        if cmd == "restart":
+            await self._cmd_restart(room, args)
             return True
 
         if cmd == "status":
@@ -332,7 +339,8 @@ class CommandMixin:
                         f"  {self.command_prefix}room remove <room_jid>\n"
                         f"  {self.command_prefix}room invite list [all|page|last]\n"
                         f"  {self.command_prefix}room invite accept <id>\n"
-                        f"  {self.command_prefix}room invite decline <id>"
+                        f"  {self.command_prefix}room invite decline <id>\n"
+                        f"  {self.command_prefix}room invite cleanup"
                     ),
                     mtype="groupchat",
                 )
@@ -513,6 +521,47 @@ class CommandMixin:
             return True
 
         return True
+
+
+    async def _cmd_restart(self, room: str, args: list[str]) -> None:
+        """Admin command to exit cleanly so a supervisor such as systemd can restart the bot."""
+        p = self.command_prefix
+
+        if not args or args[0].lower() != "confirm":
+            await self.bot_send_message(
+                mto=room,
+                mbody=(
+                    "⚠️ This will stop the bot process. "
+                    "If it is managed by systemd or another supervisor, it should restart automatically.\n\n"
+                    f"Confirm with: {p}restart confirm"
+                ),
+                mtype="groupchat",
+            )
+            return
+
+        await self.bot_send_message(
+            mto=room,
+            mbody="♻️ Restart confirmed. Shutting down now; supervisor should restart the bot.",
+            mtype="groupchat",
+            encrypted=False,
+        )
+
+        if hasattr(self, "flush_redaction_index"):
+            await self.flush_redaction_index()
+
+        if hasattr(self, "stop_background_tasks"):
+            await self.stop_background_tasks()
+
+        disconnect = getattr(self, "disconnect", None)
+        if callable(disconnect):
+            try:
+                result = disconnect(wait=False)
+            except TypeError:
+                result = disconnect()
+            if inspect.isawaitable(result):
+                await result
+
+        raise SystemExit(0)
 
 
     def _format_public_policy_text(self, text: str, room: str) -> str:
@@ -729,7 +778,8 @@ class CommandMixin:
         return (
             f"{p}help - show this help\n"
             f"{p}config - show current configuration\n"
-            f"{p}reloadconfig - reload config.py at runtime\n"
+            f"{p}reload / {p}reloadconfig - reload config.py at runtime\n"
+            f"{p}restart confirm - stop the bot so a supervisor can restart it\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"
             f"{p}checkupdate / {p}updatecheck - check if a newer bot release is available\n"
             f"{p}whoami - show your affiliation/role\n"

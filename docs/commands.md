@@ -31,10 +31,24 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | --- | --- | --- |
 | `!help` | Shows admin help | `!help` |
 | `!config` | Shows current bot configuration | `!config` |
-| `!reloadconfig` | Reloads runtime config safely | `!reloadconfig` |
+| `!reload` / `!reloadconfig` | Reloads runtime config safely | `!reload` |
+| `!restart` / `!restart confirm` | Shows restart confirmation / exits cleanly so a supervisor can restart the bot | `!restart confirm` |
 | `!status` | Shows health, rooms, uptime, bans, DB, RTBL, and workers | `!status` |
 | `!checkupdate` / `!updatecheck` | Checks whether a newer GitHub release is available | `!updatecheck` |
 | `!whoami` | Shows affiliation, role, and permissions | `!whoami` |
+
+### Reload and Restart
+
+`!reload` is a short alias for `!reloadconfig` and reloads runtime-reloadable settings from `config.py`. Startup-only settings still require a process restart.
+
+`!restart` is guarded and requires explicit confirmation:
+
+```text
+!restart
+!restart confirm
+```
+
+When confirmed, BanBot sends a final admin-room message, flushes pending redaction-index writes, stops background tasks, disconnects, and exits with status code `0`. When the service is managed by systemd or another supervisor with restart enabled, the supervisor starts the bot again.
 
 ## Rooms and Sync
 

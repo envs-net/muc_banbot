@@ -46,6 +46,9 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
             },
         }
         self.authorized = True
+        self.flushed_redaction = False
+        self.stopped_background_tasks = False
+        self.disconnect_calls = []
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
@@ -119,6 +122,15 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
 
     async def _cmd_status(self, room):
         self.sent.append({"mto": room, "mbody": "status", "mtype": "groupchat"})
+
+    async def flush_redaction_index(self):
+        self.flushed_redaction = True
+
+    async def stop_background_tasks(self):
+        self.stopped_background_tasks = True
+
+    def disconnect(self, wait=False):
+        self.disconnect_calls.append(wait)
 
 
 def admin_msg(fake_msg_factory, body: str, nick: str = "Admin"):
@@ -238,6 +250,54 @@ async def test_admin_updatecheck_alias_routes_like_checkupdate(fake_msg_factory,
     await bot.on_message(admin_msg(fake_msg_factory, "!checkupdate"))
 
     assert "Bot is up to date" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_admin_reload_alias_routes_to_reloadconfig(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!reload"))
+
+    assert bot.sent[-1]["mbody"] == "reload"
+
+
+@pytest.mark.asyncio
+async def test_admin_restart_requires_confirmation(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!restart"))
+
+    assert "restart confirm" in bot.sent[-1]["mbody"]
+    assert bot.disconnect_calls == []
+    assert bot.flushed_redaction is False
+    assert bot.stopped_background_tasks is False
+
+
+@pytest.mark.asyncio
+async def test_admin_restart_confirm_flushes_stops_disconnects_and_exits(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    with pytest.raises(SystemExit) as excinfo:
+        await bot.on_message(admin_msg(fake_msg_factory, "!restart confirm"))
+
+    assert excinfo.value.code == 0
+    assert "Restart confirmed" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["encrypted"] is False
+    assert bot.flushed_redaction is True
+    assert bot.stopped_background_tasks is True
+    assert bot.disconnect_calls == [False]
 
 
 @pytest.mark.asyncio
