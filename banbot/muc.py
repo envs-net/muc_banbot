@@ -21,7 +21,7 @@ class MucMixin:
             and getattr(self, "server_connect_time", None) is None
             and not getattr(self, "reconnecting", False)
         ):
-            log.info("Disconnect event received before session_start completed; ignoring")
+            log.debug("Pre-session disconnect event received before session_start completed; ignoring")
             return
 
         if self.reconnect_task and not self.reconnect_task.done():
