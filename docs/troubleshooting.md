@@ -155,8 +155,6 @@ Check:
 
 See [Prosody PubSub Setup](rtbl_pubsub-setup.md).
 
-
-
 ## Redaction finds no messages
 
 `!redact <jid>` can only retract messages whose room-assigned stanza IDs are known to BanBot.
