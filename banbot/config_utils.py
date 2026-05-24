@@ -15,6 +15,10 @@ except ModuleNotFoundError as exc:
     if exc.name != "config":
         raise
     config = None
+except Exception:
+    # Do not fail while importing config_utils just because config.py is broken.
+    # bot.py imports this module to format config import errors for users.
+    config = None
 
 from .utils import validate_jid_format
 
@@ -56,7 +60,10 @@ def format_config_import_error(exc: BaseException) -> str:
             lines.append("    " + " " * max(exc.offset - 1, 0) + "^")
 
     if isinstance(exc, NameError):
-        lines.append("Hint: Python booleans are True/False. This bot also accepts lowercase true/false.")
+        lines.append("Hint: string values in config.py need quotes.")
+        lines.append('Example: CONNECT_HOST = "myhost.com"')
+        lines.append("For booleans, use True/False.")
+        lines.append("This bot also accepts lowercase true/false.")
 
     if isinstance(exc, ModuleNotFoundError) and getattr(exc, "name", None) == "config":
         lines.append("Hint: config.py is missing.")
