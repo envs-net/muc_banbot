@@ -138,13 +138,16 @@ if OMEMO_AVAILABLE:
             blindly_trusted: frozenset[DeviceInformation],  # type: ignore[valid-type]
             identifier: str | None,
         ) -> None:
-            trusted_jids = sorted({device.bare_jid for device in blindly_trusted})
+            jid_count = len({
+                getattr(device, "bare_jid", None)
+                for device in blindly_trusted
+                if getattr(device, "bare_jid", None)
+            })
             log.info(
-                "OMEMO: [%s] blindly trusted %d device(s) for %d JID(s): %s",
+                "OMEMO: [%s] blindly trusted %d device(s) for %d JID(s)",
                 identifier,
                 len(blindly_trusted),
-                len(trusted_jids),
-                ", ".join(trusted_jids),
+                jid_count,
             )
 
         async def _prompt_manual_trust(
@@ -367,22 +370,21 @@ class OmemoMixin:
                 log.warning(
                     (
                         "OMEMO: skipping %d recipient(s) without usable OMEMO "
-                        "devices for %s: %s"
+                        "devices for %s"
                     ),
                     len(removed),
                     mto,
-                    ", ".join(sorted(removed)),
                 )
 
                 if not current_recipients:
                     raise RuntimeError(
-                        f"No usable OMEMO recipients left for {mto}; skipped: "
-                        + ", ".join(sorted(skipped_recipients))
+                        f"No usable OMEMO recipients left for {mto}; "
+                        f"skipped {len(skipped_recipients)} recipient(s)"
                     ) from exc
 
         raise RuntimeError(
-            f"Could not encrypt OMEMO message for {mto}; skipped: "
-            + ", ".join(sorted(skipped_recipients))
+            f"Could not encrypt OMEMO message for {mto}; "
+            f"skipped {len(skipped_recipients)} recipient(s)"
         )
 
     async def _encrypt_and_send_omemo_once(
@@ -393,7 +395,8 @@ class OmemoMixin:
         mto: str,
     ) -> Any:
         """Encrypt and send one OMEMO message attempt."""
-        log.debug("OMEMO: encrypting message for %s", recipients)
+        recipient_count = len(recipients) if isinstance(recipients, set) else 1
+        log.debug("OMEMO: encrypting message for %d recipient(s)", recipient_count)
 
         encrypted_result = await self.plugin["xep_0384"].encrypt_message(
             msg,
@@ -410,7 +413,8 @@ class OmemoMixin:
             encrypted_messages, errors = encrypted_result
 
         if errors:
-            log.warning("OMEMO: encryption errors for %s: %s", mto, errors)
+            error_count = len(errors) if hasattr(errors, "__len__") else 1
+            log.warning("OMEMO: encryption returned %d error(s) for %s", error_count, mto)
 
         if not encrypted_messages:
             raise RuntimeError(f"OMEMO produced no encrypted messages for {mto}")
@@ -499,19 +503,10 @@ class OmemoMixin:
         except Exception as exc:
             if self._is_expected_omemo_device_info_error(exc):
                 log.info(
-                    (
-                        "OMEMO: could not decrypt incoming message from %s "
-                        "because sender device information is unavailable: %s"
-                    ),
-                    msg.get("from"),
-                    exc,
+                    "OMEMO: could not decrypt incoming message because sender device information is unavailable"
                 )
             else:
-                log.warning(
-                    "OMEMO: failed to decrypt incoming message from %s: %s",
-                    msg.get("from"),
-                    exc,
-                )
+                log.warning("OMEMO: failed to decrypt incoming message")
             return None, True
 
 
@@ -567,5 +562,5 @@ class OmemoMixin:
             recipients.add(JID(own_bare))
 
         recipients = {jid for jid in recipients if jid and jid.bare}
-        log.debug("OMEMO: recipients for %s: %s", room, recipients)
+        log.debug("OMEMO: %d recipient(s) available for %s", len(recipients), room)
         return recipients
