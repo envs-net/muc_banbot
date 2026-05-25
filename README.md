@@ -193,7 +193,7 @@ See [docs/testing.md](docs/testing.md) for the full testing workflow and [tests/
 
 ## Documentation
 
-The full documentation is split into focused guides. Start with the [documentation index](docs/index.md), or jump directly to a topic:
+The full documentation is split into focused guides. Start with the [documentation index](docs/README.md), or jump directly to a topic:
 
 * [Configuration](docs/configuration.md)
 * [Commands](docs/commands.md)
