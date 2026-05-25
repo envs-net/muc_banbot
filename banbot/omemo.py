@@ -153,9 +153,9 @@ if OMEMO_AVAILABLE:
             identifier: str | None,
         ) -> None:
             log.warning(
-                "OMEMO: [%s] manual trust requested for devices, but interactive trust is disabled: %s",
+                "OMEMO: [%s] manual trust requested for %d device(s), but interactive trust is disabled",
                 identifier,
-                manually_trusted,
+                len(manually_trusted),
             )
 
 
