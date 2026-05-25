@@ -224,7 +224,7 @@ async def test_decrypt_incoming_omemo_device_info_failures_are_logged_as_info(
 
 @pytest.mark.omemo
 @pytest.mark.asyncio
-async def test_decrypt_incoming_omemo_unexpected_failures_remain_warnings(
+async def test_decrypt_incoming_omemo_unexpected_failures_log_sanitized_warning(
     omemo_payload_xml,
     caplog,
 ):
@@ -244,7 +244,11 @@ async def test_decrypt_incoming_omemo_unexpected_failures_remain_warnings(
     assert result is None
     assert encrypted is True
     assert "failed to decrypt incoming message" in caplog.text
-    assert "unexpected decrypt failure" in caplog.text
+
+    # Do not log raw decrypt exception details. They may contain sensitive
+    # OMEMO/account/device metadata and are flagged by CodeQL.
+    assert "unexpected decrypt failure" not in caplog.text
+    assert "room@example.test/dan" not in caplog.text
 
 
 @pytest.mark.omemo
