@@ -5,9 +5,6 @@ imported in tests and tooling without requiring runtime-only dependencies to be
 installed first.
 """
 
-__all__ = ["BanBot"]
-
-
 def __getattr__(name: str):
     if name == "BanBot":
         from .bot import BanBot

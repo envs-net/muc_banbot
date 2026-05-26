@@ -122,7 +122,12 @@ if OMEMO_AVAILABLE:
         def plugin_init(self) -> None:
             if not self.json_file_path:
                 raise RuntimeError("OMEMO JSON storage path not specified")
-            self._storage = JsonFileStorage(Path(self.json_file_path))
+
+            storage_cls = JsonFileStorage
+            if not callable(storage_cls):
+                raise RuntimeError("OMEMO JSON storage backend is unavailable")
+
+            self._storage = storage_cls(Path(self.json_file_path))
             super().plugin_init()
 
         @property
