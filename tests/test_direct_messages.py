@@ -38,6 +38,8 @@ class DirectBot(DirectMessageMixin):
         self.command_prefix = "!"
         self.allow_admin_commands_in_dms = True
         self.calls = []
+        self.version_check_url = "https://github.com/envs-net/muc_banbot/releases/latest"
+        self.update_result = (False, "2.3.0", None)
 
     def bare_jid(self, jid):
         return bare_jid(jid)
@@ -53,6 +55,10 @@ class DirectBot(DirectMessageMixin):
         self.calls.append(("status", room))
         await self.bot_send_message(mto=room, mbody="status output", mtype="groupchat")
 
+    async def check_for_updates_once(self, announce=False):
+        self.calls.append(("checkupdate", announce))
+        return self.update_result
+
     async def cmd_banlist(self, room, page=1, show_all=False):
         self.calls.append(("banlist", room, page, show_all))
         await self.bot_send_message(mto=room, mbody="banlist output", mtype="groupchat")
@@ -60,6 +66,14 @@ class DirectBot(DirectMessageMixin):
     async def cmd_banlist_rtbl(self, room, page=1, show_all=False):
         self.calls.append(("banlist_rtbl", room, page, show_all))
         await self.bot_send_message(mto=room, mbody="rtbl banlist output", mtype="groupchat")
+
+    async def cmd_bansearch(self, query, page=1, show_all=False):
+        self.calls.append(("bansearch", query, page, show_all))
+        await self.bot_send_message(mto=ADMIN_ROOM, mbody="bansearch output", mtype="groupchat")
+
+    async def cmd_why(self, identifier, room):
+        self.calls.append(("why", identifier, room))
+        await self.bot_send_message(mto=room, mbody="why output", mtype="groupchat")
 
     async def cmd_room(self, args, room):
         self.calls.append(("room", tuple(args), room))
@@ -162,6 +176,68 @@ async def test_admin_dm_can_use_status_readonly_command():
     assert bot.calls == [("status", "admin@example.org")]
     assert bot.sent[-1]["mtype"] == "chat"
     assert bot.sent[-1]["mbody"] == "status output"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_updatecheck_aliases():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!checkupdate"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!updatecheck"))
+
+    assert bot.calls == [("checkupdate", False), ("checkupdate", False)]
+    assert bot.sent[-2]["mtype"] == "chat"
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert "Bot is up to date" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_bansearch_readonly_command():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!bansearch all spam wave")
+    )
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!bansearch spam wave last")
+    )
+
+    assert bot.calls[0] == ("bansearch", "spam wave", 1, True)
+    assert bot.calls[1] == ("bansearch", "spam wave", -1, False)
+    assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_bansearch_requires_query():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!bansearch all"))
+
+    assert bot.calls == []
+    assert "Usage: !bansearch" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_why_readonly_command():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!why alice")
+    )
+
+    assert bot.calls == [("why", "alice", "admin@example.org")]
+    assert bot.sent[-1]["mto"] == "admin@example.org"
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert bot.sent[-1]["mbody"] == "why output"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_why_requires_target():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!why")
+    )
+
+    assert bot.calls == []
+    assert "Usage: !why" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
 
 
 @pytest.mark.asyncio

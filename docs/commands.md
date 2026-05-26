@@ -61,14 +61,17 @@ Allowed DM commands for admins:
 ```text
 !config
 !status
-!banlist / !blacklist [all|page|last]
-!banlist / !blacklist rtbl [all|page|last]
+!checkupdate / !updatecheck
+!audit [all|page|last|query]
 !room list [all|page|last]
 !room invite list [all|page|last]
+!banlist / !blacklist [all|page|last]
+!banlist / !blacklist rtbl [all|page|last]
 !ignore / !ignore list [all|page|last]
 !whitelist / !whitelist list [all|page|last]
+!bansearch <query> [all|page|last]
+!why <jid|nick>
 !rtbl list
-!audit [all|page|last|query]
 ```
 
 All other admin commands, especially ban, unban, room changes, RTBL changes, reload/restart, policy changes, and redaction, must be run in the admin room.

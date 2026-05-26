@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 
 from config import ADMIN_ROOM
+from ._version import __version__
 from .utils import wants_all_pages, without_all_pages_arg
 
 
@@ -116,6 +117,32 @@ class DirectMessageMixin:
                 await self._cmd_status(reply_to)
                 return True
 
+            if cmd in ("checkupdate", "updatecheck"):
+                is_update, remote_version, error_message = await self.check_for_updates_once(announce=False)
+
+                if error_message:
+                    await self.bot_send_message(
+                        mto=reply_to,
+                        mbody=f"❌ Update check failed: {error_message}",
+                        mtype="chat",
+                    )
+                elif is_update:
+                    await self.bot_send_message(
+                        mto=reply_to,
+                        mbody=(
+                            f"⬆️ New bot version available: {remote_version} (current: {__version__})\n"
+                            f"Release page: {self.version_check_url}"
+                        ),
+                        mtype="chat",
+                    )
+                else:
+                    await self.bot_send_message(
+                        mto=reply_to,
+                        mbody=f"✅ Bot is up to date ({__version__})",
+                        mtype="chat",
+                    )
+                return True
+
             if cmd in ("banlist", "blacklist"):
                 show_all = wants_all_pages(args)
                 args = without_all_pages_arg(args)
@@ -209,6 +236,50 @@ class DirectMessageMixin:
 
             if cmd == "audit":
                 await self.cmd_audit(args, reply_to)
+                return True
+
+            if cmd == "why":
+                if not args:
+                    await self._send_direct_message(
+                        reply_to,
+                        f"❌ Usage: {p}why <nick|jid>",
+                    )
+                    return True
+
+                await self.cmd_why(args[0], reply_to)
+                return True
+
+            if cmd == "bansearch":
+                if len(args) < 1:
+                    await self._send_direct_message(
+                        reply_to,
+                        f"❌ Usage: {p}bansearch <query> [all|page|last]",
+                    )
+                    return True
+
+                show_all = wants_all_pages(args)
+                args = without_all_pages_arg(args)
+                page = 1
+                query_args = args
+                if args and args[-1].lower() == "last":
+                    page = -1
+                    query_args = args[:-1]
+                elif args:
+                    try:
+                        page = max(1, int(args[-1]))
+                        query_args = args[:-1]
+                    except ValueError:
+                        pass
+
+                if not query_args:
+                    await self._send_direct_message(
+                        reply_to,
+                        f"❌ Usage: {p}bansearch <query> [all|page|last]",
+                    )
+                    return True
+
+                query = " ".join(query_args)
+                await self.cmd_bansearch(query, page=page, show_all=show_all)
                 return True
 
         return False
