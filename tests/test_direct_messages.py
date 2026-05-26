@@ -14,8 +14,8 @@ class FakeJid:
 
 
 class FakeDirectMessage:
-    def __init__(self, *, bare, resource=None, msg_type="chat"):
-        self._data = {"from": FakeJid(bare, resource), "type": msg_type}
+    def __init__(self, *, bare, resource=None, msg_type="chat", body=""):
+        self._data = {"from": FakeJid(bare, resource), "type": msg_type, "body": body}
 
     def __getitem__(self, key):
         return self._data[key]
@@ -35,12 +35,46 @@ class DirectBot(DirectMessageMixin):
             },
         }
         self.sent = []
+        self.command_prefix = "!"
+        self.calls = []
 
     def bare_jid(self, jid):
         return bare_jid(jid)
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
+
+    async def _cmd_config(self, room):
+        self.calls.append(("config", room))
+        await self.bot_send_message(mto=room, mbody="config output", mtype="groupchat")
+
+    async def _cmd_status(self, room):
+        self.calls.append(("status", room))
+        await self.bot_send_message(mto=room, mbody="status output", mtype="groupchat")
+
+    async def cmd_banlist(self, room, page=1, show_all=False):
+        self.calls.append(("banlist", room, page, show_all))
+        await self.bot_send_message(mto=room, mbody="banlist output", mtype="groupchat")
+
+    async def cmd_banlist_rtbl(self, room, page=1, show_all=False):
+        self.calls.append(("banlist_rtbl", room, page, show_all))
+        await self.bot_send_message(mto=room, mbody="rtbl banlist output", mtype="groupchat")
+
+    async def cmd_room(self, args, room):
+        self.calls.append(("room", tuple(args), room))
+        await self.bot_send_message(mto=room, mbody="room output", mtype="groupchat")
+
+    async def cmd_ignore(self, args, room, actor="unknown", command_name="ignore"):
+        self.calls.append(("ignore", tuple(args), room, actor, command_name))
+        await self.bot_send_message(mto=room, mbody="ignore output", mtype="groupchat")
+
+    async def cmd_rtbl(self, args, room, actor="unknown"):
+        self.calls.append(("rtbl", tuple(args), room, actor))
+        await self.bot_send_message(mto=room, mbody="rtbl output", mtype="groupchat")
+
+    async def cmd_audit(self, args, room):
+        self.calls.append(("audit", tuple(args), room))
+        await self.bot_send_message(mto=room, mbody="audit output", mtype="groupchat")
 
 
 @pytest.mark.asyncio
@@ -65,7 +99,7 @@ async def test_muc_pm_from_admin_gets_admin_hint():
         FakeDirectMessage(bare="room@conference.example.org", resource="Admin")
     )
     assert bot.sent[0]["mto"] == "room@conference.example.org/Admin"
-    assert "Nice try, admin" in bot.sent[0]["mbody"]
+    assert "Admin DM support is read-only" in bot.sent[0]["mbody"]
     assert ADMIN_ROOM in bot.sent[0]["mbody"]
 
 
@@ -81,7 +115,7 @@ async def test_regular_dm_from_admin_gets_admin_room_hint():
     bot = DirectBot()
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop"))
     assert bot.sent[0]["mto"] == "admin@example.org"
-    assert "Nice try, admin" in bot.sent[0]["mbody"]
+    assert "Admin DM support is read-only" in bot.sent[0]["mbody"]
     assert ADMIN_ROOM in bot.sent[0]["mbody"]
 
 
@@ -94,7 +128,7 @@ async def test_muc_pm_admin_detection_falls_back_to_admin_room_real_jid():
     # Admin is only a member in the protected room, but their real JID is owner
     # in ADMIN_ROOM, so the fallback should treat the MUC PM as admin.
     assert bot.sent[0]["mto"] == "room@conference.example.org/Admin"
-    assert "Nice try, admin" in bot.sent[0]["mbody"]
+    assert "Admin DM support is read-only" in bot.sent[0]["mbody"]
 
 
 @pytest.mark.asyncio
@@ -106,3 +140,93 @@ async def test_muc_pm_from_regular_user_gets_rejection():
     assert bot.sent[0]["mto"] == "room@conference.example.org/User"
     assert "ban management bot" in bot.sent[0]["mbody"]
     assert "only listen to admins" in bot.sent[0]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_config_readonly_command():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!config"))
+
+    assert bot.calls == [("config", "admin@example.org")]
+    assert bot.sent[-1]["mto"] == "admin@example.org"
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert bot.sent[-1]["mbody"] == "config output"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_status_readonly_command():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!status"))
+
+    assert bot.calls == [("status", "admin@example.org")]
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert bot.sent[-1]["mbody"] == "status output"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_banlist_and_rtbl_banlist():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!banlist all"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!blacklist rtbl last"))
+
+    assert bot.calls[0] == ("banlist", ADMIN_ROOM, 1, True)
+    assert bot.calls[1] == ("banlist_rtbl", ADMIN_ROOM, -1, False)
+    assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_room_and_invite_lists():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!room list all"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!room invite list last"))
+
+    assert bot.calls[0] == ("room", ("list", "all"), "admin@example.org")
+    assert bot.calls[1] == ("room", ("invite", "list", "last"), "admin@example.org")
+    assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_mutating_room_commands():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!room add test@conference.example.org"))
+
+    assert bot.calls == []
+    assert "read-only" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_ignore_whitelist_rtbl_and_audit_lists():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!ignore list all"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!whitelist last"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!rtbl list"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!audit last"))
+
+    assert bot.calls[0] == ("ignore", ("list", "all"), "admin@example.org", "admin@example.org", "ignore")
+    assert bot.calls[1] == ("ignore", ("last",), "admin@example.org", "admin@example.org", "whitelist")
+    assert bot.calls[2] == ("rtbl", ("list",), "admin@example.org", "admin@example.org")
+    assert bot.calls[3] == ("audit", ("last",), "admin@example.org")
+    assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_mutating_commands():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!ban bad@example.org"))
+
+    assert bot.calls == []
+    assert "read-only" in bot.sent[-1]["mbody"]
+    assert ADMIN_ROOM in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_muc_pm_admin_can_use_status_readonly_command():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="room@conference.example.org", resource="Admin", body="!status")
+    )
+
+    assert bot.calls == [("status", "room@conference.example.org/Admin")]
+    assert bot.sent[-1]["mto"] == "room@conference.example.org/Admin"
+    assert bot.sent[-1]["mtype"] == "chat"

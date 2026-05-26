@@ -50,6 +50,27 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 
 When confirmed, BanBot sends a final admin-room message, flushes pending redaction-index writes, stops background tasks, disconnects, and exits with status code `0`. When the service is managed by systemd or another supervisor with restart enabled, the supervisor starts the bot again.
 
+### Admin Direct Messages
+
+BanBot accepts a small read-only admin command subset in direct messages and MUC PMs. Mutating commands still require the admin room for auditability and safety.
+
+Allowed DM commands for admins:
+
+```text
+!config
+!status
+!banlist / !blacklist [all|page|last]
+!banlist / !blacklist rtbl [all|page|last]
+!room list [all|page|last]
+!room invite list [all|page|last]
+!ignore / !ignore list [all|page|last]
+!whitelist / !whitelist list [all|page|last]
+!rtbl list
+!audit [all|page|last|query]
+```
+
+All other admin commands, especially ban, unban, room changes, RTBL changes, reload/restart, policy changes, and redaction, must be run in the admin room.
+
 ## Rooms and Sync
 
 | Command | Description | Example |
