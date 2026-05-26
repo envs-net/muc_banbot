@@ -352,8 +352,9 @@ class DirectMessageMixin:
                 reply_to,
                 (
                     "❌ Direct-message admin commands are read-only.\n"
-                    "Allowed: config, status, banlist/blacklist, room list, "
-                    "room invite list, ignore/whitelist list, rtbl list, audit.\n"
+                    "Allowed read-only commands: !config, !status, !checkupdate, !updatecheck, "
+                    "!banlist, !bansearch, !why, !room list, !room invite list, !ignore list, "
+                    "!whitelist list, !rtbl list, !audit.\n"
                     f"Use {ADMIN_ROOM} for mutating commands."
                 ),
             )
