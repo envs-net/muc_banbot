@@ -144,7 +144,6 @@ class AuditMixin:
             total = int(row[0] or 0) if row else 0
 
         if show_all:
-            total_pages = 1
             async with self.db.execute(
                 f"""
                 SELECT created_at, event_type, actor, target_type, target, jid, nick, until, comment, details

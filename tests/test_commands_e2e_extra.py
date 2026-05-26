@@ -312,8 +312,9 @@ async def test_admin_restart_confirm_flushes_stops_disconnects_and_exits(fake_ms
     assert bot.sent[-1]["encrypted"] is False
     assert len(created_tasks) == 1
 
+    restart_task = created_tasks[0]
     with pytest.raises(SystemExit) as excinfo:
-        await created_tasks[0]
+        await restart_task
 
     assert excinfo.value.code == 0
     assert bot.flushed_redaction is True

@@ -67,8 +67,8 @@ class RedactionMixin:
             muc_jid = msg["muc"].get("jid")
             if muc_jid:
                 return bare_jid(str(muc_jid))
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Redaction: MUC plugin JID lookup failed: %s", exc)
 
         return None
 

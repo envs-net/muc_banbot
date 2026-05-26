@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 
 import pytest
@@ -245,4 +244,4 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
     assert bot.bot_admin_state == {}
     assert bot.room_join_time == {}
     assert bot.reconnect_task is not None
-    await bot.reconnect_task
+    assert await bot.reconnect_task is None

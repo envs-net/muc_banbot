@@ -6,7 +6,7 @@ import time
 import aiosqlite
 from config import DB_FILE
 
-from .utils import bare_jid, normalize_ban_target
+from .utils import normalize_ban_target
 
 log = logging.getLogger(__name__)
 

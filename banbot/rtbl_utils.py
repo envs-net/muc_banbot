@@ -1,6 +1,7 @@
 """Pure RTBL helpers for item classification, PubSub validation, hashing, and payloads."""
 
 import hashlib
+import logging
 import re
 
 # Matches exactly 64 lowercase hex characters (SHA-256 digest)
@@ -8,6 +9,8 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 # Matches a plain domain name or wildcard domain (no @, contains a dot)
 _DOMAIN_RE = re.compile(r"^[\w*][\w\-.*]*\.[a-z]{2,}$")
 _DOMAIN_LABEL_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$", re.IGNORECASE)
+
+log = logging.getLogger(__name__)
 
 
 def _is_sha256(value: str) -> bool:
@@ -68,8 +71,8 @@ def _rtbl_extract_reason(payload) -> str | None:
         el = xml_el.find(".//text")
         if el is not None and el.text:
             return el.text.strip()
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("RTBL: could not parse reporting text payload: %s", exc)
     return None
 
 

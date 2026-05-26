@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 
-import pytest
-
 import config
 from banbot.config_utils import ConfigMixin, format_config_import_error, get_config_resource
 

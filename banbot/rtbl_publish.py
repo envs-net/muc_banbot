@@ -336,8 +336,8 @@ class RtblPublishMixin:
             try:
                 if getter("id") == item_id:
                     return True
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("RTBL Publish: could not inspect PubSub result id: %s", exc)
 
         xml = getattr(result, "xml", None)
         if xml is not None and item_id in str(xml):

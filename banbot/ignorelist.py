@@ -272,7 +272,6 @@ class IgnorelistMixin:
                     rows = await cursor.fetchall()
 
                 resolved_page = 1
-                total_pages = 1
                 lines = [f"🚫 {list_label} ({total}) - All:"]
             else:
                 resolved_page = resolve_page(page, total, per_page)

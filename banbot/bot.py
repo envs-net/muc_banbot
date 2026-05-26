@@ -302,7 +302,7 @@ class BanBot(
                 try:
                     await task
                 except asyncio.CancelledError:
-                    pass
+                    log.debug("Background task cancelled during shutdown")
 
 
     async def start(self, _) -> None:
