@@ -269,6 +269,7 @@ class DirectMessageMixin:
                         page = max(1, int(args[-1]))
                         query_args = args[:-1]
                     except ValueError:
+                        # Last argument is not a page number; treat it as part of the query.
                         pass
 
                 if not query_args:

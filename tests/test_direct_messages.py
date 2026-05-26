@@ -110,6 +110,8 @@ async def test_direct_message_rejects_regular_user_dm():
 @pytest.mark.asyncio
 async def test_muc_pm_from_admin_gets_admin_hint():
     bot = DirectBot()
+    bot.occupants["room@conference.example.org"]["Admin"]["affiliation"] = "admin"
+
     await bot.on_direct_message(
         FakeDirectMessage(bare="room@conference.example.org", resource="Admin")
     )
@@ -322,8 +324,7 @@ async def test_admin_dm_commands_can_be_disabled():
     assert bot.sent[-1]["mtype"] == "chat"
     body = bot.sent[-1]["mbody"]
     assert "admin room" in body
-    assert "admin@conference.example.org" in body
-    assert ADMIN_ROOM in bot.sent[-1]["mbody"]
+    assert ADMIN_ROOM in body
 
 
 @pytest.mark.asyncio
@@ -340,6 +341,5 @@ async def test_admin_muc_pm_commands_can_be_disabled():
     assert bot.sent[-1]["mtype"] == "chat"
     body = bot.sent[-1]["mbody"]
     assert "admin room" in body
-    assert "admin@conference.example.org" in body
-    assert ADMIN_ROOM in bot.sent[-1]["mbody"]
+    assert ADMIN_ROOM in body
 
