@@ -264,7 +264,7 @@ async def test_admin_dm_why_requires_target():
 async def test_admin_dm_can_use_banlist_and_rtbl_banlist():
     bot = DirectBot()
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!banlist all"))
-    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!blacklist rtbl last"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!banlist rtbl last"))
 
     assert bot.calls[0] == ("banlist", ADMIN_ROOM, 1, True)
     assert bot.calls[1] == ("banlist_rtbl", ADMIN_ROOM, -1, False)
