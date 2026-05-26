@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -314,7 +315,7 @@ async def test_admin_restart_confirm_flushes_stops_disconnects_and_exits(fake_ms
 
     restart_task = created_tasks[0]
     with pytest.raises(SystemExit) as excinfo:
-        await restart_task
+        await asyncio.wait_for(restart_task, timeout=1)
 
     assert excinfo.value.code == 0
     assert bot.flushed_redaction is True

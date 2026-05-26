@@ -253,7 +253,7 @@ class IgnorelistMixin:
                     try:
                         page = max(1, int(args[1]))
                     except ValueError:
-                        pass
+                        log.debug("Invalid ignorelist page %r; using first page", args[1])
 
             if total == 0:
                 await self.bot_send_message(

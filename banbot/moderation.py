@@ -257,7 +257,6 @@ class ModerationMixin:
                 normalized_jid = existing_jid
                 target_type = "jid"
                 target = existing_jid
-                ban_jid = existing_jid
 
         db_key = f"*.{target}" if target_type == "domain" else target
         skip_final_message = False
