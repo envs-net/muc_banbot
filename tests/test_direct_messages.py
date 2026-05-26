@@ -218,6 +218,24 @@ async def test_admin_dm_bansearch_requires_query():
 
 
 @pytest.mark.asyncio
+async def test_admin_dm_bansearch_requires_arguments():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!bansearch",
+        )
+    )
+
+    assert bot.calls == []
+    assert "Usage:" in bot.sent[-1]["mbody"]
+    assert "bansearch" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
 async def test_admin_dm_can_use_why_readonly_command():
     bot = DirectBot()
     await bot.on_direct_message(
@@ -251,6 +269,42 @@ async def test_admin_dm_can_use_banlist_and_rtbl_banlist():
     assert bot.calls[0] == ("banlist", ADMIN_ROOM, 1, True)
     assert bot.calls[1] == ("banlist_rtbl", ADMIN_ROOM, -1, False)
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_banlist_rejects_invalid_page_argument():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!banlist notanumber",
+        )
+    )
+
+    assert bot.calls == []
+    assert "Usage:" in bot.sent[-1]["mbody"]
+    assert "banlist" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rtbl_banlist_rejects_invalid_page_argument():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!banlist rtbl notanumber",
+        )
+    )
+
+    assert bot.calls == []
+    assert "Usage:" in bot.sent[-1]["mbody"]
+    assert "banlist" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
 
 
 @pytest.mark.asyncio
@@ -297,6 +351,50 @@ async def test_admin_dm_rejects_mutating_commands():
     assert bot.calls == []
     assert "read-only" in bot.sent[-1]["mbody"]
     assert ADMIN_ROOM in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_mutating_ignore_and_whitelist_commands():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!ignore add user@example.org",
+        )
+    )
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!whitelist add user@example.org",
+        )
+    )
+
+    assert bot.calls == []
+    assert "read-only" in bot.sent[-2]["mbody"]
+    assert bot.sent[-2]["mtype"] == "chat"
+    assert "read-only" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_non_list_rtbl_commands():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!rtbl add bad@example.org",
+        )
+    )
+
+    assert bot.calls == []
+    assert "read-only" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
 
 
 @pytest.mark.asyncio
