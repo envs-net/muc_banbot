@@ -19,20 +19,32 @@ class FakeFrom:
         self.bare = bare
 
 
-class FakeMessage(dict):
+class FakeMessage:
     def __init__(self, room: str, nick: str, stanza_id: str | None = None, body: str = "hello"):
-        super().__init__()
-        self["from"] = FakeFrom(room)
-        self["mucnick"] = nick
-        self["body"] = body
-        self["id"] = "client-id"
+        self.room = room
+        self.nick = nick
+        self.stanza_id = stanza_id
+        self.body = body
         self.xml = ET.Element("message")
+        self._data = {
+            "from": FakeFrom(room),
+            "mucnick": nick,
+            "body": body,
+            "id": "client-id",
+        }
+
         if stanza_id:
             ET.SubElement(
                 self.xml,
                 f"{{{SID_NS}}}stanza-id",
                 {"by": room, "id": stanza_id},
             )
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+    def __getitem__(self, key):
+        return self._data[key]
 
 
 class FakeOutgoingIq:
