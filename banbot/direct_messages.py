@@ -218,8 +218,8 @@ class DirectMessageMixin:
         """
         Handle regular DMs and MUC PMs.
 
-        Admins may use a small read-only command subset in DMs. Mutating admin
-        commands still require the admin room for auditability and safety.
+        Admins may use a small read-only command subset in DMs when enabled.
+        Mutating admin commands still require the admin room for auditability and safety.
         """
         # Ignore own messages
         if msg["from"].bare == self.boundjid.bare:
@@ -245,6 +245,14 @@ class DirectMessageMixin:
             body = msg["body"].strip()
         except Exception:
             body = ""
+
+        if is_admin and not getattr(self, "allow_admin_commands_in_dms", True):
+            await self._send_direct_message(
+                reply_to,
+                f"🤖 Nice try, admin! But I only take commands directly in the admin room. "
+                f"Please use {ADMIN_ROOM}.\nSee you there! 😉"
+            )
+            return
 
         if is_admin and body.startswith(self.command_prefix):
             parts = body.split()

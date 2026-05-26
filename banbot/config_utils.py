@@ -149,6 +149,7 @@ class ConfigMixin:
             "ANNOUNCE_SYNC_DETAILS": self.announce_sync_details,
             "SHOW_BAN_IN_MUC": self.show_ban_in_muc,
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": self.allow_user_cmds,
+            "ALLOW_ADMIN_COMMANDS_IN_DMS": getattr(self, "allow_admin_commands_in_dms", True),
             "ROOM_INVITES_ENABLED": self.room_invites_enabled,
             "HEALTH_CHECK_INTERVAL": self.health_check_interval,
             "UNBAN_CHECK_INTERVAL": self.unban_check_interval,
@@ -323,6 +324,7 @@ class ConfigMixin:
             "AUDIT_LOG_ENABLED",
             "SHOW_BAN_IN_MUC",
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
+            "ALLOW_ADMIN_COMMANDS_IN_DMS",
             "ROOM_INVITES_ENABLED",
             "VERSION_CHECK_ENABLED",
             "REDACTION_ENABLED",
@@ -335,6 +337,7 @@ class ConfigMixin:
             "AUDIT_LOG_ENABLED": True,
             "SHOW_BAN_IN_MUC": False,
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": True,
+            "ALLOW_ADMIN_COMMANDS_IN_DMS": True,
             "ROOM_INVITES_ENABLED": False,
             "VERSION_CHECK_ENABLED": False,
             "REDACTION_ENABLED": False,
@@ -518,6 +521,7 @@ class ConfigMixin:
         self.audit_log_retention_days = getattr(config, "AUDIT_LOG_RETENTION_DAYS", 365)
         self.show_ban_in_muc = getattr(config, "SHOW_BAN_IN_MUC", False)
         self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
+        self.allow_admin_commands_in_dms = getattr(config, "ALLOW_ADMIN_COMMANDS_IN_DMS", True)
         self.room_invites_enabled = getattr(config, "ROOM_INVITES_ENABLED", False)
 
         self.health_check_interval = getattr(config, "HEALTH_CHECK_INTERVAL", 300)

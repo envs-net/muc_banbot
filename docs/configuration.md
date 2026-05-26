@@ -70,6 +70,7 @@ Common runtime settings:
 | `ANNOUNCE_SYNC_DETAILS` | `True` | Show detailed startup sync output |
 | `SHOW_BAN_IN_MUC` | `False` | Announce bans in protected rooms |
 | `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` | `True` | Enable public protected-room commands |
+| `ALLOW_ADMIN_COMMANDS_IN_DMS` | `True` | Allow admins to use selected read-only commands via direct messages / MUC PMs |
 | `ROOM_INVITES_ENABLED` | `False` | Enable admin-reviewed protected-room invite workflow |
 | `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` | `30` | Rate-limit window in seconds |
 | `PUBLIC_COMMAND_RATE_LIMIT_MAX` | `3` | Max public command uses per nick/room/command/window |
@@ -131,6 +132,12 @@ VCARD_NOTE = "XMPP MUC ban management bot"
 ```
 
 Avatar/vCard data is updated on startup and after `!reloadconfig`.
+
+## Admin Direct Messages
+
+When `ALLOW_ADMIN_COMMANDS_IN_DMS=True`, admins may use selected read-only commands via direct messages and MUC PMs. Mutating commands remain restricted to `ADMIN_ROOM` for auditability and safety.
+
+When set to `False`, admin commands are rejected outside `ADMIN_ROOM`, matching the previous behavior.
 
 ## Room Invite Service
 

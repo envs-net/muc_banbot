@@ -47,6 +47,11 @@ ANNOUNCE_SYNC_DETAILS = True  # True = Show detailed sync progress messages at s
 SHOW_BAN_IN_MUC = False  # True = visible ban/kick in protected rooms, False = hidden
 ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS = True  # True = Commands are enabled, False = deactivated
 
+# Allow admins to use selected read-only commands via direct messages / MUC PMs.
+# Mutating commands are still restricted to ADMIN_ROOM.
+# Can be changed at runtime via !reloadconfig.
+ALLOW_ADMIN_COMMANDS_IN_DMS = True
+
 # Enable protected-room invite workflow. When enabled, incoming MUC invites are
 # announced in the admin room and can be accepted/declined with !room invite.
 # Can be changed at runtime via !reloadconfig.

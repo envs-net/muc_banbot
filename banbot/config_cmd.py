@@ -33,6 +33,7 @@ class ConfigCommandMixin:
         config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
         config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
         config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
+        config_lines.append(f"💬 Admin Commands in DMs: {getattr(self, 'allow_admin_commands_in_dms', True)}")
         invite_enabled = getattr(self, "room_invites_enabled", False)
         pending_invites = len(getattr(self, "pending_room_invites", {}) or {})
         config_lines.append(f"📨 Room Invite Service: {invite_enabled} ({pending_invites} pending)")

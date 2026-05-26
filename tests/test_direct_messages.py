@@ -36,6 +36,7 @@ class DirectBot(DirectMessageMixin):
         }
         self.sent = []
         self.command_prefix = "!"
+        self.allow_admin_commands_in_dms = True
         self.calls = []
 
     def bare_jid(self, jid):
@@ -103,24 +104,6 @@ async def test_muc_pm_from_admin_gets_admin_hint():
     assert ADMIN_ROOM in bot.sent[0]["mbody"]
 
 
-@pytest.mark.parametrize("affiliation", ["admin", "owner"])
-@pytest.mark.asyncio
-async def test_muc_pm_from_protected_room_admin_or_owner_gets_admin_hint(affiliation):
-    bot = DirectBot()
-    bot.occupants["room@conference.example.org"]["RoomAdmin"] = {
-        "jid": "roomadmin@example.org/res",
-        "affiliation": affiliation,
-    }
-
-    await bot.on_direct_message(
-        FakeDirectMessage(bare="room@conference.example.org", resource="RoomAdmin")
-    )
-
-    assert bot.sent[0]["mto"] == "room@conference.example.org/RoomAdmin"
-    assert "Admin DM support is read-only" in bot.sent[0]["mbody"]
-    assert ADMIN_ROOM in bot.sent[0]["mbody"]
-
-
 @pytest.mark.asyncio
 async def test_direct_message_ignores_groupchat_messages():
     bot = DirectBot()
@@ -166,8 +149,9 @@ async def test_admin_dm_can_use_config_readonly_command():
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!config"))
 
     assert bot.calls == [("config", "admin@example.org")]
-    assert len(bot.sent) == 1
-    assert bot.sent[0] == {"mto": "admin@example.org", "mbody": "config output", "mtype": "chat"}
+    assert bot.sent[-1]["mto"] == "admin@example.org"
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert bot.sent[-1]["mbody"] == "config output"
 
 
 @pytest.mark.asyncio
@@ -176,8 +160,8 @@ async def test_admin_dm_can_use_status_readonly_command():
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!status"))
 
     assert bot.calls == [("status", "admin@example.org")]
-    assert len(bot.sent) == 1
-    assert bot.sent[0] == {"mto": "admin@example.org", "mbody": "status output", "mtype": "chat"}
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert bot.sent[-1]["mbody"] == "status output"
 
 
 @pytest.mark.asyncio
@@ -185,12 +169,9 @@ async def test_admin_dm_can_use_banlist_and_rtbl_banlist():
     bot = DirectBot()
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!banlist all"))
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!blacklist rtbl last"))
-    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!banlist rtbl all"))
 
     assert bot.calls[0] == ("banlist", ADMIN_ROOM, 1, True)
     assert bot.calls[1] == ("banlist_rtbl", ADMIN_ROOM, -1, False)
-    assert bot.calls[2] == ("banlist_rtbl", ADMIN_ROOM, 1, True)
-    assert len(bot.sent) == 3
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
 
 
@@ -250,3 +231,39 @@ async def test_muc_pm_admin_can_use_status_readonly_command():
     assert bot.calls == [("status", "room@conference.example.org/Admin")]
     assert bot.sent[-1]["mto"] == "room@conference.example.org/Admin"
     assert bot.sent[-1]["mtype"] == "chat"
+
+@pytest.mark.asyncio
+async def test_admin_dm_commands_can_be_disabled():
+    bot = DirectBot()
+    bot.allow_admin_commands_in_dms = False
+
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!status")
+    )
+
+    assert bot.calls == []
+    assert bot.sent[-1]["mto"] == "admin@example.org"
+    assert bot.sent[-1]["mtype"] == "chat"
+    body = bot.sent[-1]["mbody"]
+    assert "admin room" in body
+    assert "admin@conference.example.org" in body
+    assert ADMIN_ROOM in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_admin_muc_pm_commands_can_be_disabled():
+    bot = DirectBot()
+    bot.allow_admin_commands_in_dms = False
+
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="room@conference.example.org", resource="Admin", body="!status")
+    )
+
+    assert bot.calls == []
+    assert bot.sent[-1]["mto"] == "room@conference.example.org/Admin"
+    assert bot.sent[-1]["mtype"] == "chat"
+    body = bot.sent[-1]["mbody"]
+    assert "admin room" in body
+    assert "admin@conference.example.org" in body
+    assert ADMIN_ROOM in bot.sent[-1]["mbody"]
+

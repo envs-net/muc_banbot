@@ -52,7 +52,9 @@ When confirmed, BanBot sends a final admin-room message, flushes pending redacti
 
 ### Admin Direct Messages
 
-BanBot accepts a small read-only admin command subset in direct messages and MUC PMs. Mutating commands still require the admin room for auditability and safety.
+BanBot accepts a small read-only admin command subset in direct messages and MUC PMs when `ALLOW_ADMIN_COMMANDS_IN_DMS=True`. Mutating commands still require the admin room for auditability and safety.
+
+When `ALLOW_ADMIN_COMMANDS_IN_DMS=False`, admin commands are only accepted in `ADMIN_ROOM`, matching the previous behavior.
 
 Allowed DM commands for admins:
 

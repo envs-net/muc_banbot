@@ -10,6 +10,7 @@ class ConfigBot(ConfigMixin):
         self.announce_sync_details = True
         self.show_ban_in_muc = False
         self.allow_user_cmds = True
+        self.allow_admin_commands_in_dms = True
         self.room_invites_enabled = False
         self.health_check_interval = 300
         self.unban_check_interval = 60
@@ -125,6 +126,15 @@ def test_format_config_changes_reports_runtime_changes():
 
     assert "- COMMAND_PREFIX: '!' → '.'" in changes
     assert "- RTBL_REFRESH_INTERVAL: 3600 → 0" in changes
+
+
+def test_runtime_config_snapshot_includes_admin_dm_commands_enabled():
+    bot = ConfigBot()
+    bot.allow_admin_commands_in_dms = False
+
+    snapshot = bot._runtime_config_snapshot()
+
+    assert snapshot["ALLOW_ADMIN_COMMANDS_IN_DMS"] is False
 
 
 def test_runtime_config_snapshot_includes_room_invites_enabled():
