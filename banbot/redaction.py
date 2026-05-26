@@ -433,7 +433,8 @@ class RedactionMixin:
                 mbody=(
                     "🧹 Redaction index cleanup completed\n\n"
                     "Retention: keep forever\n"
-                    "Deleted entries: 0"
+                    "Deleted entries: 0\n"
+                    "Note: cleanup is disabled when retention is set to keep forever."
                 ),
                 mtype="groupchat",
             )
@@ -461,7 +462,8 @@ class RedactionMixin:
             mbody=(
                 "🧹 Redaction index cleanup completed\n\n"
                 f"Retention: {days} days\n"
-                f"Deleted entries: {deleted}"
+                f"Deleted entries: {deleted}\n"
+                "Note: cleanup only removes entries older than the retention period."
             ),
             mtype="groupchat",
         )
