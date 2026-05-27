@@ -7,7 +7,6 @@ import time
 
 import psutil
 import config
-from config import ADMIN_ROOM
 
 from ._version import __version__
 from .utils import human_time
@@ -25,6 +24,8 @@ class StatusMixin:
                     return f"{int(size)} {unit}"
                 return f"{size:.1f} {unit}"
             size /= 1024
+
+        return f"{size:.1f} GiB"
 
     async def _cmd_status(self, room: str) -> None:
         now = int(time.time())
@@ -94,7 +95,7 @@ class StatusMixin:
                 "   The bot may still be waiting for room presence/state."
             )
 
-        admin_infos = self.occupants.get(ADMIN_ROOM, {})
+        admin_infos = self.occupants.get(config.ADMIN_ROOM, {})
         admins = sorted(set(
             self.safe_jid(self.bare_jid(info.get("jid")) or "unknown")
             for info in admin_infos.values()
