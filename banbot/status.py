@@ -185,27 +185,33 @@ class StatusMixin:
         connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
         status_lines.append(f"🌐 Connection: {connect_host}:{connect_port} ({connect_mode})")
 
-        # mem info
+        process = None
         try:
             process = psutil.Process(os.getpid())
-            memory_info = process.memory_info()
-            memory_mb = memory_info.rss / 1024 / 1024
-            status_lines.append(f"💾 Memory Usage: {memory_mb:.1f} MB")
+        except Exception as e:
+            log.debug("Could not create process info handle: %s", e)
+
+        # mem info
+        try:
+            if process is not None:
+                memory_info = process.memory_info()
+                memory_mb = memory_info.rss / 1024 / 1024
+                status_lines.append(f"💾 Memory Usage: {memory_mb:.1f} MB")
         except Exception as e:
             log.debug("Could not get memory info: %s", e)
 
         # cpu info
         try:
-            process = psutil.Process(os.getpid())
-            loop = asyncio.get_running_loop()
+            if process is not None:
+                loop = asyncio.get_running_loop()
 
-            # psutil samples over 1 second; run in executor so the event loop stays responsive
-            cpu_percent = await loop.run_in_executor(None, process.cpu_percent, 1.0)
-            cpu_load = psutil.getloadavg()[0]
-            cpu_count = psutil.cpu_count()
+                # psutil samples over 1 second; run in executor so the bot stays responsive
+                cpu_percent = await loop.run_in_executor(None, process.cpu_percent, 1.0)
+                cpu_load = psutil.getloadavg()[0]
+                cpu_count = psutil.cpu_count() or 1
 
-            status_lines.append(f"🧠 CPU Usage: {cpu_percent:.1f}% (Process)")
-            status_lines.append(f"⚙️ System Load: {cpu_load:.2f} ({cpu_count} cores)")
+                status_lines.append(f"🧠 CPU Usage: {cpu_percent:.1f}% (Process)")
+                status_lines.append(f"⚙️ System Load: {cpu_load:.2f} ({cpu_count} cores)")
         except Exception as e:
             log.debug("Could not get CPU info: %s", e)
 
@@ -254,6 +260,7 @@ class StatusMixin:
         # ban info
         permanent_bans = db_stats.get("permanent_bans", 0)
         temporary_bans = db_stats.get("temporary_bans", 0)
+        expired_ban_rows = int(db_stats.get("expired_ban_rows", 0) or 0)
         status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
         status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
 
