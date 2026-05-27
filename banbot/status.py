@@ -25,8 +25,6 @@ class StatusMixin:
                 return f"{size:.1f} {unit}"
             size /= 1024
 
-        return f"{size:.1f} GiB"
-
     async def _cmd_status(self, room: str) -> None:
         now = int(time.time())
 
@@ -205,8 +203,8 @@ class StatusMixin:
             if process is not None:
                 loop = asyncio.get_running_loop()
 
-                # psutil samples over 1 second; run in executor so the bot stays responsive
-                cpu_percent = await loop.run_in_executor(None, process.cpu_percent, 1.0)
+                # psutil sampling runs in executor; use a short interval to avoid tying up a worker thread
+                cpu_percent = await loop.run_in_executor(None, process.cpu_percent, 0.1)
                 cpu_load = psutil.getloadavg()[0]
                 cpu_count = psutil.cpu_count() or 1
 
@@ -260,7 +258,6 @@ class StatusMixin:
         # ban info
         permanent_bans = db_stats.get("permanent_bans", 0)
         temporary_bans = db_stats.get("temporary_bans", 0)
-        expired_ban_rows = int(db_stats.get("expired_ban_rows", 0) or 0)
         status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
         status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
 
