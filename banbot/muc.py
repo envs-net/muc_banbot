@@ -12,6 +12,15 @@ log = logging.getLogger(__name__)
 
 
 class MucMixin:
+    def _get_reconnect_success_event(self) -> asyncio.Event:
+        """Return the event used to signal that session_start completed after reconnect."""
+        event = getattr(self, "reconnect_success_event", None)
+        if event is None:
+            event = asyncio.Event()
+            self.reconnect_success_event = event
+        return event
+
+
     async def on_disconnect(self, _) -> None:
         # During the initial connection/STARTTLS negotiation Slixmpp may emit a
         # disconnect-like event before session_start completed. Do not start a
@@ -30,6 +39,7 @@ class MucMixin:
 
         log.warning("⚠️  Disconnected from server")
         self.reconnecting = True
+        self._get_reconnect_success_event().clear()
 
         # runtime state reset
         self.occupants.clear()
@@ -40,21 +50,45 @@ class MucMixin:
         self.reconnect_task = asyncio.create_task(self._delayed_reconnect())
 
     async def _delayed_reconnect(self) -> None:
-        try:
-            delay = 5
-            log.info("🔄 Attempting reconnect in %ds...", delay)
-            await asyncio.sleep(delay)
-            connect_with_config = getattr(self, "connect_with_config", None)
-            if connect_with_config:
-                connect_with_config()
-            else:
-                self.connect()
+        """Reconnect until session_start confirms that the connection is usable."""
+        current_task = asyncio.current_task()
+        success_event = self._get_reconnect_success_event()
+        delay = 5
 
-            log.info("🔌 Reconnect initiated")
-        except Exception as e:
-            log.error("Reconnect error: %s", e)
+        try:
+            while True:
+                log.info("🔄 Attempting reconnect in %ds...", delay)
+                await asyncio.sleep(delay)
+                success_event.clear()
+
+                try:
+                    connect_with_config = getattr(self, "connect_with_config", None)
+                    if connect_with_config:
+                        connect_with_config()
+                    else:
+                        self.connect()
+
+                    log.info("🔌 Reconnect initiated")
+                except Exception as e:
+                    log.error("Reconnect error: %s", e)
+                    delay = min(delay * 2, 60)
+                    continue
+
+                try:
+                    await asyncio.wait_for(success_event.wait(), timeout=30)
+                    log.info("🔄 Reconnect completed")
+                    return
+                except asyncio.TimeoutError:
+                    log.warning("Reconnect did not complete within 30s; retrying")
+                    self.reconnecting = True
+                    delay = min(delay * 2, 60)
+
+        except asyncio.CancelledError:
+            log.info("Reconnect task cancelled")
+            raise
         finally:
-            self.reconnect_task = None
+            if getattr(self, "reconnect_task", None) is current_task:
+                self.reconnect_task = None
 
 
     async def wait_for_occupants(self, timeout: int = 20) -> None:

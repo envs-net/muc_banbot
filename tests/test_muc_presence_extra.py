@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -245,3 +246,82 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
     assert bot.room_join_time == {}
     assert bot.reconnect_task is not None
     assert await bot.reconnect_task is None
+
+
+@pytest.mark.asyncio
+async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatch):
+    bot = MucTestBot()
+    blocker = asyncio.Event()
+    calls = {"count": 0}
+
+    async def fake_reconnect():
+        calls["count"] += 1
+        await blocker.wait()
+
+    monkeypatch.setattr(bot, "_delayed_reconnect", fake_reconnect)
+
+    await bot.on_disconnect(None)
+    first_task = bot.reconnect_task
+    await bot.on_disconnect(None)
+
+    assert bot.reconnect_task is first_task
+    assert calls["count"] == 0
+
+    blocker.set()
+    assert await first_task is None
+
+
+@pytest.mark.asyncio
+async def test_delayed_reconnect_waits_for_session_start_signal(monkeypatch):
+    import banbot.muc as muc_module
+
+    bot = MucTestBot()
+    bot.reconnecting = True
+    calls = {"connect": 0}
+
+    async def no_sleep(_delay):
+        return None
+
+    def fake_connect_with_config():
+        calls["connect"] += 1
+        bot._get_reconnect_success_event().set()
+        return True
+
+    monkeypatch.setattr(muc_module.asyncio, "sleep", no_sleep)
+    bot.connect_with_config = fake_connect_with_config
+
+    await bot._delayed_reconnect()
+
+    assert calls["connect"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch):
+    import banbot.muc as muc_module
+
+    bot = MucTestBot()
+    bot.reconnecting = True
+    calls = {"connect": 0}
+
+    async def no_sleep(_delay):
+        return None
+
+    async def short_wait_for(awaitable, timeout):
+        awaitable.close()
+        if calls["connect"] < 2:
+            raise asyncio.TimeoutError
+        return None
+
+    def fake_connect_with_config():
+        calls["connect"] += 1
+        if calls["connect"] >= 2:
+            bot._get_reconnect_success_event().set()
+        return True
+
+    monkeypatch.setattr(muc_module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(muc_module.asyncio, "wait_for", short_wait_for)
+    bot.connect_with_config = fake_connect_with_config
+
+    await bot._delayed_reconnect()
+
+    assert calls["connect"] == 2

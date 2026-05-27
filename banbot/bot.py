@@ -178,6 +178,7 @@ class BanBot(
         self.reconnecting = False
         self.last_reconnect_time: float | None = None
         self.reconnect_task: asyncio.Task | None = None
+        self.reconnect_success_event: asyncio.Event | None = None
         self.health_check_task: asyncio.Task | None = None
         self.unban_task: asyncio.Task | None = None
 
@@ -329,8 +330,8 @@ class BanBot(
         else:
             self.last_reconnect_time = time.time()
             log.info("🔄 Reconnected successfully")
-
-        self.reconnect_task = None
+            if self.reconnect_success_event is not None:
+                self.reconnect_success_event.set()
 
         self.send_presence()
         await self.get_roster()

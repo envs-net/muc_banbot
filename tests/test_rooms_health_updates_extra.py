@@ -153,6 +153,27 @@ async def test_health_check_reports_missing_bot_and_lost_admin(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_health_check_skips_while_reconnecting(monkeypatch):
+    bot = RoomHealthBot()
+    bot.reconnecting = True
+    bot.occupants = {"room@conference.example.test": {}}
+
+    calls = {"count": 0}
+
+    async def fake_sleep(delay):
+        calls["count"] += 1
+        if calls["count"] > 1:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr("banbot.health_check.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot.health_check_worker()
+
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
 async def test_version_check_helpers_and_announcement(monkeypatch):
     bot = RoomHealthBot()
     assert bot._parse_version_tuple("v2.10.1") == (2, 10, 1)

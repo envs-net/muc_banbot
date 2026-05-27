@@ -20,6 +20,15 @@ class HealthCheckMixin:
             try:
                 await asyncio.sleep(self.health_check_interval)
 
+                if getattr(self, "reconnecting", False):
+                    log.debug("Health check skipped while reconnecting")
+                    continue
+
+                reconnect_task = getattr(self, "reconnect_task", None)
+                if reconnect_task and not reconnect_task.done():
+                    log.debug("Health check skipped while reconnect task is active")
+                    continue
+
                 # Keep audit retention active during long-running bot sessions,
                 # but do not run the cleanup more than once per day.
                 if time.time() - self.last_audit_cleanup_run >= 86400:
