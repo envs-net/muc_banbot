@@ -16,6 +16,16 @@ log = logging.getLogger(__name__)
 
 
 class StatusMixin:
+    @staticmethod
+    def human_size(num_bytes: int) -> str:
+        size = float(num_bytes)
+        for unit in ("B", "KiB", "MiB", "GiB"):
+            if size < 1024 or unit == "GiB":
+                if unit == "B":
+                    return f"{int(size)} {unit}"
+                return f"{size:.1f} {unit}"
+            size /= 1024
+
     async def _cmd_status(self, room: str) -> None:
         now = int(time.time())
 
@@ -199,8 +209,8 @@ class StatusMixin:
             log.debug("Could not get CPU info: %s", e)
 
         # db info
-        db_size_kib = int(db_stats.get("db_size_bytes", 0) or 0) / 1024
-        status_lines.append(f"💽 DB Size: {db_size_kib:.1f} KiB")
+        db_size = int(db_stats.get("db_size_bytes", 0) or 0)
+        status_lines.append(f"💽 DB Size: {self.human_size(db_size)}")
 
         # redaction index info
         try:
