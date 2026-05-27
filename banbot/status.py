@@ -18,12 +18,20 @@ class StatusMixin:
     @staticmethod
     def human_size(num_bytes: int) -> str:
         size = float(num_bytes)
-        for unit in ("B", "KiB", "MiB", "GiB"):
-            if size < 1024 or unit == "GiB":
-                if unit == "B":
-                    return f"{int(size)} {unit}"
-                return f"{size:.1f} {unit}"
-            size /= 1024
+
+        if size < 1024:
+            return f"{int(size)} B"
+
+        size /= 1024
+        if size < 1024:
+            return f"{size:.1f} KiB"
+
+        size /= 1024
+        if size < 1024:
+            return f"{size:.1f} MiB"
+
+        size /= 1024
+        return f"{size:.1f} GiB"
 
     async def _cmd_status(self, room: str) -> None:
         now = int(time.time())
