@@ -364,7 +364,9 @@ class DirectMessageMixin:
             response = (
                 "🤖 Admin DM support is read-only.\n"
                 f"Allowed: {self.command_prefix}config, {self.command_prefix}status, "
-                f"{self.command_prefix}banlist, {self.command_prefix}room list, "
+                f"{self.command_prefix}checkupdate, {self.command_prefix}updatecheck, "
+                f"{self.command_prefix}banlist, {self.command_prefix}bansearch, "
+                f"{self.command_prefix}why, {self.command_prefix}room list, "
                 f"{self.command_prefix}room invite list, {self.command_prefix}ignore list, "
                 f"{self.command_prefix}whitelist list, {self.command_prefix}rtbl list, "
                 f"{self.command_prefix}audit.\n"
