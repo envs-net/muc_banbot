@@ -121,25 +121,22 @@ class DirectMessageMixin:
                 is_update, remote_version, error_message = await self.check_for_updates_once(announce=False)
 
                 if error_message:
-                    await self.bot_send_message(
-                        mto=reply_to,
-                        mbody=f"❌ Update check failed: {error_message}",
-                        mtype="chat",
+                    await self._send_direct_message(
+                        reply_to,
+                        f"❌ Update check failed: {error_message}",
                     )
                 elif is_update:
-                    await self.bot_send_message(
-                        mto=reply_to,
-                        mbody=(
+                    await self._send_direct_message(
+                        reply_to,
+                        (
                             f"⬆️ New bot version available: {remote_version} (current: {__version__})\n"
                             f"Release page: {self.version_check_url}"
                         ),
-                        mtype="chat",
                     )
                 else:
-                    await self.bot_send_message(
-                        mto=reply_to,
-                        mbody=f"✅ Bot is up to date ({__version__})",
-                        mtype="chat",
+                    await self._send_direct_message(
+                        reply_to,
+                        f"✅ Bot is up to date ({__version__})",
                     )
                 return True
 
@@ -250,7 +247,7 @@ class DirectMessageMixin:
                 return True
 
             if cmd == "bansearch":
-                if len(args) < 1:
+                if not args:
                     await self._send_direct_message(
                         reply_to,
                         f"❌ Usage: {p}bansearch <query> [all|page|last]",
@@ -318,7 +315,7 @@ class DirectMessageMixin:
         except Exception:
             body = ""
 
-        if is_admin and not getattr(self, "allow_admin_commands_in_dms", True):
+        if is_admin and not getattr(self, "allow_admin_commands_in_dms", False):
             await self._send_direct_message(
                 reply_to,
                 f"🤖 Nice try, admin! But I only take commands directly in the admin room. "
