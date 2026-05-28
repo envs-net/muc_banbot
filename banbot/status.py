@@ -45,8 +45,6 @@ class StatusMixin:
             warnings.append("Reconnect/resync is currently in progress")
 
         last_reconnect_time = getattr(self, "last_reconnect_time", None)
-        if last_reconnect_time:
-            notes.append(f"Last reconnect completed {human_time(max(0, now - int(last_reconnect_time)))} ago")
 
         if not getattr(self, "db", None):
             problems.append("Database connection is not available")
