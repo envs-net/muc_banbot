@@ -215,6 +215,70 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
     assert "Bot has restarted" in bot.sent[-1]["mbody"]
 
 
+@pytest.mark.asyncio
+async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    bot.protected_rooms = set()
+    bot.registered_rooms = set()
+    bot.plugin = {"xep_0045": FakeMucPlugin()}
+    bot.sent = []
+    bot.version_check_enabled = False
+    bot.version_check_url = None
+    bot.announce_startup = True
+    bot.reconnecting = True
+
+    calls = []
+
+    async def record(name, result=None):
+        calls.append(name)
+        return result
+
+    bot.setup_db = lambda: record("setup_db")
+    bot.load_bans_from_db = lambda: record("load_bans_from_db")
+    bot.cleanup_old_audit_logs = lambda: record("cleanup_old_audit_logs", 0)
+    bot.setup_ignorelist = lambda: record("setup_ignorelist")
+    bot.get_roster = lambda: record("get_roster")
+    bot.wait_for_occupants = lambda timeout=20: record(f"wait_for_occupants:{timeout}")
+    bot.check_bot_admin_rights = lambda: record("check_bot_admin_rights")
+    bot.sync_admins = lambda announce=False: record(f"sync_admins:{announce}")
+    bot.sync_bans_startup = lambda: record("sync_bans_startup")
+    bot.setup_rtbl = lambda: record("setup_rtbl")
+    bot.setup_rtbl_publish = lambda: record("setup_rtbl_publish")
+    bot.update_vcard = lambda: record("update_vcard")
+    bot.bot_send_message = lambda **kwargs: record("bot_send_message", bot.sent.append(kwargs))
+    bot.send_presence = lambda: calls.append("send_presence")
+
+    async def never_running_worker():
+        await asyncio.sleep(999)
+
+    bot._rtbl_refresh_worker = never_running_worker
+    bot.unban_worker = never_running_worker
+    bot.health_check_worker = never_running_worker
+    bot.version_check_worker = never_running_worker
+
+    async def no_sleep(_delay):
+        return None
+
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+        coro.close()
+        return CompletedTask(f"task-{len(created_tasks)}")
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(bot_module.asyncio, "create_task", fake_create_task)
+
+    await bot.start(None)
+
+    assert bot.reconnecting is False
+    assert bot.last_reconnect_time is not None
+    assert bot.sent
+    assert "Bot has reconnected" in bot.sent[-1]["mbody"]
+    assert "Bot has restarted" not in bot.sent[-1]["mbody"]
+
+
 def test_connect_xmpp_uses_configured_address_and_direct_tls(monkeypatch):
     class FakeBoundJid:
         host = "jid-domain.example.org"

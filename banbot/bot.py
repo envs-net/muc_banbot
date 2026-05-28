@@ -324,7 +324,9 @@ class BanBot(
         await self.cleanup_old_audit_logs()
         await self.setup_ignorelist()
 
-        if not self.reconnecting:
+        was_reconnecting = bool(self.reconnecting)
+
+        if not was_reconnecting:
             # First connection only
             self.bot_start_time = time.time()
         else:
@@ -402,12 +404,13 @@ class BanBot(
 
         self.reconnecting = False
 
-        # Send startup notification if enabled
+        # Send lifecycle notification if enabled
         if self.announce_startup:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            action = "reconnected" if was_reconnecting else "restarted"
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
-                mbody=f"✅ Bot has restarted and synced all bans. ({timestamp})",
+                mbody=f"✅ Bot has {action} and synced all bans. ({timestamp})",
                 mtype="groupchat"
             )
 
