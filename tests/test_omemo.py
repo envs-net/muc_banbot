@@ -8,6 +8,10 @@ slixmpp = pytest.importorskip("slixmpp")
 from banbot.omemo import OmemoMixin, _prepare_omemo_storage_file
 
 
+def stat_mode(path):
+    return os.stat(path).st_mode & 0o777
+
+
 @pytest.mark.omemo
 def test_prepare_omemo_storage_file_creates_private_path(tmp_path):
     storage = tmp_path / "private" / "omemo.json"
@@ -18,6 +22,23 @@ def test_prepare_omemo_storage_file_creates_private_path(tmp_path):
     assert stat_mode(storage) == 0o600
     assert stat_mode(storage.parent) == 0o700
     assert storage.read_text(encoding="utf8").strip() == "{}"
+
+
+@pytest.mark.omemo
+def test_prepare_omemo_storage_file_updates_existing_file_permissions(tmp_path):
+    storage = tmp_path / "private" / "omemo.json"
+    storage.parent.mkdir(mode=0o777, parents=True, exist_ok=True)
+    storage.write_text('{"existing": true}', encoding="utf8")
+    os.chmod(storage.parent, 0o777)
+    os.chmod(storage, 0o666)
+
+    result = _prepare_omemo_storage_file(str(storage))
+
+    assert result == storage
+    assert storage.exists()
+    assert stat_mode(storage) == 0o600
+    assert stat_mode(storage.parent) == 0o700
+    assert storage.read_text(encoding="utf8").strip() == '{"existing": true}'
 
 
 @pytest.mark.omemo
@@ -40,10 +61,6 @@ class OmemoProbe(OmemoMixin):
             }
         }
         self.boundjid = slixmpp.JID("bot@example.test/service")
-
-
-def stat_mode(path):
-    return os.stat(path).st_mode & 0o777
 
 
 @pytest.mark.omemo
