@@ -137,6 +137,7 @@ class ConfigMixin:
         "OMEMO_STORAGE_FILE",
         "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",
         "OMEMO_PLAINTEXT_FALLBACK",
+        "OMEMO_RESET_ON_IDENTITY_CHANGE",
     )
 
 
@@ -196,6 +197,7 @@ class ConfigMixin:
             "OMEMO_STORAGE_FILE": getattr(config, "OMEMO_STORAGE_FILE", None),
             "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM": getattr(config, "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", True),
             "OMEMO_PLAINTEXT_FALLBACK": getattr(config, "OMEMO_PLAINTEXT_FALLBACK", False),
+            "OMEMO_RESET_ON_IDENTITY_CHANGE": getattr(config, "OMEMO_RESET_ON_IDENTITY_CHANGE", True),
         }
 
 
@@ -217,6 +219,7 @@ class ConfigMixin:
             "OMEMO_STORAGE_FILE",
             "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",
             "OMEMO_PLAINTEXT_FALLBACK",
+            "OMEMO_RESET_ON_IDENTITY_CHANGE",
         ):
             old = before.get(key)
             new = after.get(key)
@@ -415,6 +418,7 @@ class ConfigMixin:
         for name, default in (
             ("OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", True),
             ("OMEMO_PLAINTEXT_FALLBACK", False),
+            ("OMEMO_RESET_ON_IDENTITY_CHANGE", True),
         ):
             if not isinstance(getattr(config, name, default), bool):
                 errors.append(f"{name} must be True or False")

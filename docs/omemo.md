@@ -11,6 +11,7 @@ OMEMO_ENABLED = False
 OMEMO_STORAGE_FILE = "data/omemo.json"
 OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = True
 OMEMO_PLAINTEXT_FALLBACK = False
+OMEMO_RESET_ON_IDENTITY_CHANGE = True
 ```
 
 ## Dependencies
@@ -67,6 +68,8 @@ OMEMO_STORAGE_FILE = "data/omemo.json"
 ```
 
 The bot can create the storage file under its runtime user. The surrounding directory should not be world-readable.
+
+BanBot also writes identity metadata next to the storage file, for example `data/omemo.identity.json` for `data/omemo.json`. The metadata contains the configured `JID`, `RESOURCE`, and `NICK`. With the default `OMEMO_RESET_ON_IDENTITY_CHANGE=True`, BanBot rotates the old OMEMO storage to a timestamped `.bak-*` file and starts with a fresh OMEMO store when one of these identity values changes. On first start after upgrading to this metadata scheme, an existing non-empty OMEMO storage without metadata is also backed up once so the new store is tied to the current identity. The old storage is backed up, not deleted.
 
 ## Logging
 

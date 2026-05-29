@@ -195,6 +195,7 @@ Check:
 * The bot's OMEMO storage file is writable by the bot user.
 * At least one current MUC occupant has a visible real JID and a usable OMEMO device.
 * `OMEMO_PLAINTEXT_FALLBACK=False` means failed encrypted replies are not resent as plaintext.
+* If the bot JID, resource, or MUC nick changed, keep `OMEMO_RESET_ON_IDENTITY_CHANGE=True` so stale OMEMO storage is backed up and regenerated automatically on restart.
 
 ## OMEMO storage permission problems
 

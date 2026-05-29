@@ -63,6 +63,7 @@ class ConfigCommandMixin:
             config_lines.append(f"   Reply mode: follows incoming command encryption")
             config_lines.append(f"   Auto-encrypt admin room: {getattr(self, 'omemo_auto_encrypt_admin_room', True)}")
             config_lines.append(f"   Plaintext fallback: {getattr(self, 'omemo_plaintext_fallback', False)}")
+            config_lines.append(f"   Reset on identity change: {getattr(self, 'omemo_reset_on_identity_change', True)}")
         config_lines.append("")
         config_lines.append(f"🛡️ RTBL Enabled: {self.rtbl_enabled}")
         config_lines.append(f"📢 RTBL Announce: {self.rtbl_announce}")

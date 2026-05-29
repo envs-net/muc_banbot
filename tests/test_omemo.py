@@ -284,3 +284,129 @@ def test_configure_omemo_missing_optional_dependencies_disables_feature(monkeypa
     assert bot.handlers == []
     assert "optional dependencies are missing" in caplog.text
     assert "requirements-omemo.txt" in caplog.text
+
+
+@pytest.mark.omemo
+def test_omemo_identity_metadata_path_matches_storage_name(tmp_path):
+    from banbot.omemo import _omemo_identity_metadata_path
+
+    assert _omemo_identity_metadata_path(tmp_path / "omemo.json").name == "omemo.identity.json"
+    assert _omemo_identity_metadata_path(tmp_path / "omemo-store").name == "omemo-store.identity.json"
+
+
+@pytest.mark.omemo
+def test_ensure_omemo_identity_metadata_writes_first_identity(tmp_path):
+    from banbot.omemo import (
+        _ensure_omemo_identity_metadata,
+        _omemo_identity_metadata_path,
+        _read_omemo_identity_metadata,
+    )
+
+    storage = tmp_path / "data" / "omemo.json"
+    identity = {"jid": "adminbot@example.org", "resource": "bot", "nick": "AdminBot"}
+
+    backup = _ensure_omemo_identity_metadata(
+        storage,
+        identity,
+        reset_on_change=True,
+    )
+
+    metadata = _omemo_identity_metadata_path(storage)
+    assert backup is None
+    assert _read_omemo_identity_metadata(metadata) == identity
+    assert stat_mode(metadata) == 0o600
+    assert stat_mode(metadata.parent) == 0o700
+
+
+@pytest.mark.omemo
+def test_ensure_omemo_identity_metadata_rotates_existing_store_without_metadata(tmp_path, monkeypatch):
+    from banbot.omemo import (
+        _ensure_omemo_identity_metadata,
+        _omemo_identity_metadata_path,
+        _read_omemo_identity_metadata,
+    )
+
+    storage = tmp_path / "data" / "omemo.json"
+    storage.parent.mkdir()
+    storage.write_text('{"sessions": {"old": true}}\n', encoding="utf8")
+    os.chmod(storage, 0o600)
+    identity = {"jid": "adminbot@example.org", "resource": "bot", "nick": "AdminBot"}
+
+    monkeypatch.setattr("banbot.omemo.time.strftime", lambda fmt: "20260528-123456")
+
+    backup = _ensure_omemo_identity_metadata(
+        storage,
+        identity,
+        reset_on_change=True,
+    )
+
+    assert backup == tmp_path / "data" / "omemo.json.bak-20260528-123456"
+    assert backup.exists()
+    assert not storage.exists()
+    assert _read_omemo_identity_metadata(_omemo_identity_metadata_path(storage)) == identity
+
+
+@pytest.mark.omemo
+def test_ensure_omemo_identity_metadata_rotates_storage_on_identity_change(tmp_path, monkeypatch):
+    from banbot.omemo import (
+        _ensure_omemo_identity_metadata,
+        _omemo_identity_metadata_path,
+        _read_omemo_identity_metadata,
+        _write_omemo_identity_metadata,
+    )
+
+    storage = tmp_path / "data" / "omemo.json"
+    storage.parent.mkdir()
+    storage.write_text('{"old": true}\n', encoding="utf8")
+    os.chmod(storage, 0o600)
+
+    metadata = _omemo_identity_metadata_path(storage)
+    old_identity = {"jid": "adminbot@example.org", "resource": "old", "nick": "adminbot"}
+    new_identity = {"jid": "adminbot@example.org", "resource": "new", "nick": "AdminBot"}
+    _write_omemo_identity_metadata(metadata, old_identity)
+
+    monkeypatch.setattr("banbot.omemo.time.strftime", lambda fmt: "20260528-123456")
+
+    backup = _ensure_omemo_identity_metadata(
+        storage,
+        new_identity,
+        reset_on_change=True,
+    )
+
+    assert backup == tmp_path / "data" / "omemo.json.bak-20260528-123456"
+    assert backup.exists()
+    assert backup.read_text(encoding="utf8") == '{"old": true}\n'
+    assert not storage.exists()
+    assert (tmp_path / "data" / "omemo.identity.json.bak-20260528-123456").exists()
+    assert _read_omemo_identity_metadata(metadata) == new_identity
+
+
+@pytest.mark.omemo
+def test_ensure_omemo_identity_metadata_keeps_storage_when_reset_disabled(tmp_path):
+    from banbot.omemo import (
+        _ensure_omemo_identity_metadata,
+        _omemo_identity_metadata_path,
+        _read_omemo_identity_metadata,
+        _write_omemo_identity_metadata,
+    )
+
+    storage = tmp_path / "data" / "omemo.json"
+    storage.parent.mkdir()
+    storage.write_text('{"old": true}\n', encoding="utf8")
+    os.chmod(storage, 0o600)
+
+    metadata = _omemo_identity_metadata_path(storage)
+    old_identity = {"jid": "adminbot@example.org", "resource": "old", "nick": "adminbot"}
+    new_identity = {"jid": "adminbot@example.org", "resource": "new", "nick": "AdminBot"}
+    _write_omemo_identity_metadata(metadata, old_identity)
+
+    backup = _ensure_omemo_identity_metadata(
+        storage,
+        new_identity,
+        reset_on_change=False,
+    )
+
+    assert backup is None
+    assert storage.exists()
+    assert storage.read_text(encoding="utf8") == '{"old": true}\n'
+    assert _read_omemo_identity_metadata(metadata) == old_identity

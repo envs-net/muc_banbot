@@ -105,6 +105,10 @@ OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = True
 # message as plaintext. Set True only if you explicitly want fallback.
 OMEMO_PLAINTEXT_FALLBACK = False
 
+# Reset OMEMO storage automatically when JID, RESOURCE or NICK changes.
+# The old storage is moved to a timestamped .bak-* file, never deleted.
+OMEMO_RESET_ON_IDENTITY_CHANGE = True
+
 # ================= RTBL (Real-Time Block List) =================
 
 # Enable RTBL PubSub support.

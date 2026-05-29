@@ -165,6 +165,7 @@ OMEMO_ENABLED = False
 OMEMO_STORAGE_FILE = "data/omemo.json"
 OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = True
 OMEMO_PLAINTEXT_FALLBACK = False
+OMEMO_RESET_ON_IDENTITY_CHANGE = True
 ```
 
 | Setting | Description |
@@ -173,6 +174,7 @@ OMEMO_PLAINTEXT_FALLBACK = False
 | `OMEMO_STORAGE_FILE` | JSON storage for identity/session/trust state |
 | `OMEMO_AUTO_ENCRYPT_ADMIN_ROOM` | Encrypt proactive admin-room messages when possible |
 | `OMEMO_PLAINTEXT_FALLBACK` | Allow plaintext fallback when encrypted reply fails |
+| `OMEMO_RESET_ON_IDENTITY_CHANGE` | Rotate OMEMO storage when JID, RESOURCE, or NICK changes |
 
 ## RTBL Settings
 

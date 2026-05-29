@@ -34,6 +34,7 @@ if "config" not in sys.modules:
     config.OMEMO_STORAGE_FILE = "data/omemo.json"
     config.OMEMO_AUTO_ENCRYPT_ADMIN_ROOM = True
     config.OMEMO_PLAINTEXT_FALLBACK = False
+    config.OMEMO_RESET_ON_IDENTITY_CHANGE = True
 
     config.RTBL_ENABLED = True
     config.RTBL_REFRESH_INTERVAL = 3600
