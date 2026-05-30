@@ -24,6 +24,7 @@ try:  # Optional dependency; only required when OMEMO_ENABLED=True.
     from omemo.storage import Just, Maybe, Nothing, Storage
     from omemo.types import DeviceInformation, JSONType
     from slixmpp.plugins import register_plugin  # type: ignore[attr-defined]
+    import slixmpp_omemo as XEP_0384_module
     from slixmpp_omemo import XEP_0384
 
     OMEMO_AVAILABLE = True
@@ -269,11 +270,7 @@ if OMEMO_AVAILABLE:
             if not self.json_file_path:
                 raise RuntimeError("OMEMO JSON storage path not specified")
 
-            storage_cls = JsonFileStorage
-            if not callable(storage_cls):
-                raise RuntimeError("OMEMO JSON storage backend is unavailable")
-
-            self._storage = storage_cls(Path(self.json_file_path))
+            self._storage = JsonFileStorage(Path(self.json_file_path))
             super().plugin_init()
 
         @property
@@ -396,7 +393,7 @@ class OmemoMixin:
         self.register_plugin(
             "xep_0384",
             {"json_file_path": self.omemo_storage_file},
-            module=XEP_0384.__name__,
+            module=XEP_0384_module,
         )
         self.add_event_handler("omemo_initialized", self._on_omemo_initialized)
         log.info("OMEMO: enabled with storage %s", self.omemo_storage_file)
@@ -524,7 +521,7 @@ class OmemoMixin:
                     if self._bare_jid(jid).lower() in missing
                 }
 
-                if not removed or current_recipients == before:
+                if not removed:
                     raise
 
                 skipped_recipients.update(removed)
