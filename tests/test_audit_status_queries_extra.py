@@ -193,9 +193,13 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
     try:
         await bot.set_public_policy_text("Be nice", enabled=True)
         await bot._cmd_config("admin@conference.example.org")
-        assert "🪪 JID" in last_body(bot)
-        assert "🔐 OMEMO Enabled" in last_body(bot)
-        assert "🛡️ RTBL Enabled" in last_body(bot)
+        body = last_body(bot)
+        assert "🪪 Bot Identity" in body
+        assert "🔐 OMEMO" in body
+        assert "🛡️ RTBL" in body
+        assert "JID =" in body
+        assert "OMEMO_ENABLED =" in body
+        assert "RTBL_ENABLED =" in body
 
         # Avoid the one-second psutil sampling delay and host-specific values.
         import banbot.status as status_module

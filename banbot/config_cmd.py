@@ -31,22 +31,26 @@ class ConfigCommandMixin:
     unset_runtime_config_value = ConfigMixin.unset_runtime_config_value
 
     CONFIG_OUTPUT_SECTIONS = (
-        ("🪪 Identity", (
+        ("💾 Storage", (
             "DB_FILE",
+        )),
+        ("🪪 Bot Identity", (
             "JID",
             "RESOURCE",
             "RESSOURCE",
             "PASSWORD",
-            "ADMIN_ROOM",
             "NICK",
+        )),
+        ("🏠 Rooms", (
+            "ADMIN_ROOM",
         )),
         ("🌐 Connection", (
             "CONNECT_HOST",
             "CONNECT_PORT",
             "CONNECT_DIRECT_TLS",
-            "AVATAR_PATH",
         )),
-        ("🪪 vCard", (
+        ("🖼️ Profile / vCard", (
+            "AVATAR_PATH",
             "VCARD_NICKNAME",
             "VCARD_FN",
             "VCARD_ORG",
@@ -59,17 +63,23 @@ class ConfigCommandMixin:
             "COMMAND_PREFIX",
             "ANNOUNCE_STARTUP",
             "ANNOUNCE_SYNC_DETAILS",
-            "SHOW_BAN_IN_MUC",
         )),
-        ("🛡️ Moderation", (
+        ("🧭 Command Access", (
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
             "ALLOW_ADMIN_COMMANDS_IN_DMS",
-            "ROOM_INVITES_ENABLED",
-            "HEALTH_CHECK_INTERVAL",
-            "UNBAN_CHECK_INTERVAL",
-            "MAX_TEMPBAN_DAYS",
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW",
             "PUBLIC_COMMAND_RATE_LIMIT_MAX",
+        )),
+        ("🛡️ Moderation", (
+            "SHOW_BAN_IN_MUC",
+            "ROOM_INVITES_ENABLED",
+            "MAX_TEMPBAN_DAYS",
+        )),
+        ("🩺 Maintenance", (
+            "HEALTH_CHECK_INTERVAL",
+            "UNBAN_CHECK_INTERVAL",
+        )),
+        ("⚡ Performance", (
             "MUC_WRITE_SEMAPHORE",
         )),
         ("📜 Audit / Events", (
@@ -213,13 +223,6 @@ class ConfigCommandMixin:
 
     async def _cmd_config_show(self, room: str) -> None:
         config_lines = [f"📋 Current Bot Configuration (v{__version__})", ""]
-
-        # Keep the long-standing operational labels for existing tests, users and
-        # screenshots, then follow with the complete ordered key/value view.
-        config_lines.append(f"🪪 JID: {self.format_config_value_for_display('JID', getattr(self, 'jid', getattr(self, 'boundjid', '')))}")
-        config_lines.append(f"🔐 OMEMO Enabled: {getattr(self, 'omemo_enabled', False)}")
-        config_lines.append(f"🛡️ RTBL Enabled: {getattr(self, 'rtbl_enabled', False)}")
-        config_lines.append("")
 
         config_lines.append("🔒 = restart-only/protected, ✏️ = runtime-writable")
         config_lines.append("Password/secret values are hidden.")
