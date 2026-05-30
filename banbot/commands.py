@@ -249,6 +249,8 @@ class CommandMixin:
     ) -> bool:
         admin_commands = {
             "config",
+            "backup",
+            "restore",
             "omemo",
             "reload",
             "reloadconfig",
@@ -292,6 +294,16 @@ class CommandMixin:
         if cmd == "config":
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             await self._cmd_config(room, args, actor=actor_jid)
+            return True
+
+        if cmd == "backup":
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            await self.cmd_backup(args, room, actor=actor_jid)
+            return True
+
+        if cmd == "restore":
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            await self.cmd_restore(args, room, actor=actor_jid)
             return True
 
         if cmd == "omemo":
@@ -807,6 +819,8 @@ class CommandMixin:
             f"{p}help - show this help\n"
             f"{p}config [show|set|unset] - show/edit runtime config\n"
             f"{p}reload / {p}reloadconfig - reload config.py at runtime\n"
+            f"{p}backup [list] - create/list database backups\n"
+            f"{p}restore <filename|latest> confirm - restore a database backup\n"
             f"{p}restart confirm - stop the bot so a supervisor can restart it\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"
             f"{p}omemo status|devices|reset - inspect/reset OMEMO state\n"

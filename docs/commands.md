@@ -37,6 +37,9 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!omemo devices` | Shows visible admin-room recipients plus conservative local storage hints | `!omemo devices` |
 | `!omemo reset confirm` | Rotates local OMEMO storage/metadata to `.bak-*`; restart afterwards | `!omemo reset confirm` |
 | `!reload` / `!reloadconfig` | Reloads runtime config safely | `!reload` |
+| `!backup` | Creates a managed SQLite database/config.py backup | `!backup` |
+| `!backup list` | Lists managed backups | `!backup list` |
+| `!restore <file|latest> confirm` | Restores a managed database/config.py backup after confirmation | `!restore latest confirm` |
 | `!restart` / `!restart confirm` | Shows restart confirmation / exits cleanly so a supervisor can restart the bot | `!restart confirm` |
 | `!status` | Shows health, rooms, uptime, bans, DB, RTBL, and workers | `!status` |
 | `!checkupdate` / `!updatecheck` | Checks whether a newer GitHub release is available | `!updatecheck` |
@@ -88,6 +91,18 @@ Allowed DM commands for admins:
 ```
 
 All other admin commands, especially ban, unban, room changes, RTBL changes, reload/restart, policy changes, and redaction, must be run in the admin room.
+
+
+## Database Backups
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `!backup` | Creates a timestamped SQLite database snapshot plus a `config.py` companion when available | `!backup` |
+| `!backup list` | Lists managed backups, newest first | `!backup list` |
+| `!backup restore <filename|latest> confirm` | Restores a managed backup via the backup command namespace | `!backup restore latest confirm` |
+| `!restore <filename|latest> confirm` | Restores a managed backup directly | `!restore latest confirm` |
+
+BanBot creates automatic startup snapshots when `DB_BACKUP_ON_START=True`. `DB_BACKUP_KEEP` controls how many managed snapshots are kept; the default is `10`. Each snapshot includes a companion `config.py` copy when the active config file can be resolved. Restores create a safety backup of the current database and config before replacing them, reload DB-backed caches, and still recommend a process restart afterwards.
 
 ## Rooms and Sync
 

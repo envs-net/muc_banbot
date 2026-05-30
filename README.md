@@ -26,6 +26,7 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 * 📡 Optional own RTBL publish feed for local bans
 * 🧾 SQLite audit log and structured JSON event logs
 * 💾 CSV import/export with pre-import database backups
+* 🗄️ Managed SQLite/config.py backups, restore command, and automatic startup snapshots
 * ✅ Startup/runtime config validation with safe `!reloadconfig`
 * 🚦 Rate limiting for public protected-room commands
 * 📜 Optional public room policy text via `!rules` / `!policy`
@@ -96,6 +97,8 @@ Examples assume the default command prefix `!`.
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |
 | `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
 | `!reloadconfig` | Validate and reload runtime configuration |
+| `!backup` / `!backup list` | Create or list managed SQLite database/config.py backups |
+| `!restore <file|latest> confirm` | Restore a managed database/config.py backup |
 | `!omemo status/devices/reset` | Inspect OMEMO state, list local device hints, or rotate local OMEMO storage |
 | `!room add <room>` | Add a protected room |
 | `!room remove <room>` | Remove a protected room |

@@ -90,6 +90,9 @@ class ConfigMixin:
     CONFIG_KEYS = (
         "LOG_LEVEL",
         "COMMAND_PREFIX",
+        "DB_BACKUP_ON_START",
+        "DB_BACKUP_DIR",
+        "DB_BACKUP_KEEP",
         "ANNOUNCE_STARTUP",
         "ANNOUNCE_SYNC_DETAILS",
         "SHOW_BAN_IN_MUC",
@@ -159,6 +162,9 @@ class ConfigMixin:
         return {
             "LOG_LEVEL": getattr(self, "log_level", str(getattr(config, "LOG_LEVEL", "INFO")).upper()),
             "COMMAND_PREFIX": self.command_prefix,
+            "DB_BACKUP_ON_START": getattr(self, "db_backup_on_start", True),
+            "DB_BACKUP_DIR": getattr(self, "db_backup_dir", "data/backups"),
+            "DB_BACKUP_KEEP": getattr(self, "db_backup_keep", 10),
             "ANNOUNCE_STARTUP": self.announce_startup,
             "ANNOUNCE_SYNC_DETAILS": self.announce_sync_details,
             "SHOW_BAN_IN_MUC": self.show_ban_in_muc,
@@ -325,6 +331,7 @@ class ConfigMixin:
             "ALERT_ON_DB_SIZE_MB": (0, 1048576),
             "ALERT_ON_RTBL_REFRESH_FAILURES": (0, 1000),
             "ALERT_DEDUP_WINDOW": (0, 86400),
+            "DB_BACKUP_KEEP": (1, 1000),
         }
         int_defaults = {
             "AUDIT_LOG_RETENTION_DAYS": 365,
@@ -338,6 +345,7 @@ class ConfigMixin:
             "ALERT_ON_DB_SIZE_MB": 0,
             "ALERT_ON_RTBL_REFRESH_FAILURES": 3,
             "ALERT_DEDUP_WINDOW": 300,
+            "DB_BACKUP_KEEP": 10,
         }
         for name, (minimum, maximum) in int_ranges.items():
             value = getattr(config, name, int_defaults.get(name))
@@ -359,6 +367,7 @@ class ConfigMixin:
             "VERSION_CHECK_ENABLED",
             "REDACTION_ENABLED",
             "CONNECT_DIRECT_TLS",
+            "DB_BACKUP_ON_START",
             "ALERT_ON_RECONNECT",
             "ALERT_ON_ADMIN_RIGHTS_LOST",
             "ALERT_ON_HEALTH_CHECK_FAILURE",
@@ -377,6 +386,7 @@ class ConfigMixin:
             "VERSION_CHECK_ENABLED": False,
             "REDACTION_ENABLED": False,
             "CONNECT_DIRECT_TLS": False,
+            "DB_BACKUP_ON_START": True,
             "ALERT_ON_RECONNECT": True,
             "ALERT_ON_ADMIN_RIGHTS_LOST": True,
             "ALERT_ON_HEALTH_CHECK_FAILURE": True,
@@ -401,6 +411,15 @@ class ConfigMixin:
             db_parent = pathlib.Path(db_file).expanduser().parent
             if str(db_parent) not in ("", ".") and not db_parent.exists():
                 errors.append(f"DB_FILE directory does not exist: {db_parent}")
+
+        backup_dir_value = getattr(config, "DB_BACKUP_DIR", "data/backups")
+        if not isinstance(backup_dir_value, str):
+            errors.append("DB_BACKUP_DIR must be a string")
+            backup_dir = ""
+        else:
+            backup_dir = backup_dir_value.strip()
+        if not backup_dir:
+            errors.append("DB_BACKUP_DIR must not be empty")
 
         # --- Connection ---
         connect_host = getattr(config, "CONNECT_HOST", None)
@@ -557,6 +576,9 @@ class ConfigMixin:
         self.apply_log_level(getattr(config, "LOG_LEVEL", "INFO"))
 
         self.command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip() or "!"
+        self.db_backup_on_start = getattr(config, "DB_BACKUP_ON_START", True)
+        self.db_backup_dir = str(getattr(config, "DB_BACKUP_DIR", "data/backups")).strip() or "data/backups"
+        self.db_backup_keep = getattr(config, "DB_BACKUP_KEEP", 10)
         self.announce_startup = getattr(config, "ANNOUNCE_STARTUP", True)
         self.announce_sync_details = getattr(config, "ANNOUNCE_SYNC_DETAILS", True)
         self.structured_event_logs = getattr(config, "STRUCTURED_EVENT_LOGS", True)

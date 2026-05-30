@@ -164,6 +164,10 @@ class StatusMixin:
         # import info
         if self.last_import_backup_file:
             status_lines.append(f"\n💾 Last Import Backup: {self.last_import_backup_file}")
+        if getattr(self, "last_database_backup_file", None):
+            status_lines.append(f"\n💾 Last DB Backup: {self.last_database_backup_file}")
+        if getattr(self, "last_database_restore_file", None):
+            status_lines.append(f"♻️ Last DB Restore: {self.last_database_restore_file}")
 
         # version
         status_lines.append(f"\n🤖 Bot Version: {__version__}")

@@ -50,6 +50,7 @@ from .rtbl import RtblMixin
 from .messaging import MessagingMixin
 from .omemo import OmemoMixin
 from .alerts import AlertMixin
+from .backups import BackupMixin
 
 _log_level_name = str(getattr(config, "LOG_LEVEL", "INFO")).upper()
 _log_level = getattr(logging, _log_level_name, None)
@@ -112,6 +113,7 @@ class BanBot(
     MessagingMixin,
     OmemoMixin,
     AlertMixin,
+    BackupMixin,
     AuditMixin,
     CacheMixin,
     DatabaseMixin,
@@ -204,8 +206,10 @@ class BanBot(
         self.public_command_rate_limit_max: int = 3
         self.public_command_rate_limit_hits: dict[tuple[str, str, str], list[float]] = {}
 
-        # --- import backup ---
+        # --- database backups ---
         self.last_import_backup_file: str | None = None
+        self.last_database_backup_file: str | None = None
+        self.last_database_restore_file: str | None = None
 
         # --- structured event logs and audit retention ---
         self.structured_event_logs: bool = True

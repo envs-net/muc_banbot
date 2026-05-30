@@ -2,6 +2,12 @@
 
 DB_FILE = "banbot.db"
 
+# Managed SQLite database backups.
+# !backup creates snapshots, !backup list shows them, and !restore can restore them.
+DB_BACKUP_ON_START = True
+DB_BACKUP_DIR = "data/backups"
+DB_BACKUP_KEEP = 10
+
 JID = "adminbot@domain.tld"
 RESOURCE = "service"
 PASSWORD = "yourpassword"

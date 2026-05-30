@@ -26,6 +26,9 @@ DB_FILE = "banbot.db"
 | `ADMIN_ROOM` | Admin/control MUC JID |
 | `NICK` | Bot nickname in rooms |
 | `DB_FILE` | SQLite database path |
+| `DB_BACKUP_ON_START` | Create managed DB snapshots on startup |
+| `DB_BACKUP_DIR` | Directory for managed DB snapshots |
+| `DB_BACKUP_KEEP` | Number of managed DB snapshots to keep |
 
 ## Startup-Only Settings
 
@@ -73,6 +76,9 @@ Common runtime settings:
 | Setting | Default | Description |
 | --- | --- | --- |
 | `COMMAND_PREFIX` | `!` | Prefix used for commands |
+| `DB_BACKUP_ON_START` | `True` | Create an automatic DB snapshot on startup |
+| `DB_BACKUP_DIR` | `data/backups` | Directory for managed DB snapshots |
+| `DB_BACKUP_KEEP` | `10` | Number of managed DB snapshots to retain |
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `ANNOUNCE_STARTUP` | `True` | Send startup announcements |
 | `ANNOUNCE_SYNC_DETAILS` | `True` | Show detailed startup sync output |
@@ -107,6 +113,28 @@ Common runtime settings:
 | `VERSION_CHECK_URL` | GitHub latest release URL | URL used to discover latest release |
 
 Boolean aliases such as `true`/`false` are supported by the config loader for convenience.
+
+
+## Database Backup Settings
+
+BanBot can manage SQLite snapshots directly from the admin room. Automatic startup snapshots are enabled by default. Manual snapshots and restores use the same managed backup directory. When an active `config.py` file can be resolved, it is copied as a protected companion file next to the database snapshot.
+
+```python
+DB_BACKUP_ON_START = True
+DB_BACKUP_DIR = "data/backups"
+DB_BACKUP_KEEP = 10
+```
+
+Commands:
+
+```text
+!backup
+!backup list
+!restore latest confirm
+!backup restore <filename> confirm
+```
+
+`!restore` always requires `confirm` and creates a safety backup of the current database and `config.py` before replacing `DB_FILE` and, when present in the selected backup, `config.py`. The bot reloads DB-backed caches after restore, but a process restart is still recommended.
 
 ## Connection Settings
 

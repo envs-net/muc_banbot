@@ -33,6 +33,9 @@ class ConfigCommandMixin:
     CONFIG_OUTPUT_SECTIONS = (
         ("💾 Storage", (
             "DB_FILE",
+            "DB_BACKUP_ON_START",
+            "DB_BACKUP_DIR",
+            "DB_BACKUP_KEEP",
         )),
         ("🪪 Bot Identity", (
             "JID",

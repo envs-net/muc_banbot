@@ -12,8 +12,11 @@ log = logging.getLogger(__name__)
 
 
 class DatabaseMixin:
-    async def setup_db(self) -> None:
+    async def setup_db(self, *, create_startup_backup: bool = True) -> None:
         """Initialize SQLite DB, migrate bans schema, create indexes, load rooms."""
+        if create_startup_backup and hasattr(self, "create_startup_database_snapshot"):
+            await self.create_startup_database_snapshot()
+
         self.db = await aiosqlite.connect(DB_FILE)
         await self.db.execute("PRAGMA foreign_keys = ON")
 

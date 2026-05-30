@@ -66,3 +66,15 @@ banbot.db.backup-before-import-YYYYMMDD_HHMMSS
 * Migrate bans to a new bot instance
 * Restore from a previous export
 * Batch-import bans from an external moderation process
+
+## Managed SQLite Backups
+
+CSV export is useful for portable ban data. For full SQLite snapshots, use the managed database backup commands:
+
+```text
+!backup
+!backup list
+!restore latest confirm
+```
+
+Managed snapshots include the whole SQLite database, including rooms, audit log, ignorelist, pending invites, RTBL subscriptions and redaction index. They also include a companion copy of `config.py` when the active config file can be resolved. Automatic startup snapshots are controlled by `DB_BACKUP_ON_START`, `DB_BACKUP_DIR` and `DB_BACKUP_KEEP`.
