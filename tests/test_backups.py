@@ -72,7 +72,7 @@ async def test_manual_backup_creates_managed_snapshot(backup_config):
     bot = BackupBot()
     await bot.setup_db(create_startup_backup=False)
     try:
-        ok, message = await bot.create_database_backup("manual")
+        ok, message = await bot.create_database_backup("manual", actor="admin@example.org")
 
         assert ok is True
         assert backup_dir.exists()
@@ -83,7 +83,9 @@ async def test_manual_backup_creates_managed_snapshot(backup_config):
         assert bot.last_database_backup_file == message
         assert (backups[0].path.with_name(backups[0].path.name + ".config.py")).exists()
         assert bot.audit_events[-1][0] == "db_backup_created"
+        assert bot.audit_events[-1][1]["actor"] == "admin@example.org"
         assert bot.audit_events[-1][1]["details"]["config_backup"].endswith(".config.py")
+        assert bot.events[-1][2]["actor"] == "admin@example.org"
     finally:
         await bot.db.close()
 
@@ -173,10 +175,35 @@ async def test_backup_command_and_restore_alias(backup_config):
     bot = BackupBot()
     await bot.setup_db(create_startup_backup=False)
     try:
-        await bot.cmd_backup([], "admin@conference.example.org")
+        await bot.cmd_backup([], "admin@conference.example.org", actor="admin@example.org")
         assert "Database/config backup created" in bot.sent[-1]["mbody"]
+        assert bot.audit_events[-1][0] == "db_backup_created"
+        assert bot.audit_events[-1][1]["actor"] == "admin@example.org"
 
         await bot.cmd_backup(["restore", "latest"], "admin@conference.example.org")
         assert "Confirm with:" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_restore_safety_backup_records_actor(backup_config):
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, _backup_path = await bot.create_database_backup("manual", actor="creator@example.org")
+        assert ok is True
+
+        ok, message = await bot.restore_database_backup("latest", actor="restorer@example.org")
+        assert ok is True
+        assert "Database restored" in message
+
+        created_events = [event for event in bot.audit_events if event[0] == "db_backup_created"]
+        restored_events = [event for event in bot.audit_events if event[0] == "db_backup_restored"]
+
+        assert created_events[-1][1]["actor"] == "restorer@example.org"
+        assert created_events[-1][1]["details"]["reason"] == "before-restore"
+        assert restored_events[-1][1]["actor"] == "restorer@example.org"
+    finally:
+        if bot.db:
+            await bot.db.close()

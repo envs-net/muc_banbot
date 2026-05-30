@@ -161,7 +161,13 @@ class BackupMixin:
 
         return removed
 
-    async def create_database_backup(self, reason: str = "manual", *, prune: bool = True) -> tuple[bool, str]:
+    async def create_database_backup(
+        self,
+        reason: str = "manual",
+        *,
+        prune: bool = True,
+        actor: str | None = None,
+    ) -> tuple[bool, str]:
         """Create a timestamped database backup and optionally prune old backups."""
         db_path = self._database_path()
         self.last_database_backup_file = None
@@ -218,6 +224,7 @@ class BackupMixin:
                     self.log_event(
                         logging.INFO,
                         "db_backup_created",
+                        actor=actor or "system",
                         backup=str(backup_path),
                         config_backup=str(config_backup_path) if config_backup_path else None,
                         reason=reason_slug,
@@ -228,6 +235,7 @@ class BackupMixin:
                 try:
                     await self.audit_event(
                         "db_backup_created",
+                        actor=actor or "system",
                         details={
                             "backup": str(backup_path),
                             "config_backup": str(config_backup_path) if config_backup_path else None,
@@ -245,7 +253,7 @@ class BackupMixin:
         """Create an automatic startup snapshot when enabled and possible."""
         if not bool(self._db_backup_config_value("DB_BACKUP_ON_START", True)):
             return False, "Startup database backups are disabled."
-        return await self.create_database_backup("startup")
+        return await self.create_database_backup("startup", actor="system")
 
     def resolve_database_backup(self, name: str) -> DatabaseBackup | None:
         """Resolve a backup by basename, path inside backup dir, or 'latest'."""
@@ -287,7 +295,7 @@ class BackupMixin:
             return False, "Database restore is not available for in-memory DB_FILE."
 
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        safety_ok, safety_message = await self.create_database_backup("before-restore", prune=False)
+        safety_ok, safety_message = await self.create_database_backup("before-restore", prune=False, actor=actor or "unknown")
         if not safety_ok and db_path.exists():
             return False, f"Restore aborted: failed to create safety backup: {safety_message}"
 
@@ -382,7 +390,7 @@ class BackupMixin:
         action = args[0].lower() if args else "create"
 
         if action in ("create", "now"):
-            ok, message = await self.create_database_backup("manual")
+            ok, message = await self.create_database_backup("manual", actor=actor or "unknown")
             if ok:
                 config_note = (
                     "\nconfig.py included."
