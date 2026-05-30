@@ -177,8 +177,8 @@ class BackupMixin:
         backup_dir.mkdir(parents=True, exist_ok=True)
         try:
             os.chmod(backup_dir, 0o700)
-        except OSError:
-            pass
+        except OSError as exc:
+            log.debug("Failed to restrict backup directory permissions for %s: %s", backup_dir, exc)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         reason_slug = self._safe_backup_reason(reason)
@@ -195,8 +195,8 @@ class BackupMixin:
             await asyncio.to_thread(shutil.copy2, db_path, backup_path)
             try:
                 os.chmod(backup_path, 0o600)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("Failed to restrict database backup permissions for %s: %s", backup_path, exc)
 
             config_path = self._config_path()
             config_backup_path: pathlib.Path | None = None
@@ -205,8 +205,8 @@ class BackupMixin:
                 await asyncio.to_thread(shutil.copy2, config_path, config_backup_path)
                 try:
                     os.chmod(config_backup_path, 0o600)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    log.debug("Failed to restrict config backup permissions for %s: %s", config_backup_path, exc)
 
             self.last_database_backup_file = str(backup_path)
             if prune:
@@ -300,8 +300,8 @@ class BackupMixin:
             await asyncio.to_thread(shutil.copy2, backup.path, db_path)
             try:
                 os.chmod(db_path, 0o600)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("Failed to restrict restored database permissions for %s: %s", db_path, exc)
 
             restored_config = False
             config_backup_path = self._config_backup_path_for(backup.path)
@@ -311,8 +311,8 @@ class BackupMixin:
                 await asyncio.to_thread(shutil.copy2, config_backup_path, config_path)
                 try:
                     os.chmod(config_path, 0o600)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    log.debug("Failed to restrict restored config permissions for %s: %s", config_path, exc)
                 restored_config = True
 
             # Re-open and reload the most important DB-backed runtime state when
