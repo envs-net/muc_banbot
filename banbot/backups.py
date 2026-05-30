@@ -161,6 +161,39 @@ class BackupMixin:
 
         return removed
 
+
+    def _queue_database_backup_audit_event(
+        self,
+        event_type: str,
+        *,
+        actor: str | None,
+        details: dict[str, Any],
+    ) -> None:
+        """Remember backup audit events until the SQLite audit table is ready."""
+        pending = getattr(self, "_pending_database_backup_audit_events", None)
+        if pending is None:
+            pending = []
+            self._pending_database_backup_audit_events = pending
+        pending.append((event_type, actor, details))
+
+    async def flush_pending_database_backup_audit_events(self) -> None:
+        """Persist backup audit events that were created before setup_db opened SQLite."""
+        pending = list(getattr(self, "_pending_database_backup_audit_events", []))
+        if not pending:
+            return
+        if not getattr(self, "db", None) or not hasattr(self, "audit_event"):
+            return
+
+        remaining: list[tuple[str, str | None, dict[str, Any]]] = []
+        for event_type, actor, details in pending:
+            try:
+                await self.audit_event(event_type, actor=actor, details=details)
+            except Exception as exc:
+                log.debug("Failed to flush pending backup audit event %s: %s", event_type, exc)
+                remaining.append((event_type, actor, details))
+        self._pending_database_backup_audit_events = remaining
+
+
     async def create_database_backup(
         self,
         reason: str = "manual",
@@ -231,19 +264,28 @@ class BackupMixin:
                     )
                 except Exception as exc:
                     log.debug("Failed to write backup structured event: %s", exc)
+            audit_actor = actor or "system"
+            audit_details = {
+                "backup": str(backup_path),
+                "config_backup": str(config_backup_path) if config_backup_path else None,
+                "reason": reason_slug,
+            }
             if hasattr(self, "audit_event"):
-                try:
-                    await self.audit_event(
+                if getattr(self, "db", None):
+                    try:
+                        await self.audit_event(
+                            "db_backup_created",
+                            actor=audit_actor,
+                            details=audit_details,
+                        )
+                    except Exception as exc:
+                        log.debug("Failed to audit database backup: %s", exc)
+                else:
+                    self._queue_database_backup_audit_event(
                         "db_backup_created",
-                        actor=actor or "system",
-                        details={
-                            "backup": str(backup_path),
-                            "config_backup": str(config_backup_path) if config_backup_path else None,
-                            "reason": reason_slug,
-                        },
+                        actor=audit_actor,
+                        details=audit_details,
                     )
-                except Exception as exc:
-                    log.debug("Failed to audit database backup: %s", exc)
             return True, str(backup_path)
         except Exception as exc:
             log.error("Failed to create database backup: %s", exc)

@@ -183,6 +183,9 @@ class DatabaseMixin:
         await self.db.commit()
         log.info("✅ Database schema and indexes created/verified")
 
+        if hasattr(self, "flush_pending_database_backup_audit_events"):
+            await self.flush_pending_database_backup_audit_events()
+
         async with self.db.execute("SELECT room FROM rooms") as cursor:
             rows = await cursor.fetchall()
             for (room,) in rows:
