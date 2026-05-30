@@ -144,7 +144,7 @@ plaintext command  -> plaintext reply
 OMEMO command      -> OMEMO reply
 ```
 
-Encrypted MUC replies are sent to current occupants with visible real JIDs as far as possible. Occupants with unusable OMEMO devices are skipped; plaintext fallback is controlled by configuration. Admins can inspect local OMEMO state with `!omemo status`, show best-effort local device hints with `!omemo devices`, and rotate the local OMEMO store with `!omemo reset confirm` when the bot identity changed or devices got stale.
+Encrypted MUC replies are sent to current occupants with visible real JIDs as far as possible. Occupants with unusable OMEMO devices are skipped; plaintext fallback is controlled by configuration. Admins can inspect local OMEMO state with `!omemo status`, show current visible admin-room OMEMO recipients with `!omemo devices`, and rotate the local OMEMO store with `!omemo reset confirm` when the bot identity changed or devices got stale. `!omemo devices` also shows conservative local storage hints, but those hints are diagnostic only and may be stale.
 
 See [docs/omemo.md](docs/omemo.md).
 

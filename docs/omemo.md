@@ -82,7 +82,7 @@ BanBot also writes identity metadata next to the storage file, for example `data
 
 `!omemo status` shows whether OMEMO is enabled, whether optional dependencies are available, whether the OMEMO plugin is ready, storage path/permissions, current identity metadata, and whether the stored identity matches the configured `JID`, `RESOURCE`, and `NICK`.
 
-`!omemo devices` shows best-effort local device hints found in the JSON storage plus the current admin-room recipient JIDs BanBot can see for encrypted MUC replies. The storage format is owned by the OMEMO library, so this command is diagnostic and intentionally best-effort.
+`!omemo devices` shows the current admin-room recipient JIDs BanBot can see for encrypted MUC replies first. It also shows conservative local storage hints found in the JSON storage, but those hints are diagnostic only, may be stale, and are not a guaranteed list of active OMEMO devices. The storage format is owned by the OMEMO library, so BanBot intentionally avoids treating arbitrary storage counters, booleans, pre-key IDs, or session metadata as devices.
 
 `!omemo reset confirm` moves the current OMEMO storage and identity metadata to timestamped `.bak-*` files and writes fresh metadata for the current bot identity. Restart the bot afterwards so the OMEMO plugin creates and publishes a fresh identity.
 

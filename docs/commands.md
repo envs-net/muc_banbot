@@ -34,7 +34,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!config set <KEY> <value>` | Updates a runtime-writable config option | `!config set LOG_LEVEL DEBUG` |
 | `!config unset <KEY>` | Resets a runtime-writable option to the `config_sample.py` default | `!config unset LOG_LEVEL` |
 | `!omemo status` | Shows OMEMO readiness, storage, permissions, and identity metadata | `!omemo status` |
-| `!omemo devices` | Shows best-effort local OMEMO device hints and visible admin-room recipients | `!omemo devices` |
+| `!omemo devices` | Shows visible admin-room recipients plus conservative local storage hints | `!omemo devices` |
 | `!omemo reset confirm` | Rotates local OMEMO storage/metadata to `.bak-*`; restart afterwards | `!omemo reset confirm` |
 | `!reload` / `!reloadconfig` | Reloads runtime config safely | `!reload` |
 | `!restart` / `!restart confirm` | Shows restart confirmation / exits cleanly so a supervisor can restart the bot | `!restart confirm` |
