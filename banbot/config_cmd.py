@@ -239,6 +239,7 @@ class ConfigCommandMixin:
         config_lines.append(f"   Plaintext fallback: {getattr(self, 'omemo_plaintext_fallback', False)}")
         config_lines.append(f"   Reset on identity change: {getattr(self, 'omemo_reset_on_identity_change', True)}")
         if getattr(self, "rtbl_publish_enabled", False):
+            config_lines.append("")
             config_lines.append("📡 RTBL Publish Runtime:")
             config_lines.append(f"   Service:     {self.rtbl_publish_service}")
             config_lines.append(f"   JID node:    {self.rtbl_publish_jid_node}")
