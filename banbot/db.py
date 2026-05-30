@@ -81,15 +81,25 @@ class DatabaseMixin:
                     try:
                         target_type, target, normalized_jid, normalized_nick = normalize_ban_target(jid, nick)
                         key = (target_type, target)
+                        current_until = int(until or 0)
                         previous = migrated.get(key)
-                        if previous and previous[4] <= 0:
-                            continue
+                        if previous:
+                            previous_until = previous[4]
+
+                            # Existing permanent bans are stronger than duplicates.
+                            if previous_until <= 0:
+                                continue
+
+                            # Keep the temporary ban with the later expiration.
+                            if current_until > 0 and current_until <= previous_until:
+                                continue
+
                         migrated[key] = (
                             target_type,
                             target,
                             normalized_jid,
                             normalized_nick,
-                            int(until or 0),
+                            current_until,
                             issuer,
                             comment,
                         )
