@@ -831,7 +831,10 @@ class OmemoMixin:
         devices = self._collect_omemo_storage_device_hints()
         if devices:
             for jid in sorted(devices):
-                ids = sorted(devices[jid], key=lambda x: int(x) if x.isdigit() else x)
+                ids = sorted(
+                    (str(device_id) for device_id in devices[jid]),
+                    key=lambda value: (0, int(value)) if value.isdigit() else (1, value.lower(), value),
+                )
                 lines.append(f"• {jid}: {', '.join(ids) if ids else 'known, device IDs not visible in storage'}")
         else:
             lines.append("No device hints found in local OMEMO storage.")

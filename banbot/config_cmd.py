@@ -30,9 +30,133 @@ class ConfigCommandMixin:
     set_runtime_config_value = ConfigMixin.set_runtime_config_value
     unset_runtime_config_value = ConfigMixin.unset_runtime_config_value
 
+    CONFIG_OUTPUT_SECTIONS = (
+        ("🪪 Identity", (
+            "DB_FILE",
+            "JID",
+            "RESOURCE",
+            "RESSOURCE",
+            "PASSWORD",
+            "ADMIN_ROOM",
+            "NICK",
+        )),
+        ("🌐 Connection", (
+            "CONNECT_HOST",
+            "CONNECT_PORT",
+            "CONNECT_DIRECT_TLS",
+            "AVATAR_PATH",
+        )),
+        ("🪪 vCard", (
+            "VCARD_NICKNAME",
+            "VCARD_FN",
+            "VCARD_ORG",
+            "VCARD_ROLE",
+            "VCARD_URL",
+            "VCARD_NOTE",
+        )),
+        ("⚙️ General", (
+            "LOG_LEVEL",
+            "COMMAND_PREFIX",
+            "ANNOUNCE_STARTUP",
+            "ANNOUNCE_SYNC_DETAILS",
+            "SHOW_BAN_IN_MUC",
+        )),
+        ("🛡️ Moderation", (
+            "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
+            "ALLOW_ADMIN_COMMANDS_IN_DMS",
+            "ROOM_INVITES_ENABLED",
+            "HEALTH_CHECK_INTERVAL",
+            "UNBAN_CHECK_INTERVAL",
+            "MAX_TEMPBAN_DAYS",
+            "PUBLIC_COMMAND_RATE_LIMIT_WINDOW",
+            "PUBLIC_COMMAND_RATE_LIMIT_MAX",
+            "MUC_WRITE_SEMAPHORE",
+        )),
+        ("📜 Audit / Events", (
+            "STRUCTURED_EVENT_LOGS",
+            "AUDIT_LOG_ENABLED",
+            "AUDIT_LOG_RETENTION_DAYS",
+        )),
+        ("🚨 Alerts", (
+            "ALERT_ON_RECONNECT",
+            "ALERT_ON_ADMIN_RIGHTS_LOST",
+            "ALERT_ON_HEALTH_CHECK_FAILURE",
+            "ALERT_ON_DB_STATS_FAILURE",
+            "ALERT_ON_REDACTION_FAILURE",
+            "ALERT_ON_DB_SIZE_MB",
+            "ALERT_ON_RTBL_REFRESH_FAILURES",
+            "ALERT_DEDUP_WINDOW",
+        )),
+        ("🔐 OMEMO", (
+            "OMEMO_ENABLED",
+            "OMEMO_STORAGE_FILE",
+            "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",
+            "OMEMO_PLAINTEXT_FALLBACK",
+            "OMEMO_RESET_ON_IDENTITY_CHANGE",
+        )),
+        ("🛡️ RTBL", (
+            "RTBL_ENABLED",
+            "RTBL_ANNOUNCE",
+            "RTBL_REFRESH_INTERVAL",
+            "RTBL_PUBLISH_ENABLED",
+            "RTBL_PUBLISH_SERVICE",
+            "RTBL_PUBLISH_JID_NODE",
+            "RTBL_PUBLISH_DOMAIN_NODE",
+        )),
+        ("🔎 Version Check", (
+            "VERSION_CHECK_ENABLED",
+            "VERSION_CHECK_INTERVAL",
+            "VERSION_CHECK_URL",
+        )),
+        ("🧹 Redaction", (
+            "REDACTION_ENABLED",
+            "REDACTION_INDEX_RETENTION_DAYS",
+            "REDACTION_AUTO_REASONS",
+        )),
+    )
+
+    def _format_config_display_value(self, key: str, value: Any) -> str:
+        if isinstance(value, (list, tuple)) and len(value) > 6:
+            preview = ", ".join(repr(item) for item in value[:4])
+            return f"[{preview}, ...] ({len(value)} items)"
+        return self.format_config_value_for_display(key, value)
+
     def _format_config_line(self, key: str, value: Any, writable: bool) -> str:
         marker = "✏️" if writable else "🔒"
-        return f"{marker} {key} = {self.format_config_value_for_display(key, value)}"
+        return f"{marker} {key} = {self._format_config_display_value(key, value)}"
+
+    def _sectioned_config_lines(self) -> list[str]:
+        items = {key: (value, writable) for key, value, writable in self.get_ordered_config_items()}
+        emitted: set[str] = set()
+        lines: list[str] = []
+
+        for title, keys in self.CONFIG_OUTPUT_SECTIONS:
+            section_lines: list[str] = []
+            for key in keys:
+                if key not in items or key in emitted:
+                    continue
+                value, writable = items[key]
+                section_lines.append(self._format_config_line(key, value, writable))
+                emitted.add(key)
+
+            if section_lines:
+                if lines:
+                    lines.append("")
+                lines.append(title)
+                lines.extend(section_lines)
+
+        other_lines = [
+            self._format_config_line(key, value, writable)
+            for key, (value, writable) in items.items()
+            if key not in emitted
+        ]
+        if other_lines:
+            if lines:
+                lines.append("")
+            lines.append("📦 Other")
+            lines.extend(other_lines)
+
+        return lines
 
     async def _cmd_config(self, room: str, args: list[str] | None = None, actor: str | None = None) -> None:
         """Handle !config, !config show, !config set and !config unset."""
@@ -100,9 +224,7 @@ class ConfigCommandMixin:
         config_lines.append("🔒 = restart-only/protected, ✏️ = runtime-writable")
         config_lines.append("Password/secret values are hidden.")
         config_lines.append("")
-
-        for key, value, writable in self.get_ordered_config_items():
-            config_lines.append(self._format_config_line(key, value, writable))
+        config_lines.extend(self._sectioned_config_lines())
 
         # Keep a compact operational summary after the full ordered config list.
         config_lines.append("")
