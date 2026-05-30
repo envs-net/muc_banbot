@@ -19,11 +19,8 @@ PUBLIC_COMMANDS = {"help", "whoami", "banlist", "blacklist", "why", "rules", "po
 
 class CommandMixin:
     def user_cmds_allowed(self, room: str) -> bool:
-        """Check if user commands are allowed in this room."""
-        return (
-            room == ADMIN_ROOM or
-            (room in self.protected_rooms and self.allow_user_cmds)
-        )
+        """Check if user commands are allowed in protected rooms."""
+        return room in self.protected_rooms and self.allow_user_cmds
 
 
     async def on_message(self, msg) -> None:
@@ -144,7 +141,7 @@ class CommandMixin:
         cmd: str,
         args: list[str]
     ) -> bool:
-        if room != ADMIN_ROOM and cmd in PUBLIC_COMMANDS and self.user_cmds_allowed(room):
+        if room != ADMIN_ROOM and cmd in PUBLIC_COMMANDS:
             allowed, retry_after = self.check_public_command_rate_limit(room, nick, cmd)
             if not allowed:
                 await self.bot_send_message(
@@ -168,7 +165,7 @@ class CommandMixin:
             await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
             return True
 
-        if cmd in ("banlist", "blacklist") and self.user_cmds_allowed(room):
+        if cmd in ("banlist", "blacklist") and (room == ADMIN_ROOM or self.user_cmds_allowed(room)):
             show_all = wants_all_pages(args)
             args = without_all_pages_arg(args)
             if args and args[0].lower() == "rtbl":
@@ -208,7 +205,7 @@ class CommandMixin:
             await self.cmd_banlist(room, page=page, show_all=show_all)
             return True
 
-        if cmd == "why" and self.user_cmds_allowed(room):
+        if cmd == "why" and (room == ADMIN_ROOM or self.user_cmds_allowed(room)):
             if len(args) < 1:
                 await self.bot_send_message(
                     mto=room,
@@ -220,7 +217,7 @@ class CommandMixin:
             await self.cmd_why(args[0], room)
             return True
 
-        if cmd == "whoami" and self.user_cmds_allowed(room):
+        if cmd == "whoami" and (room == ADMIN_ROOM or self.user_cmds_allowed(room)):
             await self._cmd_whoami(room, nick)
             return True
 
@@ -514,9 +511,8 @@ class CommandMixin:
                 "Import completed: %d successful, %d skipped, %d errors",
                 successful,
                 skipped,
-                len(errors),
+                len(errors)
             )
-
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             self.log_event(
                 logging.INFO,
@@ -562,13 +558,10 @@ class CommandMixin:
             await self.cmd_policy(args, room)
             return True
 
-        await self.bot_send_message(
-            mto=room,
-            mbody=f"⚠️ Admin command '{cmd}' is recognized but not implemented.",
-            mtype="groupchat",
-        )
         log.error("Unhandled admin command routed without handler: %s", cmd)
-        return True
+        raise AssertionError(
+            f"Internal routing error: admin command '{cmd}' recognized but not implemented"
+        )
 
 
     async def _cmd_restart(self, room: str, args: list[str]) -> None:
@@ -594,7 +587,18 @@ class CommandMixin:
             encrypted=False,
         )
 
-        asyncio.create_task(self._restart_process())
+        restart_task = asyncio.create_task(self._restart_process())
+        self._restart_task = restart_task
+
+        add_done_callback = getattr(restart_task, "add_done_callback", None)
+        if callable(add_done_callback):
+            add_done_callback(self._clear_restart_task)
+
+
+    def _clear_restart_task(self, task: asyncio.Task) -> None:
+        """Drop the stored restart task reference once it has completed."""
+        if getattr(self, "_restart_task", None) is task:
+            self._restart_task = None
 
 
     async def _restart_process(self) -> None:
