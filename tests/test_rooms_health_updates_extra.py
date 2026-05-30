@@ -652,3 +652,82 @@ async def test_room_invite_decline_removes_persisted_invite(temp_db_path, monkey
         assert row[0] == 0
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_health_check_alerts_can_be_disabled(monkeypatch):
+    bot = RoomHealthBot()
+    bot.occupants = {"room@conference.example.test": {}}
+    bot.alert_on_health_check_failure = False
+    bot.get_db_stats = lambda: {"db_size_bytes": 0}
+
+    calls = {"count": 0}
+
+    async def fake_sleep(delay):
+        calls["count"] += 1
+        if calls["count"] > 1:
+            raise asyncio.CancelledError()
+
+    async def fake_stats():
+        return {"db_size_bytes": 0}
+
+    bot.get_db_stats = fake_stats
+    monkeypatch.setattr("banbot.health_check.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot.health_check_worker()
+
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_health_check_reports_database_stats_failure(monkeypatch):
+    bot = RoomHealthBot()
+    bot.protected_rooms = set()
+
+    async def broken_stats():
+        raise RuntimeError("database locked")
+
+    bot.get_db_stats = broken_stats
+
+    calls = {"count": 0}
+
+    async def fake_sleep(delay):
+        calls["count"] += 1
+        if calls["count"] > 1:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr("banbot.health_check.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot.health_check_worker()
+
+    assert any("Database stats failed" in item["mbody"] for item in bot.sent)
+    assert any("database locked" in item["mbody"] for item in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_health_check_reports_database_size_limit(monkeypatch):
+    bot = RoomHealthBot()
+    bot.protected_rooms = set()
+    bot.alert_on_db_size_mb = 1
+
+    async def large_stats():
+        return {"db_size_bytes": 2 * 1024 * 1024}
+
+    bot.get_db_stats = large_stats
+
+    calls = {"count": 0}
+
+    async def fake_sleep(delay):
+        calls["count"] += 1
+        if calls["count"] > 1:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr("banbot.health_check.asyncio.sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot.health_check_worker()
+
+    assert any("Database size alert" in item["mbody"] for item in bot.sent)
+    assert any("2.0 MiB" in item["mbody"] for item in bot.sent)
