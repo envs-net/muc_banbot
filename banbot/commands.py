@@ -806,10 +806,10 @@ class CommandMixin:
         return (
             f"{p}help - show this help\n"
             f"{p}config [show|set|unset] - show/edit runtime config\n"
-            f"{p}omemo status|devices|reset - inspect/reset OMEMO state\n"
             f"{p}reload / {p}reloadconfig - reload config.py at runtime\n"
             f"{p}restart confirm - stop the bot so a supervisor can restart it\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"
+            f"{p}omemo status|devices|reset - inspect/reset OMEMO state\n"
             f"{p}checkupdate / {p}updatecheck - check if a newer bot release is available\n"
             f"{p}whoami - show your affiliation/role\n"
             f"{p}audit [all|page|last|query] - show recent audit events\n\n"
