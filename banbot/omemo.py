@@ -16,7 +16,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 
 from slixmpp import JID
 
@@ -270,7 +270,8 @@ if OMEMO_AVAILABLE:
             if not self.json_file_path:
                 raise RuntimeError("OMEMO JSON storage path not specified")
 
-            self._storage = JsonFileStorage(Path(self.json_file_path))
+            storage_factory = cast(Callable[[Path], Storage], JsonFileStorage)
+            self._storage = storage_factory(Path(self.json_file_path))
             super().plugin_init()
 
         @property
