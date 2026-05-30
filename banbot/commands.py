@@ -231,7 +231,7 @@ class CommandMixin:
                 await self._cmd_public_policy_show(room)
                 return True
 
-            return True
+            return False
 
         return False
 
@@ -559,7 +559,7 @@ class CommandMixin:
             return True
 
         log.error("Unhandled admin command routed without handler: %s", cmd)
-        raise AssertionError(
+        raise RuntimeError(
             f"Internal routing error: admin command '{cmd}' recognized but not implemented"
         )
 
@@ -590,9 +590,8 @@ class CommandMixin:
         restart_task = asyncio.create_task(self._restart_process())
         self._restart_task = restart_task
 
-        add_done_callback = getattr(restart_task, "add_done_callback", None)
-        if callable(add_done_callback):
-            add_done_callback(self._clear_restart_task)
+        if isinstance(restart_task, asyncio.Task):
+            restart_task.add_done_callback(self._clear_restart_task)
 
 
     def _clear_restart_task(self, task: asyncio.Task) -> None:
