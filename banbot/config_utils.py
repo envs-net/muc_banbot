@@ -468,11 +468,13 @@ class ConfigMixin:
                     "after installing system libraries such as libsodium-dev and libxeddsa-dev."
                 )
 
-            omemo_storage = pathlib.Path(str(getattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json"))).expanduser()
-            if not str(omemo_storage):
+            omemo_storage_raw = str(getattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json")).strip()
+            if not omemo_storage_raw:
                 errors.append("OMEMO_STORAGE_FILE must not be empty when OMEMO_ENABLED=True")
-            elif str(omemo_storage.parent) not in ("", ".") and not omemo_storage.parent.exists():
-                warnings.append(f"OMEMO_STORAGE_FILE directory will be created with private permissions if possible: {omemo_storage.parent}")
+            else:
+                omemo_storage = pathlib.Path(omemo_storage_raw).expanduser()
+                if str(omemo_storage.parent) not in ("", ".") and not omemo_storage.parent.exists():
+                    warnings.append(f"OMEMO_STORAGE_FILE directory will be created with private permissions if possible: {omemo_storage.parent}")
 
         return errors, warnings
 

@@ -37,7 +37,6 @@ class ConfigCommandMixin:
         ("🪪 Bot Identity", (
             "JID",
             "RESOURCE",
-            "RESSOURCE",
             "PASSWORD",
             "NICK",
         )),

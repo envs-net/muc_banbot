@@ -847,10 +847,8 @@ class OmemoMixin:
         if not ids:
             return "storage entry found, exact device IDs not visible"
 
-        sorted_ids = sorted(
-            (str(device_id) for device_id in ids if str(device_id).isdigit()),
-            key=lambda value: int(value),
-        )
+        numeric_ids = [int(device_id) for device_id in ids if str(device_id).isdigit()]
+        sorted_ids = [str(device_id) for device_id in sorted(numeric_ids)]
         if not sorted_ids:
             return "storage entry found, exact device IDs not visible"
 
