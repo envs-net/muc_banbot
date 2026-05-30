@@ -109,6 +109,10 @@ class DirectMessageMixin:
         p = self.command_prefix
 
         async with self._redirect_command_output_to_dm(reply_to):
+            if cmd == "help":
+                await self._send_direct_message(reply_to, self._admin_help_text())
+                return True
+
             if cmd == "config":
                 await self._cmd_config(reply_to)
                 return True
@@ -360,7 +364,7 @@ class DirectMessageMixin:
                 reply_to,
                 (
                     "❌ Direct-message admin commands are read-only.\n"
-                    "Allowed read-only commands: !config, !status, !checkupdate, !updatecheck, "
+                    "Allowed read-only commands: !help, !config, !status, !checkupdate, !updatecheck, "
                     "!banlist, !bansearch, !why, !room list, !room invite list, !ignore list, "
                     "!whitelist list, !rtbl list, !audit.\n"
                     f"Use {ADMIN_ROOM} for mutating commands."
@@ -371,8 +375,9 @@ class DirectMessageMixin:
         if is_admin:
             response = (
                 "🤖 Admin DM support is read-only.\n"
-                f"Allowed: {self.command_prefix}config, {self.command_prefix}omemo status, "
-                f"{self.command_prefix}omemo devices, {self.command_prefix}status, "
+                f"Allowed: {self.command_prefix}help, {self.command_prefix}config, "
+                f"{self.command_prefix}omemo status, {self.command_prefix}omemo devices, "
+                f"{self.command_prefix}status, "
                 f"{self.command_prefix}checkupdate, {self.command_prefix}updatecheck, "
                 f"{self.command_prefix}banlist, {self.command_prefix}bansearch, "
                 f"{self.command_prefix}why, {self.command_prefix}room list, "
