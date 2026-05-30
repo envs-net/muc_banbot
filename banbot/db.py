@@ -225,6 +225,8 @@ class DatabaseMixin:
         for target_type, target, jid, nick, until, issuer, comment in rows:
             if target_type == "domain" and not jid:
                 jid = f"*.{target}"
+            if jid:
+                jid = self.bare_jid(jid)
             self._cache_ban(jid, nick, int(until or 0), issuer, comment)
 
         log.info("✅ Loaded %d active bans", len(self.ban_cache))
@@ -279,11 +281,11 @@ class DatabaseMixin:
             return 0
 
         normalized_nick = nick.lower().strip()
-        cur = await self.db.execute(
+        async with self.db.execute(
             "DELETE FROM bans WHERE target_type = 'nick' AND target = ?",
             (normalized_nick,),
-        )
-        deleted = cur.rowcount
+        ) as cur:
+            deleted = cur.rowcount
 
         if deleted:
             self._remove_ban_from_cache(normalized_nick, ban_nick=normalized_nick)
@@ -380,18 +382,16 @@ class DatabaseMixin:
 
     async def set_public_policy_enabled(self, enabled: bool) -> None:
         """Enable or disable the public policy command."""
-        _current_enabled, text = await self.get_public_policy()
-
         await self.db.execute(
             """
             INSERT INTO public_policy (id, enabled, text, updated_at)
-            VALUES (1, ?, ?, strftime('%s','now'))
+            VALUES (1, ?, '', strftime('%s','now'))
             ON CONFLICT(id)
             DO UPDATE SET
                 enabled = excluded.enabled,
                 updated_at = strftime('%s','now')
             """,
-            (1 if enabled else 0, text),
+            (1 if enabled else 0,),
         )
         await self.db.commit()
 
