@@ -71,6 +71,21 @@ The bot can create the storage file under its runtime user. The surrounding dire
 
 BanBot also writes identity metadata next to the storage file, for example `data/omemo.identity.json` for `data/omemo.json`. The metadata contains the configured `JID`, `RESOURCE`, and `NICK`. With the default `OMEMO_RESET_ON_IDENTITY_CHANGE=True`, BanBot rotates the old OMEMO storage to a timestamped `.bak-*` file and starts with a fresh OMEMO store when one of these identity values changes. On first start after upgrading to this metadata scheme, an existing non-empty OMEMO storage without metadata is also backed up once so the new store is tied to the current identity. The old storage is backed up, not deleted.
 
+## Admin Commands
+
+```text
+!omemo status
+!omemo devices
+!omemo reset
+!omemo reset confirm
+```
+
+`!omemo status` shows whether OMEMO is enabled, whether optional dependencies are available, whether the OMEMO plugin is ready, storage path/permissions, current identity metadata, and whether the stored identity matches the configured `JID`, `RESOURCE`, and `NICK`.
+
+`!omemo devices` shows best-effort local device hints found in the JSON storage plus the current admin-room recipient JIDs BanBot can see for encrypted MUC replies. The storage format is owned by the OMEMO library, so this command is diagnostic and intentionally best-effort.
+
+`!omemo reset confirm` moves the current OMEMO storage and identity metadata to timestamped `.bak-*` files and writes fresh metadata for the current bot identity. Restart the bot afterwards so the OMEMO plugin creates and publishes a fresh identity.
+
 ## Logging
 
 Third-party OMEMO libraries can emit many warnings for broken, empty, or forbidden device bundles in public MUCs. BanBot reduces dependency logger noise during normal INFO-level operation while keeping debug output available when `LOG_LEVEL="DEBUG"`.

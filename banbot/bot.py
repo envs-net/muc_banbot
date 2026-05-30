@@ -49,6 +49,7 @@ from .ignorelist import IgnorelistMixin
 from .rtbl import RtblMixin
 from .messaging import MessagingMixin
 from .omemo import OmemoMixin
+from .alerts import AlertMixin
 
 _log_level_name = str(getattr(config, "LOG_LEVEL", "INFO")).upper()
 _log_level = getattr(logging, _log_level_name, None)
@@ -110,6 +111,7 @@ class BanBot(
     ConfigMixin,
     MessagingMixin,
     OmemoMixin,
+    AlertMixin,
     AuditMixin,
     CacheMixin,
     DatabaseMixin,
@@ -152,6 +154,7 @@ class BanBot(
 
         super().__init__(full_jid, password)
         self.db: aiosqlite.Connection | None = None
+        self.init_alert_state()
 
         # --- Concurrency limit for MUC write operations ---
         # Prevents flooding the XMPP server with too many IQ stanzas at once
@@ -403,6 +406,14 @@ class BanBot(
         await self.update_vcard()
 
         self.reconnecting = False
+
+        if was_reconnecting:
+            await self.send_operational_alert(
+                "reconnect_success",
+                "Reconnect completed",
+                "BanBot reconnected successfully and synced rooms/bans.",
+                enabled=getattr(self, "alert_on_reconnect", True),
+            )
 
         # Send lifecycle notification if enabled
         if self.announce_startup:

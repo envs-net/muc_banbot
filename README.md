@@ -92,8 +92,11 @@ Examples assume the default command prefix `!`.
 | --- | --- |
 | `!help` | Show available commands |
 | `!status` | Show bot health, uptime, rooms, bans, RTBL, and DB state |
-| `!config` | Show active configuration |
+| `!config [show]` | Show full active configuration in `config.py` order; secrets are hidden |
+| `!config set <KEY> <value>` | Change a runtime-writable configuration value |
+| `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
 | `!reloadconfig` | Validate and reload runtime configuration |
+| `!omemo status/devices/reset` | Inspect OMEMO state, list local device hints, or rotate local OMEMO storage |
 | `!room add <room>` | Add a protected room |
 | `!room remove <room>` | Remove a protected room |
 | `!room list [all/page]` | List protected rooms |
@@ -141,7 +144,7 @@ plaintext command  -> plaintext reply
 OMEMO command      -> OMEMO reply
 ```
 
-Encrypted MUC replies are sent to current occupants with visible real JIDs as far as possible. Occupants with unusable OMEMO devices are skipped; plaintext fallback is controlled by configuration.
+Encrypted MUC replies are sent to current occupants with visible real JIDs as far as possible. Occupants with unusable OMEMO devices are skipped; plaintext fallback is controlled by configuration. Admins can inspect local OMEMO state with `!omemo status`, show best-effort local device hints with `!omemo devices`, and rotate the local OMEMO store with `!omemo reset confirm` when the bot identity changed or devices got stale.
 
 See [docs/omemo.md](docs/omemo.md).
 

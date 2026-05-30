@@ -1,89 +1,145 @@
-"""Configuration display and runtime reload commands."""
+"""Configuration display, runtime editing and reload commands."""
+
+from __future__ import annotations
 
 import logging
-
-import config
-from config import DB_FILE, JID, NICK
+from typing import Any
 
 from ._version import __version__
-from .config_utils import get_config_resource
+from .config_utils import ConfigMixin
 
 log = logging.getLogger(__name__)
 
 
 class ConfigCommandMixin:
-    async def _cmd_config(self, room: str) -> None:
-        config_lines = ["📋 Current Bot Configuration:\n"]
+    # Reuse ConfigMixin helpers here so lightweight test doubles that only mix in
+    # ConfigCommandMixin can still render/edit config without inheriting the full bot.
+    CONFIG_KEYS = ConfigMixin.CONFIG_KEYS
+    STARTUP_ONLY_CONFIG_KEYS = ConfigMixin.STARTUP_ONLY_CONFIG_KEYS
+    CONFIG_SECRET_KEYS = ConfigMixin.CONFIG_SECRET_KEYS
+    CONFIG_NEVER_WRITABLE_KEYS = ConfigMixin.CONFIG_NEVER_WRITABLE_KEYS
+    _config_file_path = ConfigMixin._config_file_path
+    _config_sample_path = ConfigMixin._config_sample_path
+    _ordered_config_keys_from_sample = ConfigMixin._ordered_config_keys_from_sample
+    _config_default_values_from_sample = ConfigMixin._config_default_values_from_sample
+    get_ordered_config_items = ConfigMixin.get_ordered_config_items
+    format_config_value_for_display = ConfigMixin.format_config_value_for_display
+    parse_config_value = ConfigMixin.parse_config_value
+    render_config_assignment = ConfigMixin.render_config_assignment
+    update_config_file_assignment = ConfigMixin.update_config_file_assignment
+    set_runtime_config_value = ConfigMixin.set_runtime_config_value
+    unset_runtime_config_value = ConfigMixin.unset_runtime_config_value
 
-        config_lines.append(f"🤖 Bot Version: {__version__}")
-        config_lines.append(f"💾 Database: {DB_FILE}")
-        config_lines.append(f"🪪 JID: {JID}")
-        config_lines.append(f"📦 Resource: {get_config_resource() or 'None'}")
-        config_lines.append(f"👤 Nick: {NICK}")
-        connect_host = getattr(config, "CONNECT_HOST", None) or "JID domain"
-        connect_port = getattr(config, "CONNECT_PORT", 5222)
-        connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
-        config_lines.append(f"🌐 Connection: {connect_host}:{connect_port} ({connect_mode})")
-        config_lines.append("")
-        config_lines.append(f"🔧 Command Prefix: {self.command_prefix}")
-        config_lines.append(f"🪵 Log Level: {getattr(self, 'log_level', 'INFO')}")
-        config_lines.append(f"🧱 Structured Event Logs: {self.structured_event_logs}")
-        config_lines.append(f"🧾 Audit Log: {self.audit_log_enabled} ({self.audit_log_retention_days}d retention)")
-        config_lines.append(f"📢 Announce Startup: {self.announce_startup}")
-        config_lines.append(f"📊 Announce Sync Details: {self.announce_sync_details}")
-        config_lines.append(f"📣 Show Bans in MUC: {self.show_ban_in_muc}")
-        config_lines.append(f"✅ Allow User Commands: {self.allow_user_cmds}")
-        config_lines.append(f"💬 Admin Commands in DMs: {getattr(self, 'allow_admin_commands_in_dms', True)}")
-        invite_enabled = getattr(self, "room_invites_enabled", False)
-        pending_invites = len(getattr(self, "pending_room_invites", {}) or {})
-        config_lines.append(f"📨 Room Invite Service: {invite_enabled} ({pending_invites} pending)")
-        policy_enabled, _policy_text = await self.get_public_policy()
-        policy_state = "enabled" if policy_enabled else "disabled"
-        config_lines.append(f"📜 Public Policy: {policy_state}")
-        config_lines.append("")
-        config_lines.append(f"⏰ Health Check Interval: {self.health_check_interval}s")
-        config_lines.append(f"⏱️ Unban Check Interval: {self.unban_check_interval}s")
-        config_lines.append(f"📅 Max Tempban Days: {self.max_tempban_days}")
-        config_lines.append(f"🚦 Public Command Rate Limit: {self.public_command_rate_limit_max}/{self.public_command_rate_limit_window}s")
-        config_lines.append(f"🔌 MUC Write Semaphore: {self.muc_write_limit}")
-        config_lines.append("")
-        redaction_enabled = getattr(self, "redaction_enabled", False)
-        retention = getattr(self, "redaction_index_retention_days", 30)
-        retention_text = "keep forever" if retention == 0 else f"{retention}d retention"
-        reasons = getattr(self, "redaction_auto_reasons", []) or []
-        if redaction_enabled:
-            config_lines.append(
-                f"🧹 Redaction Enabled: True ({retention_text}, {len(reasons)} auto reasons)"
-            )
-        else:
-            config_lines.append("🧹 Redaction Enabled: False")
-        config_lines.append("")
+    def _format_config_line(self, key: str, value: Any, writable: bool) -> str:
+        marker = "✏️" if writable else "🔒"
+        return f"{marker} {key} = {self.format_config_value_for_display(key, value)}"
+
+    async def _cmd_config(self, room: str, args: list[str] | None = None, actor: str | None = None) -> None:
+        """Handle !config, !config show, !config set and !config unset."""
+        args = args or []
+        subcmd = args[0].lower() if args else "show"
+
+        if subcmd in ("show", "list"):
+            await self._cmd_config_show(room)
+            return
+
+        if subcmd == "set":
+            if len(args) < 3:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=(
+                        f"❌ Usage: {self.command_prefix}config set <KEY> <value>\n"
+                        f"Example: {self.command_prefix}config set LOG_LEVEL DEBUG"
+                    ),
+                    mtype="groupchat",
+                )
+                return
+            key = args[1].upper()
+            raw_value = " ".join(args[2:])
+            ok, message = await self.set_runtime_config_value(key, raw_value)
+            await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
+            await self._audit_config_change(actor, "set", key, ok, message)
+            return
+
+        if subcmd == "unset":
+            if len(args) != 2:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}config unset <KEY>",
+                    mtype="groupchat",
+                )
+                return
+            key = args[1].upper()
+            ok, message = await self.unset_runtime_config_value(key)
+            await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
+            await self._audit_config_change(actor, "unset", key, ok, message)
+            return
+
+        await self.bot_send_message(
+            mto=room,
+            mbody=(
+                "Usage:\n"
+                f"  {self.command_prefix}config show\n"
+                f"  {self.command_prefix}config set <KEY> <value>\n"
+                f"  {self.command_prefix}config unset <KEY>\n\n"
+                "🔒 = restart-only or protected, ✏️ = runtime-writable"
+            ),
+            mtype="groupchat",
+        )
+
+    async def _cmd_config_show(self, room: str) -> None:
+        config_lines = [f"📋 Current Bot Configuration (v{__version__})", ""]
+
+        # Keep the long-standing operational labels for existing tests, users and
+        # screenshots, then follow with the complete ordered key/value view.
+        config_lines.append(f"🪪 JID: {self.format_config_value_for_display('JID', getattr(self, 'jid', getattr(self, 'boundjid', '')))}")
         config_lines.append(f"🔐 OMEMO Enabled: {getattr(self, 'omemo_enabled', False)}")
-        if getattr(self, "omemo_enabled", False):
-            config_lines.append(f"   Reply mode: follows incoming command encryption")
-            config_lines.append(f"   Auto-encrypt admin room: {getattr(self, 'omemo_auto_encrypt_admin_room', True)}")
-            config_lines.append(f"   Plaintext fallback: {getattr(self, 'omemo_plaintext_fallback', False)}")
-            config_lines.append(f"   Reset on identity change: {getattr(self, 'omemo_reset_on_identity_change', True)}")
+        config_lines.append(f"🛡️ RTBL Enabled: {getattr(self, 'rtbl_enabled', False)}")
         config_lines.append("")
-        config_lines.append(f"🛡️ RTBL Enabled: {self.rtbl_enabled}")
-        config_lines.append(f"📢 RTBL Announce: {self.rtbl_announce}")
-        config_lines.append(f"🔄 RTBL Refresh Interval: {self.rtbl_refresh_interval}s" if self.rtbl_refresh_interval > 0 else "🔄 RTBL Refresh: disabled")
-        config_lines.append(f"📡 RTBL Publish Enabled: {getattr(self, 'rtbl_publish_enabled', False)}")
+
+        config_lines.append("🔒 = restart-only/protected, ✏️ = runtime-writable")
+        config_lines.append("Password/secret values are hidden.")
+        config_lines.append("")
+
+        for key, value, writable in self.get_ordered_config_items():
+            config_lines.append(self._format_config_line(key, value, writable))
+
+        # Keep a compact operational summary after the full ordered config list.
+        config_lines.append("")
+        config_lines.append("🔐 OMEMO Runtime:")
+        config_lines.append("   Reply mode: follows incoming command encryption")
+        config_lines.append(f"   Auto-encrypt admin room: {getattr(self, 'omemo_auto_encrypt_admin_room', True)}")
+        config_lines.append(f"   Plaintext fallback: {getattr(self, 'omemo_plaintext_fallback', False)}")
+        config_lines.append(f"   Reset on identity change: {getattr(self, 'omemo_reset_on_identity_change', True)}")
         if getattr(self, "rtbl_publish_enabled", False):
+            config_lines.append("📡 RTBL Publish Runtime:")
             config_lines.append(f"   Service:     {self.rtbl_publish_service}")
             config_lines.append(f"   JID node:    {self.rtbl_publish_jid_node}")
             config_lines.append(f"   Domain node: {self.rtbl_publish_domain_node}")
+
         config_lines.append("")
-        config_lines.append(f"🔄 Version Check Enabled: {self.version_check_enabled}")
-        config_lines.append(f"🕒 Version Check Interval: {self.version_check_interval}s")
-        config_lines.append(f"🌐 Version Check URL: {self.version_check_url or 'None'}")
+        config_lines.append(
+            "Commands:\n"
+            f"  {self.command_prefix}config set <KEY> <value>\n"
+            f"  {self.command_prefix}config unset <KEY>\n"
+            f"  {self.command_prefix}reloadconfig"
+        )
 
         await self.bot_send_message(
             mto=room,
             mbody="\n".join(config_lines),
-            mtype="groupchat"
+            mtype="groupchat",
         )
 
+    async def _audit_config_change(self, actor: str | None, action: str, key: str, ok: bool, message: str) -> None:
+        try:
+            await self.audit_event(
+                "config_changed" if ok else "config_change_failed",
+                actor=actor or "unknown",
+                details={"action": action, "key": key, "ok": ok, "message": message},
+            )
+        except Exception as exc:
+            log.debug("Failed to audit config %s for %s: %s", action, key, exc)
 
     async def _cmd_reloadconfig(self, room: str) -> None:
         try:

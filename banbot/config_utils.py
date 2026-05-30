@@ -8,6 +8,10 @@ import logging
 import os
 import pathlib
 import builtins
+import ast
+import pprint
+import re
+from typing import Any
 
 try:
     import config
@@ -90,7 +94,16 @@ class ConfigMixin:
         "ANNOUNCE_SYNC_DETAILS",
         "SHOW_BAN_IN_MUC",
         "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
+        "ALLOW_ADMIN_COMMANDS_IN_DMS",
         "ROOM_INVITES_ENABLED",
+        "ALERT_ON_RECONNECT",
+        "ALERT_ON_ADMIN_RIGHTS_LOST",
+        "ALERT_ON_HEALTH_CHECK_FAILURE",
+        "ALERT_ON_DB_STATS_FAILURE",
+        "ALERT_ON_REDACTION_FAILURE",
+        "ALERT_ON_DB_SIZE_MB",
+        "ALERT_ON_RTBL_REFRESH_FAILURES",
+        "ALERT_DEDUP_WINDOW",
         "HEALTH_CHECK_INTERVAL",
         "UNBAN_CHECK_INTERVAL",
         "MAX_TEMPBAN_DAYS",
@@ -152,6 +165,14 @@ class ConfigMixin:
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": self.allow_user_cmds,
             "ALLOW_ADMIN_COMMANDS_IN_DMS": getattr(self, "allow_admin_commands_in_dms", True),
             "ROOM_INVITES_ENABLED": self.room_invites_enabled,
+            "ALERT_ON_RECONNECT": getattr(self, "alert_on_reconnect", True),
+            "ALERT_ON_ADMIN_RIGHTS_LOST": getattr(self, "alert_on_admin_rights_lost", True),
+            "ALERT_ON_HEALTH_CHECK_FAILURE": getattr(self, "alert_on_health_check_failure", True),
+            "ALERT_ON_DB_STATS_FAILURE": getattr(self, "alert_on_db_stats_failure", True),
+            "ALERT_ON_REDACTION_FAILURE": getattr(self, "alert_on_redaction_failure", True),
+            "ALERT_ON_DB_SIZE_MB": getattr(self, "alert_on_db_size_mb", 0),
+            "ALERT_ON_RTBL_REFRESH_FAILURES": getattr(self, "alert_on_rtbl_refresh_failures", 3),
+            "ALERT_DEDUP_WINDOW": getattr(self, "alert_dedup_window", 300),
             "HEALTH_CHECK_INTERVAL": self.health_check_interval,
             "UNBAN_CHECK_INTERVAL": self.unban_check_interval,
             "MAX_TEMPBAN_DAYS": self.max_tempban_days,
@@ -301,6 +322,9 @@ class ConfigMixin:
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": (1, 100),
             "MUC_WRITE_SEMAPHORE": (1, 100),
             "VERSION_CHECK_INTERVAL": (300, 86400),
+            "ALERT_ON_DB_SIZE_MB": (0, 1048576),
+            "ALERT_ON_RTBL_REFRESH_FAILURES": (0, 1000),
+            "ALERT_DEDUP_WINDOW": (0, 86400),
         }
         int_defaults = {
             "AUDIT_LOG_RETENTION_DAYS": 365,
@@ -311,6 +335,9 @@ class ConfigMixin:
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
             "MUC_WRITE_SEMAPHORE": 5,
             "VERSION_CHECK_INTERVAL": 3600,
+            "ALERT_ON_DB_SIZE_MB": 0,
+            "ALERT_ON_RTBL_REFRESH_FAILURES": 3,
+            "ALERT_DEDUP_WINDOW": 300,
         }
         for name, (minimum, maximum) in int_ranges.items():
             value = getattr(config, name, int_defaults.get(name))
@@ -332,6 +359,11 @@ class ConfigMixin:
             "VERSION_CHECK_ENABLED",
             "REDACTION_ENABLED",
             "CONNECT_DIRECT_TLS",
+            "ALERT_ON_RECONNECT",
+            "ALERT_ON_ADMIN_RIGHTS_LOST",
+            "ALERT_ON_HEALTH_CHECK_FAILURE",
+            "ALERT_ON_DB_STATS_FAILURE",
+            "ALERT_ON_REDACTION_FAILURE",
         )
         bool_defaults = {
             "ANNOUNCE_STARTUP": True,
@@ -345,6 +377,11 @@ class ConfigMixin:
             "VERSION_CHECK_ENABLED": False,
             "REDACTION_ENABLED": False,
             "CONNECT_DIRECT_TLS": False,
+            "ALERT_ON_RECONNECT": True,
+            "ALERT_ON_ADMIN_RIGHTS_LOST": True,
+            "ALERT_ON_HEALTH_CHECK_FAILURE": True,
+            "ALERT_ON_DB_STATS_FAILURE": True,
+            "ALERT_ON_REDACTION_FAILURE": True,
         }
         for name in bool_names:
             if not isinstance(getattr(config, name, bool_defaults.get(name)), bool):
@@ -528,6 +565,15 @@ class ConfigMixin:
         self.allow_admin_commands_in_dms = getattr(config, "ALLOW_ADMIN_COMMANDS_IN_DMS", True)
         self.room_invites_enabled = getattr(config, "ROOM_INVITES_ENABLED", False)
 
+        self.alert_on_reconnect = getattr(config, "ALERT_ON_RECONNECT", True)
+        self.alert_on_admin_rights_lost = getattr(config, "ALERT_ON_ADMIN_RIGHTS_LOST", True)
+        self.alert_on_health_check_failure = getattr(config, "ALERT_ON_HEALTH_CHECK_FAILURE", True)
+        self.alert_on_db_stats_failure = getattr(config, "ALERT_ON_DB_STATS_FAILURE", True)
+        self.alert_on_redaction_failure = getattr(config, "ALERT_ON_REDACTION_FAILURE", True)
+        self.alert_on_db_size_mb = getattr(config, "ALERT_ON_DB_SIZE_MB", 0)
+        self.alert_on_rtbl_refresh_failures = getattr(config, "ALERT_ON_RTBL_REFRESH_FAILURES", 3)
+        self.alert_dedup_window = getattr(config, "ALERT_DEDUP_WINDOW", 300)
+
         self.health_check_interval = getattr(config, "HEALTH_CHECK_INTERVAL", 300)
         self.unban_check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
         self.max_tempban_days = getattr(config, "MAX_TEMPBAN_DAYS", 30)
@@ -544,6 +590,155 @@ class ConfigMixin:
         self.redaction_enabled = getattr(config, "REDACTION_ENABLED", False)
         self.redaction_index_retention_days = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
         self.redaction_auto_reasons = list(getattr(config, "REDACTION_AUTO_REASONS", []))
+
+
+    # --- Runtime config file editing helpers ---
+    CONFIG_SECRET_KEYS = {"PASSWORD"}
+    CONFIG_NEVER_WRITABLE_KEYS = set(STARTUP_ONLY_CONFIG_KEYS) | CONFIG_SECRET_KEYS
+
+    def _config_file_path(self) -> pathlib.Path:
+        path = getattr(config, "__file__", None)
+        if path:
+            return pathlib.Path(path).resolve()
+        return pathlib.Path("config.py").resolve()
+
+    def _config_sample_path(self) -> pathlib.Path:
+        return pathlib.Path(__file__).resolve().parent.parent / "config_sample.py"
+
+    def _ordered_config_keys_from_sample(self) -> list[str]:
+        """Return config keys in config.py order, with config_sample.py as fallback.
+
+        The active config.py order is preferred because that is what admins edit.
+        Any keys missing from config.py are appended in config_sample.py order so
+        !config show still gives a complete view of supported options.
+        """
+        keys: list[str] = []
+
+        def add_keys_from(path: pathlib.Path) -> None:
+            try:
+                tree = ast.parse(path.read_text(encoding="utf8"))
+            except Exception:
+                return
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id.isupper() and target.id not in keys:
+                            keys.append(target.id)
+                elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                    if node.target.id.isupper() and node.target.id not in keys:
+                        keys.append(node.target.id)
+
+        add_keys_from(self._config_file_path())
+        add_keys_from(self._config_sample_path())
+
+        if not keys:
+            return list(self.STARTUP_ONLY_CONFIG_KEYS) + list(self.CONFIG_KEYS)
+        return keys
+
+    def _config_default_values_from_sample(self) -> dict[str, Any]:
+        defaults: dict[str, Any] = {}
+        try:
+            tree = ast.parse(self._config_sample_path().read_text(encoding="utf8"))
+        except Exception:
+            return defaults
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                try:
+                    value = ast.literal_eval(node.value)
+                except Exception:
+                    continue
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id.isupper():
+                        defaults[target.id] = value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                try:
+                    defaults[node.target.id] = ast.literal_eval(node.value)
+                except Exception:
+                    continue
+        return defaults
+
+    def get_ordered_config_items(self) -> list[tuple[str, Any, bool]]:
+        """Return config values in config_sample.py order as (key, value, writable)."""
+        keys = self._ordered_config_keys_from_sample()
+        # Include custom/runtime keys even if an older config_sample.py was copied.
+        for key in (*self.CONFIG_KEYS, *self.STARTUP_ONLY_CONFIG_KEYS):
+            if key not in keys:
+                keys.append(key)
+
+        items: list[tuple[str, Any, bool]] = []
+        for key in keys:
+            if not key.isupper() or key == "RESSOURCE":
+                continue
+            value = get_config_resource() if key == "RESOURCE" else getattr(config, key, None)
+            writable = key in self.CONFIG_KEYS and key not in self.CONFIG_NEVER_WRITABLE_KEYS
+            items.append((key, value, writable))
+        return items
+
+    def format_config_value_for_display(self, key: str, value: Any) -> str:
+        if key in self.CONFIG_SECRET_KEYS or any(token in key for token in ("PASSWORD", "SECRET", "TOKEN")):
+            return "****" if value not in (None, "") else "None"
+        return repr(value)
+
+    def parse_config_value(self, raw: str) -> Any:
+        text = raw.strip()
+        if text.lower() == "true":
+            return True
+        if text.lower() == "false":
+            return False
+        if text.lower() == "none":
+            return None
+        try:
+            return ast.literal_eval(text)
+        except Exception:
+            return raw
+
+    def render_config_assignment(self, key: str, value: Any) -> str:
+        return f"{key} = {pprint.pformat(value, width=88, sort_dicts=False)}"
+
+    def update_config_file_assignment(self, key: str, value: Any) -> None:
+        path = self._config_file_path()
+        text = path.read_text(encoding="utf8")
+        assignment = self.render_config_assignment(key, value)
+        pattern = re.compile(rf"^(?P<prefix>\s*){re.escape(key)}\s*=.*$", re.MULTILINE)
+        if pattern.search(text):
+            text = pattern.sub(lambda m: m.group("prefix") + assignment, text, count=1)
+        else:
+            text = text.rstrip() + "\n\n# Runtime config edits\n" + assignment + "\n"
+        path.write_text(text, encoding="utf8")
+
+    async def set_runtime_config_value(self, key: str, raw_value: str) -> tuple[bool, str]:
+        key = key.upper().strip()
+        if key not in self.CONFIG_KEYS:
+            return False, f"{key} is not a runtime-writable config option."
+        if key in self.CONFIG_NEVER_WRITABLE_KEYS:
+            return False, f"{key} cannot be changed via chat command."
+
+        old_value = getattr(config, key, None)
+        new_value = self.parse_config_value(raw_value)
+        previous_module_values = {name: getattr(config, name, None) for name in (*self.CONFIG_KEYS, *self.STARTUP_ONLY_CONFIG_KEYS)}
+        setattr(config, key, new_value)
+        errors, warnings = self._validate_config()
+        if errors:
+            self._restore_config_values(previous_module_values)
+            return False, "Invalid value; config.py was not changed.\n" + self._format_config_validation(errors, warnings)
+
+        try:
+            self.update_config_file_assignment(key, new_value)
+            importlib.reload(config)
+            self.apply_runtime_config()
+            await self.update_vcard()
+        except Exception as exc:
+            self._restore_config_values(previous_module_values)
+            return False, f"Failed to write/apply config: {format_config_import_error(exc) if isinstance(exc, BaseException) else exc}"
+
+        return True, f"✅ {key} updated: {old_value!r} → {new_value!r}"
+
+    async def unset_runtime_config_value(self, key: str) -> tuple[bool, str]:
+        key = key.upper().strip()
+        defaults = self._config_default_values_from_sample()
+        if key not in defaults:
+            return False, f"No default value found for {key} in config_sample.py."
+        return await self.set_runtime_config_value(key, repr(defaults[key]))
 
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:

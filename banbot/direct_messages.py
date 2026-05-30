@@ -113,6 +113,17 @@ class DirectMessageMixin:
                 await self._cmd_config(reply_to)
                 return True
 
+            if cmd == "omemo":
+                action = args[0].lower() if args else "status"
+                if action in ("status", "devices", "device"):
+                    await self.cmd_omemo(args, reply_to, actor=sender_bare)
+                    return True
+                await self._send_direct_message(
+                    reply_to,
+                    f"❌ Direct-message OMEMO commands are read-only. Allowed: {p}omemo status, {p}omemo devices",
+                )
+                return True
+
             if cmd == "status":
                 await self._cmd_status(reply_to)
                 return True
@@ -360,7 +371,8 @@ class DirectMessageMixin:
         if is_admin:
             response = (
                 "🤖 Admin DM support is read-only.\n"
-                f"Allowed: {self.command_prefix}config, {self.command_prefix}status, "
+                f"Allowed: {self.command_prefix}config, {self.command_prefix}omemo status, "
+                f"{self.command_prefix}omemo devices, {self.command_prefix}status, "
                 f"{self.command_prefix}checkupdate, {self.command_prefix}updatecheck, "
                 f"{self.command_prefix}banlist, {self.command_prefix}bansearch, "
                 f"{self.command_prefix}why, {self.command_prefix}room list, "

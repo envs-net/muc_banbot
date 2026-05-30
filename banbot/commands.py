@@ -249,6 +249,7 @@ class CommandMixin:
     ) -> bool:
         admin_commands = {
             "config",
+            "omemo",
             "reload",
             "reloadconfig",
             "restart",
@@ -289,7 +290,13 @@ class CommandMixin:
             return True
 
         if cmd == "config":
-            await self._cmd_config(room)
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            await self._cmd_config(room, args, actor=actor_jid)
+            return True
+
+        if cmd == "omemo":
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            await self.cmd_omemo(args, room, actor=actor_jid)
             return True
 
         if cmd in ("reload", "reloadconfig"):
@@ -798,7 +805,8 @@ class CommandMixin:
         p = self.command_prefix
         return (
             f"{p}help - show this help\n"
-            f"{p}config - show current configuration\n"
+            f"{p}config [show|set|unset] - show/edit runtime config\n"
+            f"{p}omemo status|devices|reset - inspect/reset OMEMO state\n"
             f"{p}reload / {p}reloadconfig - reload config.py at runtime\n"
             f"{p}restart confirm - stop the bot so a supervisor can restart it\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"

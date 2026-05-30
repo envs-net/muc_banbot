@@ -30,14 +30,25 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | Command | Description | Example |
 | --- | --- | --- |
 | `!help` | Shows admin help | `!help` |
-| `!config` | Shows current bot configuration | `!config` |
+| `!config [show]` | Shows full configuration in `config.py` order; secrets are hidden | `!config show` |
+| `!config set <KEY> <value>` | Updates a runtime-writable config option | `!config set LOG_LEVEL DEBUG` |
+| `!config unset <KEY>` | Resets a runtime-writable option to the `config_sample.py` default | `!config unset LOG_LEVEL` |
+| `!omemo status` | Shows OMEMO readiness, storage, permissions, and identity metadata | `!omemo status` |
+| `!omemo devices` | Shows best-effort local OMEMO device hints and visible admin-room recipients | `!omemo devices` |
+| `!omemo reset confirm` | Rotates local OMEMO storage/metadata to `.bak-*`; restart afterwards | `!omemo reset confirm` |
 | `!reload` / `!reloadconfig` | Reloads runtime config safely | `!reload` |
 | `!restart` / `!restart confirm` | Shows restart confirmation / exits cleanly so a supervisor can restart the bot | `!restart confirm` |
 | `!status` | Shows health, rooms, uptime, bans, DB, RTBL, and workers | `!status` |
 | `!checkupdate` / `!updatecheck` | Checks whether a newer GitHub release is available | `!updatecheck` |
 | `!whoami` | Shows affiliation, role, and permissions | `!whoami` |
 
-### Reload and Restart
+### Config, Reload and Restart
+
+`!config show` prints the current configuration in `config.py` order, with missing supported keys appended from `config_sample.py`. `PASSWORD` and other secret-like values are shown as `****`. `🔒` means protected/restart-only, `✏️` means runtime-writable.
+
+`!config set <KEY> <value>` writes a runtime-writable option to `config.py`, validates it, applies it immediately, and creates an audit entry. Values may be simple strings (`DEBUG`), booleans (`true`/`false`), integers (`300`), `None`, or Python literals for lists such as `['spam', 'abuse']`.
+
+`!config unset <KEY>` resets a runtime-writable option to the default from `config_sample.py`. Startup-only/sensitive settings such as `JID`, `PASSWORD`, `RESOURCE`, `ADMIN_ROOM`, `DB_FILE`, RTBL publish setup, and OMEMO setup cannot be changed via chat command.
 
 `!reload` is a short alias for `!reloadconfig` and reloads runtime-reloadable settings from `config.py`. Startup-only settings still require a process restart.
 
@@ -60,6 +71,8 @@ Allowed DM commands for admins:
 
 ```text
 !config
+!omemo status
+!omemo devices
 !status
 !checkupdate / !updatecheck
 !audit [all|page|last|query]

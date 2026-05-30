@@ -725,3 +725,193 @@ class OmemoMixin:
         recipients = {jid for jid in recipients if jid and jid.bare}
         log.debug("OMEMO: %d recipient(s) available for %s", len(recipients), room)
         return recipients
+    def _omemo_storage_status_lines(self) -> list[str]:
+        """Return human-readable status lines for the configured OMEMO store."""
+        storage_path = Path(str(getattr(self, "omemo_storage_file", "data/omemo.json"))).expanduser()
+        metadata_path = _omemo_identity_metadata_path(storage_path)
+        identity = _current_omemo_identity(__import__("config"))
+        try:
+            stored_identity = _read_omemo_identity_metadata(metadata_path)
+        except Exception as exc:
+            stored_identity = None
+            metadata_error = str(exc)
+        else:
+            metadata_error = None
+
+        lines = [
+            f"🔐 OMEMO enabled: {getattr(self, 'omemo_enabled', False)}",
+            f"📦 Optional dependencies available: {OMEMO_AVAILABLE}",
+            f"✅ OMEMO ready: {bool(getattr(self, 'omemo_ready', None) and self.omemo_ready.is_set())}",
+            f"📁 Storage file: {storage_path}",
+            f"🪪 Identity reset on change: {getattr(self, 'omemo_reset_on_identity_change', True)}",
+            f"🔁 Admin-room auto encryption: {getattr(self, 'omemo_auto_encrypt_admin_room', True)}",
+            f"🧯 Plaintext fallback: {getattr(self, 'omemo_plaintext_fallback', False)}",
+        ]
+
+        if storage_path.exists():
+            try:
+                stat = storage_path.stat()
+                lines.append(f"💾 Storage size: {stat.st_size} bytes")
+                lines.append(f"🔒 Storage permissions: {oct(stat.st_mode & 0o777)}")
+            except Exception as exc:
+                lines.append(f"⚠️ Storage stat failed: {exc}")
+        else:
+            lines.append("⚠️ Storage file does not exist yet")
+
+        lines.append(
+            "🧬 Current identity: "
+            f"jid={identity.get('jid') or '-'} resource={identity.get('resource') or '-'} nick={identity.get('nick') or '-'}"
+        )
+        if stored_identity:
+            lines.append(
+                "🧬 Stored identity:  "
+                f"jid={stored_identity.get('jid') or '-'} resource={stored_identity.get('resource') or '-'} nick={stored_identity.get('nick') or '-'}"
+            )
+            lines.append(f"✅ Identity matches: {stored_identity == identity}")
+        elif metadata_error:
+            lines.append(f"⚠️ Identity metadata could not be read: {metadata_error}")
+        else:
+            lines.append("ℹ️ No identity metadata exists yet")
+
+        return lines
+
+    def _collect_omemo_storage_device_hints(self) -> dict[str, set[str]]:
+        """Best-effort extract JID/device-id hints from the JSON storage file."""
+        storage_path = Path(str(getattr(self, "omemo_storage_file", "data/omemo.json"))).expanduser()
+        if not storage_path.exists() or not storage_path.is_file():
+            return {}
+
+        try:
+            data = json.loads(storage_path.read_text(encoding="utf8") or "{}")
+        except Exception:
+            return {}
+
+        devices: dict[str, set[str]] = {}
+        jid_re = re.compile(r"([A-Za-z0-9_.%+\-]+@[A-Za-z0-9.\-]+)")
+        device_re = re.compile(r"(?:device[_-]?id|device|dev)[^0-9]{0,8}([0-9]{1,12})", re.I)
+
+        def walk(obj: Any, context_jid: str | None = None) -> None:
+            if isinstance(obj, dict):
+                local_jid = context_jid
+                for key, value in obj.items():
+                    key_text = str(key)
+                    jid_match = jid_re.search(key_text)
+                    if jid_match:
+                        local_jid = jid_match.group(1).lower()
+                        devices.setdefault(local_jid, set())
+                    dev_match = device_re.search(key_text)
+                    if dev_match and local_jid:
+                        devices.setdefault(local_jid, set()).add(dev_match.group(1))
+                    walk(value, local_jid)
+            elif isinstance(obj, list):
+                for item in obj:
+                    walk(item, context_jid)
+            elif isinstance(obj, str):
+                jid_match = jid_re.search(obj)
+                if jid_match:
+                    devices.setdefault(jid_match.group(1).lower(), set())
+                dev_match = device_re.search(obj)
+                if dev_match and context_jid:
+                    devices.setdefault(context_jid, set()).add(dev_match.group(1))
+            elif isinstance(obj, int) and context_jid and 0 < obj < 10_000_000_000:
+                devices.setdefault(context_jid, set()).add(str(obj))
+
+        walk(data)
+        return devices
+
+    async def _cmd_omemo_status(self, room: str) -> None:
+        await self.bot_send_message(
+            mto=room,
+            mbody="\n".join(["🔐 OMEMO Status", "", *self._omemo_storage_status_lines()]),
+            mtype="groupchat",
+        )
+
+    async def _cmd_omemo_devices(self, room: str) -> None:
+        lines = ["🔐 OMEMO Device Hints", ""]
+        devices = self._collect_omemo_storage_device_hints()
+        if devices:
+            for jid in sorted(devices):
+                ids = sorted(devices[jid], key=lambda x: int(x) if x.isdigit() else x)
+                lines.append(f"• {jid}: {', '.join(ids) if ids else 'known, device IDs not visible in storage'}")
+        else:
+            lines.append("No device hints found in local OMEMO storage.")
+
+        if getattr(self, "omemo_enabled", False):
+            try:
+                recipients = await self._omemo_recipients_for_room(__import__("config").ADMIN_ROOM)
+            except Exception as exc:
+                lines.append(f"\n⚠️ Could not collect current admin-room recipients: {exc}")
+            else:
+                lines.append(f"\nCurrent admin-room OMEMO recipients: {len(recipients)}")
+                for jid in sorted(str(j.bare) for j in recipients):
+                    lines.append(f"• {jid}")
+
+        await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
+
+    async def _cmd_omemo_reset(self, room: str, actor: str | None, confirm: bool) -> None:
+        if not confirm:
+            await self.bot_send_message(
+                mto=room,
+                mbody=(
+                    "⚠️ This rotates the local OMEMO storage and identity metadata to .bak-* files.\n"
+                    "A restart is required afterwards so the OMEMO plugin creates a fresh identity.\n\n"
+                    f"Confirm with: {getattr(self, 'command_prefix', '!')}omemo reset confirm"
+                ),
+                mtype="groupchat",
+            )
+            return
+
+        storage_path = Path(str(getattr(self, "omemo_storage_file", "data/omemo.json"))).expanduser()
+        metadata_path = _omemo_identity_metadata_path(storage_path)
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        storage_backup = _backup_existing_path(storage_path, timestamp)
+        metadata_backup = _backup_existing_path(metadata_path, timestamp)
+        identity = _current_omemo_identity(__import__("config"))
+        _write_omemo_identity_metadata(metadata_path, identity)
+
+        self.omemo_ready.clear()
+        lines = [
+            "✅ OMEMO storage reset prepared.",
+            "Restart the bot now to create and publish a fresh OMEMO identity.",
+        ]
+        if storage_backup:
+            lines.append(f"Old storage backup: {storage_backup}")
+        if metadata_backup:
+            lines.append(f"Old metadata backup: {metadata_backup}")
+        if not storage_backup and not metadata_backup:
+            lines.append("No existing storage/metadata files had to be rotated.")
+
+        try:
+            await self.audit_event(
+                "omemo_reset",
+                actor=actor or "unknown",
+                details={"storage_backup": str(storage_backup) if storage_backup else None, "metadata_backup": str(metadata_backup) if metadata_backup else None},
+            )
+        except Exception as exc:
+            log.debug("Failed to audit OMEMO reset: %s", exc)
+
+        await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
+
+    async def cmd_omemo(self, args: list[str], room: str, actor: str | None = None) -> None:
+        """Admin command entry point for OMEMO diagnostics and reset."""
+        action = args[0].lower() if args else "status"
+        if action == "status":
+            await self._cmd_omemo_status(room)
+            return
+        if action in ("devices", "device"):
+            await self._cmd_omemo_devices(room)
+            return
+        if action == "reset":
+            await self._cmd_omemo_reset(room, actor, confirm=len(args) > 1 and args[1].lower() == "confirm")
+            return
+
+        await self.bot_send_message(
+            mto=room,
+            mbody=(
+                "Usage:\n"
+                f"  {getattr(self, 'command_prefix', '!')}omemo status\n"
+                f"  {getattr(self, 'command_prefix', '!')}omemo devices\n"
+                f"  {getattr(self, 'command_prefix', '!')}omemo reset [confirm]"
+            ),
+            mtype="groupchat",
+        )

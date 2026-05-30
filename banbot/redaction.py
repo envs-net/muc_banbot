@@ -227,6 +227,14 @@ class RedactionMixin:
                         room_jid,
                         exc,
                     )
+                    if hasattr(self, "send_operational_alert"):
+                        await self.send_operational_alert(
+                            f"redaction_failed:{room_jid}",
+                            "Redaction failed",
+                            f"Failed to redact stanza {stanza_id} in {room_jid}: {exc}",
+                            enabled=getattr(self, "alert_on_redaction_failure", True),
+                            details={"room": room_jid, "stanza_id": stanza_id, "error": str(exc)},
+                        )
                     return False, None
 
                 return True, row_id
@@ -363,6 +371,14 @@ class RedactionMixin:
         except Exception as exc:
             summary["failed"] = 1
             log.warning("Redaction failed for stanza %s in %s: %s", stanza_id, room_jid, exc)
+            if hasattr(self, "send_operational_alert"):
+                await self.send_operational_alert(
+                    f"redaction_failed:{room_jid}",
+                    "Redaction failed",
+                    f"Failed to redact stanza {stanza_id} in {room_jid}: {exc}",
+                    enabled=getattr(self, "alert_on_redaction_failure", True),
+                    details={"room": room_jid, "stanza_id": stanza_id, "error": str(exc)},
+                )
         else:
             await self.db.execute(
                 """

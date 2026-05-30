@@ -49,14 +49,22 @@ These require a bot restart. `!reloadconfig` warns if they changed and keeps the
 * `OMEMO_STORAGE_FILE`
 * `OMEMO_AUTO_ENCRYPT_ADMIN_ROOM`
 * `OMEMO_PLAINTEXT_FALLBACK`
+* `OMEMO_RESET_ON_IDENTITY_CHANGE`
 
 ## Runtime-Reloadable Settings
 
-Most operational settings can be reloaded with:
+Most operational settings can be shown, edited, reset to the sample default, or reloaded from disk with:
 
 ```text
+!config show
+!config set <KEY> <value>
+!config unset <KEY>
 !reloadconfig
 ```
+
+`!config show` follows the active `config.py` order and appends missing supported keys from `config_sample.py`, marks runtime-writable values with `✏️`, marks protected/restart-only values with `🔒`, and hides secrets such as `PASSWORD` as `****`.
+
+`!config set` and `!config unset` only allow runtime-writable settings. Identity, password, database path, admin room, RTBL setup, and OMEMO startup settings remain protected and require manual edit + restart.
 
 `!reloadconfig` validates `config.py`, keeps the last known good runtime config if validation fails, and reports warnings/errors in the admin room.
 
@@ -72,6 +80,14 @@ Common runtime settings:
 | `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` | `True` | Enable public protected-room commands |
 | `ALLOW_ADMIN_COMMANDS_IN_DMS` | `True` | Allow admins to use selected read-only commands via direct messages / MUC PMs |
 | `ROOM_INVITES_ENABLED` | `False` | Enable admin-reviewed protected-room invite workflow |
+| `ALERT_ON_RECONNECT` | `True` | Alert after a successful reconnect |
+| `ALERT_ON_ADMIN_RIGHTS_LOST` | `True` | Alert when the bot loses admin/owner rights |
+| `ALERT_ON_HEALTH_CHECK_FAILURE` | `True` | Alert on room health-check failures |
+| `ALERT_ON_DB_STATS_FAILURE` | `True` | Alert when DB stats cannot be read |
+| `ALERT_ON_REDACTION_FAILURE` | `True` | Alert on failed message redactions |
+| `ALERT_ON_DB_SIZE_MB` | `0` | Alert when DB size reaches this MiB value; `0` disables |
+| `ALERT_ON_RTBL_REFRESH_FAILURES` | `3` | Alert after this many consecutive RTBL refresh failures per subscription; `0` disables |
+| `ALERT_DEDUP_WINDOW` | `300` | Suppress duplicate alerts with the same key for this many seconds |
 | `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` | `30` | Rate-limit window in seconds |
 | `PUBLIC_COMMAND_RATE_LIMIT_MAX` | `3` | Max public command uses per nick/room/command/window |
 | `STRUCTURED_EVENT_LOGS` | `True` | Emit JSON logs for important events |

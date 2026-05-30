@@ -84,6 +84,25 @@ STRUCTURED_EVENT_LOGS = True
 AUDIT_LOG_ENABLED = True
 AUDIT_LOG_RETENTION_DAYS = 365
 
+# ================= EVENT ALERTS =================
+
+# Send operational alerts to ADMIN_ROOM. Alerts are deduplicated per type/window.
+ALERT_ON_RECONNECT = True
+ALERT_ON_ADMIN_RIGHTS_LOST = True
+ALERT_ON_HEALTH_CHECK_FAILURE = True
+ALERT_ON_DB_STATS_FAILURE = True
+ALERT_ON_REDACTION_FAILURE = True
+
+# 0 disables the DB size alert. Values are in MiB.
+ALERT_ON_DB_SIZE_MB = 0
+
+# Alert after this many consecutive periodic RTBL refresh failures per subscription.
+# 0 disables RTBL refresh failure alerts.
+ALERT_ON_RTBL_REFRESH_FAILURES = 3
+
+# Suppress duplicate alerts with the same key for this many seconds. 0 disables deduplication.
+ALERT_DEDUP_WINDOW = 300
+
 # ================= OMEMO ENCRYPTION =================
 
 # Enable OMEMO support for encrypted incoming commands and outgoing replies.

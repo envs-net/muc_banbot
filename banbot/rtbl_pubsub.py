@@ -622,6 +622,7 @@ class RtblPubSubMixin:
             log.info("RTBL: Starting periodic refresh (%ds interval)", interval)
 
             for service_jid, node in list(self.rtbl_subscriptions):
+                alert_key = f"rtbl_refresh:{str(service_jid).lower()}:{node}"
                 try:
                     await self._rtbl_fetch_all_items(
                         service_jid,
@@ -635,5 +636,15 @@ class RtblPubSubMixin:
                         service_jid,
                         e,
                     )
+                    await self.record_alert_failure(
+                        alert_key,
+                        "RTBL periodic refresh failed",
+                        f"RTBL refresh failed for {node} @ {service_jid}: {e}",
+                        enabled=bool(getattr(self, "alert_on_rtbl_refresh_failures", 3)),
+                        threshold=int(getattr(self, "alert_on_rtbl_refresh_failures", 3) or 1),
+                        details={"service_jid": service_jid, "node": node, "error": str(e)},
+                    )
+                else:
+                    self.record_alert_success(alert_key)
 
             log.info("RTBL: Periodic refresh complete")
