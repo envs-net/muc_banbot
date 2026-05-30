@@ -220,7 +220,7 @@ class CommandMixin:
             await self.cmd_why(args[0], room)
             return True
 
-        if cmd == "whoami":
+        if cmd == "whoami" and self.user_cmds_allowed(room):
             await self._cmd_whoami(room, nick)
             return True
 
@@ -514,10 +514,31 @@ class CommandMixin:
                 "Import completed: %d successful, %d skipped, %d errors",
                 successful,
                 skipped,
-                len(errors)
+                len(errors),
             )
-            self.log_event(logging.INFO, "import_completed", actor=nick, filename=filename, successful=successful, skipped=skipped, errors=len(errors), backup=self.last_import_backup_file)
-            await self.audit_event("import_completed", actor=nick, details={"filename": filename, "successful": successful, "skipped": skipped, "errors": len(errors), "backup": self.last_import_backup_file})
+
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            self.log_event(
+                logging.INFO,
+                "import_completed",
+                actor=actor_jid,
+                filename=filename,
+                successful=successful,
+                skipped=skipped,
+                errors=len(errors),
+                backup=self.last_import_backup_file,
+            )
+            await self.audit_event(
+                "import_completed",
+                actor=actor_jid,
+                details={
+                    "filename": filename,
+                    "successful": successful,
+                    "skipped": skipped,
+                    "errors": len(errors),
+                    "backup": self.last_import_backup_file,
+                },
+            )
             return True
 
         if cmd == "rtbl":
@@ -541,6 +562,12 @@ class CommandMixin:
             await self.cmd_policy(args, room)
             return True
 
+        await self.bot_send_message(
+            mto=room,
+            mbody=f"⚠️ Admin command '{cmd}' is recognized but not implemented.",
+            mtype="groupchat",
+        )
+        log.error("Unhandled admin command routed without handler: %s", cmd)
         return True
 
 
