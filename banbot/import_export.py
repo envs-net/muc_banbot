@@ -72,6 +72,7 @@ class ImportExportMixin:
         skipped = 0
         errors = []
         bans_to_insert = []
+        staged_lookup_keys = set()
 
         try:
             if not pathlib.Path(filename).exists():
@@ -147,6 +148,11 @@ class ImportExportMixin:
                             normalized_jid = existing_jid
 
                     lookup_key = f"*.{target}" if target_type == "domain" else target
+                    if lookup_key in staged_lookup_keys:
+                        log.info("Row %d: Duplicate staged import row for %s, skipping", row_num, lookup_key)
+                        skipped += 1
+                        continue
+
                     if lookup_key in self.ban_cache:
                         existing = self.ban_cache[lookup_key]
                         existing_until = existing[2]
@@ -164,7 +170,7 @@ class ImportExportMixin:
                         issuer,
                         comment,
                     ))
-                    self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
+                    staged_lookup_keys.add(lookup_key)
                     successful += 1
 
                 except Exception as e:
@@ -191,7 +197,6 @@ class ImportExportMixin:
                     return 0, 0, errors
 
                 try:
-                    await self.db.execute("BEGIN")
                     await self.db.executemany(
                         """
                         INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment, updated_at)
@@ -207,6 +212,16 @@ class ImportExportMixin:
                         bans_to_insert,
                     )
                     await self.db.commit()
+                    for (
+                        _target_type,
+                        _target,
+                        normalized_jid,
+                        normalized_nick,
+                        until,
+                        issuer,
+                        comment,
+                    ) in bans_to_insert:
+                        self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
                     log.info("✅ Batch upserted %d bans", len(bans_to_insert))
                 except Exception as e:
                     log.error("Batch insert failed, rolling back import transaction: %s", e)

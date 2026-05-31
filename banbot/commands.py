@@ -534,6 +534,8 @@ class CommandMixin:
             await self.audit_event(
                 "import_completed",
                 actor=actor_jid,
+                target_type="import",
+                target=filename,
                 details={
                     "filename": filename,
                     "successful": successful,

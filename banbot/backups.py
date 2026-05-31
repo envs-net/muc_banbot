@@ -167,6 +167,8 @@ class BackupMixin:
         event_type: str,
         *,
         actor: str | None,
+        target_type: str | None = None,
+        target: str | None = None,
         details: dict[str, Any],
     ) -> None:
         """Remember backup audit events until the SQLite audit table is ready."""
@@ -174,7 +176,7 @@ class BackupMixin:
         if pending is None:
             pending = []
             self._pending_database_backup_audit_events = pending
-        pending.append((event_type, actor, details))
+        pending.append((event_type, actor, target_type, target, details))
 
     async def flush_pending_database_backup_audit_events(self) -> None:
         """Persist backup audit events that were created before setup_db opened SQLite."""
@@ -184,13 +186,19 @@ class BackupMixin:
         if not getattr(self, "db", None) or not hasattr(self, "audit_event"):
             return
 
-        remaining: list[tuple[str, str | None, dict[str, Any]]] = []
-        for event_type, actor, details in pending:
+        remaining: list[tuple[str, str | None, str | None, str | None, dict[str, Any]]] = []
+        for event_type, actor, target_type, target, details in pending:
             try:
-                await self.audit_event(event_type, actor=actor, details=details)
+                await self.audit_event(
+                    event_type,
+                    actor=actor,
+                    target_type=target_type,
+                    target=target,
+                    details=details,
+                )
             except Exception as exc:
                 log.debug("Failed to flush pending backup audit event %s: %s", event_type, exc)
-                remaining.append((event_type, actor, details))
+                remaining.append((event_type, actor, target_type, target, details))
         self._pending_database_backup_audit_events = remaining
 
 
@@ -276,6 +284,8 @@ class BackupMixin:
                         await self.audit_event(
                             "db_backup_created",
                             actor=audit_actor,
+                            target_type="backup",
+                            target=backup_path.name,
                             details=audit_details,
                         )
                     except Exception as exc:
@@ -284,6 +294,8 @@ class BackupMixin:
                     self._queue_database_backup_audit_event(
                         "db_backup_created",
                         actor=audit_actor,
+                        target_type="backup",
+                        target=backup_path.name,
                         details=audit_details,
                     )
             return True, str(backup_path)
@@ -402,6 +414,8 @@ class BackupMixin:
                     await self.audit_event(
                         "db_backup_restored",
                         actor=actor or "unknown",
+                        target_type="backup",
+                        target=backup.name,
                         details={
                             "backup": str(backup.path),
                             "safety_backup": safety_message if safety_ok else None,
