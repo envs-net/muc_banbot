@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 import pytest
@@ -30,6 +31,8 @@ class BackupBot(BackupMixin, DatabaseMixin, CacheMixin):
         self.command_prefix = "!"
         self.last_database_backup_file = None
         self.last_database_restore_file = None
+        self._database_file_operation_lock = asyncio.Lock()
+        self._ban_state_operation_lock = asyncio.Lock()
 
     def log_event(self, level, event, **fields):
         self.events.append((level, event, fields))

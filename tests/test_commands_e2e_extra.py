@@ -22,6 +22,8 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
         self.version_check_url = "https://example.test/releases/latest"
         self.rtbl_enabled = True
         self.last_database_backup_file = None
+        self._database_file_operation_lock = asyncio.Lock()
+        self._ban_state_operation_lock = asyncio.Lock()
         self.sent = []
         self.ban_calls = []
         self.unban_calls = []

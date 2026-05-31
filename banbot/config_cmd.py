@@ -269,7 +269,7 @@ class ConfigCommandMixin(ConfigMixin):
                     mbody=f"❌ Config reload aborted. Old config is still active.\n\n{msg}",
                     mtype="groupchat"
                 )
-                log.error("Config reload aborted: %s", errors)
+                log.error("Config reload aborted with %d validation error(s)", len(errors))
                 return
 
             lines = ["✅ Config reloaded successfully."]
@@ -289,11 +289,11 @@ class ConfigCommandMixin(ConfigMixin):
                 mbody="\n".join(lines),
                 mtype="groupchat"
             )
-            log.info("Config reloaded at runtime. Changes: %s", changes or "none")
+            log.info("Config reloaded at runtime. Changed settings: %d", len(changes))
         except Exception as e:
             await self.bot_send_message(
                 mto=room,
                 mbody=f"❌ Failed to reload config: {e}",
                 mtype="groupchat"
             )
-            log.error("Failed to reload config: %s", e)
+            log.error("Failed to reload config")

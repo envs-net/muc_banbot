@@ -632,7 +632,7 @@ class ConfigMixin:
         self.version_check_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip() or None
 
         self.rtbl_announce = getattr(config, "RTBL_ANNOUNCE", True)
-        self.rtbl_refresh_interval  = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
+        self.rtbl_refresh_interval = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
 
         self.redaction_enabled = getattr(config, "REDACTION_ENABLED", False)
         self.redaction_index_retention_days = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)

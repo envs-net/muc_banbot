@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import pathlib
 
@@ -23,6 +24,8 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
         self.last_database_backup_file = None
         self.last_database_restore_file = None
         self._pending_database_backup_audit_events = []
+        self._database_file_operation_lock = asyncio.Lock()
+        self._ban_state_operation_lock = asyncio.Lock()
 
     def log_event(self, level, event, **fields):
         self.events.append((level, event, fields))

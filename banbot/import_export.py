@@ -122,8 +122,12 @@ class ImportExportMixin:
             resolved = candidate.resolve()
         except OSError:
             return None
-        if export_dir not in (resolved, *resolved.parents):
-            return None
+        try:
+            if not resolved.is_relative_to(export_dir):
+                return None
+        except AttributeError:
+            if resolved != export_dir and export_dir not in resolved.parents:
+                return None
         if not resolved.is_file() or not resolved.name.startswith("bans_export_") or resolved.suffix != ".csv":
             return None
         return resolved
@@ -304,7 +308,12 @@ class ImportExportMixin:
         actor: str | None = None,
         dry_run: bool = False,
     ) -> tuple[int, int, list[str]]:
-        """Import bans from a CSV file. Returns successful/skipped/errors."""
+        """Import bans from a CSV file.
+
+        Returns (successful_or_staged, skipped, errors). In normal mode,
+        successful_or_staged is the number of bans actually imported. In dry-run
+        mode, it is the number of bans staged and would be imported.
+        """
         errors: list[str] = []
         try:
             async with get_database_file_lock(self):
@@ -326,6 +335,11 @@ class ImportExportMixin:
         actor: str | None = None,
         dry_run: bool = False,
     ) -> tuple[int, int, list[str]]:
+        """Run CSV import while required locks are held.
+
+        Returns (successful_or_staged, skipped, errors). In dry-run mode,
+        successful_or_staged is the count of staged rows that would be imported.
+        """
         bans_to_insert, skipped, errors = await self._stage_ban_import_rows(filename)
         successful = len(bans_to_insert)
         if dry_run:

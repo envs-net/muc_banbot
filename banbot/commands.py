@@ -501,18 +501,23 @@ class CommandMixin:
             dry_run = len(args) >= 2 and args[1].lower() in {"dryrun", "dry-run", "check"}
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             previous_backup = getattr(self, "last_database_backup_file", None)
-            try:
-                successful, skipped, errors = await self.import_bans_from_csv(
-                    filename,
-                    actor=actor_jid,
-                    dry_run=dry_run,
+            import_kwargs = {"actor": actor_jid}
+            # Lightweight tests and older mixins may not support dry_run yet.
+            import_sig = inspect.signature(self.import_bans_from_csv)
+            supports_dry_run = (
+                "dry_run" in import_sig.parameters
+                or any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in import_sig.parameters.values()
                 )
-            except TypeError:
-                # Lightweight tests and older mixins may not support dry_run yet.
-                successful, skipped, errors = await self.import_bans_from_csv(
-                    filename,
-                    actor=actor_jid,
-                )
+            )
+            if supports_dry_run:
+                import_kwargs["dry_run"] = dry_run
+
+            successful, skipped, errors = await self.import_bans_from_csv(
+                filename,
+                **import_kwargs,
+            )
             import_backup = getattr(self, "last_database_backup_file", None)
             if import_backup == previous_backup:
                 import_backup = None
