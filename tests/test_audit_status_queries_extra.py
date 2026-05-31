@@ -40,7 +40,6 @@ class AuditStatusQueryBot(
         self.audit_log_retention_days = 30
         self.last_audit_cleanup_count = 0
         self.last_audit_cleanup_run = 0
-        self.last_import_backup_file = None
         self.last_version_check_result = "2.2.0"
         self.bot_start_time = int(time.time()) - 90
         self.server_connect_time = int(time.time()) - 30

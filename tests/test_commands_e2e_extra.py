@@ -21,7 +21,7 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
         self.public_command_rate_limit_max = 3
         self.version_check_url = "https://example.test/releases/latest"
         self.rtbl_enabled = True
-        self.last_import_backup_file = None
+        self.last_database_backup_file = None
         self.sent = []
         self.ban_calls = []
         self.unban_calls = []
@@ -105,8 +105,9 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
     async def export_bans_to_csv(self):
         return self.export_result
 
-    async def import_bans_from_csv(self, filename):
-        self.last_import_backup_file = "backup.csv"
+    async def import_bans_from_csv(self, filename, *, actor=None):
+        self.import_actor = actor
+        self.last_database_backup_file = "backup.csv"
         return self.import_result
 
     def log_event(self, level, event, **fields):
@@ -218,7 +219,7 @@ async def test_admin_export_and_import_commands_send_summaries(fake_msg_factory,
     assert "Successful: 2" in bot.sent[1]["mbody"]
     assert "Skipped: 1" in bot.sent[1]["mbody"]
     assert "line 4: invalid target" in bot.sent[1]["mbody"]
-    assert "Backup before import: backup.csv" in bot.sent[1]["mbody"]
+    assert "Full backup before import: backup.csv" in bot.sent[1]["mbody"]
 
 
 @pytest.mark.asyncio

@@ -207,7 +207,6 @@ class BanBot(
         self.public_command_rate_limit_hits: dict[tuple[str, str, str], list[float]] = {}
 
         # --- database backups ---
-        self.last_import_backup_file: str | None = None
         self.last_database_backup_file: str | None = None
         self.last_database_restore_file: str | None = None
 

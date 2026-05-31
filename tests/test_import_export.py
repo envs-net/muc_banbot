@@ -1,4 +1,5 @@
 import csv
+import pathlib
 
 import pytest
 
@@ -7,9 +8,10 @@ aiosqlite = pytest.importorskip("aiosqlite")
 from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
 from banbot.import_export import ImportExportMixin
+from banbot.backups import BackupMixin
 
 
-class ImportBot(DatabaseMixin, CacheMixin, ImportExportMixin):
+class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
     def __init__(self):
         self.protected_rooms = set()
         self.ban_cache = {}
@@ -18,6 +20,9 @@ class ImportBot(DatabaseMixin, CacheMixin, ImportExportMixin):
         self.ban_index_by_domain = {}
         self.events = []
         self.audit_events = []
+        self.last_database_backup_file = None
+        self.last_database_restore_file = None
+        self._pending_database_backup_audit_events = []
 
     def log_event(self, level, event, **fields):
         self.events.append((level, event, fields))
@@ -65,9 +70,9 @@ async def test_import_rejects_invalid_header(tmp_path):
 
 @pytest.mark.asyncio
 async def test_import_bans_from_csv_creates_backup_and_upserts_rows(temp_db_path, tmp_path, monkeypatch):
-    import banbot.import_export as import_export_module
+    import banbot.backups as backups_module
 
-    monkeypatch.setattr(import_export_module, "DB_FILE", str(temp_db_path), raising=False)
+    monkeypatch.setattr(backups_module.config, "DB_BACKUP_DIR", str(tmp_path / "backups"), raising=False)
     csv_file = tmp_path / "bans.csv"
     csv_file.write_text(
         "jid,nick,until,issuer,comment\n"
@@ -82,9 +87,9 @@ async def test_import_bans_from_csv_creates_backup_and_upserts_rows(temp_db_path
         successful, skipped, errors = await bot.import_bans_from_csv(str(csv_file))
 
         assert (successful, skipped, errors) == (2, 0, [])
-        assert bot.last_import_backup_file is not None
-        assert temp_db_path.with_name(temp_db_path.name).exists()
-        assert list(temp_db_path.parent.glob(temp_db_path.name + ".backup-before-import-*"))
+        assert bot.last_database_backup_file is not None
+        assert "snapshot-before-import" in bot.last_database_backup_file
+        assert pathlib.Path(bot.last_database_backup_file).is_file()
 
         async with bot.db.execute("SELECT target_type, target, jid, nick, issuer, comment FROM bans ORDER BY target_type, target") as cursor:
             rows = await cursor.fetchall()

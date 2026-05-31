@@ -489,7 +489,15 @@ class CommandMixin:
                 return True
 
             filename = args[0]
-            successful, skipped, errors = await self.import_bans_from_csv(filename)
+            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            previous_backup = getattr(self, "last_database_backup_file", None)
+            successful, skipped, errors = await self.import_bans_from_csv(
+                filename,
+                actor=actor_jid,
+            )
+            import_backup = getattr(self, "last_database_backup_file", None)
+            if import_backup == previous_backup:
+                import_backup = None
 
             result_msg = (
                 f"📥 Import Results:\n"
@@ -497,8 +505,8 @@ class CommandMixin:
                 f"⚠️ Skipped: {skipped}"
             )
 
-            if self.last_import_backup_file:
-                result_msg += f"\n💾 Backup before import: {self.last_import_backup_file}"
+            if import_backup:
+                result_msg += f"\n💾 Full backup before import: {import_backup}"
 
             if errors:
                 result_msg += f"\n\n❌ Errors ({len(errors)}):\n"
@@ -513,7 +521,6 @@ class CommandMixin:
                 skipped,
                 len(errors)
             )
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             self.log_event(
                 logging.INFO,
                 "import_completed",
@@ -522,7 +529,7 @@ class CommandMixin:
                 successful=successful,
                 skipped=skipped,
                 errors=len(errors),
-                backup=self.last_import_backup_file,
+                backup=import_backup,
             )
             await self.audit_event(
                 "import_completed",
@@ -532,7 +539,7 @@ class CommandMixin:
                     "successful": successful,
                     "skipped": skipped,
                     "errors": len(errors),
-                    "backup": self.last_import_backup_file,
+                    "backup": import_backup,
                 },
             )
             return True

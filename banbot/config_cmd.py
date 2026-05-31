@@ -43,7 +43,7 @@ class ConfigCommandMixin:
             "PASSWORD",
             "NICK",
         )),
-        ("🏠 Rooms", (
+        ("🛡️ Admin / Control Room", (
             "ADMIN_ROOM",
         )),
         ("🌐 Connection", (

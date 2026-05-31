@@ -57,7 +57,7 @@ Row 12: until must be a valid number
 Before writing imported rows, BanBot creates a timestamped backup:
 
 ```text
-banbot.db.backup-before-import-YYYYMMDD_HHMMSS
+data/backups/banbot.db.snapshot-before-import-YYYYMMDD_HHMMSS
 ```
 
 ## Use Cases

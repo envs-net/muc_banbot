@@ -25,7 +25,7 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 * ♻️ RTBL snapshot reconciliation with stale local ban cleanup
 * 📡 Optional own RTBL publish feed for local bans
 * 🧾 SQLite audit log and structured JSON event logs
-* 💾 CSV import/export with pre-import database backups
+* 💾 CSV import/export with managed full backups
 * 🗄️ Managed SQLite/config.py backups, restore command, and automatic startup snapshots
 * ✅ Startup/runtime config validation with safe `!reloadconfig`
 * 🚦 Rate limiting for public protected-room commands

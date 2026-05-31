@@ -161,9 +161,7 @@ class StatusMixin:
                 status_lines.append("ℹ️ Notes:")
                 status_lines.extend(f"  • {item}" for item in notes)
 
-        # import info
-        if self.last_import_backup_file:
-            status_lines.append(f"\n💾 Last Import Backup: {self.last_import_backup_file}")
+        # backup / restore info
         if getattr(self, "last_database_backup_file", None):
             status_lines.append(f"\n💾 Last DB Backup: {self.last_database_backup_file}")
         if getattr(self, "last_database_restore_file", None):

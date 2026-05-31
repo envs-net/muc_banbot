@@ -1,13 +1,10 @@
-"""CSV ban import/export, pre-import database backups, and import transactions."""
+"""CSV ban import/export and import transactions with managed full backups."""
 
-import asyncio
 import csv
 import logging
 import pathlib
-import shutil
 from datetime import datetime
 
-from config import DB_FILE
 
 from .utils import normalize_ban_target, validate_domain_ban, validate_jid_format
 
@@ -61,31 +58,12 @@ class ImportExportMixin:
             return False, f"❌ Export failed: {e}"
 
 
-    async def backup_database_before_import(self) -> tuple[bool, str]:
-        """Create a timestamped SQLite DB backup before an import changes bans."""
-        self.last_import_backup_file = None
-        db_path = pathlib.Path(DB_FILE)
-        if not db_path.exists():
-            return False, f"Database file does not exist: {DB_FILE}"
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = db_path.with_name(f"{db_path.name}.backup-before-import-{timestamp}")
-
-        try:
-            if self.db:
-                await self.db.commit()
-            await asyncio.to_thread(shutil.copy2, db_path, backup_path)
-            self.last_import_backup_file = str(backup_path)
-            log.info("✅ Created DB backup before import: %s", backup_path)
-            self.log_event(logging.INFO, "db_backup_created", backup=str(backup_path), reason="before_import")
-            await self.audit_event("db_backup_created", details={"backup": str(backup_path), "reason": "before_import"})
-            return True, str(backup_path)
-        except Exception as e:
-            log.error("Failed to create DB backup before import: %s", e)
-            return False, str(e)
-
-
-    async def import_bans_from_csv(self, filename: str) -> tuple[int, int, list[str]]:
+    async def import_bans_from_csv(
+        self,
+        filename: str,
+        *,
+        actor: str | None = None,
+    ) -> tuple[int, int, list[str]]:
         """
         Import bans from a CSV file.
         Returns: (successful_count, skipped_count, error_messages)
@@ -194,10 +172,22 @@ class ImportExportMixin:
                     skipped += 1
 
             if bans_to_insert:
-                backup_ok, backup_message = await self.backup_database_before_import()
+                create_backup = getattr(self, "create_database_backup", None)
+                if not callable(create_backup):
+                    await self.load_bans_from_db()
+                    errors.append("❌ Import aborted: managed full backups are unavailable.")
+                    return 0, 0, errors
+
+                backup_ok, backup_message = await create_backup(
+                    "before-import",
+                    actor=actor or "import",
+                )
                 if not backup_ok:
                     await self.load_bans_from_db()
-                    errors.append(f"❌ Import aborted: failed to create DB backup before import: {backup_message}")
+                    errors.append(
+                        "❌ Import aborted: failed to create full backup before import: "
+                        f"{backup_message}"
+                    )
                     return 0, 0, errors
 
                 try:
