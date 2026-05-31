@@ -41,7 +41,7 @@ async def test_config_show_groups_keys_and_hides_secrets():
 
     storage = _section(body, "💾 Storage")
     identity = _section(body, "🪪 Bot Identity")
-    rooms = _section(body, "🏠 Rooms")
+    admin_control = _section(body, "🛡️ Admin / Control Room")
     connection = _section(body, "🌐 Connection")
     profile = _section(body, "🖼️ Profile / vCard")
     command_access = _section(body, "🧭 Command Access")
@@ -52,7 +52,7 @@ async def test_config_show_groups_keys_and_hides_secrets():
     assert "RESOURCE" in identity
     assert "PASSWORD = ****" in identity
     assert "NICK" in identity
-    assert "ADMIN_ROOM" in rooms
+    assert "ADMIN_ROOM" in admin_control
     assert "CONNECT_HOST" in connection
     assert "CONNECT_PORT" in connection
     assert "AVATAR_PATH" in profile
