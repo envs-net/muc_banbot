@@ -1,80 +1,35 @@
 # Import / Export
 
-BanBot supports CSV import/export for backup, migration, and batch operations.
+BanBot supports managed CSV exports for portable ban data and CSV imports for migration or batch updates. Full recovery should use the managed backup commands.
 
 ## Export
 
 ```text
 !export
+!export list
+!export delete <filename|latest>
 ```
 
-Exports all current bans to:
-
-```text
-bans_export_YYYYMMDD_HHMMSS.csv
-```
-
-## CSV Format
-
-```csv
-jid,nick,until,issuer,comment
-alice@example.org,Alice,0,admin@example.org,spamming
-bob@example.org,Bob,1712923200,mod@example.org,rude behavior
-```
-
-`until=0` means a permanent ban. Non-zero values are Unix timestamps.
+Exports are written to `EXPORT_DIR` as `bans_export_YYYYMMDD_HHMMSS.csv`. Old export files are pruned according to `EXPORT_KEEP`.
 
 ## Import
 
 ```text
 !import bans_export_20240412_120000.csv
+!import bans_export_20240412_120000.csv dryrun
 ```
 
-Import behavior:
+Before writing staged rows, BanBot creates a managed full backup using the normal backup system. This means before-import snapshots are visible in `!backup list`, use the same retention settings and include companion files such as `config.py` and optional OMEMO storage.
 
-* Validates CSV headers and rows
-* Validates JID format
-* Validates timestamps
-* Creates a database backup before writing
-* Handles duplicates intelligently
-* Reports invalid rows with reasons
-* Uses all-or-nothing database updates where possible
+Dry-runs validate and stage rows but do not create a backup and do not change the database.
 
-Example response:
+## Full backups
 
-```text
-📥 Import Results:
-✅ Successful: 42
-⚠️ Skipped: 3
-
-❌ Errors (2):
-Row 5: Invalid JID format: user@
-Row 12: until must be a valid number
-```
-
-## Pre-Import Backup
-
-Before writing imported rows, BanBot creates a timestamped backup:
-
-```text
-data/backups/banbot.db.snapshot-before-import-YYYYMMDD_HHMMSS
-```
-
-## Use Cases
-
-* Backup before major moderation maintenance
-* Migrate bans to a new bot instance
-* Restore from a previous export
-* Batch-import bans from an external moderation process
-
-## Managed SQLite Backups
-
-CSV export is useful for portable ban data. For full SQLite snapshots, use the managed database backup commands:
+For full SQLite/config/OMEMO recovery use:
 
 ```text
 !backup
 !backup list
+!backup show latest
 !restore latest confirm
 ```
-
-Managed snapshots include the whole SQLite database, including rooms, audit log, ignorelist, pending invites, RTBL subscriptions and redaction index. They also include a companion copy of `config.py` when the active config file can be resolved. Automatic startup snapshots are controlled by `DB_BACKUP_ON_START`, `DB_BACKUP_DIR` and `DB_BACKUP_KEEP`.

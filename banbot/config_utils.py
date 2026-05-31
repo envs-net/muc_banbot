@@ -93,6 +93,9 @@ class ConfigMixin:
         "DB_BACKUP_ON_START",
         "DB_BACKUP_DIR",
         "DB_BACKUP_KEEP",
+        "DB_BACKUP_INCLUDE_OMEMO",
+        "EXPORT_DIR",
+        "EXPORT_KEEP",
         "ANNOUNCE_STARTUP",
         "ANNOUNCE_SYNC_DETAILS",
         "SHOW_BAN_IN_MUC",
@@ -164,7 +167,10 @@ class ConfigMixin:
             "COMMAND_PREFIX": self.command_prefix,
             "DB_BACKUP_ON_START": getattr(self, "db_backup_on_start", True),
             "DB_BACKUP_DIR": getattr(self, "db_backup_dir", "data/backups"),
-            "DB_BACKUP_KEEP": getattr(self, "db_backup_keep", 10),
+            "DB_BACKUP_KEEP": getattr(self, "db_backup_keep", 15),
+            "DB_BACKUP_INCLUDE_OMEMO": getattr(self, "db_backup_include_omemo", True),
+            "EXPORT_DIR": getattr(self, "export_dir", "data/exports"),
+            "EXPORT_KEEP": getattr(self, "export_keep", 15),
             "ANNOUNCE_STARTUP": self.announce_startup,
             "ANNOUNCE_SYNC_DETAILS": self.announce_sync_details,
             "SHOW_BAN_IN_MUC": self.show_ban_in_muc,
@@ -332,6 +338,7 @@ class ConfigMixin:
             "ALERT_ON_RTBL_REFRESH_FAILURES": (0, 1000),
             "ALERT_DEDUP_WINDOW": (0, 86400),
             "DB_BACKUP_KEEP": (1, 1000),
+            "EXPORT_KEEP": (1, 1000),
         }
         int_defaults = {
             "AUDIT_LOG_RETENTION_DAYS": 365,
@@ -345,7 +352,8 @@ class ConfigMixin:
             "ALERT_ON_DB_SIZE_MB": 0,
             "ALERT_ON_RTBL_REFRESH_FAILURES": 3,
             "ALERT_DEDUP_WINDOW": 300,
-            "DB_BACKUP_KEEP": 10,
+            "DB_BACKUP_KEEP": 15,
+            "EXPORT_KEEP": 15,
         }
         for name, (minimum, maximum) in int_ranges.items():
             value = getattr(config, name, int_defaults.get(name))
@@ -368,6 +376,7 @@ class ConfigMixin:
             "REDACTION_ENABLED",
             "CONNECT_DIRECT_TLS",
             "DB_BACKUP_ON_START",
+            "DB_BACKUP_INCLUDE_OMEMO",
             "ALERT_ON_RECONNECT",
             "ALERT_ON_ADMIN_RIGHTS_LOST",
             "ALERT_ON_HEALTH_CHECK_FAILURE",
@@ -387,6 +396,7 @@ class ConfigMixin:
             "REDACTION_ENABLED": False,
             "CONNECT_DIRECT_TLS": False,
             "DB_BACKUP_ON_START": True,
+            "DB_BACKUP_INCLUDE_OMEMO": True,
             "ALERT_ON_RECONNECT": True,
             "ALERT_ON_ADMIN_RIGHTS_LOST": True,
             "ALERT_ON_HEALTH_CHECK_FAILURE": True,
@@ -420,6 +430,15 @@ class ConfigMixin:
             backup_dir = backup_dir_value.strip()
         if not backup_dir:
             errors.append("DB_BACKUP_DIR must not be empty")
+
+        export_dir_value = getattr(config, "EXPORT_DIR", "data/exports")
+        if not isinstance(export_dir_value, str):
+            errors.append("EXPORT_DIR must be a string")
+            export_dir = ""
+        else:
+            export_dir = export_dir_value.strip()
+        if not export_dir:
+            errors.append("EXPORT_DIR must not be empty")
 
         # --- Connection ---
         connect_host = getattr(config, "CONNECT_HOST", None)
@@ -578,7 +597,10 @@ class ConfigMixin:
         self.command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip() or "!"
         self.db_backup_on_start = getattr(config, "DB_BACKUP_ON_START", True)
         self.db_backup_dir = str(getattr(config, "DB_BACKUP_DIR", "data/backups")).strip() or "data/backups"
-        self.db_backup_keep = getattr(config, "DB_BACKUP_KEEP", 10)
+        self.db_backup_keep = getattr(config, "DB_BACKUP_KEEP", 15)
+        self.db_backup_include_omemo = getattr(config, "DB_BACKUP_INCLUDE_OMEMO", True)
+        self.export_dir = str(getattr(config, "EXPORT_DIR", "data/exports")).strip() or "data/exports"
+        self.export_keep = getattr(config, "EXPORT_KEEP", 15)
         self.announce_startup = getattr(config, "ANNOUNCE_STARTUP", True)
         self.announce_sync_details = getattr(config, "ANNOUNCE_SYNC_DETAILS", True)
         self.structured_event_logs = getattr(config, "STRUCTURED_EVENT_LOGS", True)
@@ -728,9 +750,31 @@ class ConfigMixin:
             text = pattern.sub(lambda m: m.group("prefix") + assignment, text, count=1)
         else:
             text = text.rstrip() + "\n\n# Runtime config edits\n" + assignment + "\n"
-        path.write_text(text, encoding="utf8")
 
-    async def set_runtime_config_value(self, key: str, raw_value: str) -> tuple[bool, str]:
+        tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+        with open(tmp_path, "w", encoding="utf8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+
+    async def set_runtime_config_value(
+        self,
+        key: str,
+        raw_value: str,
+        *,
+        actor: str | None = None,
+        _locked: bool = False,
+    ) -> tuple[bool, str]:
+        if not _locked and hasattr(self, "_database_file_lock"):
+            async with self._database_file_lock():
+                return await self.set_runtime_config_value(
+                    key,
+                    raw_value,
+                    actor=actor,
+                    _locked=True,
+                )
+
         key = key.upper().strip()
         if key not in self.CONFIG_KEYS:
             return False, f"{key} is not a runtime-writable config option."
@@ -746,6 +790,13 @@ class ConfigMixin:
             self._restore_config_values(previous_module_values)
             return False, "Invalid value; config.py was not changed.\n" + self._format_config_validation(errors, warnings)
 
+        create_backup = getattr(self, "create_database_backup", None)
+        if callable(create_backup):
+            backup_ok, backup_message = await create_backup("before-config", actor=actor or "unknown", lock=False)
+            if not backup_ok:
+                self._restore_config_values(previous_module_values)
+                return False, f"Config was not changed because pre-change backup failed: {backup_message}"
+
         try:
             self.update_config_file_assignment(key, new_value)
             importlib.reload(config)
@@ -757,12 +808,27 @@ class ConfigMixin:
 
         return True, f"✅ {key} updated: {old_value!r} → {new_value!r}"
 
-    async def unset_runtime_config_value(self, key: str) -> tuple[bool, str]:
+    async def unset_runtime_config_value(
+        self,
+        key: str,
+        *,
+        actor: str | None = None,
+        _locked: bool = False,
+    ) -> tuple[bool, str]:
+        if not _locked and hasattr(self, "_database_file_lock"):
+            async with self._database_file_lock():
+                return await self.set_runtime_config_value(
+                    key,
+                    raw_value,
+                    actor=actor,
+                    _locked=True,
+                )
+
         key = key.upper().strip()
         defaults = self._config_default_values_from_sample()
         if key not in defaults:
             return False, f"No default value found for {key} in config_sample.py."
-        return await self.set_runtime_config_value(key, repr(defaults[key]))
+        return await self.set_runtime_config_value(key, repr(defaults[key]), actor=actor)
 
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:

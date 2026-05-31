@@ -18,6 +18,14 @@ PUBLIC_COMMANDS = {"help", "whoami", "banlist", "blacklist", "why", "rules", "po
 
 
 class CommandMixin:
+    def _ban_state_lock(self) -> asyncio.Lock:
+        """Return the shared ban-state lock, creating it for lightweight tests if needed."""
+        lock = getattr(self, "_ban_state_operation_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._ban_state_operation_lock = lock
+        return lock
+
     def user_cmds_allowed(self, room: str) -> bool:
         """Check if user commands are allowed in protected rooms."""
         return room in self.protected_rooms and self.allow_user_cmds
@@ -378,7 +386,8 @@ class CommandMixin:
 
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             comment = " ".join(args[1:]) if len(args) > 1 else None
-            await self.ban_all(args[0], None, actor_jid, comment)
+            async with self._ban_state_lock():
+                await self.ban_all(args[0], None, actor_jid, comment)
             return True
 
         if cmd == "tempban":
@@ -402,7 +411,8 @@ class CommandMixin:
 
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             comment = " ".join(args[2:]) if len(args) > 2 else None
-            await self.ban_all(args[0], until, actor_jid, comment)
+            async with self._ban_state_lock():
+                await self.ban_all(args[0], until, actor_jid, comment)
             return True
 
         if cmd == "unban":
@@ -415,7 +425,8 @@ class CommandMixin:
                 return True
 
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-            await self.unban_all(args[0], actor_jid)
+            async with self._ban_state_lock():
+                await self.unban_all(args[0], actor_jid)
             return True
 
         if cmd == "bansearch":
@@ -459,7 +470,8 @@ class CommandMixin:
             return True
 
         if cmd == "sync":
-            await self.sync_rooms_and_bans()
+            async with self._ban_state_lock():
+                await self.sync_rooms_and_bans()
             return True
 
         if cmd == "syncadmins":
@@ -467,7 +479,8 @@ class CommandMixin:
             return True
 
         if cmd == "syncbans":
-            await self.sync_bans()
+            async with self._ban_state_lock():
+                await self.sync_bans()
             return True
 
         if cmd == "audit":
@@ -475,35 +488,50 @@ class CommandMixin:
             return True
 
         if cmd == "export":
-            success, message = await self.export_bans_to_csv()
-            await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
+            if hasattr(self, "cmd_export"):
+                await self.cmd_export(args, room)
+            else:
+                _success, message = await self.export_bans_to_csv()
+                await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
             return True
 
         if cmd == "import":
             if len(args) < 1:
                 await self.bot_send_message(
                     mto=room,
-                    mbody=f"❌ Usage: {self.command_prefix}import <filename>",
+                    mbody=f"❌ Usage: {self.command_prefix}import <filename> [dryrun]",
                     mtype="groupchat"
                 )
                 return True
 
             filename = args[0]
+            dry_run = len(args) >= 2 and args[1].lower() in {"dryrun", "dry-run", "check"}
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             previous_backup = getattr(self, "last_database_backup_file", None)
-            successful, skipped, errors = await self.import_bans_from_csv(
-                filename,
-                actor=actor_jid,
-            )
+            try:
+                successful, skipped, errors = await self.import_bans_from_csv(
+                    filename,
+                    actor=actor_jid,
+                    dry_run=dry_run,
+                )
+            except TypeError:
+                # Lightweight tests and older mixins may not support dry_run yet.
+                successful, skipped, errors = await self.import_bans_from_csv(
+                    filename,
+                    actor=actor_jid,
+                )
             import_backup = getattr(self, "last_database_backup_file", None)
             if import_backup == previous_backup:
                 import_backup = None
 
+            heading = "📥 Import Dry-Run Results" if dry_run else "📥 Import Results"
             result_msg = (
-                f"📥 Import Results:\n"
+                f"{heading}:\n"
                 f"✅ Successful: {successful}\n"
                 f"⚠️ Skipped: {skipped}"
             )
+            if dry_run:
+                result_msg += "\nNo backup created and no database changes made."
 
             if import_backup:
                 result_msg += f"\n💾 Full backup before import: {import_backup}"
@@ -526,6 +554,7 @@ class CommandMixin:
                 "import_completed",
                 actor=actor_jid,
                 filename=filename,
+                dry_run=dry_run,
                 successful=successful,
                 skipped=skipped,
                 errors=len(errors),
@@ -538,6 +567,7 @@ class CommandMixin:
                 target=filename,
                 details={
                     "filename": filename,
+                    "dry_run": dry_run,
                     "successful": successful,
                     "skipped": skipped,
                     "errors": len(errors),
@@ -555,7 +585,8 @@ class CommandMixin:
                 )
                 return True
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-            await self.cmd_rtbl(args, room, actor=actor_jid)
+            async with self._ban_state_lock():
+                await self.cmd_rtbl(args, room, actor=actor_jid)
             return True
 
         if cmd in ("ignore", "whitelist"):
@@ -916,6 +947,6 @@ class CommandMixin:
             f"{p}rtbl publish sync - publish all current bans to your own feed\n\n"
 
             "📦 Import / Export\n"
-            f"{p}export - export all bans to a CSV file\n"
-            f"{p}import <filename> - import bans from a CSV file\n"
+            f"{p}export [list|delete] - export/list/delete managed CSV ban exports\n"
+            f"{p}import <filename> [dryrun] - import bans from a CSV file\n"
         )

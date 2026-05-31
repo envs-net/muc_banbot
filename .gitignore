@@ -6,7 +6,6 @@ __pycache__/
 data/
 config.py
 banbot*.db*
-bans_export_*.csv
 bans_import_*.csv
 import_*.csv
 

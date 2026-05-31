@@ -36,6 +36,7 @@ class ConfigCommandMixin:
             "DB_BACKUP_ON_START",
             "DB_BACKUP_DIR",
             "DB_BACKUP_KEEP",
+            "DB_BACKUP_INCLUDE_OMEMO",
         )),
         ("🪪 Bot Identity", (
             "JID",
@@ -65,6 +66,10 @@ class ConfigCommandMixin:
             "COMMAND_PREFIX",
             "ANNOUNCE_STARTUP",
             "ANNOUNCE_SYNC_DETAILS",
+        )),
+        ("📦 Export", (
+            "EXPORT_DIR",
+            "EXPORT_KEEP",
         )),
         ("🧭 Command Access", (
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
@@ -192,7 +197,7 @@ class ConfigCommandMixin:
                 return
             key = args[1].upper()
             raw_value = " ".join(args[2:])
-            ok, message = await self.set_runtime_config_value(key, raw_value)
+            ok, message = await self.set_runtime_config_value(key, raw_value, actor=actor)
             await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
             await self._audit_config_change(actor, "set", key, ok, message)
             return
@@ -206,7 +211,7 @@ class ConfigCommandMixin:
                 )
                 return
             key = args[1].upper()
-            ok, message = await self.unset_runtime_config_value(key)
+            ok, message = await self.unset_runtime_config_value(key, actor=actor)
             await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
             await self._audit_config_change(actor, "unset", key, ok, message)
             return

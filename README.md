@@ -97,8 +97,8 @@ Examples assume the default command prefix `!`.
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |
 | `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
 | `!reloadconfig` | Validate and reload runtime configuration |
-| `!backup` / `!backup list` | Create or list managed SQLite database/config.py backups |
-| `!restore <file|latest> confirm` | Restore a managed database/config.py backup |
+| `!backup` / `!backup list` | Create or list managed SQLite database/config.py/OMEMO backups |
+| `!restore <file|latest> confirm` | Restore a managed full backup |
 | `!omemo status/devices/reset` | Inspect OMEMO state, list local device hints, or rotate local OMEMO storage |
 | `!room add <room>` | Add a protected room |
 | `!room remove <room>` | Remove a protected room |
@@ -117,7 +117,7 @@ Examples assume the default command prefix `!`.
 | `!rtbl list/add/delete/refresh` | Manage RTBL subscriptions |
 | `!rtbl publish status/sync` | Manage the bot's own RTBL publish feed |
 | `!sync` / `!syncadmins` / `!syncbans` | Rejoin rooms, sync admins, and reconcile bans |
-| `!export` / `!import <file>` | Export/import bans as CSV |
+| `!export [list|delete]` / `!import <file> [dryrun]` | Manage CSV ban exports and imports |
 
 For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.
 
@@ -221,6 +221,6 @@ The full documentation is split into focused guides. Start with the [documentati
 * The admin room is the single source of truth for command permissions.
 * Admins/owners are protected from manual, nick-based, domain-based, and RTBL-applied bans.
 * Domain bans such as `*.domain.tld` reject overly generic targets such as `*.com`.
-* CSV imports create a timestamped SQLite backup before writing data.
+* CSV imports create a managed full backup before writing data, but dry-runs do not create backups or change the database.
 * The ignorelist protects exact JIDs from all bans and domains from domain-based/RTBL domain matches.
 * If RTBL publishing is enabled, ensure the configured PubSub nodes are not writable by arbitrary users.

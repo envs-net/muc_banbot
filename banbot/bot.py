@@ -206,9 +206,11 @@ class BanBot(
         self.public_command_rate_limit_max: int = 3
         self.public_command_rate_limit_hits: dict[tuple[str, str, str], list[float]] = {}
 
-        # --- database backups ---
+        # --- database backups / file operations ---
         self.last_database_backup_file: str | None = None
         self.last_database_restore_file: str | None = None
+        self._database_file_operation_lock = asyncio.Lock()
+        self._ban_state_operation_lock = asyncio.Lock()
 
         # --- structured event logs and audit retention ---
         self.structured_event_logs: bool = True

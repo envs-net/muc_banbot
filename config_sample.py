@@ -6,13 +6,18 @@ DB_FILE = "banbot.db"
 # !backup creates snapshots, !backup list shows them, and !restore can restore them.
 DB_BACKUP_ON_START = True
 DB_BACKUP_DIR = "data/backups"
-DB_BACKUP_KEEP = 10
+DB_BACKUP_KEEP = 15
+DB_BACKUP_INCLUDE_OMEMO = True
 
 JID = "adminbot@domain.tld"
 RESOURCE = "service"
 PASSWORD = "yourpassword"
 ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
+
+# Managed CSV exports.
+EXPORT_DIR = "data/exports"
+EXPORT_KEEP = 15
 
 # ================= CONNECTION =================
 

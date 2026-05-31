@@ -99,7 +99,7 @@ async def test_backup_list_command_shows_restore_hint(backup_config):
         await bot.cmd_backup(["list"], "admin@conference.example.org")
 
         body = bot.sent[-1]["mbody"]
-        assert "💾 Database Backups" in body
+        assert "💾 Managed Full Backups" in body
         assert "snapshot-manual" in body
         assert "config.py" in body
         assert "!restore <filename|latest> confirm" in body
@@ -176,7 +176,8 @@ async def test_backup_command_and_restore_alias(backup_config):
     await bot.setup_db(create_startup_backup=False)
     try:
         await bot.cmd_backup([], "admin@conference.example.org", actor="admin@example.org")
-        assert "Database/config backup created" in bot.sent[-1]["mbody"]
+        assert "Full backup created" in bot.sent[-1]["mbody"]
+        assert "Included companions: config.py" in bot.sent[-1]["mbody"]
         assert bot.audit_events[-1][0] == "db_backup_created"
         assert bot.audit_events[-1][1]["actor"] == "admin@example.org"
 

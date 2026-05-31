@@ -126,7 +126,7 @@ Pending room invites are persisted so they survive bot restarts. Entries are rem
 
 ## Backups
 
-CSV imports create a managed full backup before writing imported rows:
+CSV imports create a managed full backup before writing imported rows that actually change the database:
 
 ```text
 data/backups/banbot.db.snapshot-before-import-YYYYMMDD_HHMMSS

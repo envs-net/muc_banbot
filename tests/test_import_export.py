@@ -41,7 +41,7 @@ async def test_export_bans_to_csv_uses_cache(tmp_path, monkeypatch):
 
     assert ok is True
     assert "Exported 1 bans" in message
-    exports = list(tmp_path.glob("bans_export_*.csv"))
+    exports = list((tmp_path / "data" / "exports").glob("bans_export_*.csv"))
     assert len(exports) == 1
     with exports[0].open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
