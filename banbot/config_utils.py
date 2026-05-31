@@ -836,7 +836,12 @@ class ConfigMixin:
         defaults = self._config_default_values_from_sample()
         if key not in defaults:
             return False, f"No default value found for {key} in config_sample.py."
-        return await self.set_runtime_config_value(key, repr(defaults[key]), actor=actor)
+        return await self.set_runtime_config_value(
+            key,
+            repr(defaults[key]),
+            actor=actor,
+            _locked=True,
+        )
 
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:

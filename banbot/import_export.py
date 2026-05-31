@@ -225,8 +225,7 @@ class ImportExportMixin:
         """Read and validate CSV import rows. Returns staged rows, skipped count and errors."""
         skipped = 0
         errors: list[str] = []
-        bans_to_insert: list[tuple] = []
-        staged_lookup_keys: set[str] = set()
+        staged_by_lookup_key: dict[str, tuple] = {}
         path = pathlib.Path(filename)
         if not path.exists():
             return [], 0, [f"❌ File not found: {filename}"]
@@ -283,23 +282,51 @@ class ImportExportMixin:
                         target = existing_jid
                         normalized_jid = existing_jid
                 lookup_key = f"*.{target}" if target_type == "domain" else target
-                if lookup_key in staged_lookup_keys:
-                    log.info("Row %d: Duplicate staged import row for %s, skipping", row_num, lookup_key)
-                    skipped += 1
-                    continue
+                previous = staged_by_lookup_key.get(lookup_key)
+                if previous:
+                    previous_until = int(previous[4] or 0)
+
+                    # Existing staged permanent bans are stronger than duplicates.
+                    if previous_until <= 0:
+                        log.info("Row %d: Duplicate staged import row for %s, keeping existing permanent entry", row_num, lookup_key)
+                        skipped += 1
+                        continue
+
+                    # Keep the staged temporary ban with the later expiration.
+                    if until > 0 and until <= previous_until:
+                        log.info("Row %d: Duplicate staged import row for %s, keeping later existing expiration", row_num, lookup_key)
+                        skipped += 1
+                        continue
+
+                    log.info("Row %d: Replacing weaker staged import row for %s", row_num, lookup_key)
                 if lookup_key in self.ban_cache:
                     existing = self.ban_cache[lookup_key]
-                    existing_until = existing[2]
-                    if existing_until <= 0 and until <= 0:
+                    existing_until = int(existing[2] or 0)
+
+                    # Existing permanent bans are stronger than imported duplicates.
+                    if existing_until <= 0:
                         log.info("Row %d: Ban already exists for %s (permanent), skipping", row_num, lookup_key)
                         skipped += 1
                         continue
-                bans_to_insert.append((target_type, target, normalized_jid, normalized_nick, until, issuer, comment))
-                staged_lookup_keys.add(lookup_key)
+
+                    # Keep the existing temporary ban if it expires later.
+                    if until > 0 and until <= existing_until:
+                        log.info("Row %d: Existing temporary ban for %s expires later, skipping", row_num, lookup_key)
+                        skipped += 1
+                        continue
+                staged_by_lookup_key[lookup_key] = (
+                    target_type,
+                    target,
+                    normalized_jid,
+                    normalized_nick,
+                    until,
+                    issuer,
+                    comment,
+                )
             except Exception as e:
                 errors.append(f"Row {row_num}: {e}")
                 skipped += 1
-        return bans_to_insert, skipped, errors
+        return list(staged_by_lookup_key.values()), skipped, errors
 
     async def import_bans_from_csv(
         self,
