@@ -107,9 +107,12 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
     async def export_bans_to_csv(self):
         return self.export_result
 
-    async def import_bans_from_csv(self, filename, *, actor=None):
+    async def import_bans_from_csv(self, filename, *, actor=None, dry_run=False):
+        self.import_filename = filename
         self.import_actor = actor
-        self.last_database_backup_file = "backup.csv"
+        self.import_dry_run = dry_run
+        if not dry_run:
+            self.last_database_backup_file = "backup.csv"
         return self.import_result
 
     def log_event(self, level, event, **fields):
@@ -234,7 +237,29 @@ async def test_admin_import_without_filename_shows_usage(fake_msg_factory, monke
 
     await bot.on_message(admin_msg(fake_msg_factory, "!import"))
 
-    assert "Usage: !import <filename>" in bot.sent[-1]["mbody"]
+    assert "❌ Usage: !import <filename> [dryrun]" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_admin_import_dryrun_command_path_is_exercised(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+    bot.import_result = (2, 1, ["line 2: skipped in dry run"])
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!import bans.csv dryrun"))
+
+    assert bot.import_filename == "bans.csv"
+    assert bot.import_actor == "admin@example.test/resource"
+    assert bot.import_dry_run is True
+    body = bot.sent[-1]["mbody"]
+    assert "Import Dry-Run Results" in body
+    assert "Successful: 2" in body
+    assert "Skipped: 1" in body
+    assert "No backup created and no database changes made." in body
+    assert "line 2: skipped in dry run" in body
 
 
 @pytest.mark.asyncio

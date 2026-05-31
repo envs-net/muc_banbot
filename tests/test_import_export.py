@@ -33,6 +33,9 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
     async def audit_event(self, event_type, **kwargs):
         self.audit_events.append((event_type, kwargs))
 
+    def bare_jid(self, jid: str | None) -> str | None:
+        return jid.split("/")[0].lower() if jid else None
+
 
 @pytest.mark.asyncio
 async def test_export_bans_to_csv_uses_cache(tmp_path, monkeypatch):
@@ -98,6 +101,48 @@ async def test_import_bans_from_csv_creates_backup_and_upserts_rows(temp_db_path
             rows = await cursor.fetchall()
         assert ("domain", "example.org", "*.example.org", None, "imported", "domain spam") in rows
         assert ("jid", "user@example.org", "user@example.org", "nick", "imported", "spam") in rows
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_import_resolves_nick_only_row_to_existing_jid_ban(temp_db_path, tmp_path):
+    csv_file = tmp_path / "nick-only.csv"
+    csv_file.write_text(
+        "jid,nick,until,issuer,comment\n"
+        ",Nick,0,imported,resolved by nick\n",
+        encoding="utf-8",
+    )
+    bot = ImportBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        await bot.upsert_ban_db("user@example.org", "Nick", 0, "seed", "existing")
+
+        successful, skipped, errors = await bot.import_bans_from_csv(str(csv_file))
+
+        assert successful == 0
+        assert skipped == 1
+        assert errors == []
+
+        async with bot.db.execute(
+            """
+            SELECT target_type, target, jid, nick, issuer, comment
+            FROM bans
+            ORDER BY target_type, target
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        assert rows == [
+            (
+                "jid",
+                "user@example.org",
+                "user@example.org",
+                "nick",
+                "seed",
+                "existing",
+            )
+        ]
     finally:
         await bot.db.close()
 
