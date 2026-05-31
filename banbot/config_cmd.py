@@ -15,28 +15,30 @@ class ConfigCommandMixin(ConfigMixin):
     # Inherit ConfigMixin helpers directly. This keeps lightweight test doubles working
     # without duplicating helper attributes on the mixin class.
     CONFIG_OUTPUT_SECTIONS = (
-        ("💾 Storage", (
+        ("🪪 Bot Identity / Control", (
+            "JID",
+            "RESOURCE",
+            "PASSWORD",
+            "ADMIN_ROOM",
+            "NICK",
+        )),
+        ("💾 Storage / Backups", (
             "DB_FILE",
             "DB_BACKUP_ON_START",
             "DB_BACKUP_DIR",
             "DB_BACKUP_KEEP",
             "DB_BACKUP_INCLUDE_OMEMO",
         )),
-        ("🪪 Bot Identity", (
-            "JID",
-            "RESOURCE",
-            "PASSWORD",
-            "NICK",
-        )),
-        ("🛡️ Admin / Control Room", (
-            "ADMIN_ROOM",
+        ("📦 Managed CSV Exports", (
+            "EXPORT_DIR",
+            "EXPORT_KEEP",
         )),
         ("🌐 Connection", (
             "CONNECT_HOST",
             "CONNECT_PORT",
             "CONNECT_DIRECT_TLS",
         )),
-        ("🖼️ Profile / vCard", (
+        ("🖼️ vCard Settings", (
             "AVATAR_PATH",
             "VCARD_NICKNAME",
             "VCARD_FN",
@@ -45,40 +47,30 @@ class ConfigCommandMixin(ConfigMixin):
             "VCARD_URL",
             "VCARD_NOTE",
         )),
-        ("⚙️ General", (
+        ("⚙️ Bot Settings", (
             "LOG_LEVEL",
             "COMMAND_PREFIX",
             "ANNOUNCE_STARTUP",
             "ANNOUNCE_SYNC_DETAILS",
-        )),
-        ("📦 Export", (
-            "EXPORT_DIR",
-            "EXPORT_KEEP",
-        )),
-        ("🧭 Command Access", (
+            "SHOW_BAN_IN_MUC",
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
             "ALLOW_ADMIN_COMMANDS_IN_DMS",
+            "ROOM_INVITES_ENABLED",
+            "HEALTH_CHECK_INTERVAL",
+            "UNBAN_CHECK_INTERVAL",
+            "MAX_TEMPBAN_DAYS",
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW",
             "PUBLIC_COMMAND_RATE_LIMIT_MAX",
         )),
-        ("🛡️ Moderation", (
-            "SHOW_BAN_IN_MUC",
-            "ROOM_INVITES_ENABLED",
-            "MAX_TEMPBAN_DAYS",
-        )),
-        ("🩺 Maintenance", (
-            "HEALTH_CHECK_INTERVAL",
-            "UNBAN_CHECK_INTERVAL",
-        )),
-        ("⚡ Performance", (
+        ("⚡ Performance Tuning", (
             "MUC_WRITE_SEMAPHORE",
         )),
-        ("📜 Audit / Events", (
+        ("📜 Logging / Audit", (
             "STRUCTURED_EVENT_LOGS",
             "AUDIT_LOG_ENABLED",
             "AUDIT_LOG_RETENTION_DAYS",
         )),
-        ("🚨 Alerts", (
+        ("🚨 Event Alerts", (
             "ALERT_ON_RECONNECT",
             "ALERT_ON_ADMIN_RIGHTS_LOST",
             "ALERT_ON_HEALTH_CHECK_FAILURE",
@@ -88,7 +80,7 @@ class ConfigCommandMixin(ConfigMixin):
             "ALERT_ON_RTBL_REFRESH_FAILURES",
             "ALERT_DEDUP_WINDOW",
         )),
-        ("🔐 OMEMO", (
+        ("🔐 OMEMO Encryption", (
             "OMEMO_ENABLED",
             "OMEMO_STORAGE_FILE",
             "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",

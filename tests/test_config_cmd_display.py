@@ -39,25 +39,28 @@ async def test_config_show_groups_keys_and_hides_secrets():
     assert "🔒 = restart-only/protected, ✏️ = runtime-writable" in body
     assert "Password/secret values are hidden." in body
 
-    storage = _section(body, "💾 Storage")
-    identity = _section(body, "🪪 Bot Identity")
-    admin_control = _section(body, "🛡️ Admin / Control Room")
+    identity = _section(body, "🪪 Bot Identity / Control")
+    storage = _section(body, "💾 Storage / Backups")
+    exports = _section(body, "📦 Managed CSV Exports")
     connection = _section(body, "🌐 Connection")
-    profile = _section(body, "🖼️ Profile / vCard")
-    command_access = _section(body, "🧭 Command Access")
-    performance = _section(body, "⚡ Performance")
+    profile = _section(body, "🖼️ vCard Settings")
+    bot_settings = _section(body, "⚙️ Bot Settings")
+    performance = _section(body, "⚡ Performance Tuning")
 
-    assert "DB_FILE" in storage
     assert "JID" in identity
     assert "RESOURCE" in identity
     assert "PASSWORD = ****" in identity
+    assert "ADMIN_ROOM" in identity
     assert "NICK" in identity
-    assert "ADMIN_ROOM" in admin_control
+    assert "DB_FILE" in storage
+    assert "DB_BACKUP_KEEP" in storage
+    assert "EXPORT_DIR" in exports
+    assert "EXPORT_KEEP" in exports
     assert "CONNECT_HOST" in connection
     assert "CONNECT_PORT" in connection
     assert "AVATAR_PATH" in profile
-    assert "PUBLIC_COMMAND_RATE_LIMIT_WINDOW" in command_access
-    assert "PUBLIC_COMMAND_RATE_LIMIT_MAX" in command_access
+    assert "PUBLIC_COMMAND_RATE_LIMIT_WINDOW" in bot_settings
+    assert "PUBLIC_COMMAND_RATE_LIMIT_MAX" in bot_settings
     assert "MUC_WRITE_SEMAPHORE" in performance
 
     # Removed legacy summary lines should not make the output noisy again.

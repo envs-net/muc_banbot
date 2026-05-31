@@ -1,5 +1,13 @@
 # ================= CONFIG =================
 
+JID = "adminbot@domain.tld"
+RESOURCE = "service"
+PASSWORD = "yourpassword"
+ADMIN_ROOM = "admin@muc.domain.tld"
+NICK = "adminbot"
+
+###
+
 DB_FILE = "banbot.db"
 
 # Managed SQLite database backups.
@@ -8,12 +16,6 @@ DB_BACKUP_ON_START = True
 DB_BACKUP_DIR = "data/backups"
 DB_BACKUP_KEEP = 15
 DB_BACKUP_INCLUDE_OMEMO = True
-
-JID = "adminbot@domain.tld"
-RESOURCE = "service"
-PASSWORD = "yourpassword"
-ADMIN_ROOM = "admin@muc.domain.tld"
-NICK = "adminbot"
 
 # Managed CSV exports.
 EXPORT_DIR = "data/exports"
@@ -166,7 +168,7 @@ RTBL_PUBLISH_SERVICE = "pubsub.domain.tld" # PubSub Service JID
 RTBL_PUBLISH_JID_NODE = "muc_bans_sha256"      # Node for SHA-256 hashed JID bans
 RTBL_PUBLISH_DOMAIN_NODE = "muc_bans_domains"  # Node for plaintext domain bans
 
-# ================= UPDATE CHECK =================
+# ================= VERSION CHECK =================
 
 VERSION_CHECK_ENABLED = False  # True = check periodically for new bot releases, False = disabled
 VERSION_CHECK_INTERVAL = 3600  # Interval in seconds for update checks. Default: 3600 (1 hour)
