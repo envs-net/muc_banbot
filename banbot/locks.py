@@ -1,4 +1,4 @@
-"""Shared asyncio lock helpers for mixins."""
+"""Shared runtime locks used across mixins."""
 
 from __future__ import annotations
 
@@ -6,12 +6,17 @@ import asyncio
 from typing import Any
 
 
-def get_ban_state_lock(owner: Any) -> asyncio.Lock:
-    """Return the shared ban-state lock, creating it when needed.
+def get_database_file_lock(owner: Any) -> asyncio.Lock:
+    """Return the shared lock for database/config/export file operations."""
+    lock = getattr(owner, "_database_file_operation_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        setattr(owner, "_database_file_operation_lock", lock)
+    return lock
 
-    Kept outside mixin classes so multiple mixins can share the same lock
-    without defining conflicting base-class attributes.
-    """
+
+def get_ban_state_lock(owner: Any) -> asyncio.Lock:
+    """Return the shared lock for DB-backed ban/cache state changes."""
     lock = getattr(owner, "_ban_state_operation_lock", None)
     if lock is None:
         lock = asyncio.Lock()

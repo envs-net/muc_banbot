@@ -15,10 +15,11 @@ try:
 except ModuleNotFoundError:
     config = None
 
-from .locks import get_ban_state_lock
 from .utils import normalize_ban_target, validate_domain_ban, validate_jid_format
 
 log = logging.getLogger(__name__)
+
+from .locks import get_ban_state_lock, get_database_file_lock
 
 
 @dataclass(frozen=True)
@@ -306,19 +307,13 @@ class ImportExportMixin:
         """Import bans from a CSV file. Returns successful/skipped/errors."""
         errors: list[str] = []
         try:
-            db_lock_factory = getattr(self, "_database_file_lock", None)
-            if callable(db_lock_factory):
-                async with db_lock_factory():
-                    async with get_ban_state_lock(self):
-                        return await self._import_bans_from_csv_locked(
-                            filename,
-                            actor=actor,
-                            dry_run=dry_run,
-                            backup_lock=False,
-                        )
-
-            async with get_ban_state_lock(self):
-                return await self._import_bans_from_csv_locked(filename, actor=actor, dry_run=dry_run)
+            async with get_database_file_lock(self):
+                async with get_ban_state_lock(self):
+                    return await self._import_bans_from_csv_locked(
+                        filename,
+                        actor=actor,
+                        dry_run=dry_run,
+                    )
         except Exception as e:
             errors.append(f"❌ Import failed: {e}")
             log.error("Import error: %s", e)
@@ -330,7 +325,6 @@ class ImportExportMixin:
         *,
         actor: str | None = None,
         dry_run: bool = False,
-        backup_lock: bool = True,
     ) -> tuple[int, int, list[str]]:
         bans_to_insert, skipped, errors = await self._stage_ban_import_rows(filename)
         successful = len(bans_to_insert)
@@ -345,7 +339,7 @@ class ImportExportMixin:
             await self.load_bans_from_db()
             errors.append("❌ Import aborted: managed full backups are unavailable.")
             return 0, skipped, errors
-        backup_ok, backup_message = await create_backup("before-import", actor=actor or "import", lock=backup_lock)
+        backup_ok, backup_message = await create_backup("before-import", actor=actor or "import", lock=False)
         if not backup_ok:
             await self.load_bans_from_db()
             errors.append(f"❌ Import aborted: failed to create full backup before import: {backup_message}")

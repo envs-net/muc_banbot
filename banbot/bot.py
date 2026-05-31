@@ -24,7 +24,7 @@ import aiosqlite
 from slixmpp import ClientXMPP
 
 from config import JID, PASSWORD, ADMIN_ROOM, NICK
-from .config_utils import ConfigMixin, get_config_resource
+from .config_utils import get_config_resource
 from .utils import bare_jid, safe_jid
 from .audit import AuditMixin
 from .cache import CacheMixin
@@ -109,7 +109,6 @@ def connect_xmpp(xmpp) -> bool:
 
 class BanBot(
     ClientXMPP,
-    ConfigCommandMixin,
     MessagingMixin,
     OmemoMixin,
     AlertMixin,
@@ -127,6 +126,7 @@ class BanBot(
     RedactionMixin,
     BanQueryMixin,
     StatusMixin,
+    ConfigCommandMixin,
     MucMixin,
     HealthCheckMixin,
     SyncMixin,

@@ -12,10 +12,8 @@ log = logging.getLogger(__name__)
 
 
 class ConfigCommandMixin(ConfigMixin):
-    # Inherit ConfigMixin helpers directly so lightweight test doubles that only
-    # mix in ConfigCommandMixin can still render/edit config without duplicating
-    # helper attributes on the main BanBot multiple-inheritance tree.
-
+    # Inherit ConfigMixin helpers directly. This keeps lightweight test doubles working
+    # without duplicating helper attributes on the mixin class.
     CONFIG_OUTPUT_SECTIONS = (
         ("💾 Storage", (
             "DB_FILE",

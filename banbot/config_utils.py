@@ -24,6 +24,7 @@ except Exception:
     # bot.py imports this module to format config import errors for users.
     config = None
 
+from .locks import get_database_file_lock
 from .utils import validate_jid_format
 
 # Allow config.py to use lowercase boolean aliases like in YAML/JSON/TOML.
@@ -757,6 +758,14 @@ class ConfigMixin:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
+        try:
+            dir_fd = os.open(path.parent, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError as exc:
+            log.debug("Failed to fsync config directory %s: %s", path.parent, exc)
 
     async def set_runtime_config_value(
         self,
@@ -766,10 +775,11 @@ class ConfigMixin:
         actor: str | None = None,
         _locked: bool = False,
     ) -> tuple[bool, str]:
-        if not _locked and hasattr(self, "_database_file_lock"):
-            async with self._database_file_lock():
-                return await self.unset_runtime_config_value(
+        if not _locked:
+            async with get_database_file_lock(self):
+                return await self.set_runtime_config_value(
                     key,
+                    raw_value,
                     actor=actor,
                     _locked=True,
                 )
@@ -814,8 +824,8 @@ class ConfigMixin:
         actor: str | None = None,
         _locked: bool = False,
     ) -> tuple[bool, str]:
-        if not _locked and hasattr(self, "_database_file_lock"):
-            async with self._database_file_lock():
+        if not _locked:
+            async with get_database_file_lock(self):
                 return await self.unset_runtime_config_value(
                     key,
                     actor=actor,

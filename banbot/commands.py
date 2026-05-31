@@ -9,8 +9,8 @@ import time
 from config import ADMIN_ROOM, NICK
 
 from ._version import __version__
-from .locks import get_ban_state_lock
 from .utils import parse_duration, wants_all_pages, without_all_pages_arg
+from .locks import get_ban_state_lock
 
 log = logging.getLogger(__name__)
 

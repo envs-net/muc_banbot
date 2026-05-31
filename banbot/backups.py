@@ -13,14 +13,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .locks import get_ban_state_lock
-
 try:
     import config
 except ModuleNotFoundError:
     config = None
 
 log = logging.getLogger(__name__)
+
+from .locks import get_ban_state_lock, get_database_file_lock
 
 _BACKUP_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -52,13 +52,6 @@ class BackupMixin:
         if config is None:
             return default
         return getattr(config, name, default)
-
-    def _database_file_lock(self) -> asyncio.Lock:
-        lock = getattr(self, "_database_file_operation_lock", None)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._database_file_operation_lock = lock
-        return lock
 
     def _database_path(self) -> pathlib.Path:
         db_file = str(self._db_backup_config_value("DB_FILE", "banbot.db")).strip()
@@ -261,7 +254,7 @@ class BackupMixin:
     ) -> tuple[bool, str]:
         """Create a timestamped database backup and optionally prune old backups."""
         if lock:
-            async with self._database_file_lock():
+            async with get_database_file_lock(self):
                 return await self.create_database_backup(reason, prune=prune, actor=actor, lock=False)
 
         db_path = self._database_path()
@@ -418,7 +411,7 @@ class BackupMixin:
 
     async def restore_database_backup(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
         """Restore a managed database backup and reload DB-backed caches."""
-        async with self._database_file_lock():
+        async with get_database_file_lock(self):
             async with get_ban_state_lock(self):
                 return await self._restore_database_backup_locked(name, actor=actor)
 
