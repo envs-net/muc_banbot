@@ -768,9 +768,8 @@ class ConfigMixin:
     ) -> tuple[bool, str]:
         if not _locked and hasattr(self, "_database_file_lock"):
             async with self._database_file_lock():
-                return await self.set_runtime_config_value(
+                return await self.unset_runtime_config_value(
                     key,
-                    raw_value,
                     actor=actor,
                     _locked=True,
                 )
@@ -817,9 +816,8 @@ class ConfigMixin:
     ) -> tuple[bool, str]:
         if not _locked and hasattr(self, "_database_file_lock"):
             async with self._database_file_lock():
-                return await self.set_runtime_config_value(
+                return await self.unset_runtime_config_value(
                     key,
-                    raw_value,
                     actor=actor,
                     _locked=True,
                 )

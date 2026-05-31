@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from .locks import get_ban_state_lock
+
 try:
     import config
 except ModuleNotFoundError:
@@ -56,13 +58,6 @@ class BackupMixin:
         if lock is None:
             lock = asyncio.Lock()
             self._database_file_operation_lock = lock
-        return lock
-
-    def _ban_state_lock(self) -> asyncio.Lock:
-        lock = getattr(self, "_ban_state_operation_lock", None)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._ban_state_operation_lock = lock
         return lock
 
     def _database_path(self) -> pathlib.Path:
@@ -424,7 +419,7 @@ class BackupMixin:
     async def restore_database_backup(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
         """Restore a managed database backup and reload DB-backed caches."""
         async with self._database_file_lock():
-            async with self._ban_state_lock():
+            async with get_ban_state_lock(self):
                 return await self._restore_database_backup_locked(name, actor=actor)
 
     async def _restore_database_backup_locked(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:

@@ -109,7 +109,7 @@ def connect_xmpp(xmpp) -> bool:
 
 class BanBot(
     ClientXMPP,
-    ConfigMixin,
+    ConfigCommandMixin,
     MessagingMixin,
     OmemoMixin,
     AlertMixin,
@@ -127,7 +127,6 @@ class BanBot(
     RedactionMixin,
     BanQueryMixin,
     StatusMixin,
-    ConfigCommandMixin,
     MucMixin,
     HealthCheckMixin,
     SyncMixin,

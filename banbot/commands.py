@@ -9,6 +9,7 @@ import time
 from config import ADMIN_ROOM, NICK
 
 from ._version import __version__
+from .locks import get_ban_state_lock
 from .utils import parse_duration, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
@@ -18,14 +19,6 @@ PUBLIC_COMMANDS = {"help", "whoami", "banlist", "blacklist", "why", "rules", "po
 
 
 class CommandMixin:
-    def _ban_state_lock(self) -> asyncio.Lock:
-        """Return the shared ban-state lock, creating it for lightweight tests if needed."""
-        lock = getattr(self, "_ban_state_operation_lock", None)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._ban_state_operation_lock = lock
-        return lock
-
     def user_cmds_allowed(self, room: str) -> bool:
         """Check if user commands are allowed in protected rooms."""
         return room in self.protected_rooms and self.allow_user_cmds
@@ -386,7 +379,7 @@ class CommandMixin:
 
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             comment = " ".join(args[1:]) if len(args) > 1 else None
-            async with self._ban_state_lock():
+            async with get_ban_state_lock(self):
                 await self.ban_all(args[0], None, actor_jid, comment)
             return True
 
@@ -411,7 +404,7 @@ class CommandMixin:
 
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
             comment = " ".join(args[2:]) if len(args) > 2 else None
-            async with self._ban_state_lock():
+            async with get_ban_state_lock(self):
                 await self.ban_all(args[0], until, actor_jid, comment)
             return True
 
@@ -425,7 +418,7 @@ class CommandMixin:
                 return True
 
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-            async with self._ban_state_lock():
+            async with get_ban_state_lock(self):
                 await self.unban_all(args[0], actor_jid)
             return True
 
@@ -470,7 +463,7 @@ class CommandMixin:
             return True
 
         if cmd == "sync":
-            async with self._ban_state_lock():
+            async with get_ban_state_lock(self):
                 await self.sync_rooms_and_bans()
             return True
 
@@ -479,7 +472,7 @@ class CommandMixin:
             return True
 
         if cmd == "syncbans":
-            async with self._ban_state_lock():
+            async with get_ban_state_lock(self):
                 await self.sync_bans()
             return True
 
@@ -585,7 +578,7 @@ class CommandMixin:
                 )
                 return True
             actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-            async with self._ban_state_lock():
+            async with get_ban_state_lock(self):
                 await self.cmd_rtbl(args, room, actor=actor_jid)
             return True
 

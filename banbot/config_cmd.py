@@ -11,24 +11,10 @@ from .config_utils import ConfigMixin
 log = logging.getLogger(__name__)
 
 
-class ConfigCommandMixin:
-    # Reuse ConfigMixin helpers here so lightweight test doubles that only mix in
-    # ConfigCommandMixin can still render/edit config without inheriting the full bot.
-    CONFIG_KEYS = ConfigMixin.CONFIG_KEYS
-    STARTUP_ONLY_CONFIG_KEYS = ConfigMixin.STARTUP_ONLY_CONFIG_KEYS
-    CONFIG_SECRET_KEYS = ConfigMixin.CONFIG_SECRET_KEYS
-    CONFIG_NEVER_WRITABLE_KEYS = ConfigMixin.CONFIG_NEVER_WRITABLE_KEYS
-    _config_file_path = ConfigMixin._config_file_path
-    _config_sample_path = ConfigMixin._config_sample_path
-    _ordered_config_keys_from_sample = ConfigMixin._ordered_config_keys_from_sample
-    _config_default_values_from_sample = ConfigMixin._config_default_values_from_sample
-    get_ordered_config_items = ConfigMixin.get_ordered_config_items
-    format_config_value_for_display = ConfigMixin.format_config_value_for_display
-    parse_config_value = ConfigMixin.parse_config_value
-    render_config_assignment = ConfigMixin.render_config_assignment
-    update_config_file_assignment = ConfigMixin.update_config_file_assignment
-    set_runtime_config_value = ConfigMixin.set_runtime_config_value
-    unset_runtime_config_value = ConfigMixin.unset_runtime_config_value
+class ConfigCommandMixin(ConfigMixin):
+    # Inherit ConfigMixin helpers directly so lightweight test doubles that only
+    # mix in ConfigCommandMixin can still render/edit config without duplicating
+    # helper attributes on the main BanBot multiple-inheritance tree.
 
     CONFIG_OUTPUT_SECTIONS = (
         ("💾 Storage", (
