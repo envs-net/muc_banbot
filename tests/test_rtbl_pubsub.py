@@ -198,15 +198,20 @@ class FakeFrom:
 class FakeEventItems:
     def __init__(self, node, items):
         self.node = node
-        self.items = list(items)
+        self._items = list(items)
 
     def __iter__(self):
-        return iter(self.items)
+        return iter(self._items)
+
+    def __len__(self):
+        return len(self._items)
 
     def __getitem__(self, key):
         if key == "node":
             return self.node
-        return self.items[key]
+        if isinstance(key, int):
+            return self._items[key]
+        raise KeyError(key)
 
 
 class FakePubSubMessage(dict):

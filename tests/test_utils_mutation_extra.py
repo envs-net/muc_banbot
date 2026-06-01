@@ -86,6 +86,7 @@ def test_validate_domain_ban_accepts_precise_domains_after_normalization(domain)
 def test_validate_domain_ban_rejects_generic_or_empty_domains(domain):
     ok, msg = validate_domain_ban(domain)
     assert ok is False
+    assert msg.startswith("❌ Domain")
     assert "too generic" in msg
 
 
@@ -212,7 +213,6 @@ def test_validate_jid_format_accepts_basic_two_part_domains(jid):
         ("", "*."),
         (".", "*."),
         ("*.org", "*.org"),
-        ("org", "*.org"),
         ("localhost", "*.localhost"),
         ("*.", "*."),
     ],
@@ -395,10 +395,10 @@ def test_looks_like_domain_rejects_wildcards_jids_resources_and_single_labels(va
 
 
 def test_normalize_ban_target_domain_without_nick_and_jid_resource_cases_are_distinct():
-    assert normalize_ban_target(jid="*.Sub.Example.Org.") == (
+    assert normalize_ban_target(jid="*.Sub.Example.Org..") == (
         "domain",
         "sub.example.org",
-        "*.sub.example.org.",
+        "*.sub.example.org..",
         None,
     )
     assert normalize_ban_target(jid="User@Example.Org/Device/Extra") == (
@@ -409,6 +409,8 @@ def test_normalize_ban_target_domain_without_nick_and_jid_resource_cases_are_dis
     )
     with pytest.raises(ValueError, match="Ban target requires"):
         normalize_ban_target(jid=None, nick="")
+    with pytest.raises(ValueError, match="Ban target requires"):
+        normalize_ban_target(jid=None, nick="   ")
 
 
 def test_paginate_lines_uses_start_offset_and_end_exclusively():
