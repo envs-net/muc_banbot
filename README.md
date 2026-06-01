@@ -72,6 +72,30 @@ For a systemd service example, see [docs/configuration.md](docs/configuration.md
 
 `main` is the development branch. For production deployments, use the latest tagged release shown on GitHub/Gitea. Only bump `banbot/_version.py` when preparing a release that will be tagged and published, so the packaged version and release tag stay aligned.
 
+## Updating to a New Release
+
+For production deployments, update to the latest tagged release instead of running directly from `main`:
+
+```bash
+cd /srv/adminbot/muc_banbot
+
+git fetch --tags
+LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
+git checkout "$LATEST_TAG"
+
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Optional, only when OMEMO support is used:
+# pip install -r requirements-omemo.txt
+
+systemctl --user restart muc_banbot
+# or, for a system-wide service:
+# sudo systemctl restart muc_banbot
+```
+
+If the release notes mention new configuration options, compare your local `config.py` with the updated `config_sample.py` and add any new settings you want to customize.
+
 ---
 
 ## Minimal Configuration
