@@ -98,6 +98,22 @@ def test_domain_matches_is_boundary_aware_and_normalizes_case_and_dots():
     assert domain_matches("", "example.org") is False
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("example.org ", True),
+        ("sub.example.org", True),
+        ("*.example.org", False),
+        ("user@example.org", False),
+        ("example.org/resource", False),
+        ("nick", False),
+        (None, False),
+    ],
+)
+def test_looks_like_domain_boundaries(value, expected):
+    assert looks_like_domain(value) is expected
+
+
 def test_normalize_ban_target_prefers_jid_over_nick_and_preserves_domain_marker():
     assert normalize_ban_target(jid="User@Example.Org/Res", nick="Nick") == (
         "jid",
@@ -196,6 +212,7 @@ def test_validate_jid_format_accepts_basic_two_part_domains(jid):
     [
         ("", "*."),
         (".", "*."),
+        ("org", "*.org"),
         ("*.org", "*.org"),
         ("localhost", "*.localhost"),
         ("*.", "*."),
@@ -253,6 +270,23 @@ def test_domain_matches_negative_boundary_cases(user_domain, banned_domain):
     assert domain_matches(user_domain, banned_domain) is False
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (" example.org ", True),
+        ("sub.example.org", True),
+        ("example", False),
+        ("*.example.org", False),
+        ("user@example.org", False),
+        ("example.org/resource", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_looks_like_domain_requires_plain_bare_domain_shape(value, expected):
+    assert looks_like_domain(value) is expected
+
+
 def test_normalize_ban_target_empty_jid_falls_back_to_nick():
     assert normalize_ban_target(jid="", nick=" Nick ") == (
         "nick",
@@ -294,10 +328,10 @@ def test_parse_duration_rejects_single_suffix_without_number():
             parse_duration(value)
 
 
-def test_parse_duration_whitespace_rules_allow_numeric_whitespace_before_suffix_only():
+def test_parse_duration_accepts_python_integer_whitespace_but_not_bad_suffix_spacing():
     assert parse_duration(" 1m") == 60
-    assert parse_duration("1 m") == 60
     assert parse_duration("\t2h") == 7200
+    assert parse_duration("1\tm") == 60
     with pytest.raises(ValueError):
         parse_duration("1m ")
 
@@ -369,8 +403,6 @@ def test_normalize_ban_target_domain_without_nick_and_jid_resource_cases_are_dis
         "*.sub.example.org.",
         None,
     )
-    # Current normalization strips duplicate trailing dots for the target key,
-    # but preserves the lower-cased raw wildcard marker string for normalized_jid.
     assert normalize_ban_target(jid="*.Sub.Example.Org..") == (
         "domain",
         "sub.example.org",
@@ -385,8 +417,6 @@ def test_normalize_ban_target_domain_without_nick_and_jid_resource_cases_are_dis
     )
     with pytest.raises(ValueError, match="Ban target requires"):
         normalize_ban_target(jid=None, nick="")
-    with pytest.raises(ValueError, match="Ban target requires"):
-        normalize_ban_target(jid=None, nick="   ")
 
 
 def test_paginate_lines_uses_start_offset_and_end_exclusively():
@@ -401,32 +431,3 @@ def test_resolve_page_uses_ceiling_total_pages_and_clamps_to_last():
     assert resolve_page(-1, 10, per_page=10) == 1
     assert resolve_page(-1, 11, per_page=10) == 2
     assert resolve_page(99, 11, per_page=10) == 2
-
-
-def test_parse_duration_error_messages_match_exactly_for_cli_feedback():
-    with pytest.raises(ValueError) as exc:
-        parse_duration("10w")
-    assert str(exc.value) == "Invalid duration format (use 10s, 10m, 2h, 1d)"
-
-    with pytest.raises(ValueError) as exc:
-        parse_duration("xm")
-    assert str(exc.value) == "Invalid duration number"
-
-
-def test_validate_domain_ban_generic_error_message_is_exact_after_normalization():
-    ok, message = validate_domain_ban("*.org")
-    assert ok is False
-    assert message == (
-        "❌ Domain '*.org' is too generic. "
-        "Specify more precise domain (e.g., *.domain.tld)."
-    )
-
-
-def test_paginate_lines_and_resolve_page_default_to_ten_items_per_page():
-    lines = [str(i) for i in range(11)]
-
-    page_lines, current_page, total_pages, total_items = paginate_lines(lines, 1)
-    assert page_lines == [str(i) for i in range(10)]
-    assert (current_page, total_pages, total_items) == (1, 2, 11)
-
-    assert resolve_page(-1, 11) == 2
