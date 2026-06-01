@@ -109,7 +109,7 @@ Common runtime settings:
 | `PUBLIC_COMMAND_RATE_LIMIT_MAX` | `3` | Max public command uses per nick/room/command/window |
 | `STRUCTURED_EVENT_LOGS` | `True` | Emit JSON logs for important events |
 | `AUDIT_LOG_ENABLED` | `True` | Store audit events in SQLite |
-| `AUDIT_LOG_RETENTION_DAYS` | `365` | Audit retention; validation caps this at 365 |
+| `AUDIT_LOG_RETENTION_DAYS` | `365` | Audit retention in days; valid range 1-365 |
 | `HEALTH_CHECK_INTERVAL` | `300` | Health check interval; minimum 60 seconds |
 | `UNBAN_CHECK_INTERVAL` | `60` | Expired tempban check interval |
 | `MAX_TEMPBAN_DAYS` | `30` | Max temporary ban duration; 1-365 |
@@ -147,7 +147,7 @@ Commands:
 !backup show latest
 !backup verify latest
 !restore latest confirm
-!backup restore <filename> confirm
+!restore <filename> confirm
 ```
 
 `!restore` always requires `confirm` and creates a safety backup of the current database and `config.py` before replacing `DB_FILE` and, when present in the selected backup, `config.py` and OMEMO storage. The bot reloads DB-backed caches after restore, but a process restart is still recommended.
