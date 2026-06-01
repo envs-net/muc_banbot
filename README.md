@@ -48,6 +48,12 @@ cd /srv/adminbot
 git clone https://git.envs.net/envs/muc_banbot.git
 cd muc_banbot
 
+# Production installs should use the latest tagged release, not the main branch.
+git fetch --tags
+LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
+git checkout "$LATEST_TAG"
+echo "Using muc_banbot release $LATEST_TAG"
+
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -63,6 +69,8 @@ python muc_banbot.py
 ```
 
 For a systemd service example, see [docs/configuration.md](docs/configuration.md#systemd-service).
+
+`main` is the development branch. For production deployments, use the latest tagged release shown on GitHub/Gitea. Only bump `banbot/_version.py` when preparing a release that will be tagged and published, so the packaged version and release tag stay aligned.
 
 ---
 
@@ -93,7 +101,7 @@ Examples assume the default command prefix `!`.
 | --- | --- |
 | `!help` | Show available commands |
 | `!status` | Show bot health, uptime, rooms, bans, RTBL, and DB state |
-| `!config [show]` | Show full active configuration in `config.py` order; secrets are hidden |
+| `!config [show]` | Show full active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |
 | `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
 | `!reloadconfig` | Validate and reload runtime configuration |

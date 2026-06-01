@@ -7,6 +7,14 @@ cp config_sample.py config.py
 $EDITOR config.py
 ```
 
+## `config_sample.py` as Display Reference
+
+BanBot uses `config_sample.py` as the reference for the section order shown by `!config`. Keep this file deployed together with the bot and update it when adding new configuration options.
+
+Do not put local secrets or production values into `config_sample.py`; use `config.py` for local configuration. `config_sample.py` should remain a versioned sample file, while `config.py`, `data/backups/`, and OMEMO storage should be treated as private deployment files.
+
+If `config_sample.py` is missing or incomplete, BanBot falls back to its built-in config ordering, but the displayed grouping may be less complete.
+
 ## Required Settings
 
 ```python
@@ -65,7 +73,7 @@ Most operational settings can be shown, edited, reset to the sample default, or 
 !reloadconfig
 ```
 
-`!config show` follows the active `config.py` order and appends missing supported keys from `config_sample.py`, marks runtime-writable values with `✏️`, marks protected/restart-only values with `🔒`, and hides secrets such as `PASSWORD` as `****`.
+`!config show` displays active runtime values from `config.py`, but uses `config_sample.py` as the reference for section order and for appending missing supported keys. It marks runtime-writable values with `✏️`, marks protected/restart-only values with `🔒`, and hides secrets such as `PASSWORD` as `****`.
 
 `!config set` and `!config unset` only allow runtime-writable settings. Identity, password, database path, admin room, RTBL setup, and OMEMO startup settings remain protected and require manual edit + restart.
 
