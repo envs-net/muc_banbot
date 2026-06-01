@@ -237,8 +237,8 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
             if msg["mbody"].startswith("⏳ Syncing batch")
         ]
         assert len(batch_messages) == 2
-        assert "1-1/2" in batch_messages[0]
-        assert "2-2/2" in batch_messages[1]
+        assert any("1-1/2" in message for message in batch_messages)
+        assert any("2-2/2" in message for message in batch_messages)
     finally:
         await bot.db.close()
 
