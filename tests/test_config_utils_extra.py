@@ -17,6 +17,7 @@ class ConfigBot(ConfigMixin):
         self.max_tempban_days = 30
         self.public_command_rate_limit_window = 30
         self.public_command_rate_limit_max = 3
+        self.list_page_size = 10
         self.muc_write_limit = 5
         self.sync_batch_size = 10
         self.structured_event_logs = True
@@ -117,6 +118,15 @@ def test_runtime_config_snapshot_includes_sync_batch_size():
     snapshot = bot._runtime_config_snapshot()
 
     assert snapshot["SYNC_BATCH_SIZE"] == 7
+
+
+def test_runtime_config_snapshot_includes_list_page_size():
+    bot = ConfigBot()
+    bot.list_page_size = 12
+
+    snapshot = bot._runtime_config_snapshot()
+
+    assert snapshot["LIST_PAGE_SIZE"] == 12
 
 
 def test_runtime_config_snapshot_includes_rtbl_refresh_interval():

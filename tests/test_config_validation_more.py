@@ -22,6 +22,7 @@ class ConfigValidationBot(ConfigMixin):
         self.max_tempban_days = 30
         self.public_command_rate_limit_window = 30
         self.public_command_rate_limit_max = 3
+        self.list_page_size = 10
         self.muc_write_limit = 5
         self.sync_batch_size = 10
         self.structured_event_logs = True
@@ -54,6 +55,7 @@ def set_valid_config(monkeypatch):
         "MAX_TEMPBAN_DAYS": 30,
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
         "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
+        "LIST_PAGE_SIZE": 10,
         "MUC_WRITE_SEMAPHORE": 5,
         "SYNC_BATCH_SIZE": 10,
         "VERSION_CHECK_INTERVAL": 3600,

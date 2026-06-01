@@ -4,7 +4,7 @@ import time
 
 from config import ADMIN_ROOM
 
-from .utils import human_time, paginate_lines, resolve_page
+from .utils import get_list_page_size, human_time, paginate_lines, resolve_page
 
 
 class BanQueryMixin:
@@ -225,7 +225,7 @@ class BanQueryMixin:
             )
             text = header + ":\n" + "\n".join(page_lines)
         else:
-            per_page      = 10
+            per_page      = get_list_page_size(self)
             resolved_page = resolve_page(page, len(all_entries), per_page)
             page_lines, current_page, total_pages, total_items = paginate_lines(
                 all_entries, resolved_page, per_page=per_page
@@ -297,7 +297,7 @@ class BanQueryMixin:
                     header = f"📋 Banlist ({total_items}) - All:"
                     text = header + "\n" + "\n".join(page_lines)
                 else:
-                    per_page = 10
+                    per_page = get_list_page_size(self)
                     resolved_page = resolve_page(page, len(entries), per_page)
                     page_lines, current_page, total_pages, total_items = paginate_lines(
                         entries, resolved_page, per_page=per_page
@@ -373,7 +373,7 @@ class BanQueryMixin:
                 + "\n".join(page_lines)
             )
         else:
-            per_page = 10
+            per_page = get_list_page_size(self)
             resolved_page = resolve_page(page, len(entries), per_page)
             page_lines, current_page, total_pages, total_items = paginate_lines(
                 entries, resolved_page, per_page=per_page

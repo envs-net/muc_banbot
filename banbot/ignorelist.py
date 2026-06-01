@@ -4,6 +4,7 @@ import logging
 
 from .utils import (
     domain_matches,
+    get_list_page_size,
     resolve_page,
     validate_domain_ban,
     validate_jid_format,
@@ -263,7 +264,7 @@ class IgnorelistMixin:
                 )
                 return
 
-            per_page = 10
+            per_page = get_list_page_size(self)
             if show_all:
                 async with self.db.execute(
                     "SELECT target, target_type, reason, added_by FROM ignorelist "

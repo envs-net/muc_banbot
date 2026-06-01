@@ -57,6 +57,7 @@ VCARD_NOTE = "Bot Admin Assistant"   # Notes/description
 LOG_LEVEL = "INFO"
 
 COMMAND_PREFIX = "!" # Command prefix used to trigger bot commands in rooms
+LIST_PAGE_SIZE = 10  # Default number of entries per page for paginated list commands
 ANNOUNCE_STARTUP = True  # True = Show startup messages in the admin room, False = off
 ANNOUNCE_SYNC_DETAILS = True  # True = Show detailed sync progress messages at startup (per-room details), False = off. Manual !sync and !syncbans commands always show details
 SHOW_BAN_IN_MUC = False  # True = visible ban/kick in protected rooms, False = hidden

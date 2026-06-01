@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 from .locks import database_file_lock, database_mutation_locks
 from .managed_files import ManagedFile, format_file_size, list_managed_files, prune_managed_files, resolve_managed_file
+from .utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 _BACKUP_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -601,6 +602,23 @@ class BackupMixin:
             return
 
         if action == "list":
+            show_all = wants_all_pages(args[1:])
+            list_args = without_all_pages_arg(args[1:])
+            page = 1
+            if list_args:
+                if list_args[0].lower() == "last":
+                    page = -1
+                else:
+                    try:
+                        page = max(1, int(list_args[0]))
+                    except ValueError:
+                        await self.bot_send_message(
+                            mto=room,
+                            mbody=f"❌ Usage: {self.command_prefix}backup list [all|page|last]",
+                            mtype="groupchat",
+                        )
+                        return
+
             backups = self.list_database_backups()
             lines = ["💾 Managed Full Backups"]
             lines.append(f"Directory: {self._database_backup_dir()}")
@@ -609,10 +627,22 @@ class BackupMixin:
                 lines.append("\nNo managed database backups found.")
             else:
                 lines.append("")
-                for index, backup in enumerate(backups[:20], start=1):
-                    lines.append(self._format_backup_entry(backup, index))
-                if len(backups) > 20:
-                    lines.append(f"... and {len(backups) - 20} more backups")
+                if show_all:
+                    lines[0] = f"💾 Managed Full Backups ({len(backups)}) - All"
+                    for index, backup in enumerate(backups, start=1):
+                        lines.append(self._format_backup_entry(backup, index))
+                else:
+                    per_page = get_list_page_size(self)
+                    resolved_page = resolve_page(page, len(backups), per_page)
+                    page_backups, current_page, total_pages, total_items = paginate_lines(
+                        backups, resolved_page, per_page=per_page
+                    )
+                    lines[0] = f"💾 Managed Full Backups ({total_items}) - Page {current_page}/{total_pages}"
+                    start_index = (current_page - 1) * per_page + 1
+                    for index, backup in enumerate(page_backups, start=start_index):
+                        lines.append(self._format_backup_entry(backup, index))
+                    if current_page < total_pages:
+                        lines.append(f"\nUse {self.command_prefix}backup list {current_page + 1} for the next page.")
                 lines.append("")
                 lines.append(f"Restore with: {self.command_prefix}restore <filename|latest> confirm")
             await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
@@ -655,7 +685,7 @@ class BackupMixin:
             mbody=(
                 "Usage:\n"
                 f"  {self.command_prefix}backup\n"
-                f"  {self.command_prefix}backup list\n"
+                f"  {self.command_prefix}backup list [all|page|last]\n"
                 f"  {self.command_prefix}backup show <filename|latest>\n"
                 f"  {self.command_prefix}backup verify <filename|latest>\n"
                 f"  {self.command_prefix}backup restore <filename|latest> confirm\n"

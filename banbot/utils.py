@@ -136,6 +136,21 @@ def normalize_ban_target(jid: str | None = None, nick: str | None = None) -> tup
 
 
 
+def get_list_page_size(obj=None, default: int = 10) -> int:
+    """Return the configured page size for paginated command output."""
+    value = getattr(obj, "list_page_size", None) if obj is not None else None
+    if value is None:
+        try:
+            import config  # type: ignore
+
+            value = getattr(config, "LIST_PAGE_SIZE", default)
+        except Exception:
+            value = default
+    try:
+        return max(1, int(value))
+    except Exception:
+        return default
+
 def wants_all_pages(args: list[str]) -> bool:
     """Return True when command arguments request unpaginated output."""
     return any(str(arg).lower() == "all" for arg in args)

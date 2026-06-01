@@ -7,7 +7,7 @@ import re
 from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
 
-from .utils import paginate_lines, wants_all_pages, without_all_pages_arg
+from .utils import get_list_page_size, paginate_lines, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +112,8 @@ class RoomMixin:
                         + "\n".join(page_lines)
                     )
                 else:
-                    page_lines, current_page, total_pages, total_items = paginate_lines(rooms, page, per_page=10)
+                    per_page = get_list_page_size(self)
+                    page_lines, current_page, total_pages, total_items = paginate_lines(rooms, page, per_page=per_page)
 
                     text = (
                         f"🔒 Protected Rooms ({total_items}) - Page {current_page}/{total_pages}:\n"

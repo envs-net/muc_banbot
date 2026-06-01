@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from config import DB_FILE
 
-from .utils import resolve_page, wants_all_pages, without_all_pages_arg
+from .utils import get_list_page_size, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
@@ -155,10 +155,11 @@ class AuditMixin:
             ) as cursor:
                 rows = await cursor.fetchall()
         else:
-            page = resolve_page(page, total, per_page=10)
-            total_pages = max(1, (total + 9) // 10)
+            per_page = get_list_page_size(self)
+            page = resolve_page(page, total, per_page=per_page)
+            total_pages = max(1, (total + per_page - 1) // per_page)
             page = max(1, min(page, total_pages))
-            offset = (page - 1) * 10
+            offset = (page - 1) * per_page
 
             async with self.db.execute(
                 f"""
@@ -166,9 +167,9 @@ class AuditMixin:
                 FROM audit_log
                 {where}
                 ORDER BY created_at DESC, id DESC
-                LIMIT 10 OFFSET ?
+                LIMIT ? OFFSET ?
                 """,
-                [*params, offset],
+                [*params, per_page, offset],
             ) as cursor:
                 rows = await cursor.fetchall()
 

@@ -12,6 +12,9 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 !audit last
 !audit all
 
+!backup list all
+!export list all
+
 !banlist all
 !blacklist all
 !banlist rtbl all
@@ -47,7 +50,10 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | Command | Description | Example |
 | --- | --- | --- |
 | `!backup` | Creates a managed full backup | `!backup` |
-| `!backup list` | Lists managed backups | `!backup list` |
+| `!backup list [all/page/last]` | Lists managed backups | `!backup list` |
+| `!backup show <filename|latest>` | Shows details and companions for one backup | `!backup show latest` |
+| `!backup verify <filename|latest>` | Runs SQLite integrity checks and companion readability checks | `!backup verify latest` |
+| `!restore <filename|latest> confirm` | Restores a managed full backup | `!restore latest confirm` |
 
 ### Rooms / Policy
 
@@ -121,7 +127,8 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | Command | Description | Example |
 | --- | --- | --- |
 | `!export` | Exports all bans to `EXPORT_DIR/bans_export_TIMESTAMP.csv` | `!export` |
-| `!export list` | Lists managed CSV exports | `!export list` |
+| `!export list [all/page/last]` | Lists managed CSV exports | `!export list` |
+| `!export delete <file|latest>` | Deletes a managed CSV export | `!export delete latest` |
 | `!import <file> [dryrun]` | Imports bans from CSV with validation and pre-import full backup | `!import bans.csv dryrun` |
 
 ### Config, Reload and Restart
@@ -179,7 +186,7 @@ All other admin commands, especially ban, unban, room changes, RTBL changes, rel
 | Command | Description | Example |
 | --- | --- | --- |
 | `!backup` | Creates a timestamped SQLite database snapshot plus companions when available | `!backup` |
-| `!backup list` | Lists managed backups, newest first | `!backup list` |
+| `!backup list [all/page/last]` | Lists managed backups, newest first | `!backup list` |
 | `!backup show <filename|latest>` | Shows details and companions for one backup | `!backup show latest` |
 | `!backup verify <filename|latest>` | Runs SQLite integrity checks and companion readability checks | `!backup verify latest` |
 | `!restore <filename|latest> confirm` | Restores a managed backup directly | `!restore latest confirm` |
@@ -327,7 +334,7 @@ See [RTBL](rtbl.md) for behavior details.
 | Command | Description |
 | --- | --- |
 | `!export` | Exports all bans to `EXPORT_DIR/bans_export_TIMESTAMP.csv` |
-| `!export list` | Lists managed CSV exports |
+| `!export list [all/page/last]` | Lists managed CSV exports |
 | `!export delete <file|latest>` | Deletes a managed CSV export |
 | `!import <file> [dryrun]` | Imports bans from CSV with validation and pre-import full backup |
 

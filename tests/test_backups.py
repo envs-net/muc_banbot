@@ -30,6 +30,7 @@ class BackupBot(BackupMixin, DatabaseMixin, CacheMixin):
         self.audit_events = []
         self.sent = []
         self.command_prefix = "!"
+        self.list_page_size = 10
         self.last_database_backup_file = None
         self.last_database_restore_file = None
         self._database_file_operation_lock = asyncio.Lock()
@@ -109,6 +110,33 @@ async def test_backup_list_command_shows_restore_hint(backup_config):
         assert "!restore <filename|latest> confirm" in body
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_backup_list_command_paginates(backup_config):
+    db_path, backup_dir = backup_config
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for index in range(3):
+        path = backup_dir / f"{db_path.name}.snapshot-manual-20260101_00000{index}"
+        path.write_text("backup", encoding="utf-8")
+        os.utime(path, (1000 + index, 1000 + index))
+
+    bot = BackupBot()
+    bot.list_page_size = 2
+
+    await bot.cmd_backup(["list"], "admin@conference.example.org")
+    first_page = bot.sent[-1]["mbody"]
+    assert "Managed Full Backups (3) - Page 1/2" in first_page
+    assert "Use !backup list 2 for the next page." in first_page
+
+    await bot.cmd_backup(["list", "2"], "admin@conference.example.org")
+    second_page = bot.sent[-1]["mbody"]
+    assert "Managed Full Backups (3) - Page 2/2" in second_page
+    assert "Use !backup list 3" not in second_page
+
+    await bot.cmd_backup(["list", "all"], "admin@conference.example.org")
+    all_page = bot.sent[-1]["mbody"]
+    assert "Managed Full Backups (3) - All" in all_page
 
 
 @pytest.mark.asyncio

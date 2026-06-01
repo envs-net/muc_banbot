@@ -14,7 +14,16 @@ try:
 except ModuleNotFoundError:
     config = None
 
-from .utils import normalize_ban_target, validate_domain_ban, validate_jid_format
+from .utils import (
+    get_list_page_size,
+    normalize_ban_target,
+    paginate_lines,
+    resolve_page,
+    validate_domain_ban,
+    validate_jid_format,
+    wants_all_pages,
+    without_all_pages_arg,
+)
 
 log = logging.getLogger(__name__)
 
@@ -138,16 +147,45 @@ class ImportExportMixin:
             await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
             return
         if action == "list":
+            show_all = wants_all_pages(args[1:])
+            list_args = without_all_pages_arg(args[1:])
+            page = 1
+            if list_args:
+                if list_args[0].lower() == "last":
+                    page = -1
+                else:
+                    try:
+                        page = max(1, int(list_args[0]))
+                    except ValueError:
+                        await self.bot_send_message(
+                            mto=room,
+                            mbody=f"❌ Usage: {self.command_prefix}export list [all|page|last]",
+                            mtype="groupchat",
+                        )
+                        return
+
             exports = self.list_export_files()
             lines = ["📦 Managed Ban Exports", f"Directory: {self._export_dir()}", f"Keep: {self._export_keep()}"]
             if not exports:
                 lines.append("\nNo managed export files found.")
             else:
                 lines.append("")
-                for index, export_file in enumerate(exports[:20], start=1):
-                    lines.append(self._format_export_entry(export_file, index))
-                if len(exports) > 20:
-                    lines.append(f"... and {len(exports) - 20} more exports")
+                if show_all:
+                    lines[0] = f"📦 Managed Ban Exports ({len(exports)}) - All"
+                    for index, export_file in enumerate(exports, start=1):
+                        lines.append(self._format_export_entry(export_file, index))
+                else:
+                    per_page = get_list_page_size(self)
+                    resolved_page = resolve_page(page, len(exports), per_page)
+                    page_exports, current_page, total_pages, total_items = paginate_lines(
+                        exports, resolved_page, per_page=per_page
+                    )
+                    lines[0] = f"📦 Managed Ban Exports ({total_items}) - Page {current_page}/{total_pages}"
+                    start_index = (current_page - 1) * per_page + 1
+                    for index, export_file in enumerate(page_exports, start=start_index):
+                        lines.append(self._format_export_entry(export_file, index))
+                    if current_page < total_pages:
+                        lines.append(f"\nUse {self.command_prefix}export list {current_page + 1} for the next page.")
             await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return
         if action == "delete":
@@ -170,7 +208,7 @@ class ImportExportMixin:
             mbody=(
                 "Usage:\n"
                 f"  {self.command_prefix}export\n"
-                f"  {self.command_prefix}export list\n"
+                f"  {self.command_prefix}export list [all|page|last]\n"
                 f"  {self.command_prefix}export delete <filename|latest>"
             ),
             mtype="groupchat",

@@ -903,7 +903,7 @@ class CommandMixin:
 
             "💾 Backup / Restore\n"
             f"{p}backup - create a full backup\n"
-            f"{p}backup list - list full backups\n"
+            f"{p}backup list [all|page|last] - list full backups\n"
             f"{p}backup show <filename|latest> - show backup details\n"
             f"{p}backup verify <filename|latest> - verify a backup\n"
             f"{p}restore <filename|latest> confirm - restore a full backup\n\n"
@@ -954,6 +954,8 @@ class CommandMixin:
             f"{p}rtbl publish sync - publish all current bans to your own feed\n\n"
 
             "📦 Import / Export\n"
-            f"{p}export [list|delete] - export/list/delete managed CSV ban exports\n"
+            f"{p}export - export all bans to a managed CSV file\n"
+            f"{p}export list [all|page|last] - list managed CSV exports\n"
+            f"{p}export delete <filename|latest> - delete a managed CSV export\n"
             f"{p}import <filename> [dryrun] - import bans from a CSV file\n"
         )

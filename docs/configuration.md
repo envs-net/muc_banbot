@@ -84,6 +84,7 @@ Common runtime settings:
 | Setting | Default | Description |
 | --- | --- | --- |
 | `COMMAND_PREFIX` | `!` | Prefix used for commands |
+| `LIST_PAGE_SIZE` | `10` | Entries per page for paginated list commands |
 | `DB_BACKUP_ON_START` | `True` | Create an automatic DB snapshot on startup |
 | `DB_BACKUP_DIR` | `data/backups` | Directory for managed DB snapshots |
 | `DB_BACKUP_INCLUDE_OMEMO` | `True` | Include `OMEMO_STORAGE_FILE` as companion when it exists |
@@ -143,7 +144,7 @@ Commands:
 
 ```text
 !backup
-!backup list
+!backup list [all|page|last]
 !backup show latest
 !backup verify latest
 !restore latest confirm

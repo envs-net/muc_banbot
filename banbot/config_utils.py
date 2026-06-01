@@ -91,6 +91,7 @@ class ConfigMixin:
     CONFIG_KEYS = (
         "LOG_LEVEL",
         "COMMAND_PREFIX",
+        "LIST_PAGE_SIZE",
         "DB_BACKUP_ON_START",
         "DB_BACKUP_DIR",
         "DB_BACKUP_KEEP",
@@ -167,6 +168,7 @@ class ConfigMixin:
         return {
             "LOG_LEVEL": getattr(self, "log_level", str(getattr(config, "LOG_LEVEL", "INFO")).upper()),
             "COMMAND_PREFIX": self.command_prefix,
+            "LIST_PAGE_SIZE": getattr(self, "list_page_size", 10),
             "DB_BACKUP_ON_START": getattr(self, "db_backup_on_start", True),
             "DB_BACKUP_DIR": getattr(self, "db_backup_dir", "data/backups"),
             "DB_BACKUP_KEEP": getattr(self, "db_backup_keep", 15),
@@ -335,6 +337,7 @@ class ConfigMixin:
             "MAX_TEMPBAN_DAYS": (1, 365),
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": (1, 3600),
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": (1, 100),
+            "LIST_PAGE_SIZE": (1, 100),
             "MUC_WRITE_SEMAPHORE": (1, 100),
             "SYNC_BATCH_SIZE": (1, 100),
             "VERSION_CHECK_INTERVAL": (300, 86400),
@@ -351,6 +354,7 @@ class ConfigMixin:
             "MAX_TEMPBAN_DAYS": 30,
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
+            "LIST_PAGE_SIZE": 10,
             "MUC_WRITE_SEMAPHORE": 5,
             "SYNC_BATCH_SIZE": 10,
             "VERSION_CHECK_INTERVAL": 3600,
@@ -600,6 +604,7 @@ class ConfigMixin:
         self.apply_log_level(getattr(config, "LOG_LEVEL", "INFO"))
 
         self.command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip() or "!"
+        self.list_page_size = getattr(config, "LIST_PAGE_SIZE", 10)
         self.sync_batch_size = getattr(config, "SYNC_BATCH_SIZE", 10)
         self.db_backup_on_start = getattr(config, "DB_BACKUP_ON_START", True)
         self.db_backup_dir = str(getattr(config, "DB_BACKUP_DIR", "data/backups")).strip() or "data/backups"

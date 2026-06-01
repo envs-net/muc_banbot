@@ -9,6 +9,7 @@ from xml.etree import ElementTree as ET
 from config import ADMIN_ROOM
 
 from .utils import (
+    get_list_page_size,
     paginate_lines,
     resolve_page,
     safe_jid,
@@ -606,8 +607,9 @@ class RoomInviteMixin:
             if show_all:
                 text = f"📨 Pending Room Invites ({len(lines)}) - All:\n" + "\n".join(lines)
             else:
-                page = resolve_page(page, len(lines), per_page=10)
-                page_lines, current_page, total_pages, total_items = paginate_lines(lines, page, per_page=10)
+                per_page = get_list_page_size(self)
+                page = resolve_page(page, len(lines), per_page=per_page)
+                page_lines, current_page, total_pages, total_items = paginate_lines(lines, page, per_page=per_page)
                 text = (
                     f"📨 Pending Room Invites ({total_items}) - Page {current_page}/{total_pages}:\n"
                     + "\n".join(page_lines)

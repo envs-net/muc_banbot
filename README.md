@@ -134,7 +134,7 @@ Examples assume the default command prefix `!`.
 | `!whoami` | Show your affiliation, role, and permissions |
 | `!audit [all/page/last/query]` | Show audit log entries |
 | `!backup` | Create a managed full backup |
-| `!backup list` | List managed full backups |
+| `!backup list [all/page/last]` | List managed full backups |
 | `!backup show <file/latest>` | Inspect one managed backup |
 | `!backup verify <file/latest>` | Verify a managed backup |
 | `!restore <file/latest> confirm` | Restore a managed full backup |
@@ -163,10 +163,12 @@ Examples assume the default command prefix `!`.
 | `!omemo reset [confirm]` | Rotate local OMEMO storage after confirmation |
 | `!rtbl list/add/delete/refresh` | Manage RTBL subscriptions |
 | `!rtbl publish status/sync` | Manage the bot's own RTBL publish feed |
-| `!export [list/delete]` | Manage CSV ban exports |
+| `!export` | Export all bans to a managed CSV file |
+| `!export list [all/page/last]` | List managed CSV ban exports |
+| `!export delete <file/latest>` | Delete a managed CSV ban export |
 | `!import <file> [dryrun]` | Import bans from CSV with validation and optional dry-run |
 
-For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.
+For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!backup list all`, `!export list all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.
 
 Full command reference: [docs/commands.md](docs/commands.md).
 

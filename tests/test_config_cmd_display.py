@@ -61,6 +61,7 @@ async def test_config_show_groups_keys_and_hides_secrets():
     assert "AVATAR_PATH" in profile
     assert "PUBLIC_COMMAND_RATE_LIMIT_WINDOW" in bot_settings
     assert "PUBLIC_COMMAND_RATE_LIMIT_MAX" in bot_settings
+    assert "LIST_PAGE_SIZE" in bot_settings
     assert "MUC_WRITE_SEMAPHORE" in performance
     assert "SYNC_BATCH_SIZE" in performance
 
