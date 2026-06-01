@@ -98,22 +98,6 @@ def test_domain_matches_is_boundary_aware_and_normalizes_case_and_dots():
     assert domain_matches("", "example.org") is False
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("example.org ", True),
-        ("sub.example.org", True),
-        ("*.example.org", False),
-        ("user@example.org", False),
-        ("example.org/resource", False),
-        ("nick", False),
-        (None, False),
-    ],
-)
-def test_looks_like_domain_boundaries(value, expected):
-    assert looks_like_domain(value) is expected
-
-
 def test_normalize_ban_target_prefers_jid_over_nick_and_preserves_domain_marker():
     assert normalize_ban_target(jid="User@Example.Org/Res", nick="Nick") == (
         "jid",
@@ -269,23 +253,6 @@ def test_domain_matches_negative_boundary_cases(user_domain, banned_domain):
     assert domain_matches(user_domain, banned_domain) is False
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (" example.org ", True),
-        ("sub.example.org", True),
-        ("example", False),
-        ("*.example.org", False),
-        ("user@example.org", False),
-        ("example.org/resource", False),
-        ("", False),
-        (None, False),
-    ],
-)
-def test_looks_like_domain_requires_plain_bare_domain_shape(value, expected):
-    assert looks_like_domain(value) is expected
-
-
 def test_normalize_ban_target_empty_jid_falls_back_to_nick():
     assert normalize_ban_target(jid="", nick=" Nick ") == (
         "nick",
@@ -327,8 +294,9 @@ def test_parse_duration_rejects_single_suffix_without_number():
             parse_duration(value)
 
 
-def test_parse_duration_accepts_python_integer_whitespace_but_not_bad_suffix_spacing():
+def test_parse_duration_whitespace_rules_allow_numeric_whitespace_before_suffix_only():
     assert parse_duration(" 1m") == 60
+    assert parse_duration("1 m") == 60
     assert parse_duration("\t2h") == 7200
     with pytest.raises(ValueError):
         parse_duration("1m ")
@@ -395,6 +363,14 @@ def test_looks_like_domain_rejects_wildcards_jids_resources_and_single_labels(va
 
 
 def test_normalize_ban_target_domain_without_nick_and_jid_resource_cases_are_distinct():
+    assert normalize_ban_target(jid="*.Sub.Example.Org.") == (
+        "domain",
+        "sub.example.org",
+        "*.sub.example.org.",
+        None,
+    )
+    # Current normalization strips duplicate trailing dots for the target key,
+    # but preserves the lower-cased raw wildcard marker string for normalized_jid.
     assert normalize_ban_target(jid="*.Sub.Example.Org..") == (
         "domain",
         "sub.example.org",

@@ -203,14 +203,9 @@ class FakeEventItems:
     def __iter__(self):
         return iter(self._items)
 
-    def __len__(self):
-        return len(self._items)
-
     def __getitem__(self, key):
         if key == "node":
             return self.node
-        if isinstance(key, int):
-            return self._items[key]
         raise KeyError(key)
 
 
