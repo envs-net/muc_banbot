@@ -70,7 +70,7 @@ python muc_banbot.py
 
 For a systemd service example, see [docs/configuration.md](docs/configuration.md#systemd-service).
 
-`main` is the development branch. For production deployments, use the latest tagged release shown on GitHub/Gitea. Only bump `banbot/_version.py` when preparing a release that will be tagged and published, so the packaged version and release tag stay aligned.
+`main` is the development branch. For production deployments, use the latest tagged release shown on GitHub/Gitea.
 
 ## Updating to a New Release
 
@@ -128,28 +128,43 @@ Examples assume the default command prefix `!`.
 | `!config [show]` | Show full active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |
 | `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
-| `!reloadconfig` | Validate and reload runtime configuration |
-| `!backup` / `!backup list/show/verify` | Create, list, inspect, or verify managed SQLite database/config.py/OMEMO backups |
-| `!restore <file|latest> confirm` | Restore a managed full backup |
-| `!omemo status/devices/reset` | Inspect OMEMO state, list local device hints, or rotate local OMEMO storage |
+| `!reload` / `!reloadconfig` | Validate and reload runtime configuration |
+| `!restart confirm` | Stop the bot so a supervisor can restart it |
+| `!checkupdate` / `!updatecheck` | Check whether a newer release is available |
+| `!whoami` | Show your affiliation, role, and permissions |
+| `!audit [all/page/last/query]` | Show audit log entries |
+| `!backup` | Create a managed full backup |
+| `!backup list` | List managed full backups |
+| `!backup show <file/latest>` | Inspect one managed backup |
+| `!backup verify <file/latest>` | Verify a managed backup |
+| `!restore <file/latest> confirm` | Restore a managed full backup |
 | `!room add <room>` | Add a protected room |
 | `!room remove <room>` | Remove a protected room |
 | `!room list [all/page]` | List protected rooms |
+| `!room invite list [all/page/last]` | List pending room invites |
+| `!room invite accept/decline <id>` | Accept or decline a pending room invite |
+| `!policy` / `!rules show/set/clear/enable/disable` | Manage public room policy text |
 | `!ban <jid/nick/domain> [comment]` | Ban a JID, nick, or wildcard domain |
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add a temporary ban |
 | `!unban <jid/nick/domain>` | Remove a ban |
-| `!banlist [all/page/last]` | Show active bans |
-| `!banlist rtbl [all/page/last]` | Show raw RTBL hash/domain entries |
-| `!bansearch [all] <query>` | Search bans by target, issuer, comment, or RTBL reason |
+| `!redact <jid> [reason]` / `!redact id ...` / `!redact cleanup` | Redact indexed messages or clean old redaction index entries |
+| `!banlist` / `!blacklist [all/page/last]` | Show active bans |
+| `!banlist` / `!blacklist rtbl [all/page/last]` | Show raw RTBL hash/domain entries |
+| `!bansearch <query> [all/page/last]` | Search bans by target, issuer, comment, or RTBL reason |
 | `!why <nick/jid>` | Explain why a user is banned |
-| `!audit [all/page/last/query]` | Show audit log entries |
-| `!redact <jid> [reason]` / `!redact cleanup` | Redact indexed messages or clean old redaction index entries |
-| `!ignore [list/all]` / `!ignore add/remove` | Manage the global ignorelist |
-| `!whitelist [list/all]` / `!whitelist add/remove` | Alias for `!ignore ...` |
+| `!sync` | Rejoin rooms, verify admin rights, and enforce active bans |
+| `!syncadmins` | Update admin list from the admin room |
+| `!syncbans` | Sync bans from rooms into the database and enforce them |
+| `!ignore [list/all/page]` | Show the global ignorelist |
+| `!ignore add/remove <jid/domain>` | Manage protected exact JIDs and domains |
+| `!whitelist [list/all/add/remove]` | Alias for `!ignore ...` |
+| `!omemo status` | Inspect OMEMO readiness and storage state |
+| `!omemo devices` | List visible admin-room recipients and local storage hints |
+| `!omemo reset [confirm]` | Rotate local OMEMO storage after confirmation |
 | `!rtbl list/add/delete/refresh` | Manage RTBL subscriptions |
 | `!rtbl publish status/sync` | Manage the bot's own RTBL publish feed |
-| `!sync` / `!syncadmins` / `!syncbans` | Rejoin rooms, sync admins, and reconcile bans |
-| `!export [list|delete]` / `!import <file> [dryrun]` | Manage CSV ban exports and imports |
+| `!export [list/delete]` | Manage CSV ban exports |
+| `!import <file> [dryrun]` | Import bans from CSV with validation and optional dry-run |
 
 For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.
 
