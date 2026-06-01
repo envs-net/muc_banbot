@@ -18,100 +18,21 @@ _CONFIG_ASSIGNMENT_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=")
 class ConfigCommandMixin(ConfigMixin):
     # Inherit ConfigMixin helpers directly. This keeps lightweight test doubles working
     # without duplicating helper attributes on the mixin class.
-    CONFIG_OUTPUT_SECTIONS = (
-        ("🪪 Bot Identity / Control", (
-            "JID",
-            "RESOURCE",
-            "PASSWORD",
-            "ADMIN_ROOM",
-            "NICK",
-        )),
-        ("🌐 Connection", (
-            "CONNECT_HOST",
-            "CONNECT_PORT",
-            "CONNECT_DIRECT_TLS",
-        )),
-        ("💾 Database / Backups", (
-            "DB_FILE",
-            "DB_BACKUP_ON_START",
-            "DB_BACKUP_DIR",
-            "DB_BACKUP_KEEP",
-            "DB_BACKUP_INCLUDE_OMEMO",
-        )),
-        ("📦 Managed CSV Exports", (
-            "EXPORT_DIR",
-            "EXPORT_KEEP",
-        )),
-        ("🖼️ vCard Settings", (
-            "AVATAR_PATH",
-            "VCARD_NICKNAME",
-            "VCARD_FN",
-            "VCARD_ORG",
-            "VCARD_ROLE",
-            "VCARD_URL",
-            "VCARD_NOTE",
-        )),
-        ("⚙️ Bot Settings", (
-            "LOG_LEVEL",
-            "COMMAND_PREFIX",
-            "ANNOUNCE_STARTUP",
-            "ANNOUNCE_SYNC_DETAILS",
-            "SHOW_BAN_IN_MUC",
-            "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
-            "ALLOW_ADMIN_COMMANDS_IN_DMS",
-            "ROOM_INVITES_ENABLED",
-            "HEALTH_CHECK_INTERVAL",
-            "UNBAN_CHECK_INTERVAL",
-            "MAX_TEMPBAN_DAYS",
-            "PUBLIC_COMMAND_RATE_LIMIT_WINDOW",
-            "PUBLIC_COMMAND_RATE_LIMIT_MAX",
-        )),
-        ("⚡ Performance Tuning", (
-            "MUC_WRITE_SEMAPHORE",
-        )),
-        ("📜 Logging / Audit", (
-            "STRUCTURED_EVENT_LOGS",
-            "AUDIT_LOG_ENABLED",
-            "AUDIT_LOG_RETENTION_DAYS",
-        )),
-        ("🚨 Event Alerts", (
-            "ALERT_ON_RECONNECT",
-            "ALERT_ON_ADMIN_RIGHTS_LOST",
-            "ALERT_ON_HEALTH_CHECK_FAILURE",
-            "ALERT_ON_DB_STATS_FAILURE",
-            "ALERT_ON_REDACTION_FAILURE",
-            "ALERT_ON_DB_SIZE_MB",
-            "ALERT_ON_RTBL_REFRESH_FAILURES",
-            "ALERT_DEDUP_WINDOW",
-        )),
-        ("🔐 OMEMO Encryption", (
-            "OMEMO_ENABLED",
-            "OMEMO_STORAGE_FILE",
-            "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",
-            "OMEMO_PLAINTEXT_FALLBACK",
-            "OMEMO_RESET_ON_IDENTITY_CHANGE",
-        )),
-        ("🛡️ RTBL", (
-            "RTBL_ENABLED",
-            "RTBL_ANNOUNCE",
-            "RTBL_REFRESH_INTERVAL",
-            "RTBL_PUBLISH_ENABLED",
-            "RTBL_PUBLISH_SERVICE",
-            "RTBL_PUBLISH_JID_NODE",
-            "RTBL_PUBLISH_DOMAIN_NODE",
-        )),
-        ("🔎 Version Check", (
-            "VERSION_CHECK_ENABLED",
-            "VERSION_CHECK_INTERVAL",
-            "VERSION_CHECK_URL",
-        )),
-        ("🧹 Redaction", (
-            "REDACTION_ENABLED",
-            "REDACTION_INDEX_RETENTION_DAYS",
-            "REDACTION_AUTO_REASONS",
-        )),
-    )
-
+    CONFIG_SAMPLE_SECTION_TITLES = {
+        "CONFIG": "🪪 Bot Identity / Control",
+        "CONNECTION": "🌐 Connection",
+        "DATABASE / BACKUPS": "💾 Database / Backups",
+        "MANAGED CSV EXPORTS": "📦 Managed CSV Exports",
+        "VCARD SETTINGS": "🖼️ vCard Settings",
+        "BOT SETTINGS": "⚙️ Bot Settings",
+        "PERFORMANCE TUNING": "⚡ Performance Tuning",
+        "LOGGING / AUDIT": "📜 Logging / Audit",
+        "EVENT ALERTS": "🚨 Event Alerts",
+        "OMEMO ENCRYPTION": "🔐 OMEMO Encryption",
+        "RTBL (REAL-TIME BLOCK LIST)": "🛡️ RTBL",
+        "VERSION CHECK": "🔎 Version Check",
+        "REDACTION": "🧹 Redaction",
+    }
 
     def _config_sample_paths(self) -> list[pathlib.Path]:
         """Return candidate config_sample.py paths for ordering !config output."""
@@ -120,39 +41,78 @@ class ConfigCommandMixin(ConfigMixin):
             pathlib.Path(__file__).resolve().parent.parent / "config_sample.py",
         ]
 
-    def _config_sample_key_order(self) -> dict[str, int]:
-        """Read key order from config_sample.py so !config follows the sample file."""
+    def _config_sample_sections(self) -> list[tuple[str, tuple[str, ...]]]:
+        """Parse config_sample.py sections so !config cannot drift from the sample."""
+        heading_re = re.compile(r"^#\s*=+\s*(.*?)\s*=+\s*$")
+
         for path in self._config_sample_paths():
             try:
                 if not path.is_file():
                     continue
-                order: dict[str, int] = {}
+
+                sections: list[tuple[str, list[str]]] = []
+                current_title: str | None = None
+                current_keys: list[str] = []
+
                 for line in path.read_text(encoding="utf-8").splitlines():
+                    heading = heading_re.match(line)
+                    if heading:
+                        if current_title is not None and current_keys:
+                            sections.append((current_title, current_keys))
+                        raw_title = " ".join(heading.group(1).strip().split())
+                        mapped_title = self.CONFIG_SAMPLE_SECTION_TITLES.get(
+                            raw_title.upper(),
+                            f"📦 {raw_title.title()}",
+                        )
+                        current_title = mapped_title
+                        current_keys = []
+                        continue
+
                     match = _CONFIG_ASSIGNMENT_RE.match(line)
-                    if match and match.group(1) not in order:
-                        order[match.group(1)] = len(order)
-                if order:
-                    return order
+                    if not match:
+                        continue
+
+                    if current_title is None:
+                        current_title = "📦 Other"
+                    key = match.group(1)
+                    if key not in current_keys:
+                        current_keys.append(key)
+
+                if current_title is not None and current_keys:
+                    sections.append((current_title, current_keys))
+
+                if sections:
+                    return [(title, tuple(keys)) for title, keys in sections]
             except OSError as exc:
-                log.debug("Could not read config sample order from %s: %s", path, exc)
-        return {}
+                log.debug("Could not read config sample sections from %s: %s", path, exc)
+        return []
+
+    def _config_sample_key_order(self) -> dict[str, int]:
+        """Read key order from config_sample.py so !config follows the sample file."""
+        order: dict[str, int] = {}
+        for _title, keys in self._config_sample_sections():
+            for key in keys:
+                if key not in order:
+                    order[key] = len(order)
+        return order
 
     def _ordered_config_output_sections(self) -> list[tuple[str, tuple[str, ...]]]:
-        """Return configured sections ordered by first occurrence in config_sample.py."""
-        sample_order = self._config_sample_key_order()
-        if not sample_order:
-            return list(self.CONFIG_OUTPUT_SECTIONS)
+        """Return display sections parsed from config_sample.py."""
+        sections = self._config_sample_sections()
+        if sections:
+            return sections
 
-        def section_order(section: tuple[str, tuple[str, ...]]) -> int:
-            _title, keys = section
-            positions = [sample_order[key] for key in keys if key in sample_order]
-            return min(positions) if positions else 10_000
+        # Minimal fallback for environments where config_sample.py is unavailable.
+        return [
+            ("🪪 Bot Identity / Control", ("JID", "RESOURCE", "PASSWORD", "ADMIN_ROOM", "NICK")),
+            ("🌐 Connection", ("CONNECT_HOST", "CONNECT_PORT", "CONNECT_DIRECT_TLS")),
+            (
+                "💾 Database / Backups",
+                ("DB_FILE", "DB_BACKUP_ON_START", "DB_BACKUP_DIR", "DB_BACKUP_KEEP", "DB_BACKUP_INCLUDE_OMEMO"),
+            ),
+            ("📦 Managed CSV Exports", ("EXPORT_DIR", "EXPORT_KEEP")),
+        ]
 
-        ordered_sections: list[tuple[str, tuple[str, ...]]] = []
-        for title, keys in sorted(self.CONFIG_OUTPUT_SECTIONS, key=section_order):
-            ordered_keys = tuple(sorted(keys, key=lambda key: sample_order.get(key, 10_000)))
-            ordered_sections.append((title, ordered_keys))
-        return ordered_sections
     def _format_config_display_value(self, key: str, value: Any) -> str:
         if isinstance(value, (list, tuple)) and len(value) > 6:
             preview = ", ".join(repr(item) for item in value[:4])
