@@ -11,7 +11,7 @@ aiosqlite = pytest.importorskip("aiosqlite")
 from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
 from banbot.sync import SyncMixin
-from banbot.utils import bare_jid
+from banbot.utils import bare_jid, safe_jid
 
 
 class FakeMucService:
@@ -44,7 +44,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
 
     @staticmethod
     def safe_jid(jid):
-        return str(jid).replace("@", "@\u200b")
+        return safe_jid(jid)
 
     def is_bot_admin_or_owner(self, room):
         return room in self.admin_rooms

@@ -67,14 +67,30 @@ async def test_lock_helpers_reuse_fallback_locks_and_are_reentrant():
     assert getattr(bot, "_ban_state_lock_depth") == 0
 
 
+async def _raise_inside_maintenance_operation(bot):
+    async with maintenance_operation(bot):
+        assert is_maintenance_mode(bot) is True
+        raise RuntimeError("boom")
+
+
+async def _raise_inside_database_file_lock(bot):
+    async with database_file_lock(bot):
+        assert getattr(bot, "_database_file_lock_depth") == 1
+        raise RuntimeError("db boom")
+
+
+async def _raise_inside_ban_state_lock(bot):
+    async with ban_state_lock(bot):
+        assert getattr(bot, "_ban_state_lock_depth") == 1
+        raise RuntimeError("ban boom")
+
+
 @pytest.mark.asyncio
 async def test_maintenance_operation_clears_depth_after_exception():
     bot = LockBot()
 
     with pytest.raises(RuntimeError, match="boom"):
-        async with maintenance_operation(bot):
-            assert is_maintenance_mode(bot) is True
-            raise RuntimeError("boom")
+        await _raise_inside_maintenance_operation(bot)
 
     assert is_maintenance_mode(bot) is False
 
@@ -84,14 +100,10 @@ async def test_individual_lock_helpers_clear_depth_after_exception():
     bot = LockBot()
 
     with pytest.raises(RuntimeError, match="db boom"):
-        async with database_file_lock(bot):
-            assert getattr(bot, "_database_file_lock_depth") == 1
-            raise RuntimeError("db boom")
+        await _raise_inside_database_file_lock(bot)
     assert getattr(bot, "_database_file_lock_depth") == 0
 
     with pytest.raises(RuntimeError, match="ban boom"):
-        async with ban_state_lock(bot):
-            assert getattr(bot, "_ban_state_lock_depth") == 1
-            raise RuntimeError("ban boom")
+        await _raise_inside_ban_state_lock(bot)
     assert getattr(bot, "_ban_state_lock_depth") == 0
 

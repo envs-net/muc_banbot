@@ -212,6 +212,7 @@ def test_validate_jid_format_accepts_basic_two_part_domains(jid):
         ("", "*."),
         (".", "*."),
         ("*.org", "*.org"),
+        ("org", "*.org"),
         ("localhost", "*.localhost"),
         ("*.", "*."),
     ],
@@ -394,10 +395,10 @@ def test_looks_like_domain_rejects_wildcards_jids_resources_and_single_labels(va
 
 
 def test_normalize_ban_target_domain_without_nick_and_jid_resource_cases_are_distinct():
-    assert normalize_ban_target(jid="*.Sub.Example.Org..") == (
+    assert normalize_ban_target(jid="*.Sub.Example.Org.") == (
         "domain",
         "sub.example.org",
-        "*.sub.example.org..",
+        "*.sub.example.org.",
         None,
     )
     assert normalize_ban_target(jid="User@Example.Org/Device/Extra") == (

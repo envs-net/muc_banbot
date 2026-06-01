@@ -195,15 +195,18 @@ class FakeFrom:
         self.bare = bare
 
 
-class FakeEventItems(list):
+class FakeEventItems:
     def __init__(self, node, items):
-        super().__init__(items)
         self.node = node
+        self.items = list(items)
+
+    def __iter__(self):
+        return iter(self.items)
 
     def __getitem__(self, key):
         if key == "node":
             return self.node
-        return super().__getitem__(key)
+        return self.items[key]
 
 
 class FakePubSubMessage(dict):
