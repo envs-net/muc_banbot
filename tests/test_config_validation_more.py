@@ -23,6 +23,7 @@ class ConfigValidationBot(ConfigMixin):
         self.public_command_rate_limit_window = 30
         self.public_command_rate_limit_max = 3
         self.muc_write_limit = 5
+        self.sync_batch_size = 10
         self.structured_event_logs = True
         self.audit_log_enabled = True
         self.audit_log_retention_days = 365
@@ -54,6 +55,7 @@ def set_valid_config(monkeypatch):
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
         "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
         "MUC_WRITE_SEMAPHORE": 5,
+        "SYNC_BATCH_SIZE": 10,
         "VERSION_CHECK_INTERVAL": 3600,
         "RTBL_REFRESH_INTERVAL": 3600,
         "REDACTION_ENABLED": False,

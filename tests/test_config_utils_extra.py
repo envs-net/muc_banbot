@@ -18,6 +18,7 @@ class ConfigBot(ConfigMixin):
         self.public_command_rate_limit_window = 30
         self.public_command_rate_limit_max = 3
         self.muc_write_limit = 5
+        self.sync_batch_size = 10
         self.structured_event_logs = True
         self.audit_log_enabled = True
         self.audit_log_retention_days = 365
@@ -106,6 +107,16 @@ def test_startup_config_snapshot_includes_rtbl_and_omemo(monkeypatch):
     assert snapshot["OMEMO_STORAGE_FILE"] == "data/omemo-test.json"
     assert snapshot["OMEMO_AUTO_ENCRYPT_ADMIN_ROOM"] is True
     assert snapshot["OMEMO_PLAINTEXT_FALLBACK"] is False
+
+
+
+def test_runtime_config_snapshot_includes_sync_batch_size():
+    bot = ConfigBot()
+    bot.sync_batch_size = 7
+
+    snapshot = bot._runtime_config_snapshot()
+
+    assert snapshot["SYNC_BATCH_SIZE"] == 7
 
 
 def test_runtime_config_snapshot_includes_rtbl_refresh_interval():

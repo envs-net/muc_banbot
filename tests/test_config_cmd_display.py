@@ -62,6 +62,7 @@ async def test_config_show_groups_keys_and_hides_secrets():
     assert "PUBLIC_COMMAND_RATE_LIMIT_WINDOW" in bot_settings
     assert "PUBLIC_COMMAND_RATE_LIMIT_MAX" in bot_settings
     assert "MUC_WRITE_SEMAPHORE" in performance
+    assert "SYNC_BATCH_SIZE" in performance
 
     # Removed legacy summary lines should not make the output noisy again.
     assert "🪪 JID:" not in body

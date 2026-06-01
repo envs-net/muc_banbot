@@ -36,16 +36,30 @@ class SyncMixin:
             )
             return
 
-        async def sync_single_room(idx: int, room: str) -> None:
+        # Fetch active bans once per full sync run instead of once per room.
+        # This avoids repeating identical database reads for every room in the batch.
+        active_bans = []
+        async with self.db.execute("SELECT jid, nick, until, comment FROM bans") as cursor:
+            db_bans = await cursor.fetchall()
+        for ban_jid, ban_nick, until, comment in db_bans:
+            if until > 0 and until <= now:  # skip expired temporary bans
+                continue
+            active_bans.append((ban_jid, ban_nick, comment))
+
+        async def sync_single_room(
+            idx: int,
+            room: str,
+            active_room_bans: list[tuple[str | None, str | None, str | None]],
+        ) -> None:
             # --- Leave and rejoin room to refresh presence ---
             try:
                 self.plugin["xep_0045"].leave_muc(room, NICK)
                 await asyncio.sleep(0.5)  # short delay
                 self.plugin["xep_0045"].join_muc(room, NICK)
+                self.room_join_time[room] = time.time()
             except Exception as e:
                 log.warning("⚠️ Failed to rejoin room %s: %s", room, e)
 
-            self.room_join_time[room] = time.time()
             self.bot_admin_state[room] = self.is_bot_admin_or_owner(room)
 
             # --- Wait until bot is recognized in occupants ---
@@ -72,16 +86,6 @@ class SyncMixin:
                 mtype="groupchat"
             )
 
-            # --- Fetch all active bans ---
-            async with self.db.execute("SELECT jid, nick, until, comment FROM bans") as cursor:
-                db_bans = await cursor.fetchall()
-
-            active_bans = []
-            for ban_jid, ban_nick, until, comment in db_bans:
-                if until > 0 and until <= now:  # skip expired temporary bans
-                    continue
-                active_bans.append((ban_jid, ban_nick, comment))
-
             # --- Fetch current outcasts in this room ---
             try:
                 outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
@@ -94,7 +98,7 @@ class SyncMixin:
             tasks = []
             new_bans_count = 0
 
-            for ban_jid, ban_nick, comment in active_bans:
+            for ban_jid, ban_nick, comment in active_room_bans:
                 # Check if already outcast in this room
                 already_banned = False
 
@@ -109,9 +113,24 @@ class SyncMixin:
                     new_bans_count += 1
 
             if tasks:
-                await asyncio.gather(*tasks)
-                log.info("ℹ️ Applied %d new bans in %s (skipped %d already banned)",
-                        new_bans_count, room, len(active_bans) - new_bans_count)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                failed_count = 0
+                for result in results:
+                    if isinstance(result, Exception):
+                        failed_count += 1
+                        log.warning("⚠️ Failed to apply ban in %s: %s", room, result)
+                if failed_count:
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=f"⚠️ Failed to apply {failed_count} bans in {room}",
+                        mtype="groupchat"
+                    )
+                log.info(
+                    "ℹ️ Applied %d new bans in %s (skipped %d already banned)",
+                    new_bans_count - failed_count,
+                    room,
+                    len(active_room_bans) - new_bans_count,
+                )
             else:
                 log.info("ℹ️ All bans already applied in %s, nothing to do", room)
 
@@ -122,7 +141,12 @@ class SyncMixin:
             )
 
         # Batch rooms to prevent overwhelming server
-        batch_size = 10  # Hardcoded: sync 10 rooms at a time
+        raw_batch_size = getattr(self, "sync_batch_size", 10)
+        try:
+            batch_size = int(raw_batch_size)
+        except (TypeError, ValueError):
+            batch_size = 10
+        batch_size = max(1, batch_size)
         rooms_list = list(self.protected_rooms)
 
         for batch_num in range(0, len(rooms_list), batch_size):
@@ -136,19 +160,25 @@ class SyncMixin:
                 mtype="groupchat"
             )
 
-            # Run batch in parallel
-            try:
-                await asyncio.gather(*(
-                    sync_single_room(batch_num + 1 + i, room)
-                    for i, room in enumerate(batch)
-                ))
-            except Exception as e:
-                log.warning("Error in batch %d-%d: %s", batch_start, batch_end, e)
-                await self.bot_send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=f"⚠️ Error during batch {batch_start}-{batch_end} sync: {e}",
-                    mtype="groupchat"
-                )
+            # Run batch in parallel. Keep processing remaining rooms even if one room fails.
+            results = await asyncio.gather(*(
+                sync_single_room(batch_num + 1 + i, room, active_bans)
+                for i, room in enumerate(batch)
+            ), return_exceptions=True)
+            for room, result in zip(batch, results, strict=False):
+                if isinstance(result, Exception):
+                    log.warning(
+                        "Error syncing room %s in batch %d-%d: %s",
+                        room,
+                        batch_start,
+                        batch_end,
+                        result,
+                    )
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=f"⚠️ Error syncing {room} during batch {batch_start}-{batch_end}: {result}",
+                        mtype="groupchat"
+                    )
 
             # Small delay between batches to avoid overwhelming server
             if batch_end < len(rooms_list):

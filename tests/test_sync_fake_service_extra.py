@@ -15,9 +15,20 @@ from banbot.utils import bare_jid, safe_jid as real_safe_jid
 
 
 class FakeMucService:
-    def __init__(self, affiliations=None):
+    def __init__(self, affiliations=None, fail_join_rooms=None):
         self.affiliations = affiliations or {}
+        self.fail_join_rooms = set(fail_join_rooms or [])
         self.calls = []
+        self.left = []
+        self.joined = []
+
+    def leave_muc(self, room, nick):
+        self.left.append((room, nick))
+
+    def join_muc(self, room, nick):
+        if room in self.fail_join_rooms:
+            raise RuntimeError(f"join failed for {room}")
+        self.joined.append((room, nick))
 
     async def get_users_by_affiliation(self, room, affiliation):
         self.calls.append((room, affiliation))
@@ -34,6 +45,9 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.ban_index_by_nick = {}
         self.ban_index_by_domain = {}
         self.sent = []
+        self.room_join_time = {}
+        self.bot_admin_state = {}
+        self.sync_batch_size = 10
         self.applied = []
         self.unbanned = []
         self.admin_rooms = {"room@conference.example.test"}
@@ -188,5 +202,67 @@ async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, monkeypa
         await bot.sync_rooms_and_bans()
 
         assert bot.sent[-1]["mbody"] == "⚠️ No protected rooms to sync."
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch):
+    import banbot.sync as sync_module
+
+    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
+    bot = await make_bot()
+    bot.protected_rooms = {
+        "room-a@conference.example.test",
+        "room-b@conference.example.test",
+    }
+    bot.admin_rooms = set(bot.protected_rooms)
+    bot.occupants = {
+        room: {sync_module.NICK: {"jid": "bot@example.test"}}
+        for room in bot.protected_rooms
+    }
+    bot.plugin["xep_0045"] = FakeMucService()
+    bot.sync_batch_size = 1
+    try:
+        await bot.sync_rooms_and_bans()
+
+        batch_messages = [
+            msg["mbody"]
+            for msg in bot.sent
+            if msg["mbody"].startswith("⏳ Syncing batch")
+        ]
+        assert len(batch_messages) == 2
+        assert "1-1/2" in batch_messages[0]
+        assert "2-2/2" in batch_messages[1]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_rooms_and_bans_sets_join_time_only_after_success(temp_db_path, monkeypatch):
+    import banbot.sync as sync_module
+
+    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
+    bot = await make_bot()
+    bot.protected_rooms = {"room@conference.example.test"}
+    bot.occupants = {
+        "room@conference.example.test": {sync_module.NICK: {"jid": "bot@example.test"}}
+    }
+    bot.plugin["xep_0045"] = FakeMucService(fail_join_rooms={"room@conference.example.test"})
+    try:
+        await bot.sync_rooms_and_bans()
+
+        assert "room@conference.example.test" not in bot.room_join_time
+        assert bot.bot_admin_state["room@conference.example.test"] is True
     finally:
         await bot.db.close()

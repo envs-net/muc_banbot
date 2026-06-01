@@ -88,6 +88,10 @@ PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 # Recommended: 5-20 (default: 5)
 MUC_WRITE_SEMAPHORE = 5
 
+# Number of rooms processed concurrently during full sync operations.
+# Higher = faster sync, but more server/database load. Default: 10
+SYNC_BATCH_SIZE = 10
+
 # ================= LOGGING / AUDIT =================
 
 # Structured event logs are emitted as JSON for important moderation events.

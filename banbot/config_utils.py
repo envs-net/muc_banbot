@@ -117,6 +117,7 @@ class ConfigMixin:
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW",
         "PUBLIC_COMMAND_RATE_LIMIT_MAX",
         "MUC_WRITE_SEMAPHORE",
+        "SYNC_BATCH_SIZE",
         "STRUCTURED_EVENT_LOGS",
         "AUDIT_LOG_ENABLED",
         "AUDIT_LOG_RETENTION_DAYS",
@@ -192,6 +193,7 @@ class ConfigMixin:
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": self.public_command_rate_limit_window,
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": self.public_command_rate_limit_max,
             "MUC_WRITE_SEMAPHORE": self.muc_write_limit,
+            "SYNC_BATCH_SIZE": getattr(self, "sync_batch_size", 10),
             "STRUCTURED_EVENT_LOGS": self.structured_event_logs,
             "AUDIT_LOG_ENABLED": self.audit_log_enabled,
             "AUDIT_LOG_RETENTION_DAYS": self.audit_log_retention_days,
@@ -334,6 +336,7 @@ class ConfigMixin:
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": (1, 3600),
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": (1, 100),
             "MUC_WRITE_SEMAPHORE": (1, 100),
+            "SYNC_BATCH_SIZE": (1, 100),
             "VERSION_CHECK_INTERVAL": (300, 86400),
             "ALERT_ON_DB_SIZE_MB": (0, 1048576),
             "ALERT_ON_RTBL_REFRESH_FAILURES": (0, 1000),
@@ -349,6 +352,7 @@ class ConfigMixin:
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
             "MUC_WRITE_SEMAPHORE": 5,
+            "SYNC_BATCH_SIZE": 10,
             "VERSION_CHECK_INTERVAL": 3600,
             "ALERT_ON_DB_SIZE_MB": 0,
             "ALERT_ON_RTBL_REFRESH_FAILURES": 3,
@@ -596,6 +600,7 @@ class ConfigMixin:
         self.apply_log_level(getattr(config, "LOG_LEVEL", "INFO"))
 
         self.command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip() or "!"
+        self.sync_batch_size = getattr(config, "SYNC_BATCH_SIZE", 10)
         self.db_backup_on_start = getattr(config, "DB_BACKUP_ON_START", True)
         self.db_backup_dir = str(getattr(config, "DB_BACKUP_DIR", "data/backups")).strip() or "data/backups"
         self.db_backup_keep = getattr(config, "DB_BACKUP_KEEP", 15)

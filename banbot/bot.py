@@ -161,6 +161,7 @@ class BanBot(
         # Prevents flooding the XMPP server with too many IQ stanzas at once
         self.muc_write_limit = getattr(config, "MUC_WRITE_SEMAPHORE", 5)
         self.muc_write_semaphore = asyncio.Semaphore(self.muc_write_limit)
+        self.sync_batch_size = getattr(config, "SYNC_BATCH_SIZE", 10)
 
         # Ban Cache: key -> (jid_bare, nick, until, issuer, comment)
         self.ban_cache: dict[str, tuple[str | None, str | None, int, str | None, str | None]] = {}
