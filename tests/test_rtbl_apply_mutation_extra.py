@@ -184,3 +184,49 @@ async def test_domain_publish_scan_returns_after_first_matching_occupant():
     await bot._rtbl_check_all_occupants_for_domain("spam.example", "domain reason")
 
     assert bot.domain_bans == [("spam.example", "domain reason", "DomainOne", "one@spam.example")]
+
+
+@pytest.mark.asyncio
+async def test_hash_publish_scan_continues_past_unprotected_rooms():
+    bot = RtblMutationBot()
+    bot.occupants = {
+        "unprotected@conference.example.test": {
+            "IgnoredRoom": {"jid": "hash@example.test/res"},
+        },
+        "room@conference.example.test": {
+            "Hash": {"jid": "hash@example.test/res"},
+        },
+    }
+
+    await bot._rtbl_check_all_occupants_for_hash(
+        _rtbl_hash_jid("hash@example.test"),
+        "hash reason",
+    )
+
+    assert bot.jid_bans == [("hash@example.test", "Hash", "hash reason")]
+
+
+@pytest.mark.asyncio
+async def test_domain_publish_scan_continues_past_unprotected_rooms():
+    bot = RtblMutationBot()
+    bot.occupants = {
+        "unprotected@conference.example.test": {
+            "IgnoredRoom": {"jid": "one@spam.example/res"},
+        },
+        "room@conference.example.test": {
+            "DomainOne": {"jid": "one@spam.example/res"},
+        },
+    }
+
+    await bot._rtbl_check_all_occupants_for_domain("spam.example", "domain reason")
+
+    assert bot.domain_bans == [("spam.example", "domain reason", "DomainOne", "one@spam.example")]
+
+
+@pytest.mark.asyncio
+async def test_domain_apply_wrapper_preserves_reason_argument():
+    bot = RtblMutationBot()
+
+    await bot._rtbl_apply_ban_domain("spam.example", "domain reason", nick="Nick", jid="jid@example.test")
+
+    assert bot.domain_bans == [("spam.example", "domain reason", "Nick", "jid@example.test")]

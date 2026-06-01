@@ -162,3 +162,31 @@ async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, mon
         assert "Current admins/owners" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_wait_for_bot_admin_rights_returns_immediate_final_state_without_sleep(temp_db_path):
+    bot = await make_bot()
+    try:
+        bot.admin_rooms = {"room@conference.example.test"}
+        assert await bot._wait_for_bot_admin_rights("room@conference.example.test", timeout=0, interval=0) is True
+
+        bot.admin_rooms = set()
+        assert await bot._wait_for_bot_admin_rights("room@conference.example.test", timeout=0, interval=0) is False
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, monkeypatch):
+    import banbot.sync as sync_module
+
+    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    bot.protected_rooms = set()
+    try:
+        await bot.sync_rooms_and_bans()
+
+        assert bot.sent[-1]["mbody"] == "⚠️ No protected rooms to sync."
+    finally:
+        await bot.db.close()

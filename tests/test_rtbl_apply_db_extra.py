@@ -333,3 +333,14 @@ async def test_rtbl_cleanup_locked_uses_default_issuer(temp_db_path):
         assert ("gone@example.test", "rtbl_cleanup") in bot.unbanned
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_rtbl_ban_is_still_covered_rejects_wildcard_like_jid_even_if_domain_matches(temp_db_path):
+    bot = await make_bot()
+    try:
+        bot.rtbl_domain_cache["example.test"] = "domain"
+
+        assert await bot._rtbl_ban_is_still_covered("*.bad@example.test") is False
+    finally:
+        await bot.db.close()

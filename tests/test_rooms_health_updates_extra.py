@@ -731,3 +731,27 @@ async def test_health_check_reports_database_size_limit(monkeypatch):
 
     assert any("Database size alert" in item["mbody"] for item in bot.sent)
     assert any("2.0 MiB" in item["mbody"] for item in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_room_invite_accept_and_decline_validate_missing_or_bad_ids():
+    bot = RoomHealthBot()
+
+    await bot.cmd_room_invite(["accept"], "admin@conference.example.org")
+    assert "Usage" in bot.sent[-1]["mbody"]
+
+    await bot.cmd_room_invite(["accept", "not-a-number"], "admin@conference.example.org")
+    assert "Invite id must be a number" in bot.sent[-1]["mbody"]
+
+    await bot.cmd_room_invite(["decline", "123"], "admin@conference.example.org")
+    assert "Unknown pending room invite id: 123" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_invite_unknown_action_shows_usage():
+    bot = RoomHealthBot()
+
+    await bot.cmd_room_invite(["wat"], "admin@conference.example.org")
+
+    assert "Unknown room invite action: wat" in bot.sent[-1]["mbody"]
+    assert "room invite list" in bot.sent[-1]["mbody"]

@@ -422,3 +422,32 @@ def test_resolve_page_uses_ceiling_total_pages_and_clamps_to_last():
     assert resolve_page(-1, 10, per_page=10) == 1
     assert resolve_page(-1, 11, per_page=10) == 2
     assert resolve_page(99, 11, per_page=10) == 2
+
+
+def test_parse_duration_error_messages_match_exactly_for_cli_feedback():
+    with pytest.raises(ValueError) as exc:
+        parse_duration("10w")
+    assert str(exc.value) == "Invalid duration format (use 10s, 10m, 2h, 1d)"
+
+    with pytest.raises(ValueError) as exc:
+        parse_duration("xm")
+    assert str(exc.value) == "Invalid duration number"
+
+
+def test_validate_domain_ban_generic_error_message_is_exact_after_normalization():
+    ok, message = validate_domain_ban("*.org")
+    assert ok is False
+    assert message == (
+        "❌ Domain '*.org' is too generic. "
+        "Specify more precise domain (e.g., *.domain.tld)."
+    )
+
+
+def test_paginate_lines_and_resolve_page_default_to_ten_items_per_page():
+    lines = [str(i) for i in range(11)]
+
+    page_lines, current_page, total_pages, total_items = paginate_lines(lines, 1)
+    assert page_lines == [str(i) for i in range(10)]
+    assert (current_page, total_pages, total_items) == (1, 2, 11)
+
+    assert resolve_page(-1, 11) == 2

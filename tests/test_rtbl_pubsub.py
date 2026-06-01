@@ -188,3 +188,135 @@ async def test_full_page_without_rsm_is_treated_as_incomplete(tmp_path):
         assert "incomplete" in bot.rtbl_last_error[("service", "node")]
     finally:
         await db.close()
+
+
+class FakeFrom:
+    def __init__(self, bare):
+        self.bare = bare
+
+
+class FakeEventItems(list):
+    def __init__(self, node, items):
+        super().__init__(items)
+        self.node = node
+
+    def __getitem__(self, key):
+        if key == "node":
+            return self.node
+        return super().__getitem__(key)
+
+
+class FakePubSubMessage(dict):
+    def __init__(self, service, node, items):
+        super().__init__()
+        self["from"] = FakeFrom(service)
+        self["pubsub_event"] = {"items": FakeEventItems(node, items)}
+
+
+@pytest.mark.rtbl
+@pytest.mark.asyncio
+async def test_pubsub_publish_updates_hash_and_domain_caches_and_scans(tmp_path):
+    db = await prepare_rtbl_db(tmp_path)
+    try:
+        bot = RtblBot(db, [])
+        bot.rtbl_subscriptions = [("service", "node")]
+        hash_checks = []
+        domain_checks = []
+
+        async def check_hash(item_id, reason):
+            hash_checks.append((item_id, reason))
+
+        async def check_domain(domain, reason):
+            domain_checks.append((domain, reason))
+
+        bot._rtbl_check_all_occupants_for_hash = check_hash
+        bot._rtbl_check_all_occupants_for_domain = check_domain
+
+        msg = FakePubSubMessage(
+            "service",
+            "node",
+            [
+                {"id": HASH_A, "payload": None},
+                {"id": "*.Example.Org", "payload": None},
+                {"id": "not-a-valid-entry", "payload": None},
+            ],
+        )
+
+        await bot._on_rtbl_publish(msg)
+
+        assert bot.rtbl_hash_cache[HASH_A] is None
+        assert bot.rtbl_domain_cache["example.org"] is None
+        assert hash_checks == [(HASH_A, None)]
+        assert domain_checks == [("example.org", None)]
+        assert bot.rtbl_last_error[("service", "node")] is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.rtbl
+@pytest.mark.asyncio
+async def test_pubsub_publish_ignores_unsubscribed_and_disabled_messages(tmp_path):
+    db = await prepare_rtbl_db(tmp_path)
+    try:
+        bot = RtblBot(db, [])
+        bot.rtbl_subscriptions = [("service", "node")]
+
+        await bot._on_rtbl_publish(FakePubSubMessage("other", "node", [{"id": HASH_A}]))
+        assert bot.rtbl_hash_cache == {}
+
+        bot.rtbl_enabled = False
+        await bot._on_rtbl_publish(FakePubSubMessage("service", "node", [{"id": HASH_A}]))
+        assert bot.rtbl_hash_cache == {}
+    finally:
+        await db.close()
+
+
+@pytest.mark.rtbl
+@pytest.mark.asyncio
+async def test_pubsub_retract_keeps_cache_when_other_subscription_still_references_item(tmp_path):
+    db = await prepare_rtbl_db(tmp_path)
+    try:
+        await db.execute(
+            "INSERT INTO rtbl_hashes (hash, service_jid, node, reason) VALUES (?, ?, ?, ?)",
+            (HASH_A, "service", "node", "remove"),
+        )
+        await db.execute(
+            "INSERT INTO rtbl_hashes (hash, service_jid, node, reason) VALUES (?, ?, ?, ?)",
+            (HASH_A, "other", "node", "keep"),
+        )
+        await db.commit()
+
+        bot = RtblBot(db, [])
+        bot.rtbl_subscriptions = [("service", "node")]
+        bot.rtbl_hash_cache[HASH_A] = "remove"
+
+        await bot._on_rtbl_retract(FakePubSubMessage("service", "node", [{"id": HASH_A}]))
+
+        assert bot.rtbl_hash_cache[HASH_A] == "remove"
+        assert bot.cleanup_calls == ["rtbl_retract"]
+        assert bot.rtbl_last_error[("service", "node")] is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.rtbl
+@pytest.mark.asyncio
+async def test_pubsub_retract_removes_domain_cache_when_last_reference_disappears(tmp_path):
+    db = await prepare_rtbl_db(tmp_path)
+    try:
+        await db.execute(
+            "INSERT INTO rtbl_domains (domain, service_jid, node, reason) VALUES (?, ?, ?, ?)",
+            ("example.org", "service", "node", "remove"),
+        )
+        await db.commit()
+
+        bot = RtblBot(db, [])
+        bot.rtbl_subscriptions = [("service", "node")]
+        bot.rtbl_domain_cache["example.org"] = "remove"
+
+        await bot._on_rtbl_retract(FakePubSubMessage("service", "node", [{"id": "*.example.org"}]))
+
+        assert "example.org" not in bot.rtbl_domain_cache
+        assert bot.cleanup_calls == ["rtbl_retract"]
+    finally:
+        await db.close()
