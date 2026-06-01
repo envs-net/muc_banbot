@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import pathlib
 
 import pytest
 
@@ -244,3 +245,94 @@ async def test_backup_verify_rejects_corrupt_database_backup(backup_config):
     body = bot.sent[-1]["mbody"]
     assert "Backup verification failed" in body
     assert "SQLite integrity_check failed" in body
+
+
+@pytest.mark.asyncio
+async def test_backup_show_latest_includes_companion_details(backup_config):
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, _message = await bot.create_database_backup("manual", actor="admin@example.org")
+        assert ok is True
+
+        await bot.cmd_backup(["show", "latest"], "admin@conference.example.org")
+
+        body = bot.sent[-1]["mbody"]
+        assert "Backup:" in body
+        assert "config.py" in body
+        assert "Size:" in body
+        assert "Modified:" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_backup_verify_rejects_invalid_config_companion(backup_config):
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
+        assert ok is True
+        config_backup = pathlib.Path(backup_path).with_name(pathlib.Path(backup_path).name + ".config.py")
+        config_backup.write_text("this is not valid python =", encoding="utf-8")
+
+        await bot.cmd_backup(["verify", "latest"], "admin@conference.example.org")
+
+        body = bot.sent[-1]["mbody"]
+        assert "Backup verification failed" in body
+        assert "config.py companion check failed" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_backup_verify_rejects_invalid_omemo_companion(backup_config, tmp_path, monkeypatch):
+    import banbot.backups as backups_module
+
+    omemo_path = tmp_path / "data" / "omemo.json"
+    omemo_path.parent.mkdir(parents=True)
+    omemo_path.write_text('{"ok": true}', encoding="utf-8")
+    monkeypatch.setattr(backups_module.config, "DB_BACKUP_INCLUDE_OMEMO", True, raising=False)
+    monkeypatch.setattr(backups_module.config, "OMEMO_STORAGE_FILE", str(omemo_path), raising=False)
+
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
+        assert ok is True
+        omemo_backup = pathlib.Path(backup_path).with_name(pathlib.Path(backup_path).name + ".omemo.json")
+        assert omemo_backup.exists()
+        omemo_backup.write_text("{not json", encoding="utf-8")
+
+        await bot.cmd_backup(["verify", "latest"], "admin@conference.example.org")
+
+        body = bot.sent[-1]["mbody"]
+        assert "Backup verification failed" in body
+        assert "OMEMO companion check failed" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_restore_rejects_corrupt_backup_before_replacing_database(backup_config):
+    db_path, backup_dir = backup_config
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    corrupt = backup_dir / f"{db_path.name}.snapshot-manual-corrupt"
+    corrupt.write_text("not sqlite", encoding="utf-8")
+
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        await bot.db.execute("INSERT INTO rooms(room) VALUES ('current@conference.example.org')")
+        await bot.db.commit()
+
+        ok, message = await bot.restore_database_backup(corrupt.name, actor="admin@example.org")
+
+        assert ok is False
+        assert "Backup verification failed" in message or "integrity" in message.lower()
+        async with bot.db.execute("SELECT room FROM rooms") as cursor:
+            rows = await cursor.fetchall()
+        assert rows == [("current@conference.example.org",)]
+    finally:
+        if bot.db:
+            await bot.db.close()

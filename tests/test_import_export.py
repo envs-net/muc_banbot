@@ -24,6 +24,8 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
         self.last_database_backup_file = None
         self.last_database_restore_file = None
         self._pending_database_backup_audit_events = []
+        self.sent = []
+        self.command_prefix = "!"
         self._database_file_operation_lock = asyncio.Lock()
         self._ban_state_operation_lock = asyncio.Lock()
 
@@ -35,6 +37,9 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
 
     def bare_jid(self, jid: str | None) -> str | None:
         return jid.split("/")[0].lower() if jid else None
+
+    async def bot_send_message(self, **kwargs):
+        self.sent.append(kwargs)
 
 
 @pytest.mark.asyncio
@@ -192,3 +197,104 @@ async def test_import_skips_invalid_rows_without_backup(tmp_path):
     assert successful == 0
     assert skipped == 3
     assert len(errors) == 3
+
+
+@pytest.mark.asyncio
+async def test_export_command_lists_and_deletes_latest(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = ImportBot()
+    bot._cache_ban("one@example.org", "One", 0, "tester", "one")
+
+    ok, _message = await bot.export_bans_to_csv()
+    assert ok is True
+    bot._cache_ban("two@example.org", "Two", 0, "tester", "two")
+    ok, _message = await bot.export_bans_to_csv()
+    assert ok is True
+
+    await bot.cmd_export(["list"], "admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+    assert "Managed Ban Exports" in body
+    assert "bans_export_" in body
+    assert "Keep:" in body
+
+    exports_before = bot.list_export_files()
+    assert len(exports_before) == 2
+    latest = exports_before[0].path
+
+    await bot.cmd_export(["delete", "latest"], "admin@conference.example.org")
+    assert "Export deleted" in bot.sent[-1]["mbody"]
+    assert not latest.exists()
+    assert len(bot.list_export_files()) == 1
+
+
+@pytest.mark.asyncio
+async def test_export_command_rejects_unknown_delete_target(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = ImportBot()
+
+    await bot.cmd_export(["delete", "../outside.csv"], "admin@conference.example.org")
+
+    assert "Export not found" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_export_bans_to_csv_without_bans_returns_message(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = ImportBot()
+
+    ok, message = await bot.export_bans_to_csv()
+
+    assert ok is False
+    assert "No bans to export" in message
+    assert bot.list_export_files() == []
+
+
+@pytest.mark.asyncio
+async def test_import_dry_run_stages_without_backup_or_database_write(temp_db_path, tmp_path):
+    csv_file = tmp_path / "dryrun.csv"
+    csv_file.write_text(
+        "jid,nick,until,issuer,comment\n"
+        "dryrun@example.org,Dry,0,imported,would import\n",
+        encoding="utf-8",
+    )
+    bot = ImportBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        successful, skipped, errors = await bot.import_bans_from_csv(
+            str(csv_file),
+            actor="admin@example.org",
+            dry_run=True,
+        )
+
+        assert (successful, skipped, errors) == (1, 0, [])
+        assert bot.last_database_backup_file is None
+        assert "dryrun@example.org" not in bot.ban_cache
+        async with bot.db.execute("SELECT COUNT(*) FROM bans") as cursor:
+            row = await cursor.fetchone()
+        assert row[0] == 0
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_import_staged_duplicates_keep_later_temporary_row(temp_db_path, tmp_path):
+    csv_file = tmp_path / "temp-duplicates.csv"
+    csv_file.write_text(
+        "jid,nick,until,issuer,comment\n"
+        "user@example.org,Nick,1000,imported,weaker temp\n"
+        "user@example.org,Nick,2000,imported,stronger temp\n",
+        encoding="utf-8",
+    )
+    bot = ImportBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        successful, skipped, errors = await bot.import_bans_from_csv(str(csv_file))
+
+        assert (successful, skipped, errors) == (1, 1, [])
+        async with bot.db.execute(
+            "SELECT until, comment FROM bans WHERE target = 'user@example.org'"
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (2000, "stronger temp")
+    finally:
+        await bot.db.close()

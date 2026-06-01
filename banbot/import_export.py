@@ -91,14 +91,21 @@ class ImportExportMixin:
                 log.debug("Failed to restrict export directory permissions for %s: %s", export_dir, exc)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = export_dir / f"bans_export_{timestamp}.csv"
+            counter = 2
+            while filename.exists():
+                filename = export_dir / f"bans_export_{timestamp}-{counter}.csv"
+                counter += 1
 
             if self.ban_cache:
                 rows = [(v[0], v[1], v[2], v[3], v[4]) for v in self.ban_cache.values()]
                 log.info("📤 Export using cache (%d bans)", len(rows))
-            else:
+            elif getattr(self, "db", None) is not None:
                 async with self.db.execute("SELECT jid, nick, until, issuer, comment FROM bans") as cursor:
                     rows = await cursor.fetchall()
                 log.info("📤 Export using database query (%d bans)", len(rows))
+            else:
+                rows = []
+                log.info("📤 Export skipped: no cache entries and no database connection")
 
             if not rows:
                 return False, "❌ No bans to export."

@@ -21,3 +21,57 @@ async def test_database_mutation_locks_enable_maintenance_mode_for_lightweight_o
         async with database_mutation_locks(bot):
             assert is_maintenance_mode(bot) is True
     assert is_maintenance_mode(bot) is False
+
+from banbot.locks import (
+    ban_state_lock,
+    database_file_lock,
+    get_ban_state_lock,
+    get_database_file_lock,
+    maintenance_operation,
+)
+
+
+@pytest.mark.asyncio
+async def test_lock_helpers_use_explicit_locks_when_available():
+    import asyncio
+
+    bot = LockBot()
+    db_lock = asyncio.Lock()
+    ban_lock = asyncio.Lock()
+    bot._database_file_operation_lock = db_lock
+    bot._ban_state_operation_lock = ban_lock
+
+    assert get_database_file_lock(bot) is db_lock
+    assert get_ban_state_lock(bot) is ban_lock
+
+
+@pytest.mark.asyncio
+async def test_lock_helpers_reuse_fallback_locks_and_are_reentrant():
+    bot = LockBot()
+
+    assert get_database_file_lock(bot) is get_database_file_lock(bot)
+    assert get_ban_state_lock(bot) is get_ban_state_lock(bot)
+
+    async with database_file_lock(bot):
+        assert getattr(bot, "_database_file_lock_depth") == 1
+        async with database_file_lock(bot):
+            assert getattr(bot, "_database_file_lock_depth") == 2
+        assert getattr(bot, "_database_file_lock_depth") == 1
+
+    async with ban_state_lock(bot):
+        assert getattr(bot, "_ban_state_lock_depth") == 1
+        async with ban_state_lock(bot):
+            assert getattr(bot, "_ban_state_lock_depth") == 2
+        assert getattr(bot, "_ban_state_lock_depth") == 1
+
+
+@pytest.mark.asyncio
+async def test_maintenance_operation_clears_depth_after_exception():
+    bot = LockBot()
+
+    with pytest.raises(RuntimeError):
+        async with maintenance_operation(bot):
+            assert is_maintenance_mode(bot) is True
+            raise RuntimeError("boom")
+
+    assert is_maintenance_mode(bot) is False

@@ -318,3 +318,107 @@ def test_resolve_page_clamps_low_high_and_last_for_exact_multiples():
     assert resolve_page(0, 20, per_page=10) == 1
     assert resolve_page(99, 20, per_page=10) == 2
     assert resolve_page(2, 20, per_page=10) == 2
+
+
+def test_parse_duration_rejects_single_suffix_without_number():
+    for value in ["s", "m", "h", "d"]:
+        with pytest.raises(ValueError):
+            parse_duration(value)
+
+
+def test_parse_duration_accepts_python_integer_whitespace_but_not_bad_suffix_spacing():
+    assert parse_duration(" 1m") == 60
+    assert parse_duration("\t2h") == 7200
+    with pytest.raises(ValueError):
+        parse_duration("1m ")
+
+
+def test_parse_duration_distinguishes_units_and_does_not_round_or_clamp():
+    assert parse_duration("59s") == 59
+    assert parse_duration("2m") == 120
+    assert parse_duration("2h") == 7200
+    assert parse_duration("2d") == 172800
+    assert parse_duration("999s") == 999
+
+
+def test_safe_jid_escapes_every_at_sign_exactly_once():
+    value = "one@two@three@example.org"
+    escaped = safe_jid(value)
+    assert escaped == "one@\u200btwo@\u200bthree@\u200bexample.org"
+    assert escaped.count("@") == value.count("@")
+    assert escaped.count("\u200b") == value.count("@")
+
+
+@pytest.mark.parametrize(
+    ("domain", "expected_message_fragment"),
+    [
+        ("*.example", "*.example"),
+        ("..", "*."),
+        ("*.localhost.", "*.localhost"),
+        (" . ", "*."),
+    ],
+)
+def test_validate_domain_ban_rejects_after_wildcard_dot_and_empty_part_cleanup(domain, expected_message_fragment):
+    ok, message = validate_domain_ban(domain)
+    assert ok is False
+    assert expected_message_fragment in message
+    assert message.startswith("❌ Domain")
+
+
+@pytest.mark.parametrize(
+    ("user_domain", "banned_domain"),
+    [
+        ("reallyexample.org", "example.org"),
+        ("sub.example.org.evil", "example.org"),
+        ("evil-example.org", "example.org"),
+        ("example.org", "sub.example.org"),
+    ],
+)
+def test_domain_matches_requires_exact_domain_or_dot_boundary(user_domain, banned_domain):
+    assert domain_matches(user_domain, banned_domain) is False
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (" example.org ", True),
+        (" example ", False),
+        ("*.example.org ", False),
+        ("user@sub.example.org", False),
+        ("sub.example.org/resource", False),
+        ("sub.example.org/", False),
+    ],
+)
+def test_looks_like_domain_rejects_wildcards_jids_resources_and_single_labels(value, expected):
+    assert looks_like_domain(value) is expected
+
+
+def test_normalize_ban_target_domain_without_nick_and_jid_resource_cases_are_distinct():
+    assert normalize_ban_target(jid="*.Sub.Example.Org..") == (
+        "domain",
+        "sub.example.org",
+        "*.sub.example.org..",
+        None,
+    )
+    assert normalize_ban_target(jid="User@Example.Org/Device/Extra") == (
+        "jid",
+        "user@example.org",
+        "user@example.org",
+        None,
+    )
+    with pytest.raises(ValueError, match="Ban target requires"):
+        normalize_ban_target(jid=None, nick="")
+
+
+def test_paginate_lines_uses_start_offset_and_end_exclusively():
+    lines = [str(i) for i in range(1, 8)]
+    assert paginate_lines(lines, 1, per_page=3) == (["1", "2", "3"], 1, 3, 7)
+    assert paginate_lines(lines, 2, per_page=3) == (["4", "5", "6"], 2, 3, 7)
+    assert paginate_lines(lines, 3, per_page=3) == (["7"], 3, 3, 7)
+
+
+def test_resolve_page_uses_ceiling_total_pages_and_clamps_to_last():
+    assert resolve_page(-1, 1, per_page=10) == 1
+    assert resolve_page(-1, 10, per_page=10) == 1
+    assert resolve_page(-1, 11, per_page=10) == 2
+    assert resolve_page(99, 11, per_page=10) == 2
