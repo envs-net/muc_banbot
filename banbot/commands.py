@@ -10,7 +10,7 @@ from config import ADMIN_ROOM, NICK
 
 from ._version import __version__
 from .utils import parse_duration, wants_all_pages, without_all_pages_arg
-from .locks import get_ban_state_lock
+from .locks import ban_state_lock
 
 log = logging.getLogger(__name__)
 
@@ -19,6 +19,11 @@ PUBLIC_COMMANDS = {"help", "whoami", "banlist", "blacklist", "why", "rules", "po
 
 
 class CommandMixin:
+    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str:
+        """Resolve a room occupant nick to the best actor JID for logs/audit."""
+        jid = self.occupants.get(room, {}).get(nick, {}).get("jid")
+        return jid or nick
+
     def user_cmds_allowed(self, room: str) -> bool:
         """Check if user commands are allowed in protected rooms."""
         return room in self.protected_rooms and self.allow_user_cmds
@@ -290,22 +295,22 @@ class CommandMixin:
             return True
 
         if cmd == "config":
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
             await self._cmd_config(room, args, actor=actor_jid)
             return True
 
         if cmd == "backup":
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
             await self.cmd_backup(args, room, actor=actor_jid)
             return True
 
         if cmd == "restore":
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
             await self.cmd_restore(args, room, actor=actor_jid)
             return True
 
         if cmd == "omemo":
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
             await self.cmd_omemo(args, room, actor=actor_jid)
             return True
 
@@ -365,7 +370,8 @@ class CommandMixin:
                 )
                 return True
 
-            await self.cmd_room(args, room)
+            async with ban_state_lock(self):
+                await self.cmd_room(args, room)
             return True
 
         if cmd == "ban":
@@ -377,9 +383,9 @@ class CommandMixin:
                 )
                 return True
 
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
             comment = " ".join(args[1:]) if len(args) > 1 else None
-            async with get_ban_state_lock(self):
+            async with ban_state_lock(self):
                 await self.ban_all(args[0], None, actor_jid, comment)
             return True
 
@@ -402,9 +408,9 @@ class CommandMixin:
                 )
                 return True
 
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
             comment = " ".join(args[2:]) if len(args) > 2 else None
-            async with get_ban_state_lock(self):
+            async with ban_state_lock(self):
                 await self.ban_all(args[0], until, actor_jid, comment)
             return True
 
@@ -417,8 +423,8 @@ class CommandMixin:
                 )
                 return True
 
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-            async with get_ban_state_lock(self):
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
+            async with ban_state_lock(self):
                 await self.unban_all(args[0], actor_jid)
             return True
 
@@ -458,12 +464,12 @@ class CommandMixin:
             return True
 
         if cmd == "redact":
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
             await self.cmd_redact(args, room, actor=actor_jid)
             return True
 
         if cmd == "sync":
-            async with get_ban_state_lock(self):
+            async with ban_state_lock(self):
                 await self.sync_rooms_and_bans()
             return True
 
@@ -472,7 +478,7 @@ class CommandMixin:
             return True
 
         if cmd == "syncbans":
-            async with get_ban_state_lock(self):
+            async with ban_state_lock(self):
                 await self.sync_bans()
             return True
 
@@ -499,7 +505,7 @@ class CommandMixin:
 
             filename = args[0]
             dry_run = len(args) >= 2 and args[1].lower() in {"dryrun", "dry-run", "check"}
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
             previous_backup = getattr(self, "last_database_backup_file", None)
             import_kwargs = {"actor": actor_jid}
             # Lightweight tests and older mixins may not support dry_run yet.
@@ -582,14 +588,15 @@ class CommandMixin:
                     mtype="groupchat",
                 )
                 return True
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-            async with get_ban_state_lock(self):
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
+            async with ban_state_lock(self):
                 await self.cmd_rtbl(args, room, actor=actor_jid)
             return True
 
         if cmd in ("ignore", "whitelist"):
-            actor_jid = self.occupants.get(room, {}).get(nick, {}).get("jid", nick)
-            await self.cmd_ignore(args, room, actor=actor_jid, command_name=cmd)
+            actor_jid = self._actor_jid_from_room_nick(room, nick)
+            async with ban_state_lock(self):
+                await self.cmd_ignore(args, room, actor=actor_jid, command_name=cmd)
             return True
 
         if cmd in ("policy", "rules"):
@@ -897,6 +904,8 @@ class CommandMixin:
             "💾 Backup / Restore\n"
             f"{p}backup - create a full backup\n"
             f"{p}backup list - list full backups\n"
+            f"{p}backup show <filename|latest> - show backup details\n"
+            f"{p}backup verify <filename|latest> - verify a backup\n"
             f"{p}restore <filename|latest> confirm - restore a full backup\n\n"
 
             "🏠 Rooms / Policy\n"

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import os
 import pathlib
 import re
 import shutil
 import sqlite3
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -20,26 +20,13 @@ except ModuleNotFoundError:
 
 log = logging.getLogger(__name__)
 
-from .locks import get_ban_state_lock, get_database_file_lock
+from .locks import database_file_lock, database_mutation_locks
+from .managed_files import ManagedFile, format_file_size, list_managed_files, prune_managed_files, resolve_managed_file
 
 _BACKUP_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
-@dataclass(frozen=True)
-class DatabaseBackup:
-    """Metadata for one managed database backup file."""
-
-    path: pathlib.Path
-    size: int
-    mtime: float
-
-    @property
-    def name(self) -> str:
-        return self.path.name
-
-    @property
-    def mtime_text(self) -> str:
-        return datetime.fromtimestamp(self.mtime).strftime("%Y-%m-%d %H:%M:%S")
+DatabaseBackup = ManagedFile
 
 
 class BackupMixin:
@@ -116,11 +103,7 @@ class BackupMixin:
         return cleaned or "manual"
 
     def _format_backup_size(self, size: int) -> str:
-        if size >= 1024 * 1024:
-            return f"{size / (1024 * 1024):.1f} MiB"
-        if size >= 1024:
-            return f"{size / 1024:.1f} KiB"
-        return f"{size} B"
+        return format_file_size(size)
 
     def _backup_companion_names(self, backup_path: pathlib.Path) -> list[str]:
         companions: list[str] = []
@@ -136,61 +119,41 @@ class BackupMixin:
         companion_suffix = f", {', '.join(companions)}" if companions else ""
         return f"{prefix}{backup.name} ({self._format_backup_size(backup.size)}, {backup.mtime_text}{companion_suffix})"
 
+    def _is_database_backup_file(self, path: pathlib.Path) -> bool:
+        return path.is_file() and not path.name.endswith((".config.py", ".omemo.json"))
+
     def list_database_backups(self) -> list[DatabaseBackup]:
         """Return managed backup files sorted newest first."""
-        backup_dir = self._database_backup_dir()
-        if not backup_dir.exists():
-            return []
-
-        backups: list[DatabaseBackup] = []
-        for path in backup_dir.glob(self._database_backup_pattern()):
-            if not path.is_file() or path.name.endswith((".config.py", ".omemo.json")):
-                continue
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            backups.append(DatabaseBackup(path=path, size=stat.st_size, mtime=stat.st_mtime))
-
-        backups.sort(key=lambda item: (item.mtime, item.name), reverse=True)
-        return backups
+        return list_managed_files(
+            self._database_backup_dir(),
+            self._database_backup_pattern(),
+            exclude_suffixes=(".config.py", ".omemo.json"),
+            predicate=self._is_database_backup_file,
+        )
 
     async def prune_database_backups(self, *, preserve: pathlib.Path | None = None) -> list[pathlib.Path]:
         """Delete old managed backups beyond DB_BACKUP_KEEP."""
         keep = self._database_backup_keep()
-        preserve_resolved = preserve.resolve() if preserve is not None and preserve.exists() else None
-        removed: list[pathlib.Path] = []
-        backups = self.list_database_backups()
 
-        kept = 0
-        for backup in backups:
-            try:
-                backup_resolved = backup.path.resolve()
-            except OSError:
-                backup_resolved = backup.path
+        def companions(path: pathlib.Path) -> list[pathlib.Path]:
+            return [
+                self._config_backup_path_for(path),
+                self._omemo_backup_path_for(path),
+            ]
 
-            if preserve_resolved is not None and backup_resolved == preserve_resolved:
-                kept += 1
-                continue
+        try:
+            removed = await prune_managed_files(
+                self.list_database_backups(),
+                keep=keep,
+                preserve=preserve,
+                delete_companions=companions,
+            )
+        except OSError as exc:
+            log.warning("Failed to prune database backups: %s", exc)
+            return []
 
-            if kept < keep:
-                kept += 1
-                continue
-
-            try:
-                backup.path.unlink()
-                removed.append(backup.path)
-                for companion in (
-                    self._config_backup_path_for(backup.path),
-                    self._omemo_backup_path_for(backup.path),
-                ):
-                    if companion.exists():
-                        companion.unlink()
-                        removed.append(companion)
-                log.info("Deleted old database backup: %s", backup.path)
-            except OSError as exc:
-                log.warning("Failed to delete old database backup %s: %s", backup.path, exc)
-
+        for path in removed:
+            log.info("Deleted old database backup: %s", path)
         return removed
 
     def _queue_database_backup_audit_event(
@@ -244,6 +207,73 @@ class BackupMixin:
         else:
             await asyncio.to_thread(shutil.copy2, db_path, backup_path)
 
+    @staticmethod
+    def _check_sqlite_integrity_sync(path: pathlib.Path) -> tuple[bool, str]:
+        """Run SQLite PRAGMA integrity_check for a database file."""
+        if not path.exists():
+            return False, f"Database file does not exist: {path}"
+        if not path.is_file():
+            return False, f"Database path is not a regular file: {path}"
+        if path.stat().st_size <= 0:
+            return False, f"Database file is empty: {path}"
+
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            result = connection.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            connection.close()
+
+        message = str(result[0]) if result else "no integrity_check result"
+        return message.lower() == "ok", message
+
+    async def _check_sqlite_integrity(self, path: pathlib.Path) -> tuple[bool, str]:
+        """Run SQLite integrity_check without blocking the event loop."""
+        try:
+            return await asyncio.to_thread(self._check_sqlite_integrity_sync, path)
+        except Exception as exc:
+            return False, str(exc)
+
+    async def verify_database_backup(self, name: str) -> tuple[bool, str]:
+        """Verify a managed backup database and readable companion files."""
+        backup = self.resolve_database_backup(name)
+        if backup is None:
+            return False, f"Backup not found: {name}"
+
+        lines = [f"🔎 Backup verification: {backup.name}"]
+        ok, message = await self._check_sqlite_integrity(backup.path)
+        if ok:
+            lines.append("✅ SQLite integrity_check: ok")
+        else:
+            lines.append(f"❌ SQLite integrity_check failed: {message}")
+            return False, "\n".join(lines)
+
+        config_backup = self._config_backup_path_for(backup.path)
+        if config_backup.is_file():
+            try:
+                text = await asyncio.to_thread(config_backup.read_text, encoding="utf-8")
+                compile(text, str(config_backup), "exec")
+                lines.append("✅ config.py companion: readable and valid Python")
+            except Exception as exc:
+                lines.append(f"❌ config.py companion check failed: {exc}")
+                return False, "\n".join(lines)
+        else:
+            lines.append("ℹ️ config.py companion: not present")
+
+        omemo_backup = self._omemo_backup_path_for(backup.path)
+        if omemo_backup.is_file():
+            try:
+                text = await asyncio.to_thread(omemo_backup.read_text, encoding="utf-8")
+                if text.strip():
+                    json.loads(text)
+                lines.append("✅ OMEMO companion: readable JSON")
+            except Exception as exc:
+                lines.append(f"❌ OMEMO companion check failed: {exc}")
+                return False, "\n".join(lines)
+        else:
+            lines.append("ℹ️ OMEMO companion: not present")
+
+        return True, "\n".join(lines)
+
     async def create_database_backup(
         self,
         reason: str = "manual",
@@ -254,7 +284,7 @@ class BackupMixin:
     ) -> tuple[bool, str]:
         """Create a timestamped database backup and optionally prune old backups."""
         if lock:
-            async with get_database_file_lock(self):
+            async with database_file_lock(self):
                 return await self.create_database_backup(reason, prune=prune, actor=actor, lock=False)
 
         db_path = self._database_path()
@@ -371,32 +401,20 @@ class BackupMixin:
 
     def resolve_database_backup(self, name: str) -> DatabaseBackup | None:
         """Resolve a backup by basename, path inside backup dir, or 'latest'."""
-        query = str(name).strip()
         backups = self.list_database_backups()
-        if not query or not backups:
+        path = resolve_managed_file(
+            self._database_backup_dir(),
+            name,
+            backups,
+            predicate=self._is_database_backup_file,
+        )
+        if path is None:
             return None
-        if query.lower() == "latest":
-            return backups[0]
-
-        backup_dir = self._database_backup_dir().resolve()
-        for backup in backups:
-            if query == backup.name or query == str(backup.path):
-                return backup
-
-        # Allow paths only if they still resolve inside the configured backup dir.
-        candidate = pathlib.Path(query).expanduser()
-        if not candidate.is_absolute():
-            candidate = self._database_backup_dir() / candidate
         try:
-            resolved = candidate.resolve()
+            stat = path.stat()
         except OSError:
             return None
-        if backup_dir not in (resolved, *resolved.parents):
-            return None
-        if not resolved.is_file() or resolved.name.endswith((".config.py", ".omemo.json")):
-            return None
-        stat = resolved.stat()
-        return DatabaseBackup(path=resolved, size=stat.st_size, mtime=stat.st_mtime)
+        return DatabaseBackup(path=path, size=stat.st_size, mtime=stat.st_mtime)
 
     def _format_backup_details(self, backup: DatabaseBackup) -> str:
         companions = self._backup_companion_names(backup.path)
@@ -411,9 +429,8 @@ class BackupMixin:
 
     async def restore_database_backup(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
         """Restore a managed database backup and reload DB-backed caches."""
-        async with get_database_file_lock(self):
-            async with get_ban_state_lock(self):
-                return await self._restore_database_backup_locked(name, actor=actor)
+        async with database_mutation_locks(self):
+            return await self._restore_database_backup_locked(name, actor=actor)
 
     async def _restore_database_backup_locked(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
         """Restore implementation. The requested backup is resolved before the safety backup."""
@@ -424,6 +441,10 @@ class BackupMixin:
         db_path = self._database_path()
         if not self._is_backup_supported_database(db_path):
             return False, "Database restore is not available for in-memory DB_FILE."
+
+        verify_ok, verify_message = await self._check_sqlite_integrity(backup.path)
+        if not verify_ok:
+            return False, f"Restore aborted: selected backup failed SQLite integrity_check: {verify_message}"
 
         db_path.parent.mkdir(parents=True, exist_ok=True)
         safety_ok, safety_message = await self.create_database_backup(
@@ -446,6 +467,17 @@ class BackupMixin:
                 os.chmod(db_path, 0o600)
             except OSError as exc:
                 log.debug("Failed to restrict restored database permissions for %s: %s", db_path, exc)
+
+            restored_ok, restored_message = await self._check_sqlite_integrity(db_path)
+            if not restored_ok:
+                rollback_note = ""
+                if safety_ok:
+                    try:
+                        await asyncio.to_thread(shutil.copy2, pathlib.Path(safety_message), db_path)
+                        rollback_note = f" Safety backup was restored: {safety_message}"
+                    except Exception as rollback_exc:
+                        rollback_note = f" Safety backup restore failed: {rollback_exc}"
+                return False, f"Restore aborted: restored DB failed integrity_check: {restored_message}.{rollback_note}"
 
             restored_config = False
             config_backup_path = self._config_backup_path_for(backup.path)
@@ -600,6 +632,19 @@ class BackupMixin:
             await self.bot_send_message(mto=room, mbody=self._format_backup_details(backup), mtype="groupchat")
             return
 
+        if action == "verify":
+            if len(args) < 2:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}backup verify <filename|latest>",
+                    mtype="groupchat",
+                )
+                return
+            ok, message = await self.verify_database_backup(args[1])
+            prefix = "✅ Backup verified." if ok else "❌ Backup verification failed."
+            await self.bot_send_message(mto=room, mbody=f"{prefix}\n{message}", mtype="groupchat")
+            return
+
         if action == "restore":
             await self.cmd_restore(args[1:], room, actor=actor)
             return
@@ -611,6 +656,7 @@ class BackupMixin:
                 f"  {self.command_prefix}backup\n"
                 f"  {self.command_prefix}backup list\n"
                 f"  {self.command_prefix}backup show <filename|latest>\n"
+                f"  {self.command_prefix}backup verify <filename|latest>\n"
                 f"  {self.command_prefix}backup restore <filename|latest> confirm\n"
                 f"  {self.command_prefix}restore <filename|latest> confirm"
             ),

@@ -148,6 +148,34 @@ async def test_import_resolves_nick_only_row_to_existing_jid_ban(temp_db_path, t
 
 
 @pytest.mark.asyncio
+async def test_import_staged_duplicates_keep_stronger_row(temp_db_path, tmp_path):
+    csv_file = tmp_path / "duplicates.csv"
+    csv_file.write_text(
+        "jid,nick,until,issuer,comment\n"
+        "user@example.org,Nick,1000,imported,weaker temp\n"
+        "user@example.org,Nick,0,imported,stronger permanent\n",
+        encoding="utf-8",
+    )
+    bot = ImportBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        successful, skipped, errors = await bot.import_bans_from_csv(str(csv_file))
+
+        assert successful == 1
+        assert skipped == 1
+        assert errors == []
+
+        async with bot.db.execute(
+            "SELECT target_type, target, until, comment FROM bans WHERE target = 'user@example.org'"
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row == ("jid", "user@example.org", 0, "stronger permanent")
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_import_skips_invalid_rows_without_backup(tmp_path):
     csv_file = tmp_path / "invalid-rows.csv"
     csv_file.write_text(

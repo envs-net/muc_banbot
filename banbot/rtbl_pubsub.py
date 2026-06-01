@@ -7,6 +7,7 @@ import time
 from slixmpp.exceptions import IqError, IqTimeout
 
 from .rtbl_utils import _is_domain, _is_sha256
+from .locks import is_maintenance_mode
 
 log = logging.getLogger(__name__)
 
@@ -615,6 +616,10 @@ class RtblPubSubMixin:
                 continue
 
             await asyncio.sleep(interval)
+
+            if is_maintenance_mode(self):
+                log.debug("RTBL: periodic refresh skipped while maintenance operation is active")
+                continue
 
             if not getattr(self, "rtbl_enabled", False):
                 continue

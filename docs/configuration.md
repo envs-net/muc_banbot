@@ -137,6 +137,7 @@ Commands:
 !backup
 !backup list
 !backup show latest
+!backup verify latest
 !restore latest confirm
 !backup restore <filename> confirm
 ```

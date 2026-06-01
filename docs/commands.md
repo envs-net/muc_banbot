@@ -40,6 +40,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!backup` | Creates a managed full backup | `!backup` |
 | `!backup list` | Lists managed backups | `!backup list` |
 | `!backup show <filename|latest>` | Shows details and companions for one backup | `!backup show latest` |
+| `!backup verify <filename|latest>` | Runs SQLite integrity checks and companion readability checks | `!backup verify latest` |
 | `!restore <file|latest> confirm` | Restores a managed full backup after confirmation | `!restore latest confirm` |
 | `!restart` / `!restart confirm` | Shows restart confirmation / exits cleanly so a supervisor can restart the bot | `!restart confirm` |
 | `!status` | Shows health, rooms, uptime, bans, DB, RTBL, and workers | `!status` |

@@ -8,9 +8,16 @@ from config import ADMIN_ROOM, NICK
 
 log = logging.getLogger(__name__)
 
+from .locks import ban_state_lock
+
 
 class SyncMixin:
     async def sync_rooms_and_bans(self) -> None:
+        """Run full room/ban sync while holding the shared ban-state lock."""
+        async with ban_state_lock(self):
+            await self._sync_rooms_and_bans_locked()
+
+    async def _sync_rooms_and_bans_locked(self) -> None:
         """
         Full sync for !sync command:
         - Rejoin all protected rooms
@@ -364,6 +371,11 @@ class SyncMixin:
 
 
     async def sync_bans_to_rooms(self, startup: bool = False, announce_progress: bool = True) -> None:
+        """Sync DB bans to rooms while holding the shared ban-state lock."""
+        async with ban_state_lock(self):
+            await self._sync_bans_to_rooms_locked(startup=startup, announce_progress=announce_progress)
+
+    async def _sync_bans_to_rooms_locked(self, startup: bool = False, announce_progress: bool = True) -> None:
         """
         Sync all bans from the database to all protected rooms.
         Skips expired temporary bans.

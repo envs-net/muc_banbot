@@ -90,3 +90,15 @@ async def test_config_show_shortens_long_lists_and_keeps_runtime_summary(monkeyp
     assert "Plaintext fallback: False" in body
     assert "Commands:" in body
     assert "!config set <KEY> <value>" in body
+
+
+@pytest.mark.asyncio
+async def test_config_show_follows_config_sample_order():
+    bot = ConfigDisplayBot()
+
+    await bot._cmd_config_show("admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+
+    assert body.index("🪪 Bot Identity / Control") < body.index("💾 Storage / Backups")
+    assert body.index("💾 Storage / Backups") < body.index("📦 Managed CSV Exports")
+    assert body.index("📦 Managed CSV Exports") < body.index("🌐 Connection")

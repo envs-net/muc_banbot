@@ -111,6 +111,24 @@ async def test_backup_list_command_shows_restore_hint(backup_config):
 
 
 @pytest.mark.asyncio
+async def test_backup_verify_latest_reports_integrity_ok(backup_config):
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, _message = await bot.create_database_backup("manual")
+        assert ok is True
+
+        await bot.cmd_backup(["verify", "latest"], "admin@conference.example.org")
+
+        body = bot.sent[-1]["mbody"]
+        assert "Backup verified" in body
+        assert "SQLite integrity_check: ok" in body
+        assert "config.py companion" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_startup_snapshot_honors_keep_limit(backup_config, monkeypatch):
     _db_path, backup_dir = backup_config
     import banbot.backups as backups_module
@@ -211,3 +229,18 @@ async def test_restore_safety_backup_records_actor(backup_config):
     finally:
         if bot.db:
             await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_backup_verify_rejects_corrupt_database_backup(backup_config):
+    db_path, backup_dir = backup_config
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    corrupt = backup_dir / f"{db_path.name}.snapshot-manual-corrupt"
+    corrupt.write_text("not sqlite", encoding="utf-8")
+
+    bot = BackupBot()
+    await bot.cmd_backup(["verify", corrupt.name], "admin@conference.example.org")
+
+    body = bot.sent[-1]["mbody"]
+    assert "Backup verification failed" in body
+    assert "SQLite integrity_check failed" in body

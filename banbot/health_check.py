@@ -5,6 +5,7 @@ import logging
 import time
 
 from config import ADMIN_ROOM, NICK
+from .locks import is_maintenance_mode
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ class HealthCheckMixin:
         while True:
             try:
                 await asyncio.sleep(self.health_check_interval)
+
+                if is_maintenance_mode(self):
+                    log.debug("Health check skipped while maintenance operation is active")
+                    continue
 
                 if getattr(self, "reconnecting", False):
                     log.debug("Health check skipped while reconnecting")

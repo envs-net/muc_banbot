@@ -24,7 +24,7 @@ except Exception:
     # bot.py imports this module to format config import errors for users.
     config = None
 
-from .locks import get_database_file_lock
+from .locks import database_file_lock
 from .utils import validate_jid_format
 
 # Allow config.py to use lowercase boolean aliases like in YAML/JSON/TOML.
@@ -776,7 +776,7 @@ class ConfigMixin:
         _locked: bool = False,
     ) -> tuple[bool, str]:
         if not _locked:
-            async with get_database_file_lock(self):
+            async with database_file_lock(self):
                 return await self.set_runtime_config_value(
                     key,
                     raw_value,
@@ -825,7 +825,7 @@ class ConfigMixin:
         _locked: bool = False,
     ) -> tuple[bool, str]:
         if not _locked:
-            async with get_database_file_lock(self):
+            async with database_file_lock(self):
                 return await self.unset_runtime_config_value(
                     key,
                     actor=actor,

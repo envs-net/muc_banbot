@@ -31,5 +31,6 @@ For full SQLite/config/OMEMO recovery use:
 !backup
 !backup list
 !backup show latest
+!backup verify latest
 !restore latest confirm
 ```

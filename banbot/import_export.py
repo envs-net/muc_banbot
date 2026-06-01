@@ -6,7 +6,6 @@ import csv
 import logging
 import os
 import pathlib
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -19,22 +18,11 @@ from .utils import normalize_ban_target, validate_domain_ban, validate_jid_forma
 
 log = logging.getLogger(__name__)
 
-from .locks import get_ban_state_lock, get_database_file_lock
+from .locks import database_mutation_locks
+from .managed_files import ManagedFile, format_file_size, list_managed_files, prune_managed_files, resolve_managed_file
 
 
-@dataclass(frozen=True)
-class ExportFile:
-    path: pathlib.Path
-    size: int
-    mtime: float
-
-    @property
-    def name(self) -> str:
-        return self.path.name
-
-    @property
-    def mtime_text(self) -> str:
-        return datetime.fromtimestamp(self.mtime).strftime("%Y-%m-%d %H:%M:%S")
+ExportFile = ManagedFile
 
 
 class ImportExportMixin:
@@ -54,83 +42,43 @@ class ImportExportMixin:
             return 15
 
     def _format_export_size(self, size: int) -> str:
-        if size >= 1024 * 1024:
-            return f"{size / (1024 * 1024):.1f} MiB"
-        if size >= 1024:
-            return f"{size / 1024:.1f} KiB"
-        return f"{size} B"
+        return format_file_size(size)
+
+    def _is_export_file(self, path: pathlib.Path) -> bool:
+        return path.is_file() and path.name.startswith("bans_export_") and path.suffix == ".csv"
 
     def list_export_files(self) -> list[ExportFile]:
-        export_dir = self._export_dir()
-        if not export_dir.exists():
-            return []
-        files: list[ExportFile] = []
-        for path in export_dir.glob("bans_export_*.csv"):
-            if not path.is_file():
-                continue
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            files.append(ExportFile(path=path, size=stat.st_size, mtime=stat.st_mtime))
-        files.sort(key=lambda item: (item.mtime, item.name), reverse=True)
-        return files
+        return list_managed_files(
+            self._export_dir(),
+            "bans_export_*.csv",
+            predicate=self._is_export_file,
+        )
 
     def _format_export_entry(self, export_file: ExportFile, index: int | None = None) -> str:
         prefix = f"{index}. " if index is not None else ""
         return f"{prefix}{export_file.name} ({self._format_export_size(export_file.size)}, {export_file.mtime_text})"
 
     async def prune_export_files(self, *, preserve: pathlib.Path | None = None) -> list[pathlib.Path]:
-        keep = self._export_keep()
-        preserve_resolved = preserve.resolve() if preserve is not None and preserve.exists() else None
-        removed: list[pathlib.Path] = []
-        kept = 0
-        for export_file in self.list_export_files():
-            try:
-                export_resolved = export_file.path.resolve()
-            except OSError:
-                export_resolved = export_file.path
-            if preserve_resolved is not None and export_resolved == preserve_resolved:
-                kept += 1
-                continue
-            if kept < keep:
-                kept += 1
-                continue
-            try:
-                export_file.path.unlink()
-                removed.append(export_file.path)
-                log.info("Deleted old export file: %s", export_file.path)
-            except OSError as exc:
-                log.warning("Failed to delete old export file %s: %s", export_file.path, exc)
+        try:
+            removed = await prune_managed_files(
+                self.list_export_files(),
+                keep=self._export_keep(),
+                preserve=preserve,
+            )
+        except OSError as exc:
+            log.warning("Failed to prune export files: %s", exc)
+            return []
+        for path in removed:
+            log.info("Deleted old export file: %s", path)
         return removed
 
     def resolve_export_file(self, name: str) -> pathlib.Path | None:
-        query = str(name).strip()
-        if not query:
-            return None
-        exports = self.list_export_files()
-        if query.lower() == "latest":
-            return exports[0].path if exports else None
-        for export_file in exports:
-            if query == export_file.name or query == str(export_file.path):
-                return export_file.path
-        export_dir = self._export_dir().resolve()
-        candidate = pathlib.Path(query).expanduser()
-        if not candidate.is_absolute():
-            candidate = self._export_dir() / candidate
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            return None
-        try:
-            if not resolved.is_relative_to(export_dir):
-                return None
-        except AttributeError:
-            if resolved != export_dir and export_dir not in resolved.parents:
-                return None
-        if not resolved.is_file() or not resolved.name.startswith("bans_export_") or resolved.suffix != ".csv":
-            return None
-        return resolved
+        return resolve_managed_file(
+            self._export_dir(),
+            name,
+            self.list_export_files(),
+            predicate=self._is_export_file,
+        )
 
     async def export_bans_to_csv(self) -> tuple[bool, str]:
         """Export all bans to a managed CSV file."""
@@ -225,7 +173,7 @@ class ImportExportMixin:
         """Read and validate CSV import rows. Returns staged rows, skipped count and errors."""
         skipped = 0
         errors: list[str] = []
-        staged_by_lookup_key: dict[str, tuple] = {}
+        staged_rows: dict[str, tuple] = {}
         path = pathlib.Path(filename)
         if not path.exists():
             return [], 0, [f"❌ File not found: {filename}"]
@@ -277,56 +225,69 @@ class ImportExportMixin:
                     existing_jid_ban = await self.find_active_jid_ban_by_nick(normalized_nick)
                     if existing_jid_ban:
                         existing_jid, _existing_until, _existing_issuer, _existing_comment = existing_jid_ban
-                        log.info("Row %d: resolving nick-only import %s to existing JID ban %s", row_num, normalized_nick, existing_jid)
+                        log.info(
+                            "Row %d: resolving nick-only import %s to existing JID ban %s",
+                            row_num,
+                            normalized_nick,
+                            existing_jid,
+                        )
                         target_type = "jid"
                         target = existing_jid
                         normalized_jid = existing_jid
                 lookup_key = f"*.{target}" if target_type == "domain" else target
-                previous = staged_by_lookup_key.get(lookup_key)
+
+                existing = self.ban_cache.get(lookup_key)
+                if existing:
+                    existing_until = int(existing[2] or 0)
+                    if existing_until <= 0:
+                        log.info(
+                            "Row %d: Existing permanent ban for %s is stronger, skipping",
+                            row_num,
+                            lookup_key,
+                        )
+                        skipped += 1
+                        continue
+                    if until > 0 and until <= existing_until:
+                        log.info(
+                            "Row %d: Existing temporary ban for %s expires later, skipping",
+                            row_num,
+                            lookup_key,
+                        )
+                        skipped += 1
+                        continue
+
+                candidate = (target_type, target, normalized_jid, normalized_nick, until, issuer, comment)
+                previous = staged_rows.get(lookup_key)
                 if previous:
                     previous_until = int(previous[4] or 0)
-
-                    # Existing staged permanent bans are stronger than duplicates.
                     if previous_until <= 0:
-                        log.info("Row %d: Duplicate staged import row for %s, keeping existing permanent entry", row_num, lookup_key)
+                        log.info(
+                            "Row %d: Existing staged permanent import for %s is stronger, skipping",
+                            row_num,
+                            lookup_key,
+                        )
                         skipped += 1
                         continue
-
-                    # Keep the staged temporary ban with the later expiration.
                     if until > 0 and until <= previous_until:
-                        log.info("Row %d: Duplicate staged import row for %s, keeping later existing expiration", row_num, lookup_key)
+                        log.info(
+                            "Row %d: Existing staged temporary import for %s expires later, skipping",
+                            row_num,
+                            lookup_key,
+                        )
                         skipped += 1
                         continue
+                    log.info(
+                        "Row %d: Replacing weaker staged import row for %s",
+                        row_num,
+                        lookup_key,
+                    )
+                    skipped += 1
 
-                    log.info("Row %d: Replacing weaker staged import row for %s", row_num, lookup_key)
-                if lookup_key in self.ban_cache:
-                    existing = self.ban_cache[lookup_key]
-                    existing_until = int(existing[2] or 0)
-
-                    # Existing permanent bans are stronger than imported duplicates.
-                    if existing_until <= 0:
-                        log.info("Row %d: Ban already exists for %s (permanent), skipping", row_num, lookup_key)
-                        skipped += 1
-                        continue
-
-                    # Keep the existing temporary ban if it expires later.
-                    if until > 0 and until <= existing_until:
-                        log.info("Row %d: Existing temporary ban for %s expires later, skipping", row_num, lookup_key)
-                        skipped += 1
-                        continue
-                staged_by_lookup_key[lookup_key] = (
-                    target_type,
-                    target,
-                    normalized_jid,
-                    normalized_nick,
-                    until,
-                    issuer,
-                    comment,
-                )
+                staged_rows[lookup_key] = candidate
             except Exception as e:
                 errors.append(f"Row {row_num}: {e}")
                 skipped += 1
-        return list(staged_by_lookup_key.values()), skipped, errors
+        return list(staged_rows.values()), skipped, errors
 
     async def import_bans_from_csv(
         self,
@@ -343,13 +304,12 @@ class ImportExportMixin:
         """
         errors: list[str] = []
         try:
-            async with get_database_file_lock(self):
-                async with get_ban_state_lock(self):
-                    return await self._import_bans_from_csv_locked(
-                        filename,
-                        actor=actor,
-                        dry_run=dry_run,
-                    )
+            async with database_mutation_locks(self):
+                return await self._import_bans_from_csv_locked(
+                    filename,
+                    actor=actor,
+                    dry_run=dry_run,
+                )
         except Exception as e:
             errors.append(f"❌ Import failed: {e}")
             log.error("Import error: %s", e)

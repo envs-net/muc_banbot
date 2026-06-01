@@ -97,7 +97,7 @@ Examples assume the default command prefix `!`.
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |
 | `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
 | `!reloadconfig` | Validate and reload runtime configuration |
-| `!backup` / `!backup list` | Create or list managed SQLite database/config.py/OMEMO backups |
+| `!backup` / `!backup list/show/verify` | Create, list, inspect, or verify managed SQLite database/config.py/OMEMO backups |
 | `!restore <file|latest> confirm` | Restore a managed full backup |
 | `!omemo status/devices/reset` | Inspect OMEMO state, list local device hints, or rotate local OMEMO storage |
 | `!room add <room>` | Add a protected room |

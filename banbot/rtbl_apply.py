@@ -2,6 +2,7 @@
 
 import logging
 
+from .locks import ban_state_lock
 from .utils import domain_matches
 
 log = logging.getLogger(__name__)
@@ -199,6 +200,16 @@ class RtblApplyMixin:
         nick: str | None,
         reason: str | None,
     ) -> None:
+        """Apply an RTBL JID ban while holding the shared ban-state lock."""
+        async with ban_state_lock(self):
+            await self._rtbl_apply_ban_jid_locked(jid, nick, reason)
+
+    async def _rtbl_apply_ban_jid_locked(
+        self,
+        jid: str,
+        nick: str | None,
+        reason: str | None,
+    ) -> None:
         """
         Apply an RTBL JID ban via MUC outcast affiliation in all protected rooms.
 
@@ -271,6 +282,17 @@ class RtblApplyMixin:
 
 
     async def _rtbl_apply_ban_domain(
+        self,
+        domain: str,
+        reason: str | None,
+        nick: str | None = None,
+        jid: str | None = None,
+    ) -> None:
+        """Apply an RTBL domain ban while holding the shared ban-state lock."""
+        async with ban_state_lock(self):
+            await self._rtbl_apply_ban_domain_locked(domain, reason, nick=nick, jid=jid)
+
+    async def _rtbl_apply_ban_domain_locked(
         self,
         domain: str,
         reason: str | None,
@@ -441,6 +463,11 @@ class RtblApplyMixin:
 
 
     async def _rtbl_cleanup_stale_persisted_bans(self, issuer: str = "rtbl_cleanup") -> int:
+        """Remove stale RTBL bans while holding the shared ban-state lock."""
+        async with ban_state_lock(self):
+            return await self._rtbl_cleanup_stale_persisted_bans_locked(issuer=issuer)
+
+    async def _rtbl_cleanup_stale_persisted_bans_locked(self, issuer: str = "rtbl_cleanup") -> int:
         """
         Remove persisted issuer=rtbl bans that are no longer backed by active RTBL caches.
 

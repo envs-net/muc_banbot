@@ -7,6 +7,7 @@ import time
 from config import ADMIN_ROOM
 from slixmpp.exceptions import IqError, IqTimeout
 
+from .locks import ban_state_lock, is_maintenance_mode
 from .utils import (
     domain_matches,
     human_time,
@@ -153,6 +154,11 @@ class ModerationMixin:
 
 
     async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None) -> None:
+        """Ban a target while holding the shared ban-state lock."""
+        async with ban_state_lock(self):
+            await self._ban_all_locked(identifier, until, issuer, comment)
+
+    async def _ban_all_locked(self, identifier: str, until: int | None, issuer: str, comment: str | None = None) -> None:
         """
         Bans a user by JID, nick, or domain (*.domain.tld):
         - Validates JID/domain format
@@ -403,6 +409,10 @@ class ModerationMixin:
         while True:
             now = int(time.time())
             try:
+                if is_maintenance_mode(self):
+                    log.debug("unban_worker skipped while maintenance operation is active")
+                    await asyncio.sleep(self.unban_check_interval)
+                    continue
                 # --- Fetch expired bans (limited to 100 per check) ---
                 async with self.db.execute(
                     "SELECT target_type, target, jid, nick FROM bans WHERE until > 0 AND until <= ? LIMIT 100", (now,)
@@ -523,6 +533,11 @@ class ModerationMixin:
 
 
     async def unban_all(self, identifier: str, issuer: str | None = None) -> None:
+        """Unban a target while holding the shared ban-state lock."""
+        async with ban_state_lock(self):
+            await self._unban_all_locked(identifier, issuer=issuer)
+
+    async def _unban_all_locked(self, identifier: str, issuer: str | None = None) -> None:
         """
         Remove a ban from a user (JID, nick, or domain) and unban in all protected rooms.
         Supports exact wildcard-domain unbans (*.domain.tld).

@@ -6,6 +6,7 @@ import time
 
 from config import ADMIN_ROOM, NICK
 
+from .locks import ban_state_lock
 from .utils import domain_matches
 
 log = logging.getLogger(__name__)
@@ -172,15 +173,16 @@ class MucMixin:
                 # Found a nick-only ban, convert it to a JID ban.
                 ban_jid_bare = self.bare_jid(jid_str)
                 until, issuer, comment = existing_ban
-                await self.upsert_ban_db(ban_jid_bare, nick.lower(), int(until or 0), issuer, comment)
-                await self.db.execute(
-                    "DELETE FROM bans WHERE target_type = 'nick' AND target = ?",
-                    (nick.lower(),)
-                )
-                await self.db.commit()
+                async with ban_state_lock(self):
+                    await self.upsert_ban_db(ban_jid_bare, nick.lower(), int(until or 0), issuer, comment)
+                    await self.db.execute(
+                        "DELETE FROM bans WHERE target_type = 'nick' AND target = ?",
+                        (nick.lower(),)
+                    )
+                    await self.db.commit()
 
-                # Reload ban cache
-                await self.load_bans_from_db()
+                    # Reload ban cache
+                    await self.load_bans_from_db()
 
                 log.info("✅ Auto-updated ban for nick '%s': JID set to %s", nick, ban_jid_bare)
 
