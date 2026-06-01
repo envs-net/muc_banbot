@@ -40,7 +40,7 @@ async def test_config_show_groups_keys_and_hides_secrets():
     assert "Password/secret values are hidden." in body
 
     identity = _section(body, "🪪 Bot Identity / Control")
-    storage = _section(body, "💾 Storage / Backups")
+    storage = _section(body, "💾 Database / Backups")
     exports = _section(body, "📦 Managed CSV Exports")
     connection = _section(body, "🌐 Connection")
     profile = _section(body, "🖼️ vCard Settings")
@@ -99,6 +99,6 @@ async def test_config_show_follows_config_sample_order():
     await bot._cmd_config_show("admin@conference.example.org")
     body = bot.sent[-1]["mbody"]
 
-    assert body.index("🪪 Bot Identity / Control") < body.index("💾 Storage / Backups")
-    assert body.index("💾 Storage / Backups") < body.index("📦 Managed CSV Exports")
-    assert body.index("📦 Managed CSV Exports") < body.index("🌐 Connection")
+    assert body.index("🪪 Bot Identity / Control") < body.index("🌐 Connection")
+    assert body.index("🌐 Connection") < body.index("💾 Database / Backups")
+    assert body.index("💾 Database / Backups") < body.index("📦 Managed CSV Exports")

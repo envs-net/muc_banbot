@@ -26,7 +26,12 @@ class ConfigCommandMixin(ConfigMixin):
             "ADMIN_ROOM",
             "NICK",
         )),
-        ("💾 Storage / Backups", (
+        ("🌐 Connection", (
+            "CONNECT_HOST",
+            "CONNECT_PORT",
+            "CONNECT_DIRECT_TLS",
+        )),
+        ("💾 Database / Backups", (
             "DB_FILE",
             "DB_BACKUP_ON_START",
             "DB_BACKUP_DIR",
@@ -36,11 +41,6 @@ class ConfigCommandMixin(ConfigMixin):
         ("📦 Managed CSV Exports", (
             "EXPORT_DIR",
             "EXPORT_KEEP",
-        )),
-        ("🌐 Connection", (
-            "CONNECT_HOST",
-            "CONNECT_PORT",
-            "CONNECT_DIRECT_TLS",
         )),
         ("🖼️ vCard Settings", (
             "AVATAR_PATH",

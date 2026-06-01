@@ -6,21 +6,6 @@ PASSWORD = "yourpassword"
 ADMIN_ROOM = "admin@muc.domain.tld"
 NICK = "adminbot"
 
-###
-
-DB_FILE = "banbot.db"
-
-# Managed SQLite database backups.
-# !backup creates snapshots, !backup list shows them, and !restore can restore them.
-DB_BACKUP_ON_START = True
-DB_BACKUP_DIR = "data/backups"
-DB_BACKUP_KEEP = 15
-DB_BACKUP_INCLUDE_OMEMO = True
-
-# Managed CSV exports.
-EXPORT_DIR = "data/exports"
-EXPORT_KEEP = 15
-
 # ================= CONNECTION =================
 
 # Optional connection host override. None uses the domain from JID.
@@ -37,7 +22,24 @@ CONNECT_PORT = 5222
 # True  = direct TLS, usually 5223
 CONNECT_DIRECT_TLS = False
 
+# ================= DATABASE / BACKUPS =================
+
+DB_FILE = "banbot.db"
+
+# Managed SQLite database backups.
+# !backup creates snapshots, !backup list shows them, and !restore can restore them.
+DB_BACKUP_ON_START = True
+DB_BACKUP_DIR = "data/backups"
+DB_BACKUP_KEEP = 15
+DB_BACKUP_INCLUDE_OMEMO = True
+
+# ================= MANAGED CSV EXPORTS =================
+
+EXPORT_DIR = "data/exports"
+EXPORT_KEEP = 15
+
 # ================= vCARD SETTINGS =================
+
 AVATAR_PATH = "avatar.png"           # Path to avatar file (PNG/JPG), None disables avatar
 VCARD_NICKNAME = "My Bot Nickname"   # Optional nickname for vCard
 VCARD_FN = "Admin Bot"               # Full name
