@@ -551,7 +551,7 @@ class RoomInviteMixin:
                 mto=room,
                 mbody=(
                     "❌ Room invite service is disabled.\n"
-                    "Set ROOM_INVITES_ENABLED = True in config.py and run !reloadconfig."
+                    f"Set ROOM_INVITES_ENABLED = True in config.py and run {getattr(self, 'command_prefix', '!')}reloadconfig."
                 ),
                 mtype="groupchat",
             )

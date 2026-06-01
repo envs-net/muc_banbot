@@ -360,13 +360,30 @@ class DirectMessageMixin:
             if handled:
                 return
 
+            p = self.command_prefix
+            readonly_commands = ", ".join(
+                (
+                    f"{p}help",
+                    f"{p}config",
+                    f"{p}status",
+                    f"{p}checkupdate",
+                    f"{p}updatecheck",
+                    f"{p}banlist",
+                    f"{p}bansearch",
+                    f"{p}why",
+                    f"{p}room list",
+                    f"{p}room invite list",
+                    f"{p}ignore list",
+                    f"{p}whitelist list",
+                    f"{p}rtbl list",
+                    f"{p}audit",
+                )
+            )
             await self._send_direct_message(
                 reply_to,
                 (
                     "❌ Direct-message admin commands are read-only.\n"
-                    "Allowed read-only commands: !help, !config, !status, !checkupdate, !updatecheck, "
-                    "!banlist, !bansearch, !why, !room list, !room invite list, !ignore list, "
-                    "!whitelist list, !rtbl list, !audit.\n"
+                    f"Allowed read-only commands: {readonly_commands}.\n"
                     f"Use {ADMIN_ROOM} for mutating commands."
                 ),
             )

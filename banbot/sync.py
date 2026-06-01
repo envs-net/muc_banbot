@@ -154,10 +154,10 @@ class SyncMixin:
             if batch_end < len(rooms_list):
                 await asyncio.sleep(1)
 
-        log.info("✅ Full !sync completed for %d rooms", total_rooms)
+        log.info("✅ Full %ssync completed for %d rooms", getattr(self, "command_prefix", "!"), total_rooms)
         await self.bot_send_message(
             mto=ADMIN_ROOM,
-            mbody=f"✅ Full !sync completed for {total_rooms} rooms in {(len(rooms_list) + batch_size - 1) // batch_size} batches",
+            mbody=f"✅ Full {getattr(self, 'command_prefix', '!')}sync completed for {total_rooms} rooms in {(len(rooms_list) + batch_size - 1) // batch_size} batches",
             mtype="groupchat"
         )
 

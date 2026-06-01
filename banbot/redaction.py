@@ -428,7 +428,7 @@ class RedactionMixin:
                 mto=room,
                 mbody=(
                     "❌ Redaction is disabled.\n"
-                    "Set REDACTION_ENABLED=True and run !reloadconfig to use it."
+                    f"Set REDACTION_ENABLED=True and run {getattr(self, 'command_prefix', '!')}reloadconfig to use it."
                 ),
                 mtype="groupchat",
             )
@@ -492,7 +492,7 @@ class RedactionMixin:
                 mto=room,
                 mbody=(
                     "❌ Redaction is disabled.\n"
-                    "Set REDACTION_ENABLED=True and run !reloadconfig to use it."
+                    f"Set REDACTION_ENABLED=True and run {getattr(self, 'command_prefix', '!')}reloadconfig to use it."
                 ),
                 mtype="groupchat",
             )

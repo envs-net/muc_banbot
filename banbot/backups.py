@@ -562,9 +562,10 @@ class BackupMixin:
                     log.debug("Failed to audit database restore: %s", exc)
 
             lines = [f"✅ Database restored from {backup.name}"]
+            command_prefix = getattr(self, "command_prefix", "!")
             if restored_config:
                 lines.append("config.py was restored from the backup companion file.")
-                lines.append("⚠️ Run !reloadconfig or restart the bot to apply restored config.py values.")
+                lines.append(f"⚠️ Run {command_prefix}reloadconfig or restart the bot to apply restored config.py values.")
             elif config_backup_path.is_file():
                 lines.append("config.py backup companion exists, but no active config.py path was available for restore.")
             else:
