@@ -10,6 +10,8 @@ import pathlib
 import re
 import shutil
 import sqlite3
+import tempfile
+import zipfile
 from datetime import datetime
 from typing import Any
 
@@ -25,6 +27,12 @@ from .managed_files import ManagedFile, format_file_size, list_managed_files, pr
 from .utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 _BACKUP_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+_BACKUP_FORMAT = "banbot-backup-v1"
+_BACKUP_MANIFEST_ENTRY = "manifest.json"
+_BACKUP_DATABASE_ENTRY = "database.sqlite3"
+_BACKUP_CONFIG_ENTRY = "config.py"
+_BACKUP_OMEMO_ENTRY = "omemo.json"
 
 
 DatabaseBackup = ManagedFile
@@ -82,17 +90,35 @@ class BackupMixin:
         return pathlib.Path(str(raw_path)).expanduser()
 
     def _config_backup_path_for(self, backup_path: pathlib.Path) -> pathlib.Path:
-        """Return the companion config.py backup path for a database snapshot."""
+        """Return the legacy companion config.py backup path for a database snapshot."""
         return backup_path.with_name(f"{backup_path.name}.config.py")
 
     def _omemo_backup_path_for(self, backup_path: pathlib.Path) -> pathlib.Path:
-        """Return the companion OMEMO storage backup path for a database snapshot."""
+        """Return the legacy companion OMEMO storage backup path for a database snapshot."""
         return backup_path.with_name(f"{backup_path.name}.omemo.json")
 
+    def _is_backup_archive(self, backup_path: pathlib.Path) -> bool:
+        """Return True when the managed backup is a ZIP archive."""
+        return backup_path.suffix.lower() == ".zip"
+
+    def _backup_archive_names(self, backup_path: pathlib.Path) -> set[str]:
+        """Return archive member names for a ZIP backup, or an empty set."""
+        if not self._is_backup_archive(backup_path) or not backup_path.is_file():
+            return set()
+        try:
+            with zipfile.ZipFile(backup_path, "r") as archive:
+                return set(archive.namelist())
+        except (OSError, zipfile.BadZipFile):
+            return set()
+
     def _has_config_backup(self, backup_path: pathlib.Path) -> bool:
+        if self._is_backup_archive(backup_path):
+            return _BACKUP_CONFIG_ENTRY in self._backup_archive_names(backup_path)
         return self._config_backup_path_for(backup_path).is_file()
 
     def _has_omemo_backup(self, backup_path: pathlib.Path) -> bool:
+        if self._is_backup_archive(backup_path):
+            return _BACKUP_OMEMO_ENTRY in self._backup_archive_names(backup_path)
         return self._omemo_backup_path_for(backup_path).is_file()
 
     def _is_backup_supported_database(self, db_path: pathlib.Path | None = None) -> bool:
@@ -209,6 +235,85 @@ class BackupMixin:
             await asyncio.to_thread(shutil.copy2, db_path, backup_path)
 
     @staticmethod
+    def _write_backup_archive_sync(
+        archive_path: pathlib.Path,
+        *,
+        database_path: pathlib.Path,
+        config_path: pathlib.Path | None,
+        omemo_path: pathlib.Path | None,
+        manifest: dict[str, Any],
+    ) -> None:
+        """Write one self-contained ZIP backup archive."""
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                _BACKUP_MANIFEST_ENTRY,
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            )
+            archive.write(database_path, _BACKUP_DATABASE_ENTRY)
+            if config_path is not None:
+                archive.write(config_path, _BACKUP_CONFIG_ENTRY)
+            if omemo_path is not None:
+                archive.write(omemo_path, _BACKUP_OMEMO_ENTRY)
+
+    @staticmethod
+    def _extract_backup_archive_sync(archive_path: pathlib.Path, target_dir: pathlib.Path) -> dict[str, pathlib.Path | None]:
+        """Extract known backup archive entries into target_dir."""
+        try:
+            archive = zipfile.ZipFile(archive_path, "r")
+        except zipfile.BadZipFile as exc:
+            raise ValueError(f"Invalid backup archive: {exc}") from exc
+
+        with archive:
+            names = set(archive.namelist())
+            if _BACKUP_MANIFEST_ENTRY not in names:
+                raise ValueError("Backup archive is missing manifest.json")
+            if _BACKUP_DATABASE_ENTRY not in names:
+                raise ValueError("Backup archive is missing database.sqlite3")
+
+            manifest_text = archive.read(_BACKUP_MANIFEST_ENTRY).decode("utf-8")
+            manifest = json.loads(manifest_text)
+            if manifest.get("format") != _BACKUP_FORMAT:
+                raise ValueError(f"Unsupported backup format: {manifest.get('format')!r}")
+
+            database_path = target_dir / _BACKUP_DATABASE_ENTRY
+            with archive.open(_BACKUP_DATABASE_ENTRY, "r") as src, database_path.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+            config_path: pathlib.Path | None = None
+            if _BACKUP_CONFIG_ENTRY in names:
+                config_path = target_dir / _BACKUP_CONFIG_ENTRY
+                with archive.open(_BACKUP_CONFIG_ENTRY, "r") as src, config_path.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+            omemo_path: pathlib.Path | None = None
+            if _BACKUP_OMEMO_ENTRY in names:
+                omemo_path = target_dir / _BACKUP_OMEMO_ENTRY
+                with archive.open(_BACKUP_OMEMO_ENTRY, "r") as src, omemo_path.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+        return {
+            "database": database_path,
+            "config": config_path,
+            "omemo": omemo_path,
+        }
+
+    async def _extract_backup_archive(self, archive_path: pathlib.Path, target_dir: pathlib.Path) -> dict[str, pathlib.Path | None]:
+        """Extract a ZIP backup archive without blocking the event loop."""
+        return await asyncio.to_thread(self._extract_backup_archive_sync, archive_path, target_dir)
+
+    async def _backup_restore_sources(
+        self, backup_path: pathlib.Path, target_dir: pathlib.Path
+    ) -> dict[str, pathlib.Path | None]:
+        """Return database/config/OMEMO source paths for archive or legacy backups."""
+        if self._is_backup_archive(backup_path):
+            return await self._extract_backup_archive(backup_path, target_dir)
+        return {
+            "database": backup_path,
+            "config": self._config_backup_path_for(backup_path) if self._config_backup_path_for(backup_path).is_file() else None,
+            "omemo": self._omemo_backup_path_for(backup_path) if self._omemo_backup_path_for(backup_path).is_file() else None,
+        }
+
+    @staticmethod
     def _check_sqlite_integrity_sync(path: pathlib.Path) -> tuple[bool, str]:
         """Run SQLite PRAGMA integrity_check for a database file."""
         if not path.exists():
@@ -235,12 +340,56 @@ class BackupMixin:
             return False, str(exc)
 
     async def verify_database_backup(self, name: str) -> tuple[bool, str]:
-        """Verify a managed backup database and readable companion files."""
+        """Verify a managed backup archive or legacy database snapshot."""
         backup = self.resolve_database_backup(name)
         if backup is None:
             return False, f"Backup not found: {name}"
 
         lines = [f"🔎 Backup verification: {backup.name}"]
+        if self._is_backup_archive(backup.path):
+            lines.append("Format: ZIP archive")
+            with tempfile.TemporaryDirectory(prefix="banbot-backup-verify-") as tmp_name:
+                tmp_dir = pathlib.Path(tmp_name)
+                try:
+                    sources = await self._extract_backup_archive(backup.path, tmp_dir)
+                except Exception as exc:
+                    lines.append(f"❌ Backup archive check failed: {exc}")
+                    return False, "\n".join(lines)
+
+                database_source = sources.get("database")
+                ok, message = await self._check_sqlite_integrity(database_source)  # type: ignore[arg-type]
+                if ok:
+                    lines.append("✅ SQLite integrity_check: ok")
+                else:
+                    lines.append(f"❌ SQLite integrity_check failed: {message}")
+                    return False, "\n".join(lines)
+
+                config_source = sources.get("config")
+                if config_source is not None:
+                    try:
+                        text = await asyncio.to_thread(config_source.read_text, encoding="utf-8")
+                        compile(text, str(config_source), "exec")
+                        lines.append("✅ config.py companion: readable and valid Python")
+                    except Exception as exc:
+                        lines.append(f"❌ config.py companion check failed: {exc}")
+                        return False, "\n".join(lines)
+                else:
+                    lines.append("ℹ️ config.py companion: not present")
+
+                omemo_source = sources.get("omemo")
+                if omemo_source is not None:
+                    try:
+                        text = await asyncio.to_thread(omemo_source.read_text, encoding="utf-8")
+                        if text.strip():
+                            json.loads(text)
+                        lines.append("✅ OMEMO companion: readable JSON")
+                    except Exception as exc:
+                        lines.append(f"❌ OMEMO companion check failed: {exc}")
+                        return False, "\n".join(lines)
+                else:
+                    lines.append("ℹ️ OMEMO companion: not present")
+            return True, "\n".join(lines)
+
         ok, message = await self._check_sqlite_integrity(backup.path)
         if ok:
             lines.append("✅ SQLite integrity_check: ok")
@@ -283,7 +432,7 @@ class BackupMixin:
         actor: str | None = None,
         lock: bool = True,
     ) -> tuple[bool, str]:
-        """Create a timestamped database backup and optionally prune old backups."""
+        """Create a timestamped self-contained ZIP backup and optionally prune old backups."""
         if lock:
             async with database_file_lock(self):
                 return await self.create_database_backup(reason, prune=prune, actor=actor, lock=False)
@@ -308,47 +457,74 @@ class BackupMixin:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         reason_slug = self._safe_backup_reason(reason)
         base_name = f"{db_path.name}.snapshot-{reason_slug}-{timestamp}"
-        backup_path = backup_dir / base_name
+        backup_path = backup_dir / f"{base_name}.zip"
         counter = 1
         while backup_path.exists():
-            backup_path = backup_dir / f"{base_name}-{counter}"
+            backup_path = backup_dir / f"{base_name}-{counter}.zip"
             counter += 1
 
         try:
-            await self._copy_database_to_backup(db_path, backup_path)
+            with tempfile.TemporaryDirectory(prefix="banbot-backup-create-") as tmp_name:
+                tmp_dir = pathlib.Path(tmp_name)
+                database_copy = tmp_dir / _BACKUP_DATABASE_ENTRY
+                await self._copy_database_to_backup(db_path, database_copy)
+
+                config_path = self._config_path()
+                config_source: pathlib.Path | None = None
+                if config_path is not None and config_path.exists() and config_path.is_file():
+                    config_source = config_path
+
+                omemo_path = self._omemo_storage_path()
+                omemo_source: pathlib.Path | None = None
+                if self._database_backup_include_omemo():
+                    if omemo_path is not None and omemo_path.exists() and omemo_path.is_file():
+                        omemo_source = omemo_path
+                    else:
+                        log.debug("OMEMO backup skipped: storage file does not exist or is not configured")
+
+                manifest = {
+                    "format": _BACKUP_FORMAT,
+                    "created_at": int(datetime.now().timestamp()),
+                    "created_at_text": datetime.now().isoformat(timespec="seconds"),
+                    "reason": reason_slug,
+                    "database": {
+                        "source": str(db_path),
+                        "entry": _BACKUP_DATABASE_ENTRY,
+                    },
+                    "contains": {
+                        "database": True,
+                        "config": config_source is not None,
+                        "omemo": omemo_source is not None,
+                    },
+                    "entries": {
+                        "database": _BACKUP_DATABASE_ENTRY,
+                        "config": _BACKUP_CONFIG_ENTRY if config_source is not None else None,
+                        "omemo": _BACKUP_OMEMO_ENTRY if omemo_source is not None else None,
+                    },
+                }
+
+                await asyncio.to_thread(
+                    self._write_backup_archive_sync,
+                    backup_path,
+                    database_path=database_copy,
+                    config_path=config_source,
+                    omemo_path=omemo_source,
+                    manifest=manifest,
+                )
+
             try:
                 os.chmod(backup_path, 0o600)
             except OSError as exc:
-                log.debug("Failed to restrict database backup permissions for %s: %s", backup_path, exc)
-
-            config_path = self._config_path()
-            config_backup_path: pathlib.Path | None = None
-            if config_path is not None and config_path.exists() and config_path.is_file():
-                config_backup_path = self._config_backup_path_for(backup_path)
-                await asyncio.to_thread(shutil.copy2, config_path, config_backup_path)
-                try:
-                    os.chmod(config_backup_path, 0o600)
-                except OSError as exc:
-                    log.debug("Failed to restrict config backup permissions for %s: %s", config_backup_path, exc)
-
-            omemo_path = self._omemo_storage_path()
-            omemo_backup_path: pathlib.Path | None = None
-            if self._database_backup_include_omemo():
-                if omemo_path is not None and omemo_path.exists() and omemo_path.is_file():
-                    omemo_backup_path = self._omemo_backup_path_for(backup_path)
-                    await asyncio.to_thread(shutil.copy2, omemo_path, omemo_backup_path)
-                    try:
-                        os.chmod(omemo_backup_path, 0o600)
-                    except OSError as exc:
-                        log.debug("Failed to restrict OMEMO backup permissions for %s: %s", omemo_backup_path, exc)
-                else:
-                    log.debug("OMEMO backup skipped: storage file does not exist or is not configured")
+                log.debug("Failed to restrict backup archive permissions for %s: %s", backup_path, exc)
 
             self.last_database_backup_file = str(backup_path)
             if prune:
                 await self.prune_database_backups(preserve=backup_path)
 
-            log.info("Created database backup: %s", backup_path)
+            config_backup = _BACKUP_CONFIG_ENTRY if self._has_config_backup(backup_path) else None
+            omemo_backup = _BACKUP_OMEMO_ENTRY if self._has_omemo_backup(backup_path) else None
+
+            log.info("Created database backup archive: %s", backup_path)
             if hasattr(self, "log_event"):
                 try:
                     self.log_event(
@@ -356,8 +532,8 @@ class BackupMixin:
                         "db_backup_created",
                         actor=actor or "system",
                         backup=str(backup_path),
-                        config_backup=str(config_backup_path) if config_backup_path else None,
-                        omemo_backup=str(omemo_backup_path) if omemo_backup_path else None,
+                        config_backup=config_backup,
+                        omemo_backup=omemo_backup,
                         reason=reason_slug,
                     )
                 except Exception as exc:
@@ -365,8 +541,9 @@ class BackupMixin:
             audit_actor = actor or "system"
             audit_details = {
                 "backup": str(backup_path),
-                "config_backup": str(config_backup_path) if config_backup_path else None,
-                "omemo_backup": str(omemo_backup_path) if omemo_backup_path else None,
+                "backup_format": _BACKUP_FORMAT,
+                "config_backup": config_backup,
+                "omemo_backup": omemo_backup,
                 "reason": reason_slug,
             }
             if hasattr(self, "audit_event"):
@@ -419,12 +596,14 @@ class BackupMixin:
 
     def _format_backup_details(self, backup: DatabaseBackup) -> str:
         companions = self._backup_companion_names(backup.path)
+        content_label = "Archive entries" if self._is_backup_archive(backup.path) else "Companions"
         lines = [
             f"💾 Backup: {backup.name}",
             f"Path: {backup.path}",
+            f"Format: {'ZIP archive' if self._is_backup_archive(backup.path) else 'legacy snapshot'}",
             f"Size: {self._format_backup_size(backup.size)}",
             f"Modified: {backup.mtime_text}",
-            "Companions: " + (", ".join(companions) if companions else "none"),
+            f"{content_label}: " + (", ".join(companions) if companions else "none"),
         ]
         return "\n".join(lines)
 
@@ -443,151 +622,164 @@ class BackupMixin:
         if not self._is_backup_supported_database(db_path):
             return False, "Database restore is not available for in-memory DB_FILE."
 
-        verify_ok, verify_message = await self._check_sqlite_integrity(backup.path)
-        if not verify_ok:
-            return False, f"Restore aborted: selected backup failed SQLite integrity_check: {verify_message}"
-
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        safety_ok, safety_message = await self.create_database_backup(
-            "before-restore",
-            prune=False,
-            actor=actor or "unknown",
-            lock=False,
-        )
-        if not safety_ok and db_path.exists():
-            return False, f"Restore aborted: failed to create safety backup: {safety_message}"
-
-        try:
-            if getattr(self, "db", None):
-                await self.db.commit()
-                await self.db.close()
-                self.db = None
-
-            await asyncio.to_thread(shutil.copy2, backup.path, db_path)
+        with tempfile.TemporaryDirectory(prefix="banbot-backup-restore-") as tmp_name:
+            tmp_dir = pathlib.Path(tmp_name)
             try:
-                os.chmod(db_path, 0o600)
-            except OSError as exc:
-                log.debug("Failed to restrict restored database permissions for %s: %s", db_path, exc)
+                sources = await self._backup_restore_sources(backup.path, tmp_dir)
+            except Exception as exc:
+                return False, f"Restore aborted: selected backup could not be prepared: {exc}"
 
-            restored_ok, restored_message = await self._check_sqlite_integrity(db_path)
-            if not restored_ok:
-                rollback_note = ""
-                if safety_ok:
+            database_source = sources.get("database")
+            verify_ok, verify_message = await self._check_sqlite_integrity(database_source)  # type: ignore[arg-type]
+            if not verify_ok:
+                return False, f"Restore aborted: selected backup failed SQLite integrity_check: {verify_message}"
+
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            safety_ok, safety_message = await self.create_database_backup(
+                "before-restore",
+                prune=False,
+                actor=actor or "unknown",
+                lock=False,
+            )
+            if not safety_ok and db_path.exists():
+                return False, f"Restore aborted: failed to create safety backup: {safety_message}"
+
+            try:
+                if getattr(self, "db", None):
+                    await self.db.commit()
+                    await self.db.close()
+                    self.db = None
+
+                await asyncio.to_thread(shutil.copy2, database_source, db_path)  # type: ignore[arg-type]
+                try:
+                    os.chmod(db_path, 0o600)
+                except OSError as exc:
+                    log.debug("Failed to restrict restored database permissions for %s: %s", db_path, exc)
+
+                restored_ok, restored_message = await self._check_sqlite_integrity(db_path)
+                if not restored_ok:
+                    rollback_note = ""
+                    if safety_ok:
+                        try:
+                            with tempfile.TemporaryDirectory(prefix="banbot-backup-rollback-") as rollback_tmp_name:
+                                rollback_sources = await self._backup_restore_sources(
+                                    pathlib.Path(safety_message),
+                                    pathlib.Path(rollback_tmp_name),
+                                )
+                                await asyncio.to_thread(shutil.copy2, rollback_sources["database"], db_path)
+                            rollback_note = f" Safety backup was restored: {safety_message}"
+                        except Exception as rollback_exc:
+                            rollback_note = f" Safety backup restore failed: {rollback_exc}"
+                    return False, f"Restore aborted: restored DB failed integrity_check: {restored_message}.{rollback_note}"
+
+                restored_config = False
+                config_source = sources.get("config")
+                config_path = self._config_path()
+                if config_source is not None and config_path is not None:
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                    await asyncio.to_thread(shutil.copy2, config_source, config_path)
                     try:
-                        await asyncio.to_thread(shutil.copy2, pathlib.Path(safety_message), db_path)
-                        rollback_note = f" Safety backup was restored: {safety_message}"
-                    except Exception as rollback_exc:
-                        rollback_note = f" Safety backup restore failed: {rollback_exc}"
-                return False, f"Restore aborted: restored DB failed integrity_check: {restored_message}.{rollback_note}"
+                        os.chmod(config_path, 0o600)
+                    except OSError as exc:
+                        log.debug("Failed to restrict restored config permissions for %s: %s", config_path, exc)
+                    restored_config = True
 
-            restored_config = False
-            config_backup_path = self._config_backup_path_for(backup.path)
-            config_path = self._config_path()
-            if config_backup_path.is_file() and config_path is not None:
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-                await asyncio.to_thread(shutil.copy2, config_backup_path, config_path)
-                try:
-                    os.chmod(config_path, 0o600)
-                except OSError as exc:
-                    log.debug("Failed to restrict restored config permissions for %s: %s", config_path, exc)
-                restored_config = True
+                restored_omemo = False
+                omemo_source = sources.get("omemo")
+                omemo_path = self._omemo_storage_path()
+                if omemo_source is not None and omemo_path is not None:
+                    omemo_path.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        os.chmod(omemo_path.parent, 0o700)
+                    except OSError as exc:
+                        log.debug("Failed to restrict OMEMO storage directory permissions for %s: %s", omemo_path.parent, exc)
+                    await asyncio.to_thread(shutil.copy2, omemo_source, omemo_path)
+                    try:
+                        os.chmod(omemo_path, 0o600)
+                    except OSError as exc:
+                        log.debug("Failed to restrict restored OMEMO storage permissions for %s: %s", omemo_path, exc)
+                    restored_omemo = True
 
-            restored_omemo = False
-            omemo_backup_path = self._omemo_backup_path_for(backup.path)
-            omemo_path = self._omemo_storage_path()
-            if omemo_backup_path.is_file() and omemo_path is not None:
-                omemo_path.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.chmod(omemo_path.parent, 0o700)
-                except OSError as exc:
-                    log.debug("Failed to restrict OMEMO storage directory permissions for %s: %s", omemo_path.parent, exc)
-                await asyncio.to_thread(shutil.copy2, omemo_backup_path, omemo_path)
-                try:
-                    os.chmod(omemo_path, 0o600)
-                except OSError as exc:
-                    log.debug("Failed to restrict restored OMEMO storage permissions for %s: %s", omemo_path, exc)
-                restored_omemo = True
+                # Re-open and reload the most important DB-backed runtime state when
+                # the full bot mixin stack is available. Lightweight tests may only
+                # exercise the file operation and skip these optional hooks.
+                if hasattr(self, "protected_rooms") and isinstance(self.protected_rooms, set):
+                    self.protected_rooms.clear()
+                if hasattr(self, "setup_db"):
+                    try:
+                        await self.setup_db(create_startup_backup=False)
+                    except TypeError:
+                        await self.setup_db()
+                if hasattr(self, "load_bans_from_db"):
+                    await self.load_bans_from_db()
+                if hasattr(self, "_load_ignorelist_from_db"):
+                    await self._load_ignorelist_from_db()
+                elif hasattr(self, "setup_ignorelist"):
+                    await self.setup_ignorelist()
+                if hasattr(self, "_load_rtbl_subscriptions_from_db") and getattr(self, "rtbl_enabled", False):
+                    await self._load_rtbl_subscriptions_from_db()
+                if hasattr(self, "load_pending_room_invites"):
+                    await self.load_pending_room_invites()
 
-            # Re-open and reload the most important DB-backed runtime state when
-            # the full bot mixin stack is available. Lightweight tests may only
-            # exercise the file operation and skip these optional hooks.
-            if hasattr(self, "protected_rooms") and isinstance(self.protected_rooms, set):
-                self.protected_rooms.clear()
-            if hasattr(self, "setup_db"):
-                try:
-                    await self.setup_db(create_startup_backup=False)
-                except TypeError:
-                    await self.setup_db()
-            if hasattr(self, "load_bans_from_db"):
-                await self.load_bans_from_db()
-            if hasattr(self, "_load_ignorelist_from_db"):
-                await self._load_ignorelist_from_db()
-            elif hasattr(self, "setup_ignorelist"):
-                await self.setup_ignorelist()
-            if hasattr(self, "_load_rtbl_subscriptions_from_db") and getattr(self, "rtbl_enabled", False):
-                await self._load_rtbl_subscriptions_from_db()
-            if hasattr(self, "load_pending_room_invites"):
-                await self.load_pending_room_invites()
+                self.last_database_restore_file = str(backup.path)
+                await self.prune_database_backups(preserve=backup.path)
 
-            self.last_database_restore_file = str(backup.path)
-            await self.prune_database_backups(preserve=backup.path)
+                if hasattr(self, "log_event"):
+                    try:
+                        self.log_event(
+                            logging.INFO,
+                            "db_backup_restored",
+                            actor=actor,
+                            backup=str(backup.path),
+                            safety_backup=safety_message if safety_ok else None,
+                            config_restored=restored_config,
+                            omemo_restored=restored_omemo,
+                        )
+                    except Exception as exc:
+                        log.debug("Failed to write restore structured event: %s", exc)
+                if hasattr(self, "audit_event"):
+                    try:
+                        await self.audit_event(
+                            "db_backup_restored",
+                            actor=actor or "unknown",
+                            target_type="backup",
+                            target=backup.name,
+                            details={
+                                "backup": str(backup.path),
+                                "safety_backup": safety_message if safety_ok else None,
+                                "config_restored": restored_config,
+                                "omemo_restored": restored_omemo,
+                            },
+                        )
+                    except Exception as exc:
+                        log.debug("Failed to audit database restore: %s", exc)
 
-            if hasattr(self, "log_event"):
-                try:
-                    self.log_event(
-                        logging.INFO,
-                        "db_backup_restored",
-                        actor=actor,
-                        backup=str(backup.path),
-                        safety_backup=safety_message if safety_ok else None,
-                        config_restored=restored_config,
-                        omemo_restored=restored_omemo,
-                    )
-                except Exception as exc:
-                    log.debug("Failed to write restore structured event: %s", exc)
-            if hasattr(self, "audit_event"):
-                try:
-                    await self.audit_event(
-                        "db_backup_restored",
-                        actor=actor or "unknown",
-                        target_type="backup",
-                        target=backup.name,
-                        details={
-                            "backup": str(backup.path),
-                            "safety_backup": safety_message if safety_ok else None,
-                            "config_restored": restored_config,
-                            "omemo_restored": restored_omemo,
-                        },
-                    )
-                except Exception as exc:
-                    log.debug("Failed to audit database restore: %s", exc)
-
-            lines = [f"✅ Database restored from {backup.name}"]
-            command_prefix = getattr(self, "command_prefix", "!")
-            if restored_config:
-                lines.append("config.py was restored from the backup companion file.")
-                lines.append(f"⚠️ Run {command_prefix}reloadconfig or restart the bot to apply restored config.py values.")
-            elif config_backup_path.is_file():
-                lines.append("config.py backup companion exists, but no active config.py path was available for restore.")
-            else:
-                lines.append("No config.py companion file was found for this backup.")
-            if restored_omemo:
-                lines.append("OMEMO storage was restored from the backup companion file.")
-                lines.append("⚠️ Restart the bot before using restored OMEMO sessions.")
-            elif omemo_backup_path.is_file():
-                lines.append("OMEMO backup companion exists, but no OMEMO_STORAGE_FILE path was available for restore.")
-            else:
-                lines.append("No OMEMO companion file was found for this backup.")
-            if safety_ok:
-                lines.append(f"Safety backup before restore: {safety_message}")
-            return True, "\n".join(lines)
-        except Exception as exc:
-            log.error("Failed to restore database backup %s: %s", backup.path, exc)
-            return False, str(exc)
+                lines = [f"✅ Database restored from {backup.name}"]
+                command_prefix = getattr(self, "command_prefix", "!")
+                if restored_config:
+                    lines.append("config.py was restored from the backup archive.")
+                    lines.append(f"⚠️ Run {command_prefix}reloadconfig or restart the bot to apply restored config.py values.")
+                elif config_source is not None:
+                    lines.append("config.py backup companion exists, but no active config.py path was available for restore.")
+                else:
+                    lines.append("No config.py companion file was found for this backup.")
+                if restored_omemo:
+                    lines.append("OMEMO storage was restored from the backup archive.")
+                    lines.append("⚠️ Restart the bot before using restored OMEMO sessions.")
+                elif omemo_source is not None:
+                    lines.append("OMEMO backup companion exists, but no OMEMO_STORAGE_FILE path was available for restore.")
+                else:
+                    lines.append("No OMEMO companion file was found for this backup.")
+                if safety_ok:
+                    lines.append(f"Safety backup before restore: {safety_message}")
+                return True, "\n".join(lines)
+            except Exception as exc:
+                log.error("Failed to restore database backup %s: %s", backup.path, exc)
+                return False, str(exc)
 
 
     async def delete_database_backup(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
-        """Delete a managed database backup and its companion files."""
+        """Delete a managed database backup archive and any legacy companion files."""
         backup = self.resolve_database_backup(name)
         if backup is None:
             return False, f"Backup not found: {name}"
@@ -642,8 +834,8 @@ class BackupMixin:
             ok, message = await self.create_database_backup("manual", actor=actor or "unknown")
             if ok:
                 companions = self._backup_companion_names(pathlib.Path(message))
-                companion_note = f"\nIncluded companions: {', '.join(companions)}" if companions else "\nIncluded companions: none"
-                body = f"✅ Full backup created (Database/config backup created):\n{message}{companion_note}"
+                companion_note = f"\nIncluded archive entries: {', '.join(companions)}" if companions else "\nIncluded archive entries: none"
+                body = f"✅ Full backup archive created:\n{message}{companion_note}"
             else:
                 body = f"❌ Database backup failed: {message}"
             await self.bot_send_message(mto=room, mbody=body, mtype="groupchat")
@@ -774,7 +966,7 @@ class BackupMixin:
                 mto=room,
                 mbody=(
                     "⚠️ This will replace the current SQLite database"
-                    " and restore config.py/OMEMO companions when present.\n\n"
+                    " and restore config.py/OMEMO archive entries when present.\n\n"
                     f"Backup selected:\n{self._format_backup_entry(backup)}\n\n"
                     "A safety backup of the current DB will be created first.\n"
                     f"Confirm with: {self.command_prefix}restore {backup.name} confirm"

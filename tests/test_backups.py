@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
+import zipfile
 
 import pytest
 
@@ -14,6 +15,18 @@ from banbot.backups import BackupMixin
 from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
 from banbot.utils import bare_jid
+
+
+def rewrite_zip_entry(archive_path: pathlib.Path, entry_name: str, content: str) -> None:
+    """Replace one ZIP member with string content."""
+    replacement = archive_path.with_suffix(archive_path.suffix + ".tmp")
+    with zipfile.ZipFile(archive_path, "r") as src, zipfile.ZipFile(replacement, "w") as dst:
+        for item in src.infolist():
+            if item.filename == entry_name:
+                continue
+            dst.writestr(item, src.read(item.filename))
+        dst.writestr(entry_name, content)
+    replacement.replace(archive_path)
 
 
 class BackupBot(BackupMixin, DatabaseMixin, CacheMixin):
@@ -83,12 +96,17 @@ async def test_manual_backup_creates_managed_snapshot(backup_config):
         backups = bot.list_database_backups()
         assert len(backups) == 1
         assert backups[0].path.name.startswith(db_path.name + ".snapshot-manual-")
+        assert backups[0].path.suffix == ".zip"
         assert message == str(backups[0].path)
         assert bot.last_database_backup_file == message
-        assert (backups[0].path.with_name(backups[0].path.name + ".config.py")).exists()
+        with zipfile.ZipFile(backups[0].path) as archive:
+            assert "manifest.json" in archive.namelist()
+            assert "database.sqlite3" in archive.namelist()
+            assert "config.py" in archive.namelist()
         assert bot.audit_events[-1][0] == "db_backup_created"
         assert bot.audit_events[-1][1]["actor"] == "admin@example.org"
-        assert bot.audit_events[-1][1]["details"]["config_backup"].endswith(".config.py")
+        assert bot.audit_events[-1][1]["details"]["config_backup"] == "config.py"
+        assert bot.audit_events[-1][1]["details"]["backup_format"] == "banbot-backup-v1"
         assert bot.events[-1][2]["actor"] == "admin@example.org"
     finally:
         await bot.db.close()
@@ -144,7 +162,7 @@ async def test_startup_snapshot_honors_keep_limit(backup_config, monkeypatch):
         bot = BackupBot()
         await bot.setup_db(create_startup_backup=True)
         await bot.db.close()
-        startup_backups = [path for path in backup_dir.glob("*.snapshot-startup-*") if not path.name.endswith(".config.py")]
+        startup_backups = [path for path in backup_dir.glob("*.snapshot-startup-*.zip")]
         os.utime(sorted(startup_backups)[-1], (1000 + suffix, 1000 + suffix))
 
     backups = BackupBot().list_database_backups()
@@ -198,8 +216,8 @@ async def test_backup_command_and_restore_alias(backup_config):
     await bot.setup_db(create_startup_backup=False)
     try:
         await bot.cmd_backup([], "admin@conference.example.org", actor="admin@example.org")
-        assert "Full backup created" in bot.sent[-1]["mbody"]
-        assert "Included companions: config.py" in bot.sent[-1]["mbody"]
+        assert "Full backup archive created" in bot.sent[-1]["mbody"]
+        assert "Included archive entries: config.py" in bot.sent[-1]["mbody"]
         assert bot.audit_events[-1][0] == "db_backup_created"
         assert bot.audit_events[-1][1]["actor"] == "admin@example.org"
 
@@ -248,7 +266,7 @@ async def test_backup_verify_rejects_corrupt_database_backup(backup_config):
 
 
 @pytest.mark.asyncio
-async def test_backup_show_latest_includes_companion_details(backup_config):
+async def test_backup_show_latest_includes_archive_details(backup_config):
     bot = BackupBot()
     await bot.setup_db(create_startup_backup=False)
     try:
@@ -259,7 +277,8 @@ async def test_backup_show_latest_includes_companion_details(backup_config):
 
         body = bot.sent[-1]["mbody"]
         assert "Backup:" in body
-        assert "config.py" in body
+        assert "Format: ZIP archive" in body
+        assert "Archive entries: config.py" in body
         assert "Size:" in body
         assert "Modified:" in body
     finally:
@@ -273,8 +292,8 @@ async def test_backup_verify_rejects_invalid_config_companion(backup_config):
     try:
         ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
         assert ok is True
-        config_backup = pathlib.Path(backup_path).with_name(pathlib.Path(backup_path).name + ".config.py")
-        config_backup.write_text("this is not valid python =", encoding="utf-8")
+        config_backup = pathlib.Path(backup_path)
+        rewrite_zip_entry(config_backup, "config.py", "this is not valid python =")
 
         await bot.cmd_backup(["verify", "latest"], "admin@conference.example.org")
 
@@ -300,9 +319,10 @@ async def test_backup_verify_rejects_invalid_omemo_companion(backup_config, tmp_
     try:
         ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
         assert ok is True
-        omemo_backup = pathlib.Path(backup_path).with_name(pathlib.Path(backup_path).name + ".omemo.json")
-        assert omemo_backup.exists()
-        omemo_backup.write_text("{not json", encoding="utf-8")
+        omemo_backup = pathlib.Path(backup_path)
+        with zipfile.ZipFile(omemo_backup) as archive:
+            assert "omemo.json" in archive.namelist()
+        rewrite_zip_entry(omemo_backup, "omemo.json", "{not json")
 
         await bot.cmd_backup(["verify", "latest"], "admin@conference.example.org")
 
@@ -359,8 +379,9 @@ async def test_backup_list_paginates_and_delete_remove_aliases(backup_config):
         assert "Page 2/2" in bot.sent[-1]["mbody"]
 
         latest = bot.list_database_backups()[0].path
-        config_companion = latest.with_name(latest.name + ".config.py")
-        assert config_companion.exists()
+        config_companion = latest
+        with zipfile.ZipFile(latest) as archive:
+            assert "config.py" in archive.namelist()
 
         await bot.cmd_backup(["remove", latest.name], "admin@conference.example.org", actor="admin@example.org")
         body = bot.sent[-1]["mbody"]

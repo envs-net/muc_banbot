@@ -46,12 +46,12 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 
 | Command | Description | Example |
 | --- | --- | --- |
-| `!backup` | Creates a managed full backup | `!backup` |
+| `!backup` | Creates a managed full ZIP backup | `!backup` |
 | `!backup list [all/page/last]` | Lists managed backups | `!backup list last` |
-| `!backup show <filename/latest>` | Shows details and companions for one backup | `!backup show latest` |
-| `!backup verify <filename/latest>` | Verifies a managed backup | `!backup verify latest` |
-| `!backup delete/remove <filename/latest>` | Deletes a managed backup and companion files | `!backup delete latest` |
-| `!restore <filename/latest> confirm` | Restores a managed backup | `!restore latest confirm` |
+| `!backup show <filename/latest>` | Shows details and archive contents for one backup | `!backup show latest` |
+| `!backup verify <filename/latest>` | Verifies a managed backup archive | `!backup verify latest` |
+| `!backup delete/remove <filename/latest>` | Deletes a managed backup archive | `!backup delete latest` |
+| `!restore <filename/latest> confirm` | Restores a managed backup archive | `!restore latest confirm` |
 
 ### Rooms / Policy
 
@@ -186,14 +186,14 @@ All other admin commands, especially ban, unban, room changes, RTBL changes, rel
 
 | Command | Description | Example |
 | --- | --- | --- |
-| `!backup` | Creates a timestamped SQLite database snapshot plus companions when available | `!backup` |
+| `!backup` | Creates a self-contained ZIP archive with SQLite plus optional config/OMEMO data | `!backup` |
 | `!backup list [all/page/last]` | Lists managed backups, newest first | `!backup list last` |
-| `!backup show <filename/latest>` | Shows details and companions for one backup | `!backup show latest` |
-| `!backup verify <filename/latest>` | Runs SQLite integrity checks and companion readability checks | `!backup verify latest` |
-| `!backup delete/remove <filename/latest>` | Deletes a managed backup and companion files | `!backup delete latest` |
+| `!backup show <filename/latest>` | Shows details and archive contents for one backup | `!backup show latest` |
+| `!backup verify <filename/latest>` | Verifies archive structure, SQLite integrity, and optional config/OMEMO entries | `!backup verify latest` |
+| `!backup delete/remove <filename/latest>` | Deletes a managed backup archive | `!backup delete latest` |
 | `!restore <filename/latest> confirm` | Restores a managed backup directly | `!restore latest confirm` |
 
-BanBot creates automatic startup snapshots when `DB_BACKUP_ON_START=True`. `DB_BACKUP_KEEP` controls how many managed snapshots are kept; the default is `15`. Each snapshot includes a companion `config.py` copy when the active config file can be resolved and can include `OMEMO_STORAGE_FILE` when `DB_BACKUP_INCLUDE_OMEMO=True` and the file exists. Restores create a safety backup of the current database and config before replacing them, reload DB-backed caches, and still recommend a process restart afterwards.
+BanBot creates automatic startup backups when `DB_BACKUP_ON_START=True`. `DB_BACKUP_KEEP` controls how many managed archives are kept; the default is `15`. Each ZIP archive contains `manifest.json` and a SQLite database snapshot, includes `config.py` when the active config file can be resolved, and can include `OMEMO_STORAGE_FILE` when `DB_BACKUP_INCLUDE_OMEMO=True` and the file exists. Restores create a safety backup archive of the current state before replacing files, reload DB-backed caches, and still recommend a process restart afterwards.
 
 ## Rooms / Policy
 

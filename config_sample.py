@@ -27,7 +27,7 @@ CONNECT_DIRECT_TLS = False
 DB_FILE = "banbot.db"
 
 # Managed SQLite database backups.
-# !backup creates snapshots, !backup list [all|page|last] shows them, and !restore can restore them.
+# !backup creates self-contained ZIP archives, !backup list [all|page|last] shows them, and !restore can restore them.
 DB_BACKUP_ON_START = True
 DB_BACKUP_DIR = "data/backups"
 DB_BACKUP_KEEP = 15

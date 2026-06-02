@@ -19,7 +19,7 @@ Exports are written to `EXPORT_DIR` as `bans_export_YYYYMMDD_HHMMSS.csv`. Old ex
 !import bans_export_20240412_120000.csv dryrun
 ```
 
-Before writing staged rows, BanBot creates a managed full backup using the normal backup system. This means before-import snapshots are visible in `!backup list`, use the same retention settings and include companion files such as `config.py` and optional OMEMO storage.
+Before writing staged rows, BanBot creates a managed full backup archive using the normal backup system. This means before-import ZIP backups are visible in `!backup list`, use the same retention settings, and include `config.py` plus optional OMEMO storage when available.
 
 Dry-runs validate and stage rows but do not create a backup and do not change the database.
 

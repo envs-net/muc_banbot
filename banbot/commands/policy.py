@@ -52,7 +52,7 @@ class CommandPolicyMixin:
             return
 
         if not args or args[0].lower() in {"show", "list"}:
-            enabled, text = await self.get_public_policy()
+            _enabled, text = await self.get_public_policy()
 
             if not text.strip():
                 await self.bot_send_message(
@@ -108,7 +108,7 @@ class CommandPolicyMixin:
             return
 
         if action == "enable":
-            enabled, text = await self.get_public_policy()
+            _enabled, text = await self.get_public_policy()
 
             if not text.strip():
                 await self.bot_send_message(
@@ -154,7 +154,7 @@ class CommandPolicyMixin:
             return
 
         if action in ("clear", "delete", "remove"):
-            enabled, text = await self.get_public_policy()
+            _enabled, text = await self.get_public_policy()
 
             if not text.strip():
                 await self.bot_send_message(
