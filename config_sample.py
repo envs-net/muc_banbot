@@ -88,6 +88,11 @@ PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 # Default number of items shown per page by paginated list commands.
 LIST_PAGE_SIZE = 10
 
+# Long command outputs can be shown in full (default) or paginated.
+# Use all to keep the full output, or paginate for page-sized output.
+CONFIG_OUTPUT_MODE = "all"
+HELP_OUTPUT_MODE = "all"
+
 # ================= PERFORMANCE TUNING =================
 
 # Concurrency limit for MUC write operations (IQ stanzas to XMPP server)

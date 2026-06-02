@@ -1,6 +1,7 @@
 """Direct-message and MUC-PM policy for admin read-only commands."""
 
 from contextlib import asynccontextmanager
+import inspect
 
 from config import ADMIN_ROOM
 from ._version import __version__
@@ -110,12 +111,16 @@ class DirectMessageMixin:
 
         async with self._redirect_command_output_to_dm(reply_to):
             if cmd == "help":
-                help_text = self._admin_topic_help_text(args) if args else self._admin_help_text()
+                help_text = self._admin_help_response(args)
                 await self._send_direct_message(reply_to, help_text)
                 return True
 
             if cmd == "config":
-                await self._cmd_config(reply_to)
+                sig = inspect.signature(self._cmd_config)
+                if len(sig.parameters) >= 2:
+                    await self._cmd_config(reply_to, args)
+                else:
+                    await self._cmd_config(reply_to)
                 return True
 
             if cmd == "omemo":

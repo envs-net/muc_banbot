@@ -9,7 +9,7 @@ import time
 from config import ADMIN_ROOM, NICK
 
 from ._version import __version__
-from .utils import parse_duration, wants_all_pages, without_all_pages_arg
+from .utils import get_list_page_size, paginate_lines, parse_duration, resolve_page, wants_all_pages, without_all_pages_arg
 from .locks import ban_state_lock
 
 log = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ class CommandMixin:
 
         if cmd == "help":
             if room == ADMIN_ROOM and self.is_authorized(msg):
-                text = self._admin_topic_help_text(args) if args else self._admin_help_text()
+                text = self._admin_help_response(args)
             elif self.user_cmds_allowed(room):
                 text = await self._user_help_text()
             else:
@@ -903,7 +903,7 @@ class CommandMixin:
         p = self.command_prefix
         return (
             "Usage:\n"
-            f"  {p}help\n"
+            f"  {p}help [all|page|last]\n"
             f"  {p}help <command>\n\n"
             "Examples:\n"
             f"  {p}help room\n"
@@ -994,7 +994,8 @@ class CommandMixin:
         p = self.command_prefix
         return (
             "Usage:\n"
-            f"  {p}config show\n"
+            f"  {p}config [all|page|last]\n"
+            f"  {p}config show [all|page|last]\n"
             f"  {p}config set <KEY> <value>\n"
             f"  {p}config unset <KEY>"
         )
@@ -1159,6 +1160,47 @@ class CommandMixin:
             f"Use {self.command_prefix}help to see available admin commands."
         )
 
+
+    @staticmethod
+    def _is_help_page_arg(arg: str) -> bool:
+        value = str(arg).lower().strip()
+        return value in {"all", "last"} or value.isdigit()
+
+    def _admin_help_should_paginate(self, args: list[str]) -> bool:
+        if wants_all_pages(args):
+            return False
+        return getattr(self, "help_output_mode", "all") == "paginate"
+
+    def _admin_help_page_from_args(self, args: list[str], total_items: int, per_page: int) -> int:
+        args = without_all_pages_arg(args)
+        page = 1
+        for arg in args:
+            value = str(arg).lower().strip()
+            if value == "last":
+                page = -1
+            elif value.isdigit():
+                page = int(value)
+        return resolve_page(page, total_items, per_page)
+
+    def _admin_help_response(self, args: list[str] | None = None) -> str:
+        args = args or []
+        if args and not all(self._is_help_page_arg(arg) for arg in args):
+            return self._admin_topic_help_text(args)
+
+        help_lines = self._admin_help_text().splitlines()
+        if not self._admin_help_should_paginate(args):
+            return "\n".join(help_lines)
+
+        per_page = get_list_page_size(self)
+        page = self._admin_help_page_from_args(args, len(help_lines), per_page)
+        page_lines, current_page, total_pages, _total_items = paginate_lines(help_lines, page, per_page)
+        return "\n".join([
+            f"🛠️ Admin Help (page {current_page}/{total_pages})",
+            *page_lines,
+            "",
+            f"Use {self.command_prefix}help all for the full output.",
+        ])
+
     async def _user_help_text(self) -> str:
         p = self.command_prefix
         lines = [
@@ -1217,16 +1259,16 @@ class CommandMixin:
             f"{p}bansearch <query> [all|page|last] - search bans by nick, domain, jid or RTBL reason\n"
             f"{p}why <nick|jid> - show the reason and remaining time for a ban\n\n"
 
-            "🔄 Sync\n"
-            f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"
-            f"{p}syncadmins - update admin list from the admin room\n"
-            f"{p}syncbans - sync bans from all rooms into the database and enforce them\n\n"
-
             "✅ Ignorelist / Whitelist\n"
             f"{p}ignore [list|all|page] - show global ignorelist (alias: {p}whitelist)\n"
             f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
             f"{p}ignore remove/delete <jid|domain> - remove from ignorelist\n"
             f"{p}whitelist [list|all|add|remove|delete] - alias for {p}ignore\n\n"
+
+            "🔄 Sync\n"
+            f"{p}sync - rejoin rooms, verify admin rights, and enforce all active bans\n"
+            f"{p}syncadmins - update admin list from the admin room\n"
+            f"{p}syncbans - sync bans from all rooms into the database and enforce them\n\n"
 
             "🔐 OMEMO\n"
             f"{p}omemo status - show OMEMO state\n"

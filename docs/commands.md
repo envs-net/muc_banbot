@@ -31,9 +31,9 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 
 | Command | Description | Example |
 | --- | --- | --- |
-| `!help` / `!help <command>` | Shows full admin help or focused usage for every command topic/subtopic | `!help room invite` |
+| `!help [all|page|last]` / `!help <command>` | Shows admin help or focused usage for every command topic/subtopic | `!help room invite` |
 | `!status` | Shows health, rooms, uptime, bans, DB, RTBL, and workers | `!status` |
-| `!config [show]` | Shows full configuration in `config_sample.py` section order; secrets are hidden | `!config show` |
+| `!config [all|page|last]` / `!config show [all|page|last]` | Shows configuration in `config_sample.py` section order; secrets are hidden | `!config show` |
 | `!config set <KEY> <value>` | Updates a runtime-writable config option | `!config set LOG_LEVEL DEBUG` |
 | `!config unset <KEY>` | Resets a runtime-writable option to the `config_sample.py` default | `!config unset LOG_LEVEL` |
 | `!reload` / `!reloadconfig` | Reloads runtime config safely | `!reload` |
@@ -84,14 +84,6 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!bansearch <query> [all/page/last]` | Searches bans by target, issuer, comment, and RTBL reason | `!bansearch reason:abuse` |
 | `!why <nick/jid>` | Shows reason and remaining time; admin output includes recent audit history | `!why alice` |
 
-### Sync
-
-| Command | Description | Example |
-| --- | --- | --- |
-| `!sync` | Rejoins rooms, verifies rights, applies missing active bans | `!sync` |
-| `!syncadmins` | Updates admins from the admin room | `!syncadmins` |
-| `!syncbans` | Reads room outcasts into the DB and reapplies active bans | `!syncbans` |
-
 ### Ignorelist / Whitelist
 
 | Command | Description | Example |
@@ -100,6 +92,14 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | `!ignore add <jid/domain> [reason]` | Adds a protected exact JID or wildcard domain | `!ignore add alice@example.org trusted user` |
 | `!ignore remove/delete <jid/domain>` | Removes an entry | `!ignore remove alice@example.org` |
 | `!whitelist [list/all/add/remove]` | Alias for `!ignore ...` | `!whitelist all` |
+
+### Sync
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `!sync` | Rejoins rooms, verifies rights, applies missing active bans | `!sync` |
+| `!syncadmins` | Updates admins from the admin room | `!syncadmins` |
+| `!syncbans` | Reads room outcasts into the DB and reapplies active bans | `!syncbans` |
 
 ### OMEMO
 
@@ -131,7 +131,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 
 ### Config, Reload and Restart
 
-`!config show` displays active runtime values from `config.py`, but uses `config_sample.py` as the reference for section order and for appending missing supported keys. `PASSWORD` and other secret-like values are shown as `****`. `🔒` means protected/restart-only, `✏️` means runtime-writable.
+`!config show` displays active runtime values from `config.py`, but uses `config_sample.py` as the reference for section order and for appending missing supported keys. `PASSWORD` and other secret-like values are shown as `****`. `🔒` means protected/restart-only, `✏️` means runtime-writable. Use `!config all` or `!config show all` to force the full output even when `CONFIG_OUTPUT_MODE = "paginate"`.
 
 `!config set <KEY> <value>` writes a runtime-writable option to `config.py`, validates it, applies it immediately, and creates an audit entry. Values may be simple strings (`DEBUG`), booleans (`true`/`false`), integers (`300`), `None`, or Python literals for lists such as `['spam', 'abuse']`.
 
@@ -276,20 +276,6 @@ Temporary bans support duration suffixes:
 | `!bansearch <query> [all/page/last]` | Searches target, JID, nick, domain, issuer, comment, and RTBL reason | `!bansearch reason:abuse` |
 | `!why <nick/jid>` | Shows reason and remaining time; admin output includes recent audit history | `!why alice` |
 
-## Sync
-
-| Command | Description | Example |
-| --- | --- | --- |
-| `!sync` | Rejoins rooms, verifies rights, applies missing active bans | `!sync` |
-| `!syncadmins` | Updates admins from the admin room | `!syncadmins` |
-| `!syncbans` | Reads room outcasts into the DB and reapplies active bans | `!syncbans` |
-
-### Sync differences
-
-* `!sync` is faster and applies only bans that are missing in rooms.
-* `!syncbans` is comprehensive: it also adopts orphan room outcasts into the DB and removes expired tempban outcasts.
-* `sync_bans_startup()` runs internally on startup.
-
 ## Ignorelist / Whitelist
 
 `!whitelist` is an alias for `!ignore`. Without arguments, both commands show the current list.
@@ -307,6 +293,20 @@ Temporary bans support duration suffixes:
 | `!whitelist add/remove ...` | Alias for add/remove | `!whitelist add *.example.org local domain` |
 
 Exact JID entries protect that JID from all bans. Domain entries protect against domain-based bans and RTBL domain matches, but do not block explicit manual JID bans on that domain.
+
+## Sync
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `!sync` | Rejoins rooms, verifies rights, applies missing active bans | `!sync` |
+| `!syncadmins` | Updates admins from the admin room | `!syncadmins` |
+| `!syncbans` | Reads room outcasts into the DB and reapplies active bans | `!syncbans` |
+
+### Sync differences
+
+* `!sync` is faster and applies only bans that are missing in rooms.
+* `!syncbans` is comprehensive: it also adopts orphan room outcasts into the DB and removes expired tempban outcasts.
+* `sync_bans_startup()` runs internally on startup.
 
 ## OMEMO Commands
 

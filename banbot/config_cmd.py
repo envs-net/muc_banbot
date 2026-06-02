@@ -9,6 +9,7 @@ from typing import Any
 
 from ._version import __version__
 from .config_utils import ConfigMixin
+from .utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
@@ -168,7 +169,11 @@ class ConfigCommandMixin(ConfigMixin):
         subcmd = args[0].lower() if args else "show"
 
         if subcmd in ("show", "list"):
-            await self._cmd_config_show(room)
+            await self._cmd_config_show(room, args[1:])
+            return
+
+        if subcmd == "all" or subcmd == "last" or subcmd.isdigit():
+            await self._cmd_config_show(room, args)
             return
 
         if subcmd == "set":
@@ -215,7 +220,24 @@ class ConfigCommandMixin(ConfigMixin):
             mtype="groupchat",
         )
 
-    async def _cmd_config_show(self, room: str) -> None:
+    def _config_show_should_paginate(self, args: list[str]) -> bool:
+        if wants_all_pages(args):
+            return False
+        return getattr(self, "config_output_mode", "all") == "paginate"
+
+    def _config_show_page_from_args(self, args: list[str], total_items: int, per_page: int) -> int:
+        args = without_all_pages_arg(args)
+        page = 1
+        for arg in args:
+            value = str(arg).lower()
+            if value == "last":
+                page = -1
+            elif value.isdigit():
+                page = int(value)
+        return resolve_page(page, total_items, per_page)
+
+    async def _cmd_config_show(self, room: str, args: list[str] | None = None) -> None:
+        args = args or []
         config_lines = [f"📋 Current Bot Configuration (v{__version__})", ""]
 
         config_lines.append("🔒 = restart-only/protected, ✏️ = runtime-writable")
@@ -240,14 +262,31 @@ class ConfigCommandMixin(ConfigMixin):
         config_lines.append("")
         config_lines.append(
             "Commands:\n"
+            f"  {self.command_prefix}config [all|page|last]\n"
+            f"  {self.command_prefix}config show [all|page|last]\n"
             f"  {self.command_prefix}config set <KEY> <value>\n"
             f"  {self.command_prefix}config unset <KEY>\n"
             f"  {self.command_prefix}reloadconfig"
         )
 
+        if self._config_show_should_paginate(args):
+            per_page = get_list_page_size(self)
+            content_lines = config_lines[2:] if len(config_lines) >= 2 and config_lines[1] == "" else config_lines
+            page = self._config_show_page_from_args(args, len(content_lines), per_page)
+            page_lines, current_page, total_pages, _total_items = paginate_lines(content_lines, page, per_page)
+            body = "\n".join([
+                f"📋 Current Bot Configuration (v{__version__}, page {current_page}/{total_pages})",
+                "",
+                *page_lines,
+                "",
+                f"Use {self.command_prefix}config all for the full output.",
+            ])
+        else:
+            body = "\n".join(config_lines)
+
         await self.bot_send_message(
             mto=room,
-            mbody="\n".join(config_lines),
+            mbody=body,
             mtype="groupchat",
         )
 

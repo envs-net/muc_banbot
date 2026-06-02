@@ -123,9 +123,9 @@ Examples assume the default command prefix `!`.
 
 | Command | Description |
 | --- | --- |
-| `!help` / `!help <command>` | Show available commands or focused help for every command topic, including subtopics such as `room invite` and `rtbl publish` |
+| `!help [all|page|last]` / `!help <command>` | Show available commands or focused help for every command topic, including subtopics such as `room invite` and `rtbl publish` |
 | `!status` | Show bot health, uptime, rooms, bans, RTBL, and DB state |
-| `!config [show]` | Show full active configuration grouped in `config_sample.py` section order; secrets are hidden |
+| `!config [all|page|last]` / `!config show [all|page|last]` | Show active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |
 | `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
 | `!reload` / `!reloadconfig` | Validate and reload runtime configuration |
@@ -153,12 +153,12 @@ Examples assume the default command prefix `!`.
 | `!banlist` / `!blacklist rtbl [all/page/last]` | Show raw RTBL hash/domain entries |
 | `!bansearch <query> [all/page/last]` | Search bans by target, issuer, comment, or RTBL reason |
 | `!why <nick/jid>` | Explain why a user is banned |
-| `!sync` | Rejoin rooms, verify admin rights, and enforce active bans |
-| `!syncadmins` | Update admin list from the admin room |
-| `!syncbans` | Sync bans from rooms into the database and enforce them |
 | `!ignore [list/all/page]` | Show the global ignorelist |
 | `!ignore add/remove <jid/domain>` | Manage protected exact JIDs and domains |
 | `!whitelist [list/all/add/remove]` | Alias for `!ignore ...` |
+| `!sync` | Rejoin rooms, verify admin rights, and enforce active bans |
+| `!syncadmins` | Update admin list from the admin room |
+| `!syncbans` | Sync bans from rooms into the database and enforce them |
 | `!omemo status` | Inspect OMEMO readiness and storage state |
 | `!omemo devices` | List visible admin-room recipients and local storage hints |
 | `!omemo reset [confirm]` | Rotate local OMEMO storage after confirmation |

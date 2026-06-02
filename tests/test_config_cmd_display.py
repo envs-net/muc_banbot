@@ -104,3 +104,39 @@ async def test_config_show_follows_config_sample_order():
     assert body.index("🪪 Bot Identity / Control") < body.index("🌐 Connection")
     assert body.index("🌐 Connection") < body.index("💾 Database / Backups")
     assert body.index("💾 Database / Backups") < body.index("📦 Managed CSV Exports")
+
+
+@pytest.mark.asyncio
+async def test_config_show_default_all_and_paginated_mode():
+    bot = ConfigDisplayBot()
+    bot.config_output_mode = "all"
+    bot.list_page_size = 8
+
+    await bot._cmd_config_show("admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+    assert "page 1/" not in body
+    assert "⚡ Performance Tuning" in body
+
+    bot.config_output_mode = "paginate"
+    await bot._cmd_config_show("admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+    assert "Current Bot Configuration" in body
+    assert "page 1/" in body
+    assert "Use !config all for the full output." in body
+
+    await bot._cmd_config_show("admin@conference.example.org", ["all"])
+    body = bot.sent[-1]["mbody"]
+    assert "page 1/" not in body
+    assert "⚡ Performance Tuning" in body
+
+
+@pytest.mark.asyncio
+async def test_config_show_accepts_page_and_last_args():
+    bot = ConfigDisplayBot()
+    bot.config_output_mode = "paginate"
+    bot.list_page_size = 5
+
+    await bot._cmd_config_show("admin@conference.example.org", ["last"])
+    body = bot.sent[-1]["mbody"]
+    assert "page " in body
+    assert "Commands:" in body

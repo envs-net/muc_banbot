@@ -121,7 +121,8 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
     async def audit_event(self, event_type, **kwargs):
         self.audit_logged_event = (event_type, kwargs)
 
-    async def _cmd_config(self, room):
+    async def _cmd_config(self, room, args=None, actor=None):
+        self.config_call = (room, list(args or []), actor)
         self.sent.append({"mto": room, "mbody": "config", "mtype": "groupchat"})
 
     async def _cmd_reloadconfig(self, room):
@@ -684,7 +685,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
     expected = {
         "help": "!help <command>",
         "status": "!status",
-        "config": "!config show",
+        "config": "!config show [all|page|last]",
         "reload": "!reload / !reloadconfig",
         "reloadconfig": "!reload / !reloadconfig",
         "restart": "!restart confirm",
@@ -741,3 +742,45 @@ async def test_help_subtopics_do_not_execute_commands(fake_msg_factory, monkeypa
     assert bot.room_calls == []
     assert bot.rtbl_calls == []
     assert "!rtbl publish status" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_admin_help_default_all_and_paginated_mode(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+    bot.list_page_size = 6
+    bot.help_output_mode = "all"
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!help"))
+    assert "Admin Help (page" not in bot.sent[-1]["mbody"]
+    assert "🛡️ RTBL" in bot.sent[-1]["mbody"]
+
+    bot.help_output_mode = "paginate"
+    await bot.on_message(admin_msg(fake_msg_factory, "!help"))
+    body = bot.sent[-1]["mbody"]
+    assert "🛠️ Admin Help (page 1/" in body
+    assert "Use !help all for the full output." in body
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!help all"))
+    assert "Admin Help (page" not in bot.sent[-1]["mbody"]
+    assert "🛡️ RTBL" in bot.sent[-1]["mbody"]
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!help room"))
+    assert "Usage:" in bot.sent[-1]["mbody"]
+    assert "!room list [all|page]" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_config_command_passes_page_args_to_config_handler(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!config 2"))
+
+    assert bot.config_call[1] == ["2"]

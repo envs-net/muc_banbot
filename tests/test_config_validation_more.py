@@ -249,3 +249,15 @@ def test_validate_config_warns_but_does_not_error_when_omemo_dependency_missing(
 
     assert "OMEMO_ENABLED=True requires optional dependency slixmpp-omemo>=2,<3" not in errors
     assert any("OMEMO_ENABLED=True but optional OMEMO dependencies are not installed" in warning for warning in warnings)
+
+
+def test_validate_config_rejects_invalid_output_modes(monkeypatch):
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "CONFIG_OUTPUT_MODE", "split", raising=False)
+    monkeypatch.setattr(config, "HELP_OUTPUT_MODE", "paged", raising=False)
+
+    bot = ConfigValidationBot()
+    errors, _warnings = bot._validate_config()
+
+    assert "CONFIG_OUTPUT_MODE must be one of all, paginate" in errors
+    assert "HELP_OUTPUT_MODE must be one of all, paginate" in errors

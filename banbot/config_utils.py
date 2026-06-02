@@ -332,6 +332,11 @@ class ConfigMixin:
         elif any(ch.isspace() for ch in command_prefix):
             errors.append("COMMAND_PREFIX must not contain whitespace")
 
+        for key in ("CONFIG_OUTPUT_MODE", "HELP_OUTPUT_MODE"):
+            mode = str(getattr(config, key, "all")).lower().strip()
+            if mode not in {"all", "paginate"}:
+                errors.append(f"{key} must be one of all, paginate")
+
         int_ranges = {
             "AUDIT_LOG_RETENTION_DAYS": (1, 365),
             "HEALTH_CHECK_INTERVAL": (60, 86400),
@@ -610,6 +615,8 @@ class ConfigMixin:
         self.command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip() or "!"
         self.sync_batch_size = getattr(config, "SYNC_BATCH_SIZE", 10)
         self.list_page_size = getattr(config, "LIST_PAGE_SIZE", 10)
+        self.config_output_mode = str(getattr(config, "CONFIG_OUTPUT_MODE", "all")).lower().strip()
+        self.help_output_mode = str(getattr(config, "HELP_OUTPUT_MODE", "all")).lower().strip()
         self.db_backup_on_start = getattr(config, "DB_BACKUP_ON_START", True)
         self.db_backup_dir = str(getattr(config, "DB_BACKUP_DIR", "data/backups")).strip() or "data/backups"
         self.db_backup_keep = getattr(config, "DB_BACKUP_KEEP", 15)

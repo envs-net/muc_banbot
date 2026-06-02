@@ -67,13 +67,14 @@ These require a bot restart. `!reloadconfig` warns if they changed and keeps the
 Most operational settings can be shown, edited, reset to the sample default, or reloaded from disk with:
 
 ```text
-!config show
+!config show [all|page|last]
+!config all
 !config set <KEY> <value>
 !config unset <KEY>
 !reloadconfig
 ```
 
-`!config show` displays active runtime values from `config.py`, but uses `config_sample.py` as the reference for section order and for appending missing supported keys. It marks runtime-writable values with `✏️`, marks protected/restart-only values with `🔒`, and hides secrets such as `PASSWORD` as `****`.
+`!config show` displays active runtime values from `config.py`, but uses `config_sample.py` as the reference for section order and for appending missing supported keys. It marks runtime-writable values with `✏️`, marks protected/restart-only values with `🔒`, and hides secrets such as `PASSWORD` as `****`. `!config all` forces the full output when pagination is enabled.
 
 `!config set` and `!config unset` only allow runtime-writable settings. Identity, password, database path, admin room, RTBL setup, and OMEMO startup settings remain protected and require manual edit + restart.
 
@@ -109,6 +110,8 @@ Common runtime settings:
 | `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` | `30` | Rate-limit window in seconds |
 | `PUBLIC_COMMAND_RATE_LIMIT_MAX` | `3` | Max public command uses per nick/room/command/window |
 | `LIST_PAGE_SIZE` | `10` | Default number of items shown per page by paginated list commands |
+| `CONFIG_OUTPUT_MODE` | `all` | Output mode for `!config`: `all` or `paginate` |
+| `HELP_OUTPUT_MODE` | `all` | Output mode for `!help`: `all` or `paginate` |
 | `STRUCTURED_EVENT_LOGS` | `True` | Emit JSON logs for important events |
 | `AUDIT_LOG_ENABLED` | `True` | Store audit events in SQLite |
 | `AUDIT_LOG_RETENTION_DAYS` | `365` | Audit retention in days; valid range 1-365 |
@@ -140,6 +143,8 @@ DB_BACKUP_INCLUDE_OMEMO = True
 EXPORT_DIR = "data/exports"
 EXPORT_KEEP = 15
 LIST_PAGE_SIZE = 10
+CONFIG_OUTPUT_MODE = "all"
+HELP_OUTPUT_MODE = "all"
 ```
 
 Commands:
