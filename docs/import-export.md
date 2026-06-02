@@ -7,10 +7,10 @@ BanBot supports managed CSV exports for portable ban data and CSV imports for mi
 ```text
 !export
 !export list [all|page|last]
-!export delete <filename|latest>
+!export delete/remove <filename|latest>
 ```
 
-Exports are written to `EXPORT_DIR` as `bans_export_YYYYMMDD_HHMMSS.csv`. Old export files are pruned according to `EXPORT_KEEP`. `!export list` supports page numbers, `last`, and `all`.
+Exports are written to `EXPORT_DIR` as `bans_export_YYYYMMDD_HHMMSS.csv`. Old export files are pruned according to `EXPORT_KEEP`. List output uses `LIST_PAGE_SIZE` by default and supports `all`, page numbers, and `last`.
 
 ## Import
 
@@ -32,5 +32,6 @@ For full SQLite/config/OMEMO recovery use:
 !backup list [all|page|last]
 !backup show latest
 !backup verify latest
+!backup delete/remove latest
 !restore latest confirm
 ```

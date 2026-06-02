@@ -84,7 +84,6 @@ Common runtime settings:
 | Setting | Default | Description |
 | --- | --- | --- |
 | `COMMAND_PREFIX` | `!` | Prefix used for commands |
-| `LIST_PAGE_SIZE` | `10` | Entries per page for paginated list commands |
 | `DB_BACKUP_ON_START` | `True` | Create an automatic DB snapshot on startup |
 | `DB_BACKUP_DIR` | `data/backups` | Directory for managed DB snapshots |
 | `DB_BACKUP_INCLUDE_OMEMO` | `True` | Include `OMEMO_STORAGE_FILE` as companion when it exists |
@@ -98,6 +97,7 @@ Common runtime settings:
 | `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` | `True` | Enable public protected-room commands |
 | `ALLOW_ADMIN_COMMANDS_IN_DMS` | `True` | Allow admins to use selected read-only commands via direct messages / MUC PMs |
 | `ROOM_INVITES_ENABLED` | `False` | Enable admin-reviewed protected-room invite workflow |
+| `ROOM_INVITE_MAX_AGE_DAYS` | `30` | Expire pending room invites older than this many days; `0` disables expiry |
 | `ALERT_ON_RECONNECT` | `True` | Alert after a successful reconnect |
 | `ALERT_ON_ADMIN_RIGHTS_LOST` | `True` | Alert when the bot loses admin/owner rights |
 | `ALERT_ON_HEALTH_CHECK_FAILURE` | `True` | Alert on room health-check failures |
@@ -108,6 +108,7 @@ Common runtime settings:
 | `ALERT_DEDUP_WINDOW` | `300` | Suppress duplicate alerts with the same key for this many seconds |
 | `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` | `30` | Rate-limit window in seconds |
 | `PUBLIC_COMMAND_RATE_LIMIT_MAX` | `3` | Max public command uses per nick/room/command/window |
+| `LIST_PAGE_SIZE` | `10` | Default number of items shown per page by paginated list commands |
 | `STRUCTURED_EVENT_LOGS` | `True` | Emit JSON logs for important events |
 | `AUDIT_LOG_ENABLED` | `True` | Store audit events in SQLite |
 | `AUDIT_LOG_RETENTION_DAYS` | `365` | Audit retention in days; valid range 1-365 |
@@ -138,6 +139,7 @@ DB_BACKUP_KEEP = 15
 DB_BACKUP_INCLUDE_OMEMO = True
 EXPORT_DIR = "data/exports"
 EXPORT_KEEP = 15
+LIST_PAGE_SIZE = 10
 ```
 
 Commands:
@@ -147,6 +149,7 @@ Commands:
 !backup list [all|page|last]
 !backup show latest
 !backup verify latest
+!backup delete latest
 !restore latest confirm
 !restore <filename> confirm
 ```
@@ -208,12 +211,12 @@ When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them 
 !room invite list [all|page|last]
 !room invite accept <id>
 !room invite decline <id>
-!room invite cleanup
+!room invite cleanup [expired]
 ```
 
 Incoming invite room JIDs are validated before they are shown as pending protected-room requests. Repeated invites from the same inviter for the same room are deduplicated.
 
-Pending invites are persisted in SQLite. BanBot does not automatically expire or delete them. They are removed only when accepted, declined/rejected, or when an admin runs `!room invite cleanup`.
+Pending invites are persisted in SQLite. By default, pending invites older than `ROOM_INVITE_MAX_AGE_DAYS` are expired automatically when invites are loaded/listed, and admins can run `!room invite cleanup expired` to remove only expired invites. Set `ROOM_INVITE_MAX_AGE_DAYS = 0` to keep pending invites indefinitely until accepted, declined/rejected, or removed with `!room invite cleanup`.
 
 ## OMEMO Settings
 

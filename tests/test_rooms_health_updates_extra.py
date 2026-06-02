@@ -124,7 +124,7 @@ async def test_room_list_add_and_remove_flow(temp_db_path, monkeypatch):
         assert bot.plugin["xep_0045"].joined
         assert "Room added" in bot.sent[-1]["mbody"]
 
-        await bot.cmd_room(["remove", "new@conference.example.test"], "admin@conference.example.org")
+        await bot.cmd_room(["delete", "new@conference.example.test"], "admin@conference.example.org")
         assert "new@conference.example.test" not in bot.protected_rooms
         assert bot.plugin["xep_0045"].left
     finally:
@@ -490,6 +490,23 @@ async def test_room_invite_decline_removes_pending_invite(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_room_invite_remove_alias_declines_pending_invite(monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    bot.pending_room_invites = {
+        1: {"id": 1, "room_jid": "new@conference.example.test", "inviter": "alice@example.org", "reason": "", "created_at": 0}
+    }
+    bot.pending_room_invite_index = {("new@conference.example.test", "alice@example.org"): 1}
+
+    await bot.cmd_room_invite(["remove", "1"], "admin@conference.example.org")
+
+    assert bot.pending_room_invites == {}
+    assert "Declined protected-room invite #1" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
 async def test_mediated_room_invite_is_detected(fake_msg_factory, monkeypatch):
     import banbot.room_invites as invite_module
 
@@ -755,3 +772,74 @@ async def test_room_invite_unknown_action_shows_usage():
 
     assert "Unknown room invite action: wat" in bot.sent[-1]["mbody"]
     assert "room invite list" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_invite_cleanup_expired_only_removes_old_invites(monkeypatch):
+    import banbot.room_invites as invite_module
+
+    monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
+    bot = RoomHealthBot()
+    bot.room_invite_max_age_days = 30
+    now = int(time.time())
+    bot.pending_room_invites = {
+        1: {"id": 1, "room_jid": "old@conference.example.test", "inviter": "alice@example.org", "reason": "", "created_at": now - 31 * 86400},
+        2: {"id": 2, "room_jid": "new@conference.example.test", "inviter": "bob@example.org", "reason": "", "created_at": now},
+    }
+    bot.pending_room_invite_index = {
+        (str(invite["room_jid"]), str(invite["inviter"])): idx
+        for idx, invite in bot.pending_room_invites.items()
+    }
+
+    await bot.cmd_room_invite(["cleanup", "expired"], "admin@conference.example.org")
+
+    assert sorted(bot.pending_room_invites) == [2]
+    assert "Deleted pending invites: 1" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_invite_cleanup_expired_respects_disabled_expiry():
+    bot = RoomHealthBot()
+    bot.room_invite_max_age_days = 0
+    bot.pending_room_invites = {
+        1: {"id": 1, "room_jid": "old@conference.example.test", "inviter": "alice@example.org", "reason": "", "created_at": int(time.time()) - 365 * 86400},
+    }
+    bot.pending_room_invite_index = {("old@conference.example.test", "alice@example.org"): 1}
+
+    await bot.cmd_room_invite(["cleanup", "expired"], "admin@conference.example.org")
+
+    assert sorted(bot.pending_room_invites) == [1]
+    assert "Invite expiry is disabled" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_invite_accept_keeps_invite_when_room_add_fails():
+    bot = RoomHealthBot()
+    bot.pending_room_invites = {
+        1: {"id": 1, "room_jid": "broken@conference.example.test", "inviter": "alice@example.org", "reason": "", "created_at": int(time.time())},
+    }
+    bot.pending_room_invite_index = {("broken@conference.example.test", "alice@example.org"): 1}
+
+    async def fake_cmd_room(args, room):
+        await bot.bot_send_message(mto=room, mbody="❌ Room add failed", mtype="groupchat")
+
+    bot.cmd_room = fake_cmd_room
+
+    await bot.cmd_room_invite(["accept", "1"], "admin@conference.example.org")
+
+    assert sorted(bot.pending_room_invites) == [1]
+    assert "invite remains pending" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_invite_rm_alias_declines_pending_invite():
+    bot = RoomHealthBot()
+    bot.pending_room_invites = {
+        1: {"id": 1, "room_jid": "new@conference.example.test", "inviter": "alice@example.org", "reason": "", "created_at": int(time.time())},
+    }
+    bot.pending_room_invite_index = {("new@conference.example.test", "alice@example.org"): 1}
+
+    await bot.cmd_room_invite(["rm", "1"], "admin@conference.example.org")
+
+    assert bot.pending_room_invites == {}
+    assert "Declined protected-room invite #1" in bot.sent[-1]["mbody"]

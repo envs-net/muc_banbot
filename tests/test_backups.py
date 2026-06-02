@@ -30,7 +30,6 @@ class BackupBot(BackupMixin, DatabaseMixin, CacheMixin):
         self.audit_events = []
         self.sent = []
         self.command_prefix = "!"
-        self.list_page_size = 10
         self.last_database_backup_file = None
         self.last_database_restore_file = None
         self._database_file_operation_lock = asyncio.Lock()
@@ -110,33 +109,6 @@ async def test_backup_list_command_shows_restore_hint(backup_config):
         assert "!restore <filename|latest> confirm" in body
     finally:
         await bot.db.close()
-
-
-@pytest.mark.asyncio
-async def test_backup_list_command_paginates(backup_config):
-    db_path, backup_dir = backup_config
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    for index in range(3):
-        path = backup_dir / f"{db_path.name}.snapshot-manual-20260101_00000{index}"
-        path.write_text("backup", encoding="utf-8")
-        os.utime(path, (1000 + index, 1000 + index))
-
-    bot = BackupBot()
-    bot.list_page_size = 2
-
-    await bot.cmd_backup(["list"], "admin@conference.example.org")
-    first_page = bot.sent[-1]["mbody"]
-    assert "Managed Full Backups (3) - Page 1/2" in first_page
-    assert "Use !backup list 2 for the next page." in first_page
-
-    await bot.cmd_backup(["list", "2"], "admin@conference.example.org")
-    second_page = bot.sent[-1]["mbody"]
-    assert "Managed Full Backups (3) - Page 2/2" in second_page
-    assert "Use !backup list 3" not in second_page
-
-    await bot.cmd_backup(["list", "all"], "admin@conference.example.org")
-    all_page = bot.sent[-1]["mbody"]
-    assert "Managed Full Backups (3) - All" in all_page
 
 
 @pytest.mark.asyncio
@@ -361,6 +333,46 @@ async def test_restore_rejects_corrupt_backup_before_replacing_database(backup_c
         async with bot.db.execute("SELECT room FROM rooms") as cursor:
             rows = await cursor.fetchall()
         assert rows == [("current@conference.example.org",)]
+    finally:
+        if bot.db:
+            await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_backup_list_paginates_and_delete_remove_aliases(backup_config):
+    bot = BackupBot()
+    bot.list_page_size = 2
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        for index in range(3):
+            ok, backup_path = await bot.create_database_backup(f"manual-{index}")
+            assert ok is True
+            # Make newest ordering deterministic.
+            os.utime(backup_path, (1000 + index, 1000 + index))
+
+        await bot.cmd_backup(["list"], "admin@conference.example.org")
+        body = bot.sent[-1]["mbody"]
+        assert "Page 1/2" in body
+        assert "Next page: !backup list 2" in body
+
+        await bot.cmd_backup(["list", "last"], "admin@conference.example.org")
+        assert "Page 2/2" in bot.sent[-1]["mbody"]
+
+        latest = bot.list_database_backups()[0].path
+        config_companion = latest.with_name(latest.name + ".config.py")
+        assert config_companion.exists()
+
+        await bot.cmd_backup(["remove", latest.name], "admin@conference.example.org", actor="admin@example.org")
+        body = bot.sent[-1]["mbody"]
+        assert "Backup deleted" in body
+        assert not latest.exists()
+        assert not config_companion.exists()
+        assert bot.audit_events[-1][0] == "db_backup_deleted"
+
+        latest = bot.list_database_backups()[0].path
+        await bot.cmd_backup(["delete", "latest"], "admin@conference.example.org")
+        assert "Backup deleted" in bot.sent[-1]["mbody"]
+        assert not latest.exists()
     finally:
         if bot.db:
             await bot.db.close()

@@ -91,7 +91,6 @@ class ConfigMixin:
     CONFIG_KEYS = (
         "LOG_LEVEL",
         "COMMAND_PREFIX",
-        "LIST_PAGE_SIZE",
         "DB_BACKUP_ON_START",
         "DB_BACKUP_DIR",
         "DB_BACKUP_KEEP",
@@ -104,6 +103,7 @@ class ConfigMixin:
         "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
         "ALLOW_ADMIN_COMMANDS_IN_DMS",
         "ROOM_INVITES_ENABLED",
+        "ROOM_INVITE_MAX_AGE_DAYS",
         "ALERT_ON_RECONNECT",
         "ALERT_ON_ADMIN_RIGHTS_LOST",
         "ALERT_ON_HEALTH_CHECK_FAILURE",
@@ -117,6 +117,7 @@ class ConfigMixin:
         "MAX_TEMPBAN_DAYS",
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW",
         "PUBLIC_COMMAND_RATE_LIMIT_MAX",
+        "LIST_PAGE_SIZE",
         "MUC_WRITE_SEMAPHORE",
         "SYNC_BATCH_SIZE",
         "STRUCTURED_EVENT_LOGS",
@@ -168,7 +169,6 @@ class ConfigMixin:
         return {
             "LOG_LEVEL": getattr(self, "log_level", str(getattr(config, "LOG_LEVEL", "INFO")).upper()),
             "COMMAND_PREFIX": self.command_prefix,
-            "LIST_PAGE_SIZE": getattr(self, "list_page_size", 10),
             "DB_BACKUP_ON_START": getattr(self, "db_backup_on_start", True),
             "DB_BACKUP_DIR": getattr(self, "db_backup_dir", "data/backups"),
             "DB_BACKUP_KEEP": getattr(self, "db_backup_keep", 15),
@@ -181,6 +181,7 @@ class ConfigMixin:
             "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": self.allow_user_cmds,
             "ALLOW_ADMIN_COMMANDS_IN_DMS": getattr(self, "allow_admin_commands_in_dms", True),
             "ROOM_INVITES_ENABLED": self.room_invites_enabled,
+            "ROOM_INVITE_MAX_AGE_DAYS": getattr(self, "room_invite_max_age_days", 30),
             "ALERT_ON_RECONNECT": getattr(self, "alert_on_reconnect", True),
             "ALERT_ON_ADMIN_RIGHTS_LOST": getattr(self, "alert_on_admin_rights_lost", True),
             "ALERT_ON_HEALTH_CHECK_FAILURE": getattr(self, "alert_on_health_check_failure", True),
@@ -194,6 +195,7 @@ class ConfigMixin:
             "MAX_TEMPBAN_DAYS": self.max_tempban_days,
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": self.public_command_rate_limit_window,
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": self.public_command_rate_limit_max,
+            "LIST_PAGE_SIZE": getattr(self, "list_page_size", 10),
             "MUC_WRITE_SEMAPHORE": self.muc_write_limit,
             "SYNC_BATCH_SIZE": getattr(self, "sync_batch_size", 10),
             "STRUCTURED_EVENT_LOGS": self.structured_event_logs,
@@ -338,6 +340,7 @@ class ConfigMixin:
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": (1, 3600),
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": (1, 100),
             "LIST_PAGE_SIZE": (1, 100),
+            "ROOM_INVITE_MAX_AGE_DAYS": (0, 3650),
             "MUC_WRITE_SEMAPHORE": (1, 100),
             "SYNC_BATCH_SIZE": (1, 100),
             "VERSION_CHECK_INTERVAL": (300, 86400),
@@ -355,6 +358,7 @@ class ConfigMixin:
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
             "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
             "LIST_PAGE_SIZE": 10,
+            "ROOM_INVITE_MAX_AGE_DAYS": 30,
             "MUC_WRITE_SEMAPHORE": 5,
             "SYNC_BATCH_SIZE": 10,
             "VERSION_CHECK_INTERVAL": 3600,
@@ -604,8 +608,8 @@ class ConfigMixin:
         self.apply_log_level(getattr(config, "LOG_LEVEL", "INFO"))
 
         self.command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip() or "!"
-        self.list_page_size = getattr(config, "LIST_PAGE_SIZE", 10)
         self.sync_batch_size = getattr(config, "SYNC_BATCH_SIZE", 10)
+        self.list_page_size = getattr(config, "LIST_PAGE_SIZE", 10)
         self.db_backup_on_start = getattr(config, "DB_BACKUP_ON_START", True)
         self.db_backup_dir = str(getattr(config, "DB_BACKUP_DIR", "data/backups")).strip() or "data/backups"
         self.db_backup_keep = getattr(config, "DB_BACKUP_KEEP", 15)
@@ -621,6 +625,7 @@ class ConfigMixin:
         self.allow_user_cmds = getattr(config, "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS", True)
         self.allow_admin_commands_in_dms = getattr(config, "ALLOW_ADMIN_COMMANDS_IN_DMS", True)
         self.room_invites_enabled = getattr(config, "ROOM_INVITES_ENABLED", False)
+        self.room_invite_max_age_days = getattr(config, "ROOM_INVITE_MAX_AGE_DAYS", 30)
 
         self.alert_on_reconnect = getattr(config, "ALERT_ON_RECONNECT", True)
         self.alert_on_admin_rights_lost = getattr(config, "ALERT_ON_ADMIN_RIGHTS_LOST", True)

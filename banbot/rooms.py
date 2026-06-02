@@ -7,7 +7,7 @@ import re
 from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
 
-from .utils import get_list_page_size, paginate_lines, wants_all_pages, without_all_pages_arg
+from .utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ class RoomMixin:
                     )
                 else:
                     per_page = get_list_page_size(self)
+                    page = resolve_page(page, len(rooms), per_page)
                     page_lines, current_page, total_pages, total_items = paginate_lines(rooms, page, per_page=per_page)
 
                     text = (
@@ -127,7 +128,7 @@ class RoomMixin:
 
             await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
 
-        elif action in ("add", "remove") and len(args) >= 2:
+        elif action in ("add", "remove", "delete", "del") and len(args) >= 2:
             target = args[1].lower()
 
             if action == "add":
@@ -188,7 +189,7 @@ class RoomMixin:
                 else:
                     await self.bot_send_message(mto=room, mbody=f"⚠️ Room already in protected list: {target}", mtype="groupchat")
 
-            elif action == "remove":
+            elif action in ("remove", "delete", "del"):
                 self.protected_rooms.discard(target)
                 await self.db.execute("DELETE FROM rooms WHERE room=?", (target,))
                 await self.db.commit()

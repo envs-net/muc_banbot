@@ -12,9 +12,6 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 !audit last
 !audit all
 
-!backup list all
-!export list all
-
 !banlist all
 !blacklist all
 !banlist rtbl all
@@ -50,21 +47,22 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | Command | Description | Example |
 | --- | --- | --- |
 | `!backup` | Creates a managed full backup | `!backup` |
-| `!backup list [all/page/last]` | Lists managed backups | `!backup list` |
+| `!backup list [all|page|last]` | Lists managed backups | `!backup list last` |
 | `!backup show <filename|latest>` | Shows details and companions for one backup | `!backup show latest` |
-| `!backup verify <filename|latest>` | Runs SQLite integrity checks and companion readability checks | `!backup verify latest` |
-| `!restore <filename|latest> confirm` | Restores a managed full backup | `!restore latest confirm` |
+| `!backup verify <filename|latest>` | Verifies a managed backup | `!backup verify latest` |
+| `!backup delete/remove <filename|latest>` | Deletes a managed backup and companion files | `!backup delete latest` |
+| `!restore <filename|latest> confirm` | Restores a managed backup | `!restore latest confirm` |
 
 ### Rooms / Policy
 
 | Command | Description | Example |
 | --- | --- | --- |
 | `!room add <room>` | Adds a protected room and stores it in the DB | `!room add secret@conference.example.org` |
-| `!room remove <room>` | Removes a protected room and makes the bot leave | `!room remove secret@conference.example.org` |
+| `!room remove/delete <room>` | Removes a protected room and makes the bot leave | `!room remove secret@conference.example.org` |
 | `!room list [all/page]` | Lists protected rooms | `!room list all` |
 | `!room invite list [all/page/last]` | Lists pending protected-room invites | `!room invite list all` |
-| `!room invite accept/decline <id>` | Accepts or declines a pending invite | `!room invite accept 3` |
-| `!policy` / `!rules show/set/clear/enable/disable` | Manages public rules/policy text | `!policy show` |
+| `!room invite accept/decline/remove/delete <id>` | Accepts or declines a pending invite | `!room invite accept 3` |
+| `!policy` / `!rules show/set/clear/delete/remove/enable/disable` | Manages public rules/policy text | `!policy show` |
 
 ### Moderation
 
@@ -100,7 +98,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | --- | --- | --- |
 | `!ignore [list/all/page]` | Shows ignorelist entries | `!ignore list all` |
 | `!ignore add <jid/domain> [reason]` | Adds a protected exact JID or wildcard domain | `!ignore add alice@example.org trusted user` |
-| `!ignore remove <jid/domain>` | Removes an entry | `!ignore remove alice@example.org` |
+| `!ignore remove/delete <jid/domain>` | Removes an entry | `!ignore remove alice@example.org` |
 | `!whitelist [list/all/add/remove]` | Alias for `!ignore ...` | `!whitelist all` |
 
 ### OMEMO
@@ -117,7 +115,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | --- | --- | --- |
 | `!rtbl list` | Shows active subscriptions and publish-feed counts | `!rtbl list` |
 | `!rtbl add <service> <node>` | Subscribes to an RTBL PubSub node | `!rtbl add xmppbl.org muc_bans_sha256` |
-| `!rtbl delete <service> [node]` | Removes one or all subscriptions for a service | `!rtbl delete xmppbl.org muc_bans_sha256` |
+| `!rtbl delete/remove <service> [node]` | Removes one or all subscriptions for a service | `!rtbl delete xmppbl.org muc_bans_sha256` |
 | `!rtbl refresh [service] [node]` | Refreshes all, one service, or one node | `!rtbl refresh xmppbl.org muc_bans_sha256` |
 | `!rtbl publish status` | Shows own publish-feed status and local publish counts | `!rtbl publish status` |
 | `!rtbl publish sync` | Publishes current local non-RTBL bans | `!rtbl publish sync` |
@@ -127,8 +125,8 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | Command | Description | Example |
 | --- | --- | --- |
 | `!export` | Exports all bans to `EXPORT_DIR/bans_export_TIMESTAMP.csv` | `!export` |
-| `!export list [all/page/last]` | Lists managed CSV exports | `!export list` |
-| `!export delete <file|latest>` | Deletes a managed CSV export | `!export delete latest` |
+| `!export list [all|page|last]` | Lists managed CSV exports | `!export list last` |
+| `!export delete/remove <file|latest>` | Deletes a managed CSV export | `!export delete latest` |
 | `!import <file> [dryrun]` | Imports bans from CSV with validation and pre-import full backup | `!import bans.csv dryrun` |
 
 ### Config, Reload and Restart
@@ -186,9 +184,10 @@ All other admin commands, especially ban, unban, room changes, RTBL changes, rel
 | Command | Description | Example |
 | --- | --- | --- |
 | `!backup` | Creates a timestamped SQLite database snapshot plus companions when available | `!backup` |
-| `!backup list [all/page/last]` | Lists managed backups, newest first | `!backup list` |
+| `!backup list [all|page|last]` | Lists managed backups, newest first | `!backup list last` |
 | `!backup show <filename|latest>` | Shows details and companions for one backup | `!backup show latest` |
 | `!backup verify <filename|latest>` | Runs SQLite integrity checks and companion readability checks | `!backup verify latest` |
+| `!backup delete/remove <filename|latest>` | Deletes a managed backup and companion files | `!backup delete latest` |
 | `!restore <filename|latest> confirm` | Restores a managed backup directly | `!restore latest confirm` |
 
 BanBot creates automatic startup snapshots when `DB_BACKUP_ON_START=True`. `DB_BACKUP_KEEP` controls how many managed snapshots are kept; the default is `15`. Each snapshot includes a companion `config.py` copy when the active config file can be resolved and can include `OMEMO_STORAGE_FILE` when `DB_BACKUP_INCLUDE_OMEMO=True` and the file exists. Restores create a safety backup of the current database and config before replacing them, reload DB-backed caches, and still recommend a process restart afterwards.
@@ -198,25 +197,25 @@ BanBot creates automatic startup snapshots when `DB_BACKUP_ON_START=True`. `DB_B
 | Command | Description | Example |
 | --- | --- | --- |
 | `!room add <room>` | Adds a protected room and stores it in the DB | `!room add secret@conference.example.org` |
-| `!room remove <room>` | Removes a protected room and makes the bot leave | `!room remove secret@conference.example.org` |
+| `!room remove/delete <room>` | Removes a protected room and makes the bot leave | `!room remove secret@conference.example.org` |
 | `!room list [all/page]` | Lists protected rooms | `!room list all` |
 | `!room invite list [all/page/last]` | Lists pending protected-room invites | `!room invite list all` |
 | `!room invite accept <id>` | Accepts a pending invite and adds the room | `!room invite accept 3` |
 | `!room invite decline <id>` | Declines a pending invite | `!room invite decline 3` |
-| `!room invite cleanup` | Deletes all pending protected-room invites | `!room invite cleanup` |
+| `!room invite cleanup [expired]` | Deletes all pending invites, or only expired invites with `expired` | `!room invite cleanup expired` |
 | `!policy show` / `!rules show` | Shows configured policy text and enable state | `!policy show` |
 | `!policy set <text>` / `!rules set <text>` | Sets and enables policy text; use literal `\n` for line breaks | `!policy set Be nice` |
-| `!policy clear` / `!rules clear` | Clears and disables policy text | `!policy clear` |
+| `!policy clear/delete/remove` / `!rules clear/delete/remove` | Clears and disables policy text | `!policy clear` |
 | `!policy enable` / `!rules enable` | Enables protected-room `!rules` / `!policy` output | `!policy enable` |
 | `!policy disable` / `!rules disable` | Disables public policy output without deleting text | `!policy disable` |
 
 ### Protected-Room Invite Workflow
 
-When `ROOM_INVITES_ENABLED=True`, BanBot can be invited to potential protected rooms. Invites are announced in the admin room and stay pending until an admin accepts or declines them.
+When `ROOM_INVITES_ENABLED=True`, BanBot can be invited to potential protected rooms. Invites are announced in the admin room and stay pending until an admin accepts or declines them, or until they expire via `ROOM_INVITE_MAX_AGE_DAYS`.
 
 The admin-room invite message includes the room JID, inviter JID, optional invite reason, and the accept/decline commands. Duplicate invites from the same inviter for the same room are ignored.
 
-Pending invites are stored in SQLite and survive bot restarts. They are removed only when accepted, declined/rejected, or cleared with `!room invite cleanup`.
+Pending invites are stored in SQLite and survive bot restarts. They are removed when accepted, declined/rejected, expired, or cleared with `!room invite cleanup`; `!room invite cleanup expired` only removes expired invites.
 
 Accepting an invite uses the normal `!room add` flow, including room JID validation, DB persistence, joining the room, ban sync, and RTBL occupant checks.
 
@@ -298,7 +297,7 @@ Temporary bans support duration suffixes:
 | `!ignore list [all/page/last]` | Shows ignorelist entries | `!ignore list all` |
 | `!ignore all` | Alias for full list output | `!ignore all` |
 | `!ignore add <jid/domain> [reason]` | Adds a protected exact JID or wildcard domain | `!ignore add alice@example.org trusted user` |
-| `!ignore remove <jid/domain>` | Removes an entry | `!ignore remove alice@example.org` |
+| `!ignore remove/delete <jid/domain>` | Removes an entry | `!ignore remove alice@example.org` |
 | `!whitelist` | Alias for list | `!whitelist` |
 | `!whitelist list [all/page/last]` | Alias for list | `!whitelist list all` |
 | `!whitelist all` | Alias for full list output | `!whitelist all` |
@@ -322,7 +321,7 @@ See [OMEMO](omemo.md) for behavior details.
 | --- | --- | --- |
 | `!rtbl list` | Shows active subscriptions and publish-feed counts | `!rtbl list` |
 | `!rtbl add <service> <node>` | Subscribes to an RTBL PubSub node | `!rtbl add xmppbl.org muc_bans_sha256` |
-| `!rtbl delete <service> [node]` | Removes one or all subscriptions for a service | `!rtbl delete xmppbl.org muc_bans_sha256` |
+| `!rtbl delete/remove <service> [node]` | Removes one or all subscriptions for a service | `!rtbl delete xmppbl.org muc_bans_sha256` |
 | `!rtbl refresh [service] [node]` | Refreshes all, one service, or one node | `!rtbl refresh xmppbl.org muc_bans_sha256` |
 | `!rtbl publish status` | Shows own publish-feed status and local publish counts | `!rtbl publish status` |
 | `!rtbl publish sync` | Publishes current local non-RTBL bans | `!rtbl publish sync` |
@@ -334,8 +333,8 @@ See [RTBL](rtbl.md) for behavior details.
 | Command | Description |
 | --- | --- |
 | `!export` | Exports all bans to `EXPORT_DIR/bans_export_TIMESTAMP.csv` |
-| `!export list [all/page/last]` | Lists managed CSV exports |
-| `!export delete <file|latest>` | Deletes a managed CSV export |
+| `!export list [all|page|last]` | Lists managed CSV exports |
+| `!export delete/remove <file|latest>` | Deletes a managed CSV export |
 | `!import <file> [dryrun]` | Imports bans from CSV with validation and pre-import full backup |
 
 See [Import / Export](import-export.md).

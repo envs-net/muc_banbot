@@ -3,6 +3,7 @@ import pytest
 from banbot.utils import (
     bare_jid,
     domain_matches,
+    get_list_page_size,
     human_time,
     looks_like_domain,
     normalize_ban_target,
@@ -117,3 +118,32 @@ def test_all_pages_arg_helpers():
     assert wants_all_pages(["2", "ALL"]) is True
     assert wants_all_pages(["small"]) is False
     assert without_all_pages_arg(["all", "spam", "ALL", "2"]) == ["spam", "2"]
+
+
+
+def test_get_list_page_size_uses_configured_value():
+    class Bot:
+        list_page_size = 25
+
+    assert get_list_page_size(Bot()) == 25
+
+
+def test_get_list_page_size_falls_back_for_missing_or_invalid_value(monkeypatch):
+    class MissingBot:
+        pass
+
+    class InvalidBot:
+        list_page_size = "nope"
+
+    class ZeroBot:
+        list_page_size = 0
+
+    assert get_list_page_size(InvalidBot()) == 10
+    assert get_list_page_size(ZeroBot()) == 1
+    assert get_list_page_size(MissingBot()) == 10
+
+    import config
+
+    monkeypatch.setattr(config, "LIST_PAGE_SIZE", 20, raising=False)
+    assert get_list_page_size() == 20
+    assert get_list_page_size(MissingBot()) == 20

@@ -162,6 +162,7 @@ class BanBot(
         self.muc_write_limit = getattr(config, "MUC_WRITE_SEMAPHORE", 5)
         self.muc_write_semaphore = asyncio.Semaphore(self.muc_write_limit)
         self.sync_batch_size = getattr(config, "SYNC_BATCH_SIZE", 10)
+        self.list_page_size = getattr(config, "LIST_PAGE_SIZE", 10)
 
         # Ban Cache: key -> (jid_bare, nick, until, issuer, comment)
         self.ban_cache: dict[str, tuple[str | None, str | None, int, str | None, str | None]] = {}

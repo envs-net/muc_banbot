@@ -82,7 +82,7 @@ Message bodies are not stored.
 | `reason` | TEXT | Optional invite reason |
 | `created_at` | INTEGER | Creation timestamp |
 
-Pending room invites are persisted so they survive bot restarts. Entries are removed when accepted, declined/rejected, or cleared with `!room invite cleanup`.
+Pending room invites are persisted so they survive bot restarts. Entries are removed when accepted, declined/rejected, expired via `ROOM_INVITE_MAX_AGE_DAYS`, or cleared with `!room invite cleanup`; `!room invite cleanup expired` removes only expired entries.
 
 ### `public_policy`
 

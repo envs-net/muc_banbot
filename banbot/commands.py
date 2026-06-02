@@ -17,6 +17,36 @@ log = logging.getLogger(__name__)
 # PUBLIC_COMMANDS used for ratelimits
 PUBLIC_COMMANDS = {"help", "whoami", "banlist", "blacklist", "why", "rules", "policy"}
 
+ADMIN_COMMANDS = {
+    "config",
+    "backup",
+    "restore",
+    "omemo",
+    "reload",
+    "reloadconfig",
+    "restart",
+    "status",
+    "checkupdate",
+    "updatecheck",
+    "room",
+    "ban",
+    "tempban",
+    "unban",
+    "bansearch",
+    "sync",
+    "syncadmins",
+    "syncbans",
+    "export",
+    "import",
+    "audit",
+    "rtbl",
+    "redact",
+    "ignore",
+    "whitelist",
+    "policy",
+    "rules",
+}
+
 
 class CommandMixin:
     def _actor_jid_from_room_nick(self, room: str, nick: str) -> str:
@@ -250,37 +280,7 @@ class CommandMixin:
         cmd: str,
         args: list[str]
     ) -> bool:
-        admin_commands = {
-            "config",
-            "backup",
-            "restore",
-            "omemo",
-            "reload",
-            "reloadconfig",
-            "restart",
-            "status",
-            "checkupdate",
-            "updatecheck",
-            "room",
-            "ban",
-            "tempban",
-            "unban",
-            "bansearch",
-            "sync",
-            "syncadmins",
-            "syncbans",
-            "export",
-            "import",
-            "audit",
-            "rtbl",
-            "redact",
-            "ignore",
-            "whitelist",
-            "policy",
-            "rules",
-        }
-
-        if cmd not in admin_commands:
+        if cmd not in ADMIN_COMMANDS:
             return False
 
         if room != ADMIN_ROOM:
@@ -360,10 +360,10 @@ class CommandMixin:
                         "Usage:\n"
                         f"  {self.command_prefix}room list [all|page]\n"
                         f"  {self.command_prefix}room add <room_jid>\n"
-                        f"  {self.command_prefix}room remove <room_jid>\n"
+                        f"  {self.command_prefix}room remove/delete <room_jid>\n"
                         f"  {self.command_prefix}room invite list [all|page|last]\n"
                         f"  {self.command_prefix}room invite accept <id>\n"
-                        f"  {self.command_prefix}room invite decline <id>\n"
+                        f"  {self.command_prefix}room invite decline/remove/delete <id>\n"
                         f"  {self.command_prefix}room invite cleanup"
                     ),
                     mtype="groupchat",
@@ -723,7 +723,7 @@ class CommandMixin:
             f"  {p}policy set <text>\n"
             f"  {p}policy enable\n"
             f"  {p}policy disable\n"
-            f"  {p}policy clear\n\n"
+            f"  {p}policy clear/delete/remove\n\n"
             "Supported placeholders:\n"
             "  {prefix}, {room}, {room_count}, {admin_room}, {bot_name}\n"
             "Use literal \\n for line breaks."
@@ -843,7 +843,7 @@ class CommandMixin:
             )
             return
 
-        if action == "clear":
+        if action in ("clear", "delete", "remove"):
             enabled, text = await self.get_public_policy()
 
             if not enabled and not text.strip():
@@ -866,7 +866,7 @@ class CommandMixin:
             mto=room,
             mbody=(
                 f"❌ Unknown policy action: {action}\n"
-                f"Available: show / set / enable / disable / clear / help"
+                f"Available: show / set / enable / disable / clear / delete / remove / help"
             ),
             mtype="groupchat",
         )
@@ -906,14 +906,15 @@ class CommandMixin:
             f"{p}backup list [all|page|last] - list full backups\n"
             f"{p}backup show <filename|latest> - show backup details\n"
             f"{p}backup verify <filename|latest> - verify a backup\n"
+            f"{p}backup delete/remove <filename|latest> - delete a backup\n"
             f"{p}restore <filename|latest> confirm - restore a full backup\n\n"
 
             "🏠 Rooms / Policy\n"
-            f"{p}room add/remove - manage protected rooms\n"
+            f"{p}room add/remove/delete - manage protected rooms\n"
             f"{p}room list [all|page] - list protected rooms\n"
             f"{p}room invite list [all|page|last] - list pending room invites\n"
-            f"{p}room invite accept/decline <id> - accept or decline a room invite\n"
-            f"{p}policy / {p}rules show/set/clear/enable/disable - manage public rules/policy text\n\n"
+            f"{p}room invite accept/decline/remove/delete <id> - accept or remove a room invite\n"
+            f"{p}policy / {p}rules show/set/clear/delete/remove/enable/disable - manage public rules/policy text\n\n"
 
             "🛡️ Moderation\n"
             f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
@@ -937,8 +938,8 @@ class CommandMixin:
             "✅ Ignorelist / Whitelist\n"
             f"{p}ignore [list|all|page] - show global ignorelist (alias: {p}whitelist)\n"
             f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
-            f"{p}ignore remove <jid|domain> - remove from ignorelist\n"
-            f"{p}whitelist [list|all|add|remove] - alias for {p}ignore\n\n"
+            f"{p}ignore remove/delete <jid|domain> - remove from ignorelist\n"
+            f"{p}whitelist [list|all|add|remove|delete] - alias for {p}ignore\n\n"
 
             "🔐 OMEMO\n"
             f"{p}omemo status - show OMEMO state\n"
@@ -948,14 +949,12 @@ class CommandMixin:
             "🛡️ RTBL\n"
             f"{p}rtbl list - show active RTBL subscriptions\n"
             f"{p}rtbl add <service> <node> - subscribe to a RTBL node\n"
-            f"{p}rtbl delete <service> [node] - remove a RTBL subscription\n"
+            f"{p}rtbl delete/remove <service> [node] - remove a RTBL subscription\n"
             f"{p}rtbl refresh [service_jid] [node] - refresh RTBL subscriptions now\n"
             f"{p}rtbl publish status - status of your own RTBL feed\n"
             f"{p}rtbl publish sync - publish all current bans to your own feed\n\n"
 
             "📦 Import / Export\n"
-            f"{p}export - export all bans to a managed CSV file\n"
-            f"{p}export list [all|page|last] - list managed CSV exports\n"
-            f"{p}export delete <filename|latest> - delete a managed CSV export\n"
+            f"{p}export [list|delete|remove] [all|page|last] - export/list/delete managed CSV ban exports\n"
             f"{p}import <filename> [dryrun] - import bans from a CSV file\n"
         )

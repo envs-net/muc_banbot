@@ -137,13 +137,14 @@ Examples assume the default command prefix `!`.
 | `!backup list [all/page/last]` | List managed full backups |
 | `!backup show <file/latest>` | Inspect one managed backup |
 | `!backup verify <file/latest>` | Verify a managed backup |
+| `!backup delete/remove <file/latest>` | Delete a managed full backup |
 | `!restore <file/latest> confirm` | Restore a managed full backup |
 | `!room add <room>` | Add a protected room |
-| `!room remove <room>` | Remove a protected room |
+| `!room remove/delete <room>` | Remove a protected room |
 | `!room list [all/page]` | List protected rooms |
 | `!room invite list [all/page/last]` | List pending room invites |
-| `!room invite accept/decline <id>` | Accept or decline a pending room invite |
-| `!policy` / `!rules show/set/clear/enable/disable` | Manage public room policy text |
+| `!room invite accept/decline/remove/delete <id>` | Accept or decline a pending room invite |
+| `!policy` / `!rules show/set/clear/delete/remove/enable/disable` | Manage public room policy text |
 | `!ban <jid/nick/domain> [comment]` | Ban a JID, nick, or wildcard domain |
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add a temporary ban |
 | `!unban <jid/nick/domain>` | Remove a ban |
@@ -161,14 +162,12 @@ Examples assume the default command prefix `!`.
 | `!omemo status` | Inspect OMEMO readiness and storage state |
 | `!omemo devices` | List visible admin-room recipients and local storage hints |
 | `!omemo reset [confirm]` | Rotate local OMEMO storage after confirmation |
-| `!rtbl list/add/delete/refresh` | Manage RTBL subscriptions |
+| `!rtbl list/add/delete/remove/refresh` | Manage RTBL subscriptions |
 | `!rtbl publish status/sync` | Manage the bot's own RTBL publish feed |
-| `!export` | Export all bans to a managed CSV file |
-| `!export list [all/page/last]` | List managed CSV ban exports |
-| `!export delete <file/latest>` | Delete a managed CSV ban export |
+| `!export [list/delete]` | Manage CSV ban exports |
 | `!import <file> [dryrun]` | Import bans from CSV with validation and optional dry-run |
 
-For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!backup list all`, `!export list all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.
+For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.
 
 Full command reference: [docs/commands.md](docs/commands.md).
 
@@ -177,7 +176,7 @@ Full command reference: [docs/commands.md](docs/commands.md).
 
 ## Room Invite Service
 
-When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites for potential protected rooms. Invites are announced in the admin room and must be accepted or declined with `!room invite` commands. BanBot does not auto-join invited rooms.
+When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites for potential protected rooms. Invites are announced in the admin room and must be accepted or declined with `!room invite` commands. Pending invites older than `ROOM_INVITE_MAX_AGE_DAYS` are expired automatically; set it to `0` to keep them indefinitely. BanBot does not auto-join invited rooms.
 
 ## Message Redaction
 

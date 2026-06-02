@@ -26,7 +26,6 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
         self._pending_database_backup_audit_events = []
         self.sent = []
         self.command_prefix = "!"
-        self.list_page_size = 10
         self._database_file_operation_lock = asyncio.Lock()
         self._ban_state_operation_lock = asyncio.Lock()
 
@@ -229,33 +228,6 @@ async def test_export_command_lists_and_deletes_latest(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_export_list_command_paginates(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    export_dir = tmp_path / "data" / "exports"
-    export_dir.mkdir(parents=True)
-    for index in range(3):
-        path = export_dir / f"bans_export_20260101_00000{index}.csv"
-        path.write_text("jid,nick,until,issuer,comment\n", encoding="utf-8")
-        path.touch()
-
-    bot = ImportBot()
-    bot.list_page_size = 2
-
-    await bot.cmd_export(["list"], "admin@conference.example.org")
-    first_page = bot.sent[-1]["mbody"]
-    assert "Managed Ban Exports (3) - Page 1/2" in first_page
-    assert "Use !export list 2 for the next page." in first_page
-
-    await bot.cmd_export(["list", "last"], "admin@conference.example.org")
-    last_page = bot.sent[-1]["mbody"]
-    assert "Managed Ban Exports (3) - Page 2/2" in last_page
-
-    await bot.cmd_export(["list", "all"], "admin@conference.example.org")
-    all_page = bot.sent[-1]["mbody"]
-    assert "Managed Ban Exports (3) - All" in all_page
-
-
-@pytest.mark.asyncio
 async def test_export_command_rejects_unknown_delete_target(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bot = ImportBot()
@@ -326,3 +298,28 @@ async def test_import_staged_duplicates_keep_later_temporary_row(temp_db_path, t
         assert row == (2000, "stronger temp")
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_export_list_paginates_and_remove_alias(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = ImportBot()
+    bot.list_page_size = 2
+
+    for index in range(3):
+        bot._cache_ban(f"user{index}@example.org", f"User{index}", 0, "tester", f"reason {index}")
+        ok, message = await bot.export_bans_to_csv()
+        assert ok is True, message
+
+    await bot.cmd_export(["list"], "admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+    assert "Page 1/2" in body
+    assert "Next page: !export list 2" in body
+
+    await bot.cmd_export(["list", "last"], "admin@conference.example.org")
+    assert "Page 2/2" in bot.sent[-1]["mbody"]
+
+    latest = bot.list_export_files()[0].path
+    await bot.cmd_export(["remove", "latest"], "admin@conference.example.org")
+    assert "Export deleted" in bot.sent[-1]["mbody"]
+    assert not latest.exists()

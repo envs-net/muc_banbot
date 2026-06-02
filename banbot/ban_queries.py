@@ -225,7 +225,7 @@ class BanQueryMixin:
             )
             text = header + ":\n" + "\n".join(page_lines)
         else:
-            per_page      = get_list_page_size(self)
+            per_page = get_list_page_size(self)
             resolved_page = resolve_page(page, len(all_entries), per_page)
             page_lines, current_page, total_pages, total_items = paginate_lines(
                 all_entries, resolved_page, per_page=per_page

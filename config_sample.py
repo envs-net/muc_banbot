@@ -27,7 +27,7 @@ CONNECT_DIRECT_TLS = False
 DB_FILE = "banbot.db"
 
 # Managed SQLite database backups.
-# !backup creates snapshots, !backup list shows them, and !restore can restore them.
+# !backup creates snapshots, !backup list [all|page|last] shows them, and !restore can restore them.
 DB_BACKUP_ON_START = True
 DB_BACKUP_DIR = "data/backups"
 DB_BACKUP_KEEP = 15
@@ -57,7 +57,6 @@ VCARD_NOTE = "Bot Admin Assistant"   # Notes/description
 LOG_LEVEL = "INFO"
 
 COMMAND_PREFIX = "!" # Command prefix used to trigger bot commands in rooms
-LIST_PAGE_SIZE = 10  # Default number of entries per page for paginated list commands
 ANNOUNCE_STARTUP = True  # True = Show startup messages in the admin room, False = off
 ANNOUNCE_SYNC_DETAILS = True  # True = Show detailed sync progress messages at startup (per-room details), False = off. Manual !sync and !syncbans commands always show details
 SHOW_BAN_IN_MUC = False  # True = visible ban/kick in protected rooms, False = hidden
@@ -73,6 +72,10 @@ ALLOW_ADMIN_COMMANDS_IN_DMS = True
 # Can be changed at runtime via !reloadconfig.
 ROOM_INVITES_ENABLED = False
 
+# Pending room invites older than this many days are expired automatically.
+# Set to 0 to keep pending invites indefinitely until accepted/declined/cleanup.
+ROOM_INVITE_MAX_AGE_DAYS = 30
+
 HEALTH_CHECK_INTERVAL = 300  # Interval (seconds) for health checks of bot rights in rooms. Minimum: 60. Default: 300
 UNBAN_CHECK_INTERVAL = 60  # Interval (seconds) for checking expired temporary bans. Lower = faster unbans but more DB queries. Default: 60
 MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default: 30
@@ -81,6 +84,9 @@ MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default
 # Example default: max 3 uses per nick/room/command every 30 seconds.
 PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 30
 PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
+
+# Default number of items shown per page by paginated list commands.
+LIST_PAGE_SIZE = 10
 
 # ================= PERFORMANCE TUNING =================
 

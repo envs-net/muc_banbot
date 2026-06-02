@@ -599,3 +599,26 @@ async def test_rules_alias_works_in_admin_room(fake_msg_factory, monkeypatch):
     body = bot.sent[-1]["mbody"]
     assert "Public policy is currently enabled" in body
     assert "Please read the rules." in body
+
+@pytest.mark.asyncio
+async def test_policy_delete_and_remove_alias_clear_text(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "adminbot")
+
+    bot = PolicyCommandBot()
+    bot.policy_enabled = True
+    bot.policy_text = "Please read the rules."
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!policy delete"))
+    assert bot.policy_enabled is False
+    assert bot.policy_text == ""
+    assert "cleared" in bot.sent[-1]["mbody"]
+
+    bot.policy_enabled = True
+    bot.policy_text = "Please read the rules again."
+    await bot.on_message(admin_msg(fake_msg_factory, "!policy remove"))
+    assert bot.policy_enabled is False
+    assert bot.policy_text == ""
+    assert "cleared" in bot.sent[-1]["mbody"]

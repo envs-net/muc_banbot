@@ -22,7 +22,6 @@ class ConfigValidationBot(ConfigMixin):
         self.max_tempban_days = 30
         self.public_command_rate_limit_window = 30
         self.public_command_rate_limit_max = 3
-        self.list_page_size = 10
         self.muc_write_limit = 5
         self.sync_batch_size = 10
         self.structured_event_logs = True
@@ -51,6 +50,7 @@ def set_valid_config(monkeypatch):
         "HEALTH_CHECK_INTERVAL": 300,
         "ALLOW_ADMIN_COMMANDS_IN_DMS": True,
         "ROOM_INVITES_ENABLED": False,
+        "ROOM_INVITE_MAX_AGE_DAYS": 30,
         "UNBAN_CHECK_INTERVAL": 60,
         "MAX_TEMPBAN_DAYS": 30,
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
@@ -160,6 +160,7 @@ def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):
     assert bot.announce_startup is False
     assert bot.allow_admin_commands_in_dms is True
     assert bot.room_invites_enabled is False
+    assert bot.room_invite_max_age_days == 30
     assert bot.rtbl_refresh_interval == 0
     assert logging.getLogger("banbot").level == logging.ERROR
 
@@ -170,6 +171,7 @@ def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
     set_valid_config(monkeypatch)
     monkeypatch.setattr(config, "ALLOW_ADMIN_COMMANDS_IN_DMS", "yes", raising=False)
     monkeypatch.setattr(config, "ROOM_INVITES_ENABLED", "yes", raising=False)
+    monkeypatch.setattr(config, "ROOM_INVITE_MAX_AGE_DAYS", -1, raising=False)
     monkeypatch.setattr(config, "RTBL_ENABLED", "yes", raising=False)
     monkeypatch.setattr(config, "RTBL_ANNOUNCE", "yes", raising=False)
     monkeypatch.setattr(config, "RTBL_REFRESH_INTERVAL", -1, raising=False)

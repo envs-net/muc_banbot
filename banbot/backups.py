@@ -585,6 +585,54 @@ class BackupMixin:
             log.error("Failed to restore database backup %s: %s", backup.path, exc)
             return False, str(exc)
 
+
+    async def delete_database_backup(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
+        """Delete a managed database backup and its companion files."""
+        backup = self.resolve_database_backup(name)
+        if backup is None:
+            return False, f"Backup not found: {name}"
+
+        companion_paths = [
+            self._config_backup_path_for(backup.path),
+            self._omemo_backup_path_for(backup.path),
+        ]
+        removed: list[str] = []
+
+        try:
+            for path in [backup.path, *companion_paths]:
+                if path.exists():
+                    await asyncio.to_thread(path.unlink)
+                    removed.append(path.name)
+        except OSError as exc:
+            log.warning("Failed to delete backup %s: %s", backup.path, exc)
+            return False, str(exc)
+
+        if hasattr(self, "log_event"):
+            try:
+                self.log_event(
+                    logging.INFO,
+                    "db_backup_deleted",
+                    actor=actor or "unknown",
+                    backup=str(backup.path),
+                    removed=removed,
+                )
+            except Exception as exc:
+                log.debug("Failed to write backup delete structured event: %s", exc)
+
+        if hasattr(self, "audit_event") and getattr(self, "db", None):
+            try:
+                await self.audit_event(
+                    "db_backup_deleted",
+                    actor=actor or "unknown",
+                    target_type="backup",
+                    target=backup.name,
+                    details={"backup": str(backup.path), "removed": removed},
+                )
+            except Exception as exc:
+                log.debug("Failed to audit backup deletion: %s", exc)
+
+        return True, "Deleted files: " + (", ".join(removed) if removed else backup.name)
+
     async def cmd_backup(self, args: list[str], room: str, actor: str | None = None) -> None:
         """Handle !backup commands."""
         args = args or []
@@ -602,6 +650,7 @@ class BackupMixin:
             return
 
         if action == "list":
+            backups = self.list_database_backups()
             show_all = wants_all_pages(args[1:])
             list_args = without_all_pages_arg(args[1:])
             page = 1
@@ -619,32 +668,29 @@ class BackupMixin:
                         )
                         return
 
-            backups = self.list_database_backups()
             lines = ["💾 Managed Full Backups"]
             lines.append(f"Directory: {self._database_backup_dir()}")
             lines.append(f"Keep: {self._database_backup_keep()}")
             if not backups:
                 lines.append("\nNo managed database backups found.")
             else:
-                lines.append("")
+                entries = [self._format_backup_entry(backup, index) for index, backup in enumerate(backups, start=1)]
                 if show_all:
-                    lines[0] = f"💾 Managed Full Backups ({len(backups)}) - All"
-                    for index, backup in enumerate(backups, start=1):
-                        lines.append(self._format_backup_entry(backup, index))
+                    lines[0] = f"💾 Managed Full Backups ({len(entries)}) - All"
+                    page_entries = entries
                 else:
                     per_page = get_list_page_size(self)
-                    resolved_page = resolve_page(page, len(backups), per_page)
-                    page_backups, current_page, total_pages, total_items = paginate_lines(
-                        backups, resolved_page, per_page=per_page
-                    )
+                    page = resolve_page(page, len(entries), per_page)
+                    page_entries, current_page, total_pages, total_items = paginate_lines(entries, page, per_page=per_page)
                     lines[0] = f"💾 Managed Full Backups ({total_items}) - Page {current_page}/{total_pages}"
-                    start_index = (current_page - 1) * per_page + 1
-                    for index, backup in enumerate(page_backups, start=start_index):
-                        lines.append(self._format_backup_entry(backup, index))
-                    if current_page < total_pages:
-                        lines.append(f"\nUse {self.command_prefix}backup list {current_page + 1} for the next page.")
+
+                lines.append("")
+                lines.extend(page_entries)
                 lines.append("")
                 lines.append(f"Restore with: {self.command_prefix}restore <filename|latest> confirm")
+                lines.append(f"Delete with: {self.command_prefix}backup delete <filename|latest>")
+                if not show_all and current_page < total_pages:
+                    lines.append(f"Next page: {self.command_prefix}backup list {current_page + 1}")
             await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return
 
@@ -676,6 +722,19 @@ class BackupMixin:
             await self.bot_send_message(mto=room, mbody=f"{prefix}\n{message}", mtype="groupchat")
             return
 
+        if action in ("delete", "remove", "del", "rm"):
+            if len(args) < 2:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}backup delete <filename|latest>",
+                    mtype="groupchat",
+                )
+                return
+            ok, message = await self.delete_database_backup(args[1], actor=actor)
+            prefix = "✅ Backup deleted." if ok else "❌ Backup deletion failed."
+            await self.bot_send_message(mto=room, mbody=f"{prefix}\n{message}", mtype="groupchat")
+            return
+
         if action == "restore":
             await self.cmd_restore(args[1:], room, actor=actor)
             return
@@ -688,14 +747,14 @@ class BackupMixin:
                 f"  {self.command_prefix}backup list [all|page|last]\n"
                 f"  {self.command_prefix}backup show <filename|latest>\n"
                 f"  {self.command_prefix}backup verify <filename|latest>\n"
-                f"  {self.command_prefix}backup restore <filename|latest> confirm\n"
+                f"  {self.command_prefix}backup delete/remove <filename|latest>\n"
                 f"  {self.command_prefix}restore <filename|latest> confirm"
             ),
             mtype="groupchat",
         )
 
     async def cmd_restore(self, args: list[str], room: str, actor: str | None = None) -> None:
-        """Handle !restore and !backup restore."""
+        """Handle !restore and the legacy !backup restore alias."""
         if len(args) < 1:
             await self.bot_send_message(
                 mto=room,

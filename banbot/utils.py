@@ -136,6 +136,16 @@ def normalize_ban_target(jid: str | None = None, nick: str | None = None) -> tup
 
 
 
+def wants_all_pages(args: list[str]) -> bool:
+    """Return True when command arguments request unpaginated output."""
+    return any(str(arg).lower() == "all" for arg in args)
+
+
+def without_all_pages_arg(args: list[str]) -> list[str]:
+    """Return args with any standalone all-paging marker removed."""
+    return [arg for arg in args if str(arg).lower() != "all"]
+
+
 def get_list_page_size(obj=None, default: int = 10) -> int:
     """Return the configured page size for paginated command output."""
     value = getattr(obj, "list_page_size", None) if obj is not None else None
@@ -150,15 +160,6 @@ def get_list_page_size(obj=None, default: int = 10) -> int:
         return max(1, int(value))
     except Exception:
         return default
-
-def wants_all_pages(args: list[str]) -> bool:
-    """Return True when command arguments request unpaginated output."""
-    return any(str(arg).lower() == "all" for arg in args)
-
-
-def without_all_pages_arg(args: list[str]) -> list[str]:
-    """Return args with any standalone all-paging marker removed."""
-    return [arg for arg in args if str(arg).lower() != "all"]
 
 def paginate_lines(lines: list[str], page: int, per_page: int = 10) -> tuple[list[str], int, int, int]:
     """

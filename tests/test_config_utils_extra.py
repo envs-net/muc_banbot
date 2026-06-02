@@ -12,12 +12,12 @@ class ConfigBot(ConfigMixin):
         self.allow_user_cmds = True
         self.allow_admin_commands_in_dms = True
         self.room_invites_enabled = False
+        self.room_invite_max_age_days = 30
         self.health_check_interval = 300
         self.unban_check_interval = 60
         self.max_tempban_days = 30
         self.public_command_rate_limit_window = 30
         self.public_command_rate_limit_max = 3
-        self.list_page_size = 10
         self.muc_write_limit = 5
         self.sync_batch_size = 10
         self.structured_event_logs = True
@@ -111,22 +111,15 @@ def test_startup_config_snapshot_includes_rtbl_and_omemo(monkeypatch):
 
 
 
-def test_runtime_config_snapshot_includes_sync_batch_size():
+def test_runtime_config_snapshot_includes_sync_batch_and_list_page_size():
     bot = ConfigBot()
     bot.sync_batch_size = 7
+    bot.list_page_size = 13
 
     snapshot = bot._runtime_config_snapshot()
 
     assert snapshot["SYNC_BATCH_SIZE"] == 7
-
-
-def test_runtime_config_snapshot_includes_list_page_size():
-    bot = ConfigBot()
-    bot.list_page_size = 12
-
-    snapshot = bot._runtime_config_snapshot()
-
-    assert snapshot["LIST_PAGE_SIZE"] == 12
+    assert snapshot["LIST_PAGE_SIZE"] == 13
 
 
 def test_runtime_config_snapshot_includes_rtbl_refresh_interval():
@@ -161,10 +154,12 @@ def test_runtime_config_snapshot_includes_admin_dm_commands_enabled():
 def test_runtime_config_snapshot_includes_room_invites_enabled():
     bot = ConfigBot()
     bot.room_invites_enabled = True
+    bot.room_invite_max_age_days = 7
 
     snapshot = bot._runtime_config_snapshot()
 
     assert snapshot["ROOM_INVITES_ENABLED"] is True
+    assert snapshot["ROOM_INVITE_MAX_AGE_DAYS"] == 7
 
 
 def test_runtime_config_snapshot_includes_redaction_settings():
