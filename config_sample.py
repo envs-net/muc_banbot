@@ -85,7 +85,7 @@ MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default
 PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 30
 PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 
-# Default number of items shown per page by paginated list commands.
+# Default number of lines shown per page by paginated list commands.
 LIST_PAGE_SIZE = 10
 
 # Long command outputs can be shown in full (default) or paginated.

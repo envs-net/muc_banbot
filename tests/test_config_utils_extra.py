@@ -32,6 +32,8 @@ class ConfigBot(ConfigMixin):
         self.version_check_interval = 3600
         self.version_check_url = None
         self.log_level = "INFO"
+        self.config_output_mode = "all"
+        self.help_output_mode = "all"
 
 
 def test_apply_log_level_falls_back_to_info_for_invalid_level():
@@ -111,15 +113,19 @@ def test_startup_config_snapshot_includes_rtbl_and_omemo(monkeypatch):
 
 
 
-def test_runtime_config_snapshot_includes_sync_batch_and_list_page_size():
+def test_runtime_config_snapshot_includes_sync_batch_list_page_size_and_output_modes():
     bot = ConfigBot()
     bot.sync_batch_size = 7
     bot.list_page_size = 13
+    bot.config_output_mode = "paginate"
+    bot.help_output_mode = "paginate"
 
     snapshot = bot._runtime_config_snapshot()
 
     assert snapshot["SYNC_BATCH_SIZE"] == 7
     assert snapshot["LIST_PAGE_SIZE"] == 13
+    assert snapshot["CONFIG_OUTPUT_MODE"] == "paginate"
+    assert snapshot["HELP_OUTPUT_MODE"] == "paginate"
 
 
 def test_runtime_config_snapshot_includes_rtbl_refresh_interval():
@@ -193,3 +199,10 @@ def test_format_config_import_error_includes_syntax_location():
     assert "config.py:12" in rendered
     assert "JID =" in rendered
     assert "^" in rendered
+
+
+def test_output_modes_are_runtime_writable_config_keys():
+    assert "CONFIG_OUTPUT_MODE" in ConfigMixin.CONFIG_KEYS
+    assert "HELP_OUTPUT_MODE" in ConfigMixin.CONFIG_KEYS
+    assert "CONFIG_OUTPUT_MODE" not in ConfigMixin.CONFIG_NEVER_WRITABLE_KEYS
+    assert "HELP_OUTPUT_MODE" not in ConfigMixin.CONFIG_NEVER_WRITABLE_KEYS

@@ -56,6 +56,8 @@ def set_valid_config(monkeypatch):
         "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
         "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
         "LIST_PAGE_SIZE": 10,
+        "CONFIG_OUTPUT_MODE": "all",
+        "HELP_OUTPUT_MODE": "all",
         "MUC_WRITE_SEMAPHORE": 5,
         "SYNC_BATCH_SIZE": 10,
         "VERSION_CHECK_INTERVAL": 3600,
