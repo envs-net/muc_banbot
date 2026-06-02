@@ -47,11 +47,11 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | Command | Description | Example |
 | --- | --- | --- |
 | `!backup` | Creates a managed full backup | `!backup` |
-| `!backup list [all|page|last]` | Lists managed backups | `!backup list last` |
-| `!backup show <filename|latest>` | Shows details and companions for one backup | `!backup show latest` |
-| `!backup verify <filename|latest>` | Verifies a managed backup | `!backup verify latest` |
-| `!backup delete/remove <filename|latest>` | Deletes a managed backup and companion files | `!backup delete latest` |
-| `!restore <filename|latest> confirm` | Restores a managed backup | `!restore latest confirm` |
+| `!backup list [all/page/last]` | Lists managed backups | `!backup list last` |
+| `!backup show <filename/latest>` | Shows details and companions for one backup | `!backup show latest` |
+| `!backup verify <filename/latest>` | Verifies a managed backup | `!backup verify latest` |
+| `!backup delete/remove <filename/latest>` | Deletes a managed backup and companion files | `!backup delete latest` |
+| `!restore <filename/latest> confirm` | Restores a managed backup | `!restore latest confirm` |
 
 ### Rooms / Policy
 
@@ -125,8 +125,8 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 | Command | Description | Example |
 | --- | --- | --- |
 | `!export` | Exports all bans to `EXPORT_DIR/bans_export_TIMESTAMP.csv` | `!export` |
-| `!export list [all|page|last]` | Lists managed CSV exports | `!export list last` |
-| `!export delete/remove <file|latest>` | Deletes a managed CSV export | `!export delete latest` |
+| `!export list [all/page/last]` | Lists managed CSV exports | `!export list last` |
+| `!export delete/remove <file/latest>` | Deletes a managed CSV export | `!export delete latest` |
 | `!import <file> [dryrun]` | Imports bans from CSV with validation and pre-import full backup | `!import bans.csv dryrun` |
 
 ### Config, Reload and Restart
@@ -162,15 +162,15 @@ Allowed DM commands for admins:
 !config
 !checkupdate / !updatecheck
 !whoami
-!audit [all|page|last|query]
-!room list [all|page|last]
-!room invite list [all|page|last]
-!banlist / !blacklist [all|page|last]
-!banlist / !blacklist rtbl [all|page|last]
-!bansearch <query> [all|page|last]
-!why <jid|nick>
-!ignore / !ignore list [all|page|last]
-!whitelist / !whitelist list [all|page|last]
+!audit [all/page/last/query]
+!room list [all/page/last]
+!room invite list [all/page/last]
+!banlist / !blacklist [all/page/last]
+!banlist / !blacklist rtbl [all/page/last]
+!bansearch <query> [all/page/last]
+!why <jid/nick>
+!ignore / !ignore list [all/page/last]
+!whitelist / !whitelist list [all/page/last]
 !omemo status
 !omemo devices
 !rtbl list
@@ -184,11 +184,11 @@ All other admin commands, especially ban, unban, room changes, RTBL changes, rel
 | Command | Description | Example |
 | --- | --- | --- |
 | `!backup` | Creates a timestamped SQLite database snapshot plus companions when available | `!backup` |
-| `!backup list [all|page|last]` | Lists managed backups, newest first | `!backup list last` |
-| `!backup show <filename|latest>` | Shows details and companions for one backup | `!backup show latest` |
-| `!backup verify <filename|latest>` | Runs SQLite integrity checks and companion readability checks | `!backup verify latest` |
-| `!backup delete/remove <filename|latest>` | Deletes a managed backup and companion files | `!backup delete latest` |
-| `!restore <filename|latest> confirm` | Restores a managed backup directly | `!restore latest confirm` |
+| `!backup list [all/page/last]` | Lists managed backups, newest first | `!backup list last` |
+| `!backup show <filename/latest>` | Shows details and companions for one backup | `!backup show latest` |
+| `!backup verify <filename/latest>` | Runs SQLite integrity checks and companion readability checks | `!backup verify latest` |
+| `!backup delete/remove <filename/latest>` | Deletes a managed backup and companion files | `!backup delete latest` |
+| `!restore <filename/latest> confirm` | Restores a managed backup directly | `!restore latest confirm` |
 
 BanBot creates automatic startup snapshots when `DB_BACKUP_ON_START=True`. `DB_BACKUP_KEEP` controls how many managed snapshots are kept; the default is `15`. Each snapshot includes a companion `config.py` copy when the active config file can be resolved and can include `OMEMO_STORAGE_FILE` when `DB_BACKUP_INCLUDE_OMEMO=True` and the file exists. Restores create a safety backup of the current database and config before replacing them, reload DB-backed caches, and still recommend a process restart afterwards.
 
@@ -333,8 +333,8 @@ See [RTBL](rtbl.md) for behavior details.
 | Command | Description |
 | --- | --- |
 | `!export` | Exports all bans to `EXPORT_DIR/bans_export_TIMESTAMP.csv` |
-| `!export list [all|page|last]` | Lists managed CSV exports |
-| `!export delete/remove <file|latest>` | Deletes a managed CSV export |
+| `!export list [all/page/last]` | Lists managed CSV exports |
+| `!export delete/remove <file/latest>` | Deletes a managed CSV export |
 | `!import <file> [dryrun]` | Imports bans from CSV with validation and pre-import full backup |
 
 See [Import / Export](import-export.md).
