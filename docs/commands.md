@@ -31,7 +31,7 @@ Several commands support pagination. Use a page number, `last`, or `all`:
 
 | Command | Description | Example |
 | --- | --- | --- |
-| `!help` | Shows admin help | `!help` |
+| `!help` / `!help <command>` | Shows full admin help or focused usage for every command topic/subtopic | `!help room invite` |
 | `!status` | Shows health, rooms, uptime, bans, DB, RTBL, and workers | `!status` |
 | `!config [show]` | Shows full configuration in `config_sample.py` section order; secrets are hidden | `!config show` |
 | `!config set <KEY> <value>` | Updates a runtime-writable config option | `!config set LOG_LEVEL DEBUG` |
@@ -158,6 +158,9 @@ Allowed DM commands for admins:
 
 ```text
 !help
+!help <command>
+!help room invite
+!help rtbl publish
 !status
 !config
 !checkupdate / !updatecheck

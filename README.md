@@ -123,7 +123,7 @@ Examples assume the default command prefix `!`.
 
 | Command | Description |
 | --- | --- |
-| `!help` | Show available commands |
+| `!help` / `!help <command>` | Show available commands or focused help for every command topic, including subtopics such as `room invite` and `rtbl publish` |
 | `!status` | Show bot health, uptime, rooms, bans, RTBL, and DB state |
 | `!config [show]` | Show full active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |

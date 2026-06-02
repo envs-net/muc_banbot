@@ -622,3 +622,122 @@ async def test_policy_delete_and_remove_alias_clear_text(fake_msg_factory, monke
     assert bot.policy_enabled is False
     assert bot.policy_text == ""
     assert "cleared" in bot.sent[-1]["mbody"]
+
+@pytest.mark.asyncio
+async def test_admin_help_room_shows_focused_room_usage(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!help room"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "Usage:" in body
+    assert "!room list [all|page]" in body
+    assert "!room invite accept <id>" in body
+    assert bot.room_calls == []
+
+
+@pytest.mark.asyncio
+async def test_admin_help_redact_shows_focused_redact_usage_without_running_command(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!help redact"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "Usage:" in body
+    assert "!redact <jid> [reason]" in body
+    assert "!redact id <room_jid> <stanza_id> [reason]" in body
+    assert "!redact cleanup" in body
+
+
+@pytest.mark.asyncio
+async def test_admin_help_topic_aliases_and_unknown_topic(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!help blacklist"))
+    assert "!banlist [all|page|last]" in bot.sent[-1]["mbody"]
+    assert "alias for !banlist" in bot.sent[-1]["mbody"]
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!help does-not-exist"))
+    assert "Unknown help topic" in bot.sent[-1]["mbody"]
+    assert "Use !help" in bot.sent[-1]["mbody"]
+
+@pytest.mark.asyncio
+async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    expected = {
+        "help": "!help <command>",
+        "status": "!status",
+        "config": "!config show",
+        "reload": "!reload / !reloadconfig",
+        "reloadconfig": "!reload / !reloadconfig",
+        "restart": "!restart confirm",
+        "checkupdate": "!checkupdate / !updatecheck",
+        "updatecheck": "!checkupdate / !updatecheck",
+        "whoami": "!whoami",
+        "audit": "!audit [all|page|last|query]",
+        "backup": "!backup list [all|page|last]",
+        "restore": "!restore <filename|latest> confirm",
+        "room": "!room list [all|page]",
+        "room invite": "!room invite cleanup [expired]",
+        "invite": "!room invite accept <id>",
+        "policy": "!policy show",
+        "rules": "!policy show",
+        "ban": "!ban <jid|nick|*.domain.tld> [comment]",
+        "tempban": "!tempban <jid|nick> <10m|2h|1d> [comment]",
+        "unban": "!unban <jid|nick|*.domain.tld>",
+        "redact": "!redact cleanup",
+        "banlist": "!banlist [all|page|last]",
+        "blacklist": "!blacklist ... - alias for !banlist",
+        "bansearch": "!bansearch <query> [all|page|last]",
+        "why": "!why <nick|jid>",
+        "sync": "!sync",
+        "syncadmins": "!syncadmins",
+        "syncbans": "!syncbans",
+        "ignore": "!ignore add <jid|domain> [reason]",
+        "whitelist": "!whitelist ... - alias for !ignore",
+        "omemo": "!omemo reset [confirm]",
+        "rtbl": "!rtbl refresh [service_jid] [node]",
+        "rtbl publish": "!rtbl publish sync",
+        "export": "!export list [all|page|last]",
+        "import": "!import <filename> [dryrun]",
+    }
+
+    for topic, expected_text in expected.items():
+        await bot.on_message(admin_msg(fake_msg_factory, f"!help {topic}"))
+        body = bot.sent[-1]["mbody"]
+        assert "Usage:" in body, topic
+        assert expected_text in body, topic
+        assert "Unknown help topic" not in body, topic
+
+
+@pytest.mark.asyncio
+async def test_help_subtopics_do_not_execute_commands(fake_msg_factory, monkeypatch):
+    import banbot.commands as commands
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!help room invite"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!help rtbl publish"))
+
+    assert bot.room_calls == []
+    assert bot.rtbl_calls == []
+    assert "!rtbl publish status" in bot.sent[-1]["mbody"]

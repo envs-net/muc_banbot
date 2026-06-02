@@ -110,7 +110,8 @@ class DirectMessageMixin:
 
         async with self._redirect_command_output_to_dm(reply_to):
             if cmd == "help":
-                await self._send_direct_message(reply_to, self._admin_help_text())
+                help_text = self._admin_topic_help_text(args) if args else self._admin_help_text()
+                await self._send_direct_message(reply_to, help_text)
                 return True
 
             if cmd == "config":
