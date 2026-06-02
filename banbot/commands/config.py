@@ -4,16 +4,10 @@ import asyncio
 import inspect
 import logging
 import os
-import sys
-
-from ._version import __version__
+from .._version import __version__
+from .context import commands_module_attr
 
 log = logging.getLogger(__name__)
-
-
-def _commands_module_attr(name: str, fallback):
-    commands_module = sys.modules.get("banbot.commands")
-    return getattr(commands_module, name, fallback)
 
 
 class CommandConfigMixin:
@@ -97,7 +91,7 @@ class CommandConfigMixin:
             encrypted=False,
         )
 
-        asyncio_module = _commands_module_attr("asyncio", asyncio)
+        asyncio_module = commands_module_attr("asyncio", asyncio)
         restart_task = asyncio_module.create_task(self._restart_process())
         self._restart_task = restart_task
 
@@ -112,8 +106,8 @@ class CommandConfigMixin:
     async def _restart_process(self) -> None:
         """Flush state, disconnect, and terminate the process for supervisor restart."""
         # Give the confirmation message a short chance to leave the XMPP stream.
-        asyncio_module = _commands_module_attr("asyncio", asyncio)
-        os_module = _commands_module_attr("os", os)
+        asyncio_module = commands_module_attr("asyncio", asyncio)
+        os_module = commands_module_attr("os", os)
 
         await asyncio_module.sleep(0.5)
 

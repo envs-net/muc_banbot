@@ -92,3 +92,15 @@ class CommandImportMixin:
                 "backup": import_backup,
             },
         )
+
+
+class CommandImportExportMixin(CommandImportMixin):
+    async def _dispatch_export_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
+        if hasattr(self, "cmd_export"):
+            await self.cmd_export(args, room)
+        else:
+            _success, message = await self.export_bans_to_csv()
+            await self.bot_send_message(mto=room, mbody=message, mtype="groupchat")
+
+    async def _dispatch_import_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
+        await self._handle_import_command(args, room, nick)

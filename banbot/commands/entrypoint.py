@@ -1,26 +1,9 @@
 """XMPP groupchat command entry point."""
 
-import asyncio
-import os
-
-from config import ADMIN_ROOM, NICK
-
-from .command_config import CommandConfigMixin
-from .command_help import CommandHelpMixin
-from .command_import import CommandImportMixin
-from .command_policy import CommandPolicyMixin
-from .command_router import ADMIN_COMMANDS, PUBLIC_COMMANDS, CommandRouterMixin
-from .command_usage import CommandUsageMixin
+from .context import bot_nick
 
 
-class CommandMixin(
-    CommandConfigMixin,
-    CommandUsageMixin,
-    CommandHelpMixin,
-    CommandImportMixin,
-    CommandPolicyMixin,
-    CommandRouterMixin,
-):
+class CommandEntryPointMixin:
     def _actor_jid_from_room_nick(self, room: str, nick: str) -> str:
         """Resolve a room occupant nick to the best actor JID for logs/audit."""
         jid = self.occupants.get(room, {}).get(nick, {}).get("jid")
@@ -37,7 +20,7 @@ class CommandMixin(
         - Parses commands
         - Delegates to user/admin handlers
         """
-        if msg["mucnick"].lower() == NICK.lower():
+        if msg["mucnick"].lower() == bot_nick().lower():
             return  # Ignore own messages
 
         encrypted = False

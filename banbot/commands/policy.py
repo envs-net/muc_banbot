@@ -1,13 +1,6 @@
 """Public policy/rules command handling."""
 
-import sys
-
-from config import ADMIN_ROOM
-
-
-def _admin_room() -> str:
-    commands_module = sys.modules.get("banbot.commands")
-    return getattr(commands_module, "ADMIN_ROOM", ADMIN_ROOM)
+from .context import admin_room
 
 
 class CommandPolicyMixin:
@@ -18,7 +11,7 @@ class CommandPolicyMixin:
             "prefix": self.command_prefix,
             "room": room,
             "room_count": str(len(getattr(self, "protected_rooms", []))),
-            "admin_room": _admin_room(),
+            "admin_room": admin_room(),
         }
 
         formatted = text
@@ -187,3 +180,6 @@ class CommandPolicyMixin:
             ),
             mtype="groupchat",
         )
+
+    async def _dispatch_policy_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
+        await self.cmd_policy(args, room)

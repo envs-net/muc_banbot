@@ -1,6 +1,6 @@
 """Help text generation for BanBot commands."""
 
-from .utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
+from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 
 class CommandHelpMixin:
