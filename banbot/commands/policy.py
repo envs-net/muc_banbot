@@ -176,7 +176,7 @@ class CommandPolicyMixin:
             mto=room,
             mbody=(
                 f"❌ Unknown policy action: {action}\n"
-                f"Available: show / set / enable / disable / clear / delete / remove / help"
+                f"Available: show / set / enable / disable / clear / delete / remove / help / usage"
             ),
             mtype="groupchat",
         )

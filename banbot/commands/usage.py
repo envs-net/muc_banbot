@@ -11,7 +11,8 @@ class CommandUsageMixin:
             f"  {p}policy set <text>\n"
             f"  {p}policy enable\n"
             f"  {p}policy disable\n"
-            f"  {p}policy clear/delete/remove\n\n"
+            f"  {p}policy clear/delete/remove\n"
+            f"  {p}policy help/usage\n\n"
             "Supported placeholders:\n"
             "  {prefix}, {room}, {room_count}, {admin_room}, {bot_name}\n"
             "Use literal \\n for line breaks."
@@ -28,7 +29,7 @@ class CommandUsageMixin:
             f"  {p}room invite list [all|page|last]\n"
             f"  {p}room invite accept <id>\n"
             f"  {p}room invite decline/remove/delete/del/rm <id>\n"
-            f"  {p}room invite cleanup"
+            f"  {p}room invite cleanup [expired]"
         )
 
     def _room_invite_usage_text(self) -> str:
