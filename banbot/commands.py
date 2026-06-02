@@ -7,6 +7,8 @@ from config import ADMIN_ROOM, NICK
 
 from .command_config import CommandConfigMixin
 from .command_help import CommandHelpMixin
+from .command_import import CommandImportMixin
+from .command_policy import CommandPolicyMixin
 from .command_router import ADMIN_COMMANDS, PUBLIC_COMMANDS, CommandRouterMixin
 from .command_usage import CommandUsageMixin
 
@@ -15,6 +17,8 @@ class CommandMixin(
     CommandConfigMixin,
     CommandUsageMixin,
     CommandHelpMixin,
+    CommandImportMixin,
+    CommandPolicyMixin,
     CommandRouterMixin,
 ):
     def _actor_jid_from_room_nick(self, room: str, nick: str) -> str:
