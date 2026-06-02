@@ -239,9 +239,17 @@ async def test_restore_safety_backup_records_actor(backup_config):
         assert ok is True
         assert "Database restored" in message
 
-        created_events = [event for event in bot.audit_events if event[0] == "db_backup_created"]
-        restored_events = [event for event in bot.audit_events if event[0] == "db_backup_restored"]
+        created_events = [
+            event for event in bot.audit_events
+            if event[0] == "db_backup_created"
+        ]
+        restored_events = [
+            event for event in bot.audit_events
+            if event[0] == "db_backup_restored"
+        ]
 
+        assert len(created_events) >= 2
+        assert created_events[0][1]["actor"] == "creator@example.org"
         assert created_events[-1][1]["actor"] == "restorer@example.org"
         assert created_events[-1][1]["details"]["reason"] == "before-restore"
         assert restored_events[-1][1]["actor"] == "restorer@example.org"
@@ -379,9 +387,7 @@ async def test_backup_list_paginates_and_delete_remove_aliases(backup_config):
         assert "Page 2/2" in bot.sent[-1]["mbody"]
 
         latest = bot.list_database_backups()[0].path
-        config_companion = latest
-        with zipfile.ZipFile(latest) as archive:
-            assert "config.py" in archive.namelist()
+        config_companion = bot._config_backup_path_for(latest)
 
         await bot.cmd_backup(["remove", latest.name], "admin@conference.example.org", actor="admin@example.org")
         body = bot.sent[-1]["mbody"]
