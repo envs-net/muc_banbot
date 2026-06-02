@@ -156,7 +156,7 @@ class CommandPolicyMixin:
         if action in ("clear", "delete", "remove"):
             enabled, text = await self.get_public_policy()
 
-            if not enabled and not text.strip():
+            if not text.strip():
                 await self.bot_send_message(
                     mto=room,
                     mbody="ℹ️ No public policy text is configured.",
