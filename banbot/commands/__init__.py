@@ -11,7 +11,8 @@ import os
 from config import ADMIN_ROOM, NICK
 
 from .backups import CommandBackupMixin
-from .config import CommandConfigMixin
+from .omemo import CommandOmemoMixin
+from .runtime import CommandRuntimeMixin
 from .constants import ADMIN_COMMANDS, PUBLIC_COMMANDS
 from .entrypoint import CommandEntryPointMixin
 from .help import CommandHelpMixin
@@ -26,10 +27,11 @@ from .usage import CommandUsageMixin
 
 
 class CommandMixin(
-    CommandConfigMixin,
+    CommandRuntimeMixin,
     CommandUsageMixin,
     CommandHelpMixin,
     CommandBackupMixin,
+    CommandOmemoMixin,
     CommandRoomsMixin,
     CommandModerationMixin,
     CommandImportExportMixin,
