@@ -97,6 +97,8 @@ def domain_matches(user_domain: str | None, banned_domain: str | None) -> bool:
         return False
     user_domain = user_domain.lower().strip(".")
     banned_domain = banned_domain.lower().strip(".")
+    if not user_domain or not banned_domain:
+        return False
     return user_domain == banned_domain or user_domain.endswith("." + banned_domain)
 
 

@@ -6,6 +6,7 @@ from banbot.utils import (
     bare_jid,
     domain_matches,
     human_time,
+    get_list_page_size,
     looks_like_domain,
     normalize_ban_target,
     paginate_lines,
@@ -431,3 +432,114 @@ def test_resolve_page_uses_ceiling_total_pages_and_clamps_to_last():
     assert resolve_page(-1, 10, per_page=10) == 1
     assert resolve_page(-1, 11, per_page=10) == 2
     assert resolve_page(99, 11, per_page=10) == 2
+
+
+
+def test_get_list_page_size_prefers_object_value_over_config_and_clamps_minimum(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "LIST_PAGE_SIZE", 25, raising=False)
+
+    class Bot:
+        list_page_size = "7"
+
+    class ZeroBot:
+        list_page_size = 0
+
+    class NegativeBot:
+        list_page_size = -5
+
+    assert get_list_page_size(Bot()) == 7
+    assert get_list_page_size(ZeroBot()) == 1
+    assert get_list_page_size(NegativeBot()) == 1
+
+
+def test_get_list_page_size_uses_config_value_and_handles_invalid_config(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "LIST_PAGE_SIZE", "12", raising=False)
+    assert get_list_page_size() == 12
+
+    monkeypatch.setattr(config, "LIST_PAGE_SIZE", "bad", raising=False)
+    assert get_list_page_size(default=9) == 9
+
+    monkeypatch.setattr(config, "LIST_PAGE_SIZE", 0, raising=False)
+    assert get_list_page_size(default=9) == 1
+
+
+def test_get_list_page_size_falls_back_when_config_import_fails(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def failing_import(name, *args, **kwargs):
+        if name == "config":
+            raise RuntimeError("config unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+    assert get_list_page_size(default=13) == 13
+
+
+def test_parse_duration_keeps_error_classes_for_one_character_and_two_character_inputs():
+    with pytest.raises(ValueError, match="Invalid duration format"):
+        parse_duration("m")
+    with pytest.raises(ValueError, match="Invalid duration number"):
+        parse_duration("xm")
+    assert parse_duration("1m") == 60
+
+
+def test_normalize_ban_target_rejects_blank_nick_after_strip():
+    with pytest.raises(ValueError, match="Ban target requires"):
+        normalize_ban_target(nick="   ")
+
+
+def test_validate_domain_ban_trims_wildcard_and_outer_dots_before_counting_labels():
+    assert validate_domain_ban("*.sub.example.org.") == (True, "")
+    ok, message = validate_domain_ban("*.org.")
+    assert ok is False
+    assert "*.org" in message
+
+
+def test_domain_matches_empty_after_stripping_dots_does_not_match_everything():
+    assert domain_matches("example.org", ".") is False
+    assert domain_matches(".", "example.org") is False
+
+
+def test_get_list_page_size_invalid_object_value_uses_default_without_config(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "LIST_PAGE_SIZE", 25, raising=False)
+
+    class BadBot:
+        list_page_size = "not-an-int"
+
+    assert get_list_page_size(BadBot(), default=14) == 14
+
+
+def test_get_list_page_size_object_none_falls_back_to_config(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "LIST_PAGE_SIZE", "16", raising=False)
+
+    class NoneBot:
+        list_page_size = None
+
+    assert get_list_page_size(NoneBot(), default=14) == 16
+
+
+def test_paginate_lines_page_size_larger_than_total_and_resolve_mid_page():
+    lines = ["one", "two"]
+    assert paginate_lines(lines, 1, per_page=99) == (["one", "two"], 1, 1, 2)
+    assert resolve_page(2, 25, per_page=10) == 2
+
+
+def test_validate_domain_ban_keeps_double_wildcard_generic_after_cleanup():
+    ok, message = validate_domain_ban("**.org")
+    assert ok is True
+    assert message == ""
+
+
+def test_domain_matches_does_not_match_when_banned_domain_only_becomes_empty_after_strip():
+    assert domain_matches(".", ".") is False
+    assert domain_matches("sub.example.org", "...") is False
