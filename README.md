@@ -25,8 +25,8 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 * ♻️ RTBL snapshot reconciliation with stale local ban cleanup
 * 📡 Optional own RTBL publish feed for local bans
 * 🧾 SQLite audit log and structured JSON event logs
-* 💾 CSV import/export with managed full backups
-* 🗄️ Managed SQLite/config.py backup archives, restore command, and automatic startup backups
+* 💾 CSV import/export with managed safety backups
+* 🗄️ Managed ZIP backup archives with manifest, restore command, verification, and automatic startup backups
 * ✅ Startup/runtime config validation with safe `!reloadconfig`
 * 🚦 Rate limiting for public protected-room commands
 * 📜 Optional public room policy text via `!rules` / `!policy`
@@ -133,12 +133,12 @@ Examples assume the default command prefix `!`.
 | `!checkupdate` / `!updatecheck` | Check whether a newer release is available |
 | `!whoami` | Show your affiliation, role, and permissions |
 | `!audit [all/page/last/query]` | Show audit log entries |
-| `!backup` | Create a managed full backup |
-| `!backup list [all/page/last]` | List managed full backups |
-| `!backup show <file/latest>` | Inspect one managed backup |
-| `!backup verify <file/latest>` | Verify a managed backup |
-| `!backup delete/remove <file/latest>` | Delete a managed full backup |
-| `!restore <file/latest> confirm` | Restore a managed full backup |
+| `!backup` | Create a managed full ZIP backup archive |
+| `!backup list [all/page/last]` | List managed full backup archives |
+| `!backup show <file/latest>` | Inspect one managed backup archive |
+| `!backup verify <file/latest>` | Verify a managed backup archive |
+| `!backup delete/remove <file/latest>` | Delete a managed full backup archive |
+| `!restore <file/latest> confirm` | Restore a managed full backup archive |
 | `!room add <room>` | Add a protected room |
 | `!room remove/delete <room>` | Remove a protected room |
 | `!room list [all/page]` | List protected rooms |
@@ -251,15 +251,18 @@ The full documentation is split into focused guides. Start with the [documentati
 
 * [Configuration](docs/configuration.md)
 * [Commands](docs/commands.md)
+* [Backups and Restore](docs/backups.md)
+* [Rooms and Invites](docs/rooms.md)
+* [Import / Export](docs/import-export.md)
+* [OMEMO](docs/omemo.md)
+* [RTBL / PubSub](docs/rtbl.md)
+* [Prosody PubSub Setup](docs/rtbl_pubsub-setup.md)
+* [Public Policy / Rules](docs/policy.md)
 * [Admin Protection](docs/admin-protection.md)
 * [Database](docs/database.md)
 * [Testing and CI](docs/testing.md)
 * [Release Checklist](docs/release-checklist.md)
 * [Troubleshooting](docs/troubleshooting.md)
-* [Import / Export](docs/import-export.md)
-* [OMEMO](docs/omemo.md)
-* [RTBL / PubSub](docs/rtbl.md)
-* [Prosody PubSub Setup](docs/rtbl_pubsub-setup.md)
 
 ---
 

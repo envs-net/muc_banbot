@@ -62,16 +62,19 @@ Check:
 Update as needed:
 
 * `README.md`
-* `docs/index.md`
+* `docs/README.md`
 * `docs/configuration.md`
 * `docs/commands.md`
+* `docs/backups.md`
+* `docs/rooms.md`
+* `docs/import-export.md`
+* `docs/omemo.md`
 * `docs/rtbl.md`
 * `docs/rtbl_pubsub-setup.md`
-* `docs/omemo.md`
+* `docs/policy.md`
 * `docs/admin-protection.md`
 * `docs/database.md`
 * `docs/testing.md`
-* `docs/import-export.md`
 * `docs/troubleshooting.md`
 
 Check that command examples still use the correct default prefix and that paginated commands document `all`, `last`, and page-number behavior.

@@ -7,11 +7,13 @@ cp config_sample.py config.py
 $EDITOR config.py
 ```
 
+`config.py` is private deployment state. Do not commit it.
+
 ## `config_sample.py` as Display Reference
 
 BanBot uses `config_sample.py` as the reference for the section order shown by `!config`. Keep this file deployed together with the bot and update it when adding new configuration options.
 
-Do not put local secrets or production values into `config_sample.py`; use `config.py` for local configuration. `config_sample.py` should remain a versioned sample file, while `config.py`, `data/backups/`, and OMEMO storage should be treated as private deployment files.
+Do not put local secrets or production values into `config_sample.py`; use `config.py` for local configuration. `config_sample.py` should remain a versioned sample file.
 
 If `config_sample.py` is missing or incomplete, BanBot falls back to its built-in config ordering, but the displayed grouping may be less complete.
 
@@ -34,9 +36,51 @@ DB_FILE = "banbot.db"
 | `ADMIN_ROOM` | Admin/control MUC JID |
 | `NICK` | Bot nickname in rooms |
 | `DB_FILE` | SQLite database path |
-| `DB_BACKUP_ON_START` | Create managed backup archives on startup |
-| `DB_BACKUP_DIR` | Directory for managed backup archives |
-| `DB_BACKUP_KEEP` | Number of managed backup archives to keep |
+
+## Runtime Config Commands
+
+```text
+!config [all|page|last]
+!config show [all|page|last]
+!config set <KEY> <value>
+!config unset <KEY>
+!reloadconfig
+```
+
+`!config` hides secret values such as `PASSWORD`.
+
+Runtime-writable values are marked with `✏️` in the output. Protected/startup-only values are marked as protected and cannot be changed through chat commands.
+
+`!config unset <KEY>` resets a runtime-writable value to the default from `config_sample.py`.
+
+## Output Modes and Paging
+
+```python
+LIST_PAGE_SIZE = 10
+CONFIG_OUTPUT_MODE = "all"
+HELP_OUTPUT_MODE = "all"
+```
+
+`LIST_PAGE_SIZE` controls paginated list commands such as `!banlist`, `!audit`, `!backup list`, `!export list`, `!room list`, and invite lists.
+
+`CONFIG_OUTPUT_MODE` controls whether `!config` defaults to full output or paginated output.
+
+`HELP_OUTPUT_MODE` controls whether `!help` defaults to full output or paginated output.
+
+Accepted values:
+
+```python
+"all"
+"paginate"
+```
+
+The default is `"all"` to preserve previous behavior. Explicit full output is always available:
+
+```text
+!help all
+!config all
+!config show all
+```
 
 ## Startup-Only Settings
 
@@ -62,172 +106,136 @@ These require a bot restart. `!reloadconfig` warns if they changed and keeps the
 * `OMEMO_PLAINTEXT_FALLBACK`
 * `OMEMO_RESET_ON_IDENTITY_CHANGE`
 
-## Runtime-Reloadable Settings
+## Common Runtime-Reloadable Settings
 
-Most operational settings can be shown, edited, reset to the sample default, or reloaded from disk with:
+Common runtime-reloadable settings include:
 
-```text
-!config show [all|page|last]
-!config all
-!config set <KEY> <value>
-!config unset <KEY>
-!reloadconfig
+* `LOG_LEVEL`
+* `COMMAND_PREFIX`
+* `ANNOUNCE_STARTUP`
+* `ANNOUNCE_SYNC_DETAILS`
+* `SHOW_BAN_IN_MUC`
+* `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS`
+* `ALLOW_ADMIN_COMMANDS_IN_DMS`
+* `ROOM_INVITES_ENABLED`
+* `ROOM_INVITE_MAX_AGE_DAYS`
+* `HEALTH_CHECK_INTERVAL`
+* `UNBAN_CHECK_INTERVAL`
+* `MAX_TEMPBAN_DAYS`
+* `PUBLIC_COMMAND_RATE_LIMIT_WINDOW`
+* `PUBLIC_COMMAND_RATE_LIMIT_MAX`
+* `LIST_PAGE_SIZE`
+* `CONFIG_OUTPUT_MODE`
+* `HELP_OUTPUT_MODE`
+* `MUC_WRITE_SEMAPHORE`
+* `SYNC_BATCH_SIZE`
+* `STRUCTURED_EVENT_LOGS`
+* `AUDIT_LOG_ENABLED`
+* `AUDIT_LOG_RETENTION_DAYS`
+* alert settings
+* `RTBL_ANNOUNCE`
+* `RTBL_REFRESH_INTERVAL`
+* version-check settings
+* redaction settings
+
+Use `!config` in the admin room for the current authoritative runtime-writable list.
+
+## Connection Settings
+
+```python
+CONNECT_HOST = None
+CONNECT_PORT = 5222
+CONNECT_DIRECT_TLS = False
 ```
 
-`!config show` displays active runtime values from `config.py`, but uses `config_sample.py` as the reference for section order and for appending missing supported keys. It marks runtime-writable values with `✏️`, marks protected/restart-only values with `🔒`, and hides secrets such as `PASSWORD` as `****`. `!config all` forces the full output when pagination is enabled.
+`CONNECT_HOST=None` uses the domain from `JID`.
 
-`!config set` and `!config unset` only allow runtime-writable settings. Identity, password, database path, admin room, RTBL setup, and OMEMO startup settings remain protected and require manual edit + restart.
+Use STARTTLS on 5222 for normal client-to-server connections. Use direct TLS only when your server expects it.
 
-`!reloadconfig` validates `config.py`, keeps the last known good runtime config if validation fails, and reports warnings/errors in the admin room.
-
-Common runtime settings:
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `COMMAND_PREFIX` | `!` | Prefix used for commands |
-| `DB_BACKUP_ON_START` | `True` | Create an automatic backup archive on startup |
-| `DB_BACKUP_DIR` | `data/backups` | Directory for managed backup archives |
-| `DB_BACKUP_INCLUDE_OMEMO` | `True` | Include `OMEMO_STORAGE_FILE` in the ZIP archive when it exists |
-| `EXPORT_DIR` | `data/exports` | Directory for managed CSV exports |
-| `EXPORT_KEEP` | `15` | Number of managed CSV exports to keep |
-| `DB_BACKUP_KEEP` | `15` | Number of managed backup archives to retain |
-| `LOG_LEVEL` | `INFO` | Python logging level |
-| `ANNOUNCE_STARTUP` | `True` | Send startup announcements |
-| `ANNOUNCE_SYNC_DETAILS` | `True` | Show detailed startup sync output |
-| `SHOW_BAN_IN_MUC` | `False` | Announce bans in protected rooms |
-| `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS` | `True` | Enable public protected-room commands |
-| `ALLOW_ADMIN_COMMANDS_IN_DMS` | `True` | Allow admins to use selected read-only commands via direct messages / MUC PMs |
-| `ROOM_INVITES_ENABLED` | `False` | Enable admin-reviewed protected-room invite workflow |
-| `ROOM_INVITE_MAX_AGE_DAYS` | `30` | Expire pending room invites older than this many days; `0` disables expiry |
-| `ALERT_ON_RECONNECT` | `True` | Alert after a successful reconnect |
-| `ALERT_ON_ADMIN_RIGHTS_LOST` | `True` | Alert when the bot loses admin/owner rights |
-| `ALERT_ON_HEALTH_CHECK_FAILURE` | `True` | Alert on room health-check failures |
-| `ALERT_ON_DB_STATS_FAILURE` | `True` | Alert when DB stats cannot be read |
-| `ALERT_ON_REDACTION_FAILURE` | `True` | Alert on failed message redactions |
-| `ALERT_ON_DB_SIZE_MB` | `0` | Alert when DB size reaches this MiB value; `0` disables |
-| `ALERT_ON_RTBL_REFRESH_FAILURES` | `3` | Alert after this many consecutive RTBL refresh failures per subscription; `0` disables |
-| `ALERT_DEDUP_WINDOW` | `300` | Suppress duplicate alerts with the same key for this many seconds |
-| `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` | `30` | Rate-limit window in seconds |
-| `PUBLIC_COMMAND_RATE_LIMIT_MAX` | `3` | Max public command uses per nick/room/command/window |
-| `LIST_PAGE_SIZE` | `10` | Default number of items shown per page by paginated list commands |
-| `CONFIG_OUTPUT_MODE` | `all` | Output mode for `!config`: `all` or `paginate` |
-| `HELP_OUTPUT_MODE` | `all` | Output mode for `!help`: `all` or `paginate` |
-| `STRUCTURED_EVENT_LOGS` | `True` | Emit JSON logs for important events |
-| `AUDIT_LOG_ENABLED` | `True` | Store audit events in SQLite |
-| `AUDIT_LOG_RETENTION_DAYS` | `365` | Audit retention in days; valid range 1-365 |
-| `HEALTH_CHECK_INTERVAL` | `300` | Health check interval; minimum 60 seconds |
-| `UNBAN_CHECK_INTERVAL` | `60` | Expired tempban check interval |
-| `MAX_TEMPBAN_DAYS` | `30` | Max temporary ban duration; 1-365 |
-| `MUC_WRITE_SEMAPHORE` | `5` | Concurrent XMPP IQ operation limit |
-| `RTBL_ANNOUNCE` | `True` | Announce RTBL bans and skipped admin-protected entries in the admin room |
-| `RTBL_REFRESH_INTERVAL` | `3600` | RTBL subscription refresh interval in seconds; `0` disables periodic refresh |
-| `REDACTION_ENABLED` | `False` | Enable protected-room message redaction indexing and commands |
-| `REDACTION_INDEX_RETENTION_DAYS` | `30` | Days to retain indexed stanza IDs; `0` keeps them indefinitely |
-| `REDACTION_AUTO_REASONS` | `[]` | Ban-comment reason strings that trigger automatic redaction |
-| `VERSION_CHECK_ENABLED` | `False` | Enable GitHub release checks |
-| `VERSION_CHECK_INTERVAL` | `3600` | Release check interval; minimum 300 seconds |
-| `VERSION_CHECK_URL` | GitHub latest release URL | URL used to discover latest release |
-
-Boolean aliases such as `true`/`false` are supported by the config loader for convenience.
-
-
-## Database Backup Settings
-
-BanBot can manage self-contained ZIP backup archives directly from the admin room. Automatic startup backups are enabled by default. Manual backups and restores use the same managed backup directory. Each archive contains a SQLite database snapshot plus `manifest.json`. When an active `config.py` file can be resolved, it is included in the archive. When `DB_BACKUP_INCLUDE_OMEMO=True`, existing OMEMO storage is included as well; missing or disabled OMEMO storage is skipped without failing the backup.
+## Backup Settings
 
 ```python
 DB_BACKUP_ON_START = True
 DB_BACKUP_DIR = "data/backups"
 DB_BACKUP_KEEP = 15
 DB_BACKUP_INCLUDE_OMEMO = True
+```
+
+Managed backups are self-contained ZIP archives with `manifest.json`, `database.sqlite3`, and optional `config.py` / `omemo.json` entries.
+
+See [Backups and Restore](backups.md).
+
+## Managed CSV Export Settings
+
+```python
 EXPORT_DIR = "data/exports"
 EXPORT_KEEP = 15
-LIST_PAGE_SIZE = 10
-CONFIG_OUTPUT_MODE = "all"
-HELP_OUTPUT_MODE = "all"
 ```
 
-Commands:
+See [Import / Export](import-export.md).
 
-```text
-!backup
-!backup list [all|page|last]
-!backup show latest
-!backup verify latest
-!backup delete latest
-!restore latest confirm
-!restore <filename> confirm
-```
-
-`!restore` always requires `confirm` and creates a safety backup archive of the current database/config/OMEMO state before replacing `DB_FILE` and, when present in the selected backup, `config.py` and OMEMO storage. The bot reloads DB-backed caches after restore, but a process restart is still recommended.
-
-## Connection Settings
-
-Connection settings are startup-only and require a bot restart when changed.
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `CONNECT_HOST` | `None` | Optional host override; `None` uses the JID domain |
-| `CONNECT_PORT` | `5222` | TCP port for the XMPP connection |
-| `CONNECT_DIRECT_TLS` | `False` | Use direct TLS instead of STARTTLS |
-
-Examples:
+## Bot Settings
 
 ```python
-# Default STARTTLS C2S
-CONNECT_HOST = None
-CONNECT_PORT = 5222
-CONNECT_DIRECT_TLS = False
-
-# Direct TLS / legacy SSL
-CONNECT_PORT = 5223
-CONNECT_DIRECT_TLS = True
-
-# Native XMPP over direct TLS on 443
-CONNECT_PORT = 443
-CONNECT_DIRECT_TLS = True
+LOG_LEVEL = "INFO"
+COMMAND_PREFIX = "!"
+ANNOUNCE_STARTUP = True
+ANNOUNCE_SYNC_DETAILS = True
+SHOW_BAN_IN_MUC = False
+ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS = True
+ALLOW_ADMIN_COMMANDS_IN_DMS = True
+ROOM_INVITES_ENABLED = False
+ROOM_INVITE_MAX_AGE_DAYS = 30
+HEALTH_CHECK_INTERVAL = 300
+UNBAN_CHECK_INTERVAL = 60
+MAX_TEMPBAN_DAYS = 30
+PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 30
+PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 ```
 
-## vCard / Avatar Settings
+Room invite details are documented in [Rooms and Invites](rooms.md).
+
+## Performance Settings
 
 ```python
-AVATAR_PATH = "avatar.png"
-VCARD_NICKNAME = "BanBot"
-VCARD_FN = "Ban Management Bot"
-VCARD_ORG = "Example"
-VCARD_ROLE = "Moderation Bot"
-VCARD_URL = "https://example.org"
-VCARD_NOTE = "XMPP MUC ban management bot"
+MUC_WRITE_SEMAPHORE = 5
+SYNC_BATCH_SIZE = 10
 ```
 
-Avatar/vCard data is updated on startup and after `!reloadconfig`.
+`MUC_WRITE_SEMAPHORE` limits concurrent MUC write operations.
 
-## Admin Direct Messages
+`SYNC_BATCH_SIZE` controls how many rooms are processed concurrently during full sync operations.
 
-When `ALLOW_ADMIN_COMMANDS_IN_DMS=True`, admins may use selected read-only commands via direct messages and MUC PMs. Mutating commands remain restricted to `ADMIN_ROOM` for auditability and safety.
+## Logging / Audit Settings
 
-When set to `False`, admin commands are rejected outside `ADMIN_ROOM`, matching the previous behavior.
-
-## Room Invite Service
-
-When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites and offer them in the admin room as pending protected-room requests. The bot does not auto-join invited rooms. Admins must explicitly accept or decline each invite:
-
-```text
-!room invite list [all|page|last]
-!room invite accept <id>
-!room invite decline <id>
-!room invite cleanup [expired]
+```python
+STRUCTURED_EVENT_LOGS = True
+AUDIT_LOG_ENABLED = True
+AUDIT_LOG_RETENTION_DAYS = 365
 ```
 
-Incoming invite room JIDs are validated before they are shown as pending protected-room requests. Repeated invites from the same inviter for the same room are deduplicated.
+Audit events are stored in SQLite. Structured events are emitted as JSON logs for external log processing.
 
-Pending invites are persisted in SQLite. By default, pending invites older than `ROOM_INVITE_MAX_AGE_DAYS` are expired automatically when invites are loaded/listed, and admins can run `!room invite cleanup expired` to remove only expired invites. Set `ROOM_INVITE_MAX_AGE_DAYS = 0` to keep pending invites indefinitely until accepted, declined/rejected, or removed with `!room invite cleanup`.
+## Operational Alert Settings
+
+```python
+ALERT_ON_RECONNECT = True
+ALERT_ON_ADMIN_RIGHTS_LOST = True
+ALERT_ON_HEALTH_CHECK_FAILURE = True
+ALERT_ON_DB_STATS_FAILURE = True
+ALERT_ON_REDACTION_FAILURE = True
+ALERT_ON_DB_SIZE_MB = 0
+ALERT_ON_RTBL_REFRESH_FAILURES = 3
+ALERT_DEDUP_WINDOW = 300
+```
+
+Alerts are sent to the admin room and deduplicated by key/window.
+
+`ALERT_ON_DB_SIZE_MB = 0` disables database-size alerts.
+
+`ALERT_ON_RTBL_REFRESH_FAILURES = 0` disables RTBL refresh failure alerts.
 
 ## OMEMO Settings
-
-OMEMO settings are startup-only and require a bot restart when changed. See [OMEMO](omemo.md) for behavior details.
-
-OMEMO is optional. The bot can run without `slixmpp-omemo`; if `OMEMO_ENABLED=True` but optional dependencies are missing, startup continues with OMEMO disabled and a warning in the log. Install `requirements-omemo.txt` after installing the required system libraries when encrypted command/reply support is needed.
 
 ```python
 OMEMO_ENABLED = False
@@ -237,54 +245,68 @@ OMEMO_PLAINTEXT_FALLBACK = False
 OMEMO_RESET_ON_IDENTITY_CHANGE = True
 ```
 
-| Setting | Description |
-| --- | --- |
-| `OMEMO_ENABLED` | Enable OMEMO plugin integration |
-| `OMEMO_STORAGE_FILE` | JSON storage for identity/session/trust state |
-| `OMEMO_AUTO_ENCRYPT_ADMIN_ROOM` | Encrypt proactive admin-room messages when possible |
-| `OMEMO_PLAINTEXT_FALLBACK` | Allow plaintext fallback when encrypted reply fails |
-| `OMEMO_RESET_ON_IDENTITY_CHANGE` | Rotate OMEMO storage when JID, RESOURCE, or NICK changes |
+See [OMEMO](omemo.md).
 
 ## RTBL Settings
 
-See [RTBL](rtbl.md) for behavior details.
+```python
+RTBL_ENABLED = False
+RTBL_ANNOUNCE = True
+RTBL_REFRESH_INTERVAL = 3600
+RTBL_PUBLISH_ENABLED = False
+RTBL_PUBLISH_SERVICE = "pubsub.domain.tld"
+RTBL_PUBLISH_JID_NODE = "muc_bans_sha256"
+RTBL_PUBLISH_DOMAIN_NODE = "muc_bans_domains"
+```
 
-| Setting | Description |
-| --- | --- |
-| `RTBL_ENABLED` | Enable inbound RTBL subscriptions |
-| `RTBL_ANNOUNCE` | Announce RTBL changes in admin room |
-| `RTBL_REFRESH_INTERVAL` | Periodic refresh interval; `0` disables refresh |
-| `RTBL_PUBLISH_ENABLED` | Enable own local-ban publish feed |
-| `RTBL_PUBLISH_SERVICE` | PubSub service used for local publish feed |
-| `RTBL_PUBLISH_JID_NODE` | Node for SHA-256 bare-JID hashes |
-| `RTBL_PUBLISH_DOMAIN_NODE` | Node for plaintext domain bans |
+See [RTBL / PubSub](rtbl.md).
 
-When own RTBL publishing is enabled, BanBot configures PubSub node `pubsub#max_items` dynamically. It keeps at least 1000 items per publish node and auto-grows in 1000-item steps when the number of active local published bans requires more retention.
+## Version Check Settings
 
-Successful RTBL refreshes reconcile the local cache with the current PubSub node snapshot. RTBL matches that are actually applied are stored in the main ban table as `issuer=rtbl`; stale `issuer=rtbl` bans are automatically unbanned when their RTBL source disappears.
+```python
+VERSION_CHECK_ENABLED = False
+VERSION_CHECK_INTERVAL = 3600
+VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"
+```
 
-`RTBL_ANNOUNCE` and `RTBL_REFRESH_INTERVAL` are runtime-reloadable via `!reloadconfig`; enabling/disabling RTBL itself and changing own publish feed settings require a restart.
+Use `!checkupdate` / `!updatecheck` for manual checks.
 
 ## Redaction Settings
 
 ```python
 REDACTION_ENABLED = False
 REDACTION_INDEX_RETENTION_DAYS = 30
-REDACTION_AUTO_REASONS = ["spam", "harassment"]
+REDACTION_AUTO_REASONS = [
+    "spam",
+    "advertising",
+]
 ```
 
-When enabled, BanBot indexes room-assigned stanza IDs for messages it sees in protected rooms. Message bodies are not stored. `!redact <jid>` redacts all known, not-yet-redacted indexed messages for that bare JID. `REDACTION_INDEX_RETENTION_DAYS = 0` keeps the index indefinitely.
+Redaction indexes room-assigned stanza IDs, not message bodies.
 
-`REDACTION_AUTO_REASONS` is matched case-insensitively against ban comments. Matching JID bans trigger automatic redaction for the banned bare JID.
+See [Commands](commands.md#moderation).
+
+## vCard Settings
+
+```python
+AVATAR_PATH = "avatar.png"
+VCARD_NICKNAME = "My Bot Nickname"
+VCARD_FN = "Admin Bot"
+VCARD_ORG = "My Organization"
+VCARD_ROLE = "Administrator"
+VCARD_URL = "https://example.com"
+VCARD_NOTE = "Bot Admin Assistant"
+```
 
 ## Systemd Service
 
-Create `/etc/systemd/system/muc_banbot.service`:
+Example system service:
 
 ```ini
 [Unit]
-Description=BanBot XMPP MUC Bot
-After=network.target
+Description=BanBot XMPP moderation bot
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -292,66 +314,16 @@ User=adminbot
 WorkingDirectory=/srv/adminbot/muc_banbot
 ExecStart=/srv/adminbot/muc_banbot/venv/bin/python /srv/adminbot/muc_banbot/muc_banbot.py
 Restart=always
-RestartSec=5s
-Environment=PYTHONUNBUFFERED=1
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Enable and start:
+Reload after changes:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl start muc_banbot
-sudo systemctl enable muc_banbot
-sudo journalctl -u muc_banbot -f
+sudo systemctl enable --now muc_banbot
+sudo systemctl status muc_banbot
 ```
-
-## Optional File Logging with systemd and logrotate
-
-By default, the service example above writes logs to `journald`. You can inspect them with:
-
-```bash
-sudo journalctl -u muc_banbot -f
-```
-
-This is the recommended default.
-
-Some installations may prefer classic log files under `/var/log`. BanBot uses Python logging, and Python logging writes to stderr by default. This means normal `INFO`, `WARNING`, and `ERROR` messages usually appear on stderr.
-
-If you want systemd to write directly to a file, send both stdout and stderr to the same file. This avoids an empty main log file and a misleading separate “error” log.
-
-Add this to the `[Service]` section of `/etc/systemd/system/muc_banbot.service`:
-
-```ini
-StandardOutput=append:/var/log/muc_banbot.log
-StandardError=append:/var/log/muc_banbot.log
-```
-
-After changing the service file, reload systemd and restart the bot:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart muc_banbot
-```
-
-When using `append:` logging, logs are written to the file instead of the journal through stdout/stderr. Use `copytruncate` in logrotate so rotation does not require restarting the bot.
-
-Example `/etc/logrotate.d/muc_banbot`:
-
-```conf
-/var/log/muc_banbot.log {
-    daily
-    rotate 7
-    copytruncate
-    compress
-    delaycompress
-    missingok
-    notifempty
-}
-```
-
-If your systemd version does not support `append:`, omit `StandardOutput` / `StandardError` and use the default `journald` logging instead.
-
-If you need both `journald` and `/var/log/muc_banbot.log` at the same time, keep systemd logging to the journal and configure your system logger, such as rsyslog, to write selected `muc_banbot` journal/syslog entries to a file.

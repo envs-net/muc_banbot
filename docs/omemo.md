@@ -1,6 +1,8 @@
 # OMEMO Support
 
-BanBot can optionally send OMEMO-encrypted replies.
+BanBot can optionally send OMEMO-encrypted replies for encrypted admin commands.
+
+OMEMO support is optional. The bot works normally without OMEMO dependencies installed.
 
 ## Configuration
 
@@ -16,21 +18,25 @@ OMEMO_RESET_ON_IDENTITY_CHANGE = True
 
 ## Dependencies
 
-OMEMO support is optional. The base `requirements.txt` installs everything needed for plaintext bot operation, but does not require OMEMO libraries.
+Install normal dependencies first:
 
-Install the system libraries needed by the OMEMO stack first. On Raspbian systems this is typically:
+```bash
+pip install -r requirements.txt
+```
+
+Install system libraries required by the OMEMO stack. On Raspbian systems this is typically:
 
 ```bash
 sudo apt install libsodium-dev libxeddsa-dev
 ```
 
-Then install the Python OMEMO dependency:
+Then install optional OMEMO dependencies:
 
 ```bash
 pip install -r requirements-omemo.txt
 ```
 
-If these optional dependencies are missing while `OMEMO_ENABLED=True`, BanBot continues to start with OMEMO disabled and logs a warning. Plaintext bot functionality is unaffected.
+If optional dependencies are missing while `OMEMO_ENABLED=True`, BanBot starts with OMEMO disabled and logs a warning. Plaintext bot functionality is unaffected.
 
 ## Dynamic Reply Behavior
 
@@ -41,50 +47,89 @@ plaintext command  -> plaintext reply
 OMEMO command      -> OMEMO reply
 ```
 
-This keeps normal room behavior natural and avoids static encrypted/plaintext room lists.
-
-## MUC Recipients
-
-For encrypted MUC replies, BanBot attempts to encrypt to all current occupants with visible real JIDs. Occupants without usable OMEMO devices are skipped and the encrypted send is retried. This avoids failing the whole reply because one occupant has a broken or inaccessible OMEMO bundle.
-
-If no usable recipients remain, BanBot does not leak the reply as plaintext unless `OMEMO_PLAINTEXT_FALLBACK=True`.
-
-## Admin Room Auto Encryption
-
-`OMEMO_AUTO_ENCRYPT_ADMIN_ROOM=True` allows proactive admin-room messages to be encrypted when possible. Without a trigger message, BanBot cannot infer a reply context, so this option controls admin-room proactive behavior explicitly.
-
-## Plaintext Fallback
-
-`OMEMO_PLAINTEXT_FALLBACK=False` is the safer default. When encryption is required but fails, BanBot logs the failure and does not send plaintext.
-
-Enable fallback only if operational availability is more important than avoiding plaintext leakage.
-
-## Storage
-
-`OMEMO_STORAGE_FILE` stores identity keys, session state, and trust data. Keep this file private. A typical path is:
-
-```python
-OMEMO_STORAGE_FILE = "data/omemo.json"
-```
-
-The bot can create the storage file under its runtime user. The surrounding directory should not be world-readable.
-
-BanBot also writes identity metadata next to the storage file, for example `data/omemo.identity.json` for `data/omemo.json`. The metadata contains the configured `JID`, `RESOURCE`, and `NICK`. With the default `OMEMO_RESET_ON_IDENTITY_CHANGE=True`, BanBot rotates the old OMEMO storage to a timestamped `.bak-*` file and starts with a fresh OMEMO store when one of these identity values changes. On first start after upgrading to this metadata scheme, an existing non-empty OMEMO storage without metadata is also backed up once so the new store is tied to the current identity. The old storage is backed up, not deleted.
+This avoids static encrypted/plaintext room lists and keeps normal room behavior natural.
 
 ## Admin Commands
 
 ```text
 !omemo status
 !omemo devices
+!omemo trust
 !omemo reset
 !omemo reset confirm
+!omemo help
 ```
 
-`!omemo status` shows whether OMEMO is enabled, whether optional dependencies are available, whether the OMEMO plugin is ready, storage path/permissions, current identity metadata, and whether the stored identity matches the configured `JID`, `RESOURCE`, and `NICK`.
+### Status
 
-`!omemo devices` shows the current admin-room recipient JIDs BanBot can see for encrypted MUC replies first. It also shows conservative local storage hints found in the JSON storage, but those hints are diagnostic only, may be stale, and are not a guaranteed list of active OMEMO devices. The storage format is owned by the OMEMO library, so BanBot intentionally avoids treating arbitrary storage counters, booleans, pre-key IDs, or session metadata as devices.
+`!omemo status` shows:
 
-`!omemo reset confirm` moves the current OMEMO storage and identity metadata to timestamped `.bak-*` files and writes fresh metadata for the current bot identity. Restart the bot afterwards so the OMEMO plugin creates and publishes a fresh identity.
+* whether OMEMO is enabled in config
+* whether optional dependencies are available
+* whether the OMEMO plugin is ready
+* storage path and permissions
+* fallback behavior
+* configured identity metadata
+* whether stored identity metadata matches current `JID`, `RESOURCE`, and `NICK`
+
+### Devices
+
+`!omemo devices` focuses on current admin-room recipients first. It also shows conservative local storage hints found in the JSON storage.
+
+Storage hints are diagnostic only. They may be stale and are not guaranteed to be an active device list.
+
+### Reset
+
+`!omemo reset confirm` moves the current OMEMO storage and identity metadata to timestamped `.bak-*` files and writes fresh identity metadata for the current bot identity.
+
+Restart the bot afterwards so the OMEMO plugin creates and publishes fresh state.
+
+## MUC Recipients
+
+For encrypted MUC replies, BanBot attempts to encrypt to current occupants with visible real JIDs. Occupants without usable OMEMO devices are skipped and the encrypted send is retried.
+
+If no usable recipients remain, BanBot does not leak the reply as plaintext unless `OMEMO_PLAINTEXT_FALLBACK=True`.
+
+## Admin Room Auto Encryption
+
+`OMEMO_AUTO_ENCRYPT_ADMIN_ROOM=True` allows proactive admin-room messages to be encrypted when possible.
+
+Incoming encrypted commands are always answered encrypted when possible regardless of this setting.
+
+## Plaintext Fallback
+
+`OMEMO_PLAINTEXT_FALLBACK=False` is the safer default.
+
+When encryption is required and fails, BanBot logs the failure and does not send plaintext. Enable fallback only if operational availability is more important than avoiding plaintext leakage.
+
+## Storage and Identity
+
+`OMEMO_STORAGE_FILE` stores identity keys, session state, and trust data. Keep this file private.
+
+BanBot also writes identity metadata next to the storage file, for example:
+
+```text
+data/omemo.json
+data/omemo.identity.json
+```
+
+With `OMEMO_RESET_ON_IDENTITY_CHANGE=True`, BanBot rotates old OMEMO storage to timestamped `.bak-*` files when `JID`, `RESOURCE`, or `NICK` changes.
+
+The old storage is backed up, not deleted.
+
+## Backup Integration
+
+Managed ZIP backups include OMEMO storage when all of these are true:
+
+* OMEMO storage exists
+* `DB_BACKUP_INCLUDE_OMEMO=True`
+* the file is readable
+
+The archive entry is stored as `omemo.json` and described in `manifest.json`.
+
+Because OMEMO storage contains identity/session material, backup archives should be treated as secrets.
+
+See [Backups and Restore](backups.md).
 
 ## Logging
 

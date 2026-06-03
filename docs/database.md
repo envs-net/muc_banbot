@@ -126,13 +126,9 @@ Pending room invites are persisted so they survive bot restarts. Entries are rem
 
 ## Backups
 
-CSV imports create a managed full backup before writing imported rows that actually change the database:
+Managed backups are self-contained ZIP archives documented in [Backups and Restore](backups.md).
 
-```text
-data/backups/banbot.db.snapshot-before-import-YYYYMMDD_HHMMSS.zip
-```
-
-This self-contained archive allows recovery from bad import files or operator mistakes.
+CSV imports create a managed full backup before writing imported rows that actually change the database. These safety backups use the same archive format and retention settings as manual backups.
 
 ## Maintenance Notes
 
