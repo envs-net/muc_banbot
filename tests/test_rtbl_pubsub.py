@@ -9,7 +9,7 @@ aiosqlite = pytest.importorskip("aiosqlite")
 
 from banbot.rtbl_db import RtblDatabaseMixin
 from banbot.rtbl_pubsub import RtblPubSubMixin
-from banbot.rtbl_utils import _rtbl_extract_reason
+from banbot.rtbl_utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _rtbl_extract_reason
 
 PUBSUB = "http://jabber.org/protocol/pubsub"
 RSM = "http://jabber.org/protocol/rsm"
@@ -53,6 +53,17 @@ class RtblBot(RtblDatabaseMixin, RtblPubSubMixin):
         self.occupant_checks = []
         self.sent = []
         self.plugin = {"xep_0060": object()}
+        self.rtbl_publish_enabled = True
+        self.rtbl_publish_service = "service"
+        self.rtbl_publish_jid_node = "node"
+        self.rtbl_publish_domain_node = "domains"
+
+    def _rtbl_is_own_publish_node(self, service_jid: str, node: str) -> bool:
+        return (
+            self.rtbl_publish_enabled
+            and service_jid.lower() == self.rtbl_publish_service
+            and node in {self.rtbl_publish_jid_node, self.rtbl_publish_domain_node}
+        )
 
     def make_iq_get(self, ito=None):
         return FakeIQ(self._results)
@@ -89,6 +100,23 @@ def items_result(item_ids, *, rsm_last=None):
 
 def malformed_result():
     return FakeResult(ET.Element("iq"))
+
+
+def sanity_payload():
+    report = ET.Element(f"{{{REPORTING}}}report")
+    text = ET.SubElement(report, f"{{{REPORTING}}}text")
+    text.text = RTBL_PUBLISH_SANITY_CHECK_REASON
+    return report
+
+
+def sanity_items_result(item_ids):
+    iq = ET.Element("iq")
+    pubsub = ET.SubElement(iq, f"{{{PUBSUB}}}pubsub")
+    items = ET.SubElement(pubsub, f"{{{PUBSUB}}}items", {"node": "node"})
+    for item_id in item_ids:
+        item = ET.SubElement(items, f"{{{PUBSUB}}}item", {"id": item_id})
+        item.append(sanity_payload())
+    return FakeResult(iq)
 
 
 async def prepare_rtbl_db(tmp_path):
@@ -252,6 +280,50 @@ async def test_pubsub_publish_updates_hash_and_domain_caches_and_scans(tmp_path)
         assert hash_checks == [(HASH_A, None)]
         assert domain_checks == [("example.org", None)]
         assert bot.rtbl_last_error[("service", "node")] is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.rtbl
+@pytest.mark.asyncio
+async def test_pubsub_publish_ignores_own_publish_sanity_items(tmp_path):
+    db = await prepare_rtbl_db(tmp_path)
+    try:
+        bot = RtblBot(db, [])
+        bot.rtbl_subscriptions = [("service", "node")]
+        hash_checks = []
+
+        async def check_hash(item_id, reason):
+            hash_checks.append((item_id, reason))
+
+        bot._rtbl_check_all_occupants_for_hash = check_hash
+
+        await bot._on_rtbl_publish(
+            FakePubSubMessage(
+                "service",
+                "node",
+                [{"id": HASH_A, "payload": sanity_payload()}],
+            )
+        )
+
+        assert bot.rtbl_hash_cache == {}
+        assert hash_checks == []
+        assert await fetch_hashes(db) == []
+    finally:
+        await db.close()
+
+
+@pytest.mark.rtbl
+@pytest.mark.asyncio
+async def test_fetch_ignores_own_publish_sanity_items(tmp_path):
+    db = await prepare_rtbl_db(tmp_path)
+    try:
+        bot = RtblBot(db, [sanity_items_result([HASH_A])])
+        await bot._rtbl_fetch_all_items("service", "node", scan_occupants=True)
+
+        assert bot.rtbl_hash_cache == {}
+        assert await fetch_hashes(db) == []
+        assert bot.occupant_checks == []
     finally:
         await db.close()
 

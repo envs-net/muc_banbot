@@ -7,6 +7,8 @@ import uuid
 
 from slixmpp.exceptions import IqError, IqTimeout
 
+from .rtbl_utils import RTBL_PUBLISH_SANITY_CHECK_REASON
+
 log = logging.getLogger(__name__)
 
 
@@ -376,7 +378,7 @@ class RtblPublishMixin:
                 self.rtbl_publish_service,
                 node,
                 id=item_id,
-                payload=self._rtbl_build_payload("BanBot RTBL publish sanity check"),
+                payload=self._rtbl_build_payload(RTBL_PUBLISH_SANITY_CHECK_REASON),
             )
             published = True
             fetch_error = None

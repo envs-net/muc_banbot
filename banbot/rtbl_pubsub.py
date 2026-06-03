@@ -6,13 +6,24 @@ import time
 
 from slixmpp.exceptions import IqError, IqTimeout
 
-from .rtbl_utils import _is_domain, _is_sha256
+from .rtbl_utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _is_domain, _is_sha256
 from .locks import is_maintenance_mode
 
 log = logging.getLogger(__name__)
 
 
 class RtblPubSubMixin:
+    def _rtbl_is_own_publish_sanity_item(self, service_jid: str, node: str, reason: str | None) -> bool:
+        """Return True for temporary sanity-check items from our own publish nodes."""
+        if reason != RTBL_PUBLISH_SANITY_CHECK_REASON:
+            return False
+
+        is_own_publish_node = getattr(self, "_rtbl_is_own_publish_node", None)
+        if not callable(is_own_publish_node):
+            return False
+
+        return bool(is_own_publish_node(service_jid, node))
+
     async def _rtbl_subscribe_node(self, service_jid: str, node: str) -> tuple[bool, str | None]:
         """Subscribe to a PubSub node and return a user-facing error on failure."""
         try:
@@ -167,6 +178,14 @@ class RtblPubSubMixin:
 
                 payload = item_el[0] if len(item_el) > 0 else None
                 reason = self._rtbl_extract_reason(payload)
+                if self._rtbl_is_own_publish_sanity_item(service_jid, node, reason):
+                    log.debug(
+                        "RTBL: Skipping own publish sanity-check item '%s' from %s/%s",
+                        item_id,
+                        service_jid,
+                        node,
+                    )
+                    continue
 
                 if _is_sha256(item_id):
                     seen_hashes.add(item_id)
@@ -466,6 +485,14 @@ class RtblPubSubMixin:
                 continue
 
             reason = self._rtbl_extract_reason(item.get("payload"))
+            if self._rtbl_is_own_publish_sanity_item(service_jid, node, reason):
+                log.debug(
+                    "RTBL: Ignoring own publish sanity-check event '%s' from %s/%s",
+                    item_id,
+                    service_jid,
+                    node,
+                )
+                continue
 
             if _is_sha256(item_id):
                 await self.db.execute(

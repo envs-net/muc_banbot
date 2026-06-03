@@ -13,6 +13,9 @@ _DOMAIN_LABEL_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$", re.IGNORECASE)
 log = logging.getLogger(__name__)
 
 
+RTBL_PUBLISH_SANITY_CHECK_REASON = "BanBot RTBL publish sanity check"
+
+
 def _is_sha256(value: str) -> bool:
     """Return True if value looks like a SHA-256 hex digest."""
     return bool(_SHA256_RE.match(value))
