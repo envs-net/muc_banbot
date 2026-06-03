@@ -112,7 +112,7 @@ class RtblCommandMixin:
 
             if not entries:
                 lines = ["🛡️ RTBL Subscriptions:", "  (none)"]
-                current_page = total_pages = total_items = 0
+                current_page = total_pages = 0
             elif show_all:
                 total_items = len(entries)
                 lines = [f"🛡️ RTBL Subscriptions ({total_items}) - All:"]

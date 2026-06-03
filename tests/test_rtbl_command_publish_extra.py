@@ -196,24 +196,24 @@ async def test_rtbl_list_supports_paging_and_all(temp_db_path):
     try:
         await bot.setup_rtbl()
         bot.rtbl_subscriptions = [
-            ("pubsub1.example.org", "node1"),
-            ("pubsub2.example.org", "node2"),
-            ("pubsub3.example.org", "node3"),
+            ("rtbl_service_1", "node1"),
+            ("rtbl_service_2", "node2"),
+            ("rtbl_service_3", "node3"),
         ]
 
         await bot.cmd_rtbl(["list"], "admin@conference.example.org")
         body = bot.sent[-1]["mbody"]
         assert "RTBL Subscriptions (3) - Page 1/2" in body
-        assert "pubsub1.example.org" in body
-        assert "pubsub2.example.org" in body
-        assert "pubsub3.example.org" not in body
+        assert "rtbl_service_1  /  node1" in body
+        assert "rtbl_service_2  /  node2" in body
+        assert "rtbl_service_3  /  node3" not in body
         assert "Use !rtbl list 2 for the next page" in body
 
         await bot.cmd_rtbl(["list", "2"], "admin@conference.example.org")
         body = bot.sent[-1]["mbody"]
         assert "RTBL Subscriptions (3) - Page 2/2" in body
-        assert "pubsub3.example.org" in body
-        assert "pubsub1.example.org" not in body
+        assert "rtbl_service_3  /  node3" in body
+        assert "rtbl_service_1  /  node1" not in body
 
         await bot.cmd_rtbl(["list", "last"], "admin@conference.example.org")
         assert "RTBL Subscriptions (3) - Page 2/2" in bot.sent[-1]["mbody"]
@@ -221,9 +221,9 @@ async def test_rtbl_list_supports_paging_and_all(temp_db_path):
         await bot.cmd_rtbl(["list", "all"], "admin@conference.example.org")
         body = bot.sent[-1]["mbody"]
         assert "RTBL Subscriptions (3) - All" in body
-        assert "pubsub1.example.org" in body
-        assert "pubsub2.example.org" in body
-        assert "pubsub3.example.org" in body
+        assert "rtbl_service_1  /  node1" in body
+        assert "rtbl_service_2  /  node2" in body
+        assert "rtbl_service_3  /  node3" in body
     finally:
         await bot.db.close()
 
