@@ -117,7 +117,7 @@ class CommandHelpMixin:
         lines = [
             f"{p}help - show this help",
             f"{p}whoami - show your affiliation/role and permissions",
-            f"{p}banlist / {p}blacklist [page] - show temporary bans",
+            f"{p}banlist / {p}blacklist [all|page|last] - show temporary bans",
             f"{p}why <jid|nick|domain> - show ban reason",
         ]
 
