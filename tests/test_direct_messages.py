@@ -87,6 +87,10 @@ class DirectBot(DirectMessageMixin):
         self.calls.append(("rtbl", tuple(args), room, actor))
         await self.bot_send_message(mto=room, mbody="rtbl output", mtype="groupchat")
 
+    async def cmd_omemo(self, args, room, actor=None):
+        self.calls.append(("omemo", tuple(args), room, actor))
+        await self.bot_send_message(mto=room, mbody="omemo output", mtype="groupchat")
+
     async def cmd_audit(self, args, room):
         self.calls.append(("audit", tuple(args), room))
         await self.bot_send_message(mto=room, mbody="audit output", mtype="groupchat")
@@ -168,6 +172,35 @@ async def test_admin_dm_can_use_config_readonly_command():
     assert bot.sent[-1]["mto"] == "admin@example.org"
     assert bot.sent[-1]["mtype"] == "chat"
     assert bot.sent[-1]["mbody"] == "config output"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_mutating_config_commands():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!config set LOG_LEVEL DEBUG",
+        )
+    )
+
+    assert bot.calls == []
+    assert "config commands are read-only" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_omemo_readonly_commands():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!omemo status"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!omemo help"))
+
+    assert bot.calls == [
+        ("omemo", ("status",), "admin@example.org", "admin@example.org"),
+        ("omemo", ("help",), "admin@example.org", "admin@example.org"),
+    ]
+    assert all(sent["mtype"] == "chat" for sent in bot.sent)
 
 
 @pytest.mark.asyncio
@@ -333,14 +366,24 @@ async def test_admin_dm_can_use_ignore_whitelist_rtbl_and_audit_lists():
     bot = DirectBot()
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!ignore list all"))
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!whitelist last"))
-    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!rtbl list"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!rtbl list last"))
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!audit last"))
 
     assert bot.calls[0] == ("ignore", ("list", "all"), "admin@example.org", "admin@example.org", "ignore")
     assert bot.calls[1] == ("ignore", ("last",), "admin@example.org", "admin@example.org", "whitelist")
-    assert bot.calls[2] == ("rtbl", ("list",), "admin@example.org", "admin@example.org")
+    assert bot.calls[2] == ("rtbl", ("list", "last"), "admin@example.org", "admin@example.org")
     assert bot.calls[3] == ("audit", ("last",), "admin@example.org")
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_invalid_rtbl_list_page_argument():
+    bot = DirectBot()
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!rtbl list nope"))
+
+    assert bot.calls == []
+    assert "Usage: !rtbl list [all|page|last]" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
 
 
 @pytest.mark.asyncio

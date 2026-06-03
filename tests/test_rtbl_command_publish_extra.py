@@ -189,6 +189,57 @@ async def test_rtbl_list_add_refresh_and_delete_flow(temp_db_path):
 
 
 @pytest.mark.asyncio
+async def test_rtbl_list_supports_paging_and_all(temp_db_path):
+    bot = RtblCmdBot()
+    bot.list_page_size = 2
+    await bot.setup_db()
+    try:
+        await bot.setup_rtbl()
+        bot.rtbl_subscriptions = [
+            ("pubsub1.example.org", "node1"),
+            ("pubsub2.example.org", "node2"),
+            ("pubsub3.example.org", "node3"),
+        ]
+
+        await bot.cmd_rtbl(["list"], "admin@conference.example.org")
+        body = bot.sent[-1]["mbody"]
+        assert "RTBL Subscriptions (3) - Page 1/2" in body
+        assert "pubsub1.example.org" in body
+        assert "pubsub2.example.org" in body
+        assert "pubsub3.example.org" not in body
+        assert "Use !rtbl list 2 for the next page" in body
+
+        await bot.cmd_rtbl(["list", "2"], "admin@conference.example.org")
+        body = bot.sent[-1]["mbody"]
+        assert "RTBL Subscriptions (3) - Page 2/2" in body
+        assert "pubsub3.example.org" in body
+        assert "pubsub1.example.org" not in body
+
+        await bot.cmd_rtbl(["list", "last"], "admin@conference.example.org")
+        assert "RTBL Subscriptions (3) - Page 2/2" in bot.sent[-1]["mbody"]
+
+        await bot.cmd_rtbl(["list", "all"], "admin@conference.example.org")
+        body = bot.sent[-1]["mbody"]
+        assert "RTBL Subscriptions (3) - All" in body
+        assert "pubsub1.example.org" in body
+        assert "pubsub2.example.org" in body
+        assert "pubsub3.example.org" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_rtbl_list_rejects_invalid_page_argument(temp_db_path):
+    bot = RtblCmdBot()
+    await bot.setup_db()
+    try:
+        await bot.cmd_rtbl(["list", "nope"], "admin@conference.example.org")
+        assert "Usage: !rtbl list [all|page|last]" in bot.sent[-1]["mbody"]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_rtbl_rejects_invalid_or_own_subscription(temp_db_path):
     bot = RtblCmdBot()
     await bot.setup_db()

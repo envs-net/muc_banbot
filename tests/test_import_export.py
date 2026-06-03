@@ -217,6 +217,12 @@ async def test_export_command_lists_and_deletes_latest(tmp_path, monkeypatch):
     assert "bans_export_" in body
     assert "Keep:" in body
 
+    await bot.cmd_export(["show", "latest"], "admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+    assert "Managed Ban Export" in body
+    assert "Filename: bans_export_" in body
+    assert "Size:" in body
+
     exports_before = bot.list_export_files()
     assert len(exports_before) == 2
     latest = exports_before[0].path

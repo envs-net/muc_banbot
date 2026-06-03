@@ -137,13 +137,13 @@ Examples assume the default command prefix `!`.
 | `!backup list [all/page/last]` | List managed full backup archives |
 | `!backup show <file/latest>` | Inspect one managed backup archive |
 | `!backup verify <file/latest>` | Verify a managed backup archive |
-| `!backup delete/remove <file/latest>` | Delete a managed full backup archive |
+| `!backup delete/remove/del/rm <file/latest>` | Delete a managed full backup archive |
 | `!restore <file/latest> confirm` | Restore a managed full backup archive |
 | `!room add <room>` | Add a protected room |
-| `!room remove/delete <room>` | Remove a protected room |
+| `!room remove/delete/del/rm <room>` | Remove a protected room |
 | `!room list [all/page]` | List protected rooms |
 | `!room invite list [all/page/last]` | List pending room invites |
-| `!room invite accept/decline/remove/delete <id>` | Accept or decline a pending room invite |
+| `!room invite accept/decline/remove/delete/del/rm <id>` | Accept or decline a pending room invite |
 | `!policy` / `!rules show/set/clear/delete/remove/enable/disable` | Manage public room policy text |
 | `!ban <jid/nick/domain> [comment]` | Ban a JID, nick, or wildcard domain |
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add a temporary ban |
@@ -153,18 +153,18 @@ Examples assume the default command prefix `!`.
 | `!banlist` / `!blacklist rtbl [all/page/last]` | Show raw RTBL hash/domain entries |
 | `!bansearch <query> [all/page/last]` | Search bans by target, issuer, comment, or RTBL reason |
 | `!why <nick/jid>` | Explain why a user is banned |
-| `!ignore [list/all/page]` | Show the global ignorelist |
-| `!ignore add/remove <jid/domain>` | Manage protected exact JIDs and domains |
-| `!whitelist [list/all/add/remove]` | Alias for `!ignore ...` |
+| `!ignore [list/all/page/last]` | Show the global ignorelist |
+| `!ignore add/remove/delete/del/rm <jid/domain>` | Manage protected exact JIDs and domains |
+| `!whitelist [list/all/page/last/add/remove/delete/del/rm]` | Alias for `!ignore ...` |
 | `!sync` | Rejoin rooms, verify admin rights, and enforce active bans |
 | `!syncadmins` | Update admin list from the admin room |
 | `!syncbans` | Sync bans from rooms into the database and enforce them |
 | `!omemo status` | Inspect OMEMO readiness and storage state |
 | `!omemo devices` | List visible admin-room recipients and local storage hints |
 | `!omemo reset [confirm]` | Rotate local OMEMO storage after confirmation |
-| `!rtbl list/add/delete/remove/refresh` | Manage RTBL subscriptions |
+| `!rtbl list [all|page|last]`, `!rtbl add/delete/remove/refresh` | Manage RTBL subscriptions |
 | `!rtbl publish status/sync` | Manage the bot's own RTBL publish feed |
-| `!export [list/delete]` | Manage CSV ban exports |
+| `!export [list/show/delete/remove/del/rm]` | Manage CSV ban exports |
 | `!import <file> [dryrun]` | Import bans from CSV with validation and optional dry-run |
 
 For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.

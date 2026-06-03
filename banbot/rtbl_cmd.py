@@ -3,7 +3,14 @@
 import logging
 import time
 
-from .utils import human_time
+from .utils import (
+    get_list_page_size,
+    human_time,
+    paginate_lines,
+    resolve_page,
+    wants_all_pages,
+    without_all_pages_arg,
+)
 from .rtbl_utils import _looks_like_pubsub_node, _looks_like_pubsub_service_jid
 
 log = logging.getLogger(__name__)
@@ -22,7 +29,7 @@ class RtblCommandMixin:
         """
         Manage RTBL subscriptions and the optional own publish feed.
 
-        !rtbl list
+        !rtbl list [all|page|last]
         !rtbl add <service_jid> <node>
         !rtbl delete <service_jid> [node]
         !rtbl publish status
@@ -33,7 +40,7 @@ class RtblCommandMixin:
         if not args:
             lines = [
                 "Usage:",
-                f"  {p}rtbl list",
+                f"  {p}rtbl list [all|page|last]",
                 f"  {p}rtbl add <service_jid> <node>",
                 f"  {p}rtbl delete <service_jid> [node]",
                 f"  {p}rtbl refresh [service_jid] [node]",
@@ -52,43 +59,73 @@ class RtblCommandMixin:
         # list
         # ----------------------------------------------------------------
         if action == "list":
-            lines = ["🛡️ RTBL Subscriptions:"]
+            show_all = wants_all_pages(args[1:])
+            list_args = without_all_pages_arg(args[1:])
+            page = 1
+            if list_args:
+                if list_args[0].lower() == "last":
+                    page = -1
+                else:
+                    try:
+                        page = max(1, int(list_args[0]))
+                    except ValueError:
+                        await self.bot_send_message(
+                            mto=room,
+                            mbody=f"❌ Usage: {p}rtbl list [all|page|last]",
+                            mtype="groupchat",
+                        )
+                        return
 
-            if not self.rtbl_subscriptions:
-                lines.append("  (none)")
+            entries = []
+            for service_jid, node in self.rtbl_subscriptions:
+                key = (service_jid.lower(), node)
+
+                async with self.db.execute(
+                    "SELECT COUNT(*) FROM rtbl_hashes WHERE service_jid = ? AND node = ?",
+                    (service_jid, node),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    h_count = int(row[0] or 0) if row else 0
+
+                async with self.db.execute(
+                    "SELECT COUNT(*) FROM rtbl_domains WHERE service_jid = ? AND node = ?",
+                    (service_jid, node),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    d_count = int(row[0] or 0) if row else 0
+
+                last_fetch = self._rtbl_status_age(
+                    getattr(self, "rtbl_last_fetch", {}).get(key)
+                )
+                last_change = self._rtbl_status_age(
+                    getattr(self, "rtbl_last_change", {}).get(key)
+                )
+                last_error = getattr(self, "rtbl_last_error", {}).get(key)
+
+                entries.append(
+                    f"  • {service_jid}  /  {node}\n"
+                    f"    Entries: {h_count} hashes, {d_count} domains\n"
+                    f"    Last fetch: {last_fetch}\n"
+                    f"    Last change: {last_change}\n"
+                    f"    Last error: {last_error or 'none'}"
+                )
+
+            if not entries:
+                lines = ["🛡️ RTBL Subscriptions:", "  (none)"]
+                current_page = total_pages = total_items = 0
+            elif show_all:
+                total_items = len(entries)
+                lines = [f"🛡️ RTBL Subscriptions ({total_items}) - All:"]
+                lines.extend(entries)
+                current_page = total_pages = 1
             else:
-                for service_jid, node in self.rtbl_subscriptions:
-                    key = (service_jid.lower(), node)
-
-                    async with self.db.execute(
-                        "SELECT COUNT(*) FROM rtbl_hashes WHERE service_jid = ? AND node = ?",
-                        (service_jid, node),
-                    ) as cursor:
-                        row = await cursor.fetchone()
-                        h_count = int(row[0] or 0) if row else 0
-
-                    async with self.db.execute(
-                        "SELECT COUNT(*) FROM rtbl_domains WHERE service_jid = ? AND node = ?",
-                        (service_jid, node),
-                    ) as cursor:
-                        row = await cursor.fetchone()
-                        d_count = int(row[0] or 0) if row else 0
-
-                    last_fetch = self._rtbl_status_age(
-                        getattr(self, "rtbl_last_fetch", {}).get(key)
-                    )
-                    last_change = self._rtbl_status_age(
-                        getattr(self, "rtbl_last_change", {}).get(key)
-                    )
-                    last_error = getattr(self, "rtbl_last_error", {}).get(key)
-
-                    lines.append(
-                        f"  • {service_jid}  /  {node}\n"
-                        f"    Entries: {h_count} hashes, {d_count} domains\n"
-                        f"    Last fetch: {last_fetch}\n"
-                        f"    Last change: {last_change}\n"
-                        f"    Last error: {last_error or 'none'}"
-                    )
+                per_page = get_list_page_size(self)
+                page = resolve_page(page, len(entries), per_page)
+                page_entries, current_page, total_pages, total_items = paginate_lines(
+                    entries, page, per_page=per_page
+                )
+                lines = [f"🛡️ RTBL Subscriptions ({total_items}) - Page {current_page}/{total_pages}:"]
+                lines.extend(page_entries)
 
             if getattr(self, "rtbl_publish_enabled", False):
                 jid_publish_count, domain_publish_count = await self._rtbl_count_active_publish_bans()
@@ -104,6 +141,10 @@ class RtblCommandMixin:
                         f"{self.rtbl_publish_domain_node}  ({domain_publish_count} domains)"
                     ),
                 ]
+
+            if entries and not show_all and current_page < total_pages:
+                lines.append("")
+                lines.append(f"Use {p}rtbl list {current_page + 1} for the next page.")
 
             await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return

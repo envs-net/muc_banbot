@@ -130,6 +130,6 @@ After deploying the release in a test or production-like environment:
 
 * Restart the bot and check startup logs.
 * Run `!status`, `!config`, `!banlist`, and `!room list`.
-* If RTBL is enabled, run `!rtbl list` and optionally `!rtbl refresh`.
+* If RTBL is enabled, run `!rtbl list [all|page|last]` and optionally `!rtbl refresh`.
 * If OMEMO is enabled, test one plaintext command and one encrypted command.
 * Check Drone/release badge links in the README.

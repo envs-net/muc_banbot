@@ -242,7 +242,7 @@ class CommandUsageMixin:
             "Usage:\n"
             f"  {p}omemo status\n"
             f"  {p}omemo devices\n"
-            f"  {p}omemo trust\n"
+
             f"  {p}omemo reset [confirm]\n"
             f"  {p}omemo help"
         )

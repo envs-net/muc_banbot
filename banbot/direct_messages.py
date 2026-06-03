@@ -116,21 +116,41 @@ class DirectMessageMixin:
                 return True
 
             if cmd == "config":
+                config_args = args or []
+                if config_args:
+                    first = config_args[0].lower()
+                    is_readonly = (
+                        first in {"show", "list", "all", "last"}
+                        or first.isdigit()
+                    )
+                else:
+                    is_readonly = True
+
+                if not is_readonly:
+                    await self._send_direct_message(
+                        reply_to,
+                        (
+                            "❌ Direct-message config commands are read-only. "
+                            f"Allowed: {p}config [all|page|last], {p}config show [all|page|last]"
+                        ),
+                    )
+                    return True
+
                 sig = inspect.signature(self._cmd_config)
                 if len(sig.parameters) >= 2:
-                    await self._cmd_config(reply_to, args)
+                    await self._cmd_config(reply_to, config_args)
                 else:
                     await self._cmd_config(reply_to)
                 return True
 
             if cmd == "omemo":
                 action = args[0].lower() if args else "status"
-                if action in ("status", "devices", "device"):
+                if action in ("status", "devices", "device", "help", "usage"):
                     await self.cmd_omemo(args, reply_to, actor=sender_bare)
                     return True
                 await self._send_direct_message(
                     reply_to,
-                    f"❌ Direct-message OMEMO commands are read-only. Allowed: {p}omemo status, {p}omemo devices",
+                    f"❌ Direct-message OMEMO commands are read-only. Allowed: {p}omemo status, {p}omemo devices, {p}omemo help",
                 )
                 return True
 
@@ -243,12 +263,18 @@ class DirectMessageMixin:
 
             if cmd == "rtbl":
                 if args and args[0].lower() == "list":
+                    if any(not self._is_page_or_list_arg(arg) for arg in args[1:]):
+                        await self._send_direct_message(
+                            reply_to,
+                            f"❌ Usage: {p}rtbl list [all|page|last]",
+                        )
+                        return True
                     await self.cmd_rtbl(args, reply_to, actor=sender_bare)
                     return True
 
                 await self._send_direct_message(
                     reply_to,
-                    f"❌ Direct-message RTBL commands are read-only. Allowed: {p}rtbl list",
+                    f"❌ Direct-message RTBL commands are read-only. Allowed: {p}rtbl list [all|page|last]",
                 )
                 return True
 
@@ -371,6 +397,8 @@ class DirectMessageMixin:
                 (
                     f"{p}help",
                     f"{p}config",
+                    f"{p}omemo status",
+                    f"{p}omemo devices",
                     f"{p}status",
                     f"{p}checkupdate",
                     f"{p}updatecheck",

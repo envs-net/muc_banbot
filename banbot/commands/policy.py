@@ -108,7 +108,7 @@ class CommandPolicyMixin:
             return
 
         if action == "enable":
-            _enabled, text = await self.get_public_policy()
+            enabled, text = await self.get_public_policy()
 
             if not text.strip():
                 await self.bot_send_message(

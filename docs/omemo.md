@@ -54,7 +54,6 @@ This avoids static encrypted/plaintext room lists and keeps normal room behavior
 ```text
 !omemo status
 !omemo devices
-!omemo trust
 !omemo reset
 !omemo reset confirm
 !omemo help

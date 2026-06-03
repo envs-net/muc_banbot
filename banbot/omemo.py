@@ -955,6 +955,19 @@ class OmemoMixin:
         if action == "reset":
             await self._cmd_omemo_reset(room, actor, confirm=len(args) > 1 and args[1].lower() == "confirm")
             return
+        if action in ("help", "usage"):
+            await self.bot_send_message(
+                mto=room,
+                mbody=(
+                    "Usage:\n"
+                    f"  {getattr(self, 'command_prefix', '!')}omemo status\n"
+                    f"  {getattr(self, 'command_prefix', '!')}omemo devices\n"
+                    f"  {getattr(self, 'command_prefix', '!')}omemo reset [confirm]\n"
+                    f"  {getattr(self, 'command_prefix', '!')}omemo help"
+                ),
+                mtype="groupchat",
+            )
+            return
 
         await self.bot_send_message(
             mto=room,
@@ -962,7 +975,8 @@ class OmemoMixin:
                 "Usage:\n"
                 f"  {getattr(self, 'command_prefix', '!')}omemo status\n"
                 f"  {getattr(self, 'command_prefix', '!')}omemo devices\n"
-                f"  {getattr(self, 'command_prefix', '!')}omemo reset [confirm]"
+                f"  {getattr(self, 'command_prefix', '!')}omemo reset [confirm]\n"
+                f"  {getattr(self, 'command_prefix', '!')}omemo help"
             ),
             mtype="groupchat",
         )

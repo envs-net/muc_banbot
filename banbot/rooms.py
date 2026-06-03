@@ -128,7 +128,7 @@ class RoomMixin:
 
             await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
 
-        elif action in ("add", "remove", "delete", "del") and len(args) >= 2:
+        elif action in ("add", "remove", "delete", "del", "rm") and len(args) >= 2:
             target = args[1].lower()
 
             if action == "add":
@@ -189,7 +189,7 @@ class RoomMixin:
                 else:
                     await self.bot_send_message(mto=room, mbody=f"⚠️ Room already in protected list: {target}", mtype="groupchat")
 
-            elif action in ("remove", "delete", "del"):
+            elif action in ("remove", "delete", "del", "rm"):
                 self.protected_rooms.discard(target)
                 await self.db.execute("DELETE FROM rooms WHERE room=?", (target,))
                 await self.db.commit()

@@ -114,7 +114,7 @@ Check:
 Check:
 
 * `RTBL_ENABLED=True`
-* `!rtbl list` shows subscriptions and item counts
+* `!rtbl list [all|page|last]` shows subscriptions and item counts
 * The user is not protected by an exact JID ignorelist entry
 * The user's domain is not protected by a domain ignorelist entry for domain matches
 * The user is not an admin/owner

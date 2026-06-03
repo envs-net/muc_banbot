@@ -157,7 +157,6 @@ See [RTBL / PubSub](rtbl.md).
 | --- | --- |
 | `!omemo status` | Shows OMEMO readiness, storage, identity, and fallback state |
 | `!omemo devices` | Shows current admin-room recipients and conservative local storage hints |
-| `!omemo trust` | Shows current trust/help text for OMEMO trust handling |
 | `!omemo reset [confirm]` | Rotates local OMEMO storage after confirmation |
 | `!omemo help` | Shows OMEMO usage |
 
@@ -193,4 +192,29 @@ Public commands are rate-limited with `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` and `PU
 
 When `ALLOW_ADMIN_COMMANDS_IN_DMS=True`, admins may use selected read-only admin commands via direct messages or MUC PMs. Mutating commands remain restricted to the admin room.
 
-Supported read-only DM/MUC-PM commands include help/status/config-style inspection and other non-mutating checks. Use the admin room for all changes.
+Allowed read-only DM/MUC-PM commands:
+
+```text
+!help [all|page|last]
+!help <command>
+!config [all|page|last]
+!config show [all|page|last]
+!omemo status
+!omemo devices
+!omemo help
+!status
+!checkupdate
+!updatecheck
+!banlist [all|page|last]
+!banlist rtbl [all|page|last]
+!bansearch <query> [all|page|last]
+!why <nick|jid>
+!room list [all|page]
+!room invite list [all|page|last]
+!ignore [list] [all|page|last]
+!whitelist [list] [all|page|last]
+!rtbl list [all|page|last]
+!audit [all|page|last|query]
+```
+
+`!config set`, `!config unset`, backup/restore, export/import, moderation, room mutation, RTBL mutation, and ignorelist mutation commands must be run in the admin room for auditability and safety.

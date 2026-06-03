@@ -187,6 +187,41 @@ class ImportExportMixin:
                     lines.append(f"Next page: {self.command_prefix}export list {current_page + 1}")
             await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
             return
+        if action == "show":
+            if len(args) < 2:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}export show <filename|latest>",
+                    mtype="groupchat",
+                )
+                return
+
+            path = self.resolve_export_file(args[1])
+            if path is None:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Export not found: {args[1]}",
+                    mtype="groupchat",
+                )
+                return
+
+            try:
+                stat = path.stat()
+                size = stat.st_size
+                modified = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                body = (
+                    "📦 Managed Ban Export\n"
+                    f"Filename: {path.name}\n"
+                    f"Directory: {self._export_dir()}\n"
+                    f"Size: {size} bytes\n"
+                    f"Modified: {modified}"
+                )
+            except OSError as exc:
+                body = f"❌ Failed to inspect export: {exc}"
+
+            await self.bot_send_message(mto=room, mbody=body, mtype="groupchat")
+            return
+
         if action in ("delete", "remove", "del", "rm"):
             if len(args) < 2:
                 await self.bot_send_message(mto=room, mbody=f"❌ Usage: {self.command_prefix}export delete <filename|latest>", mtype="groupchat")
@@ -208,7 +243,8 @@ class ImportExportMixin:
                 "Usage:\n"
                 f"  {self.command_prefix}export\n"
                 f"  {self.command_prefix}export list [all|page|last]\n"
-                f"  {self.command_prefix}export delete/remove <filename|latest>"
+                f"  {self.command_prefix}export show <filename|latest>\n"
+                f"  {self.command_prefix}export delete/remove/del/rm <filename|latest>"
             ),
             mtype="groupchat",
         )
