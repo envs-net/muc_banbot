@@ -71,6 +71,9 @@ class RtblBot(RtblDatabaseMixin, RtblPubSubMixin):
     def _rtbl_extract_reason(self, payload):
         return _rtbl_extract_reason(payload)
 
+    async def _rebuild_rtbl_caches(self):
+        return None
+
     async def _rtbl_cleanup_stale_persisted_bans(self, issuer="rtbl_refresh"):
         self.cleanup_calls.append(issuer)
         return 2
@@ -171,6 +174,15 @@ async def test_successful_fetch_reconciles_stale_hashes_and_domains(tmp_path):
         await bot._rtbl_fetch_all_items("service", "node", scan_occupants=True)
 
         assert await fetch_hashes(db) == [HASH_A, HASH_B, HASH_C]
+        # Reconciliation is scoped to the fetched service/node only;
+        # references from other services must be preserved.
+        async with db.execute(
+            "SELECT COUNT(*) FROM rtbl_hashes WHERE hash = ? AND service_jid = ? AND node = ?",
+            (HASH_C, "other", "node"),
+        ) as cursor:
+            other_service_hash_count = (await cursor.fetchone())[0]
+        assert other_service_hash_count == 1
+
         async with db.execute("SELECT domain FROM rtbl_domains") as cursor:
             domains = {row[0] for row in await cursor.fetchall()}
         assert domains == {"example.org"}
@@ -324,6 +336,25 @@ async def test_fetch_ignores_own_publish_sanity_items(tmp_path):
         assert bot.rtbl_hash_cache == {}
         assert await fetch_hashes(db) == []
         assert bot.occupant_checks == []
+    finally:
+        await db.close()
+
+
+@pytest.mark.rtbl
+@pytest.mark.asyncio
+async def test_pubsub_publish_ignores_messages_when_disabled_before_filtering(tmp_path):
+    db = await prepare_rtbl_db(tmp_path)
+    try:
+        bot = RtblBot(db, [])
+        bot.rtbl_subscriptions = [("service", "node")]
+        bot.rtbl_enabled = False
+
+        await bot._on_rtbl_publish(
+            FakePubSubMessage("service", "node", [{"id": HASH_A}])
+        )
+
+        assert bot.rtbl_hash_cache == {}
+        assert await fetch_hashes(db) == []
     finally:
         await db.close()
 
