@@ -12,7 +12,7 @@ steps:
       - cp config_sample.py config.py
       - pip install -r requirements.txt
       - pip install -r requirements-dev.txt
-      - python -m py_compile banbot/*.py tests/*.py tests/integration/*.py
+      - python -m py_compile banbot/*.py banbot/commands/*.py tests/*.py tests/integration/*.py
       - pytest --cov=banbot --cov-report=term-missing --cov-fail-under=55
 
 trigger:
@@ -20,4 +20,25 @@ trigger:
     - main
   event:
     - push
+    - tag
+
+---
+kind: pipeline
+type: docker
+name: mutmut
+
+steps:
+  - name: mutation tests
+    image: python:3.13
+    commands:
+      - python --version
+      - python -m pip install --upgrade pip setuptools wheel
+      - cp config_sample.py config.py
+      - pip install -r requirements.txt
+      - pip install -r requirements-dev.txt
+      - PYTHONPATH="$PWD" mutmut run
+      - mutmut results
+
+trigger:
+  event:
     - tag
