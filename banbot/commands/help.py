@@ -31,10 +31,14 @@ class CommandHelpMixin:
         first = normalized.split()[0] if normalized else ""
         normalized = aliases.get(first, normalized) if len(normalized.split()) == 1 else normalized
 
+        room_invite_help = getattr(self, "_room_invite_usage", None)
+        if room_invite_help is None:
+            room_invite_help = self._room_invite_usage_text
+
         topic_help = {
             "help": self._help_usage_text,
             "room": self._room_usage_text,
-            "room invite": lambda: getattr(self, "_room_invite_usage", self._room_invite_usage_text)(),
+            "room invite": room_invite_help,
             "redact": self._redact_usage_text,
             "policy": self._policy_usage_text,
             "backup": self._backup_usage_text,
@@ -150,7 +154,7 @@ class CommandHelpMixin:
 
             "🏠 Rooms / Policy\n"
             f"{p}room add/remove/delete/del/rm - manage protected rooms\n"
-            f"{p}room list [all|page] - list protected rooms\n"
+            f"{p}room list [all|page|last] - list protected rooms\n"
             f"{p}room invite list [all|page|last] - list pending room invites\n"
             f"{p}room invite accept/decline/remove/delete/del/rm <id> - accept or remove a room invite\n"
             f"{p}room invite cleanup [expired] - cleanup pending or expired room invites\n"
