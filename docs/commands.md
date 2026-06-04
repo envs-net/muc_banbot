@@ -199,10 +199,10 @@ Allowed read-only DM/MUC-PM commands:
 !help <command>
 !config [all|page|last]
 !config show [all|page|last]
+!status
 !omemo status
 !omemo devices
 !omemo help
-!status
 !checkupdate
 !updatecheck
 !banlist [all|page|last]

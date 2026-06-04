@@ -397,9 +397,9 @@ class DirectMessageMixin:
                 (
                     f"{p}help",
                     f"{p}config",
+                    f"{p}status",
                     f"{p}omemo status",
                     f"{p}omemo devices",
-                    f"{p}status",
                     f"{p}checkupdate",
                     f"{p}updatecheck",
                     f"{p}banlist",
@@ -426,9 +426,9 @@ class DirectMessageMixin:
         if is_admin:
             response = (
                 "🤖 Admin DM support is read-only.\n"
-                f"Allowed: {self.command_prefix}help, {self.command_prefix}config, "
+                f"Allowed: {self.command_prefix}help, "
+                f"{self.command_prefix}config, {self.command_prefix}status, "
                 f"{self.command_prefix}omemo status, {self.command_prefix}omemo devices, "
-                f"{self.command_prefix}status, "
                 f"{self.command_prefix}checkupdate, {self.command_prefix}updatecheck, "
                 f"{self.command_prefix}banlist, {self.command_prefix}bansearch, "
                 f"{self.command_prefix}why, {self.command_prefix}room list, "
