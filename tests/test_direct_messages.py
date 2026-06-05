@@ -309,7 +309,7 @@ async def test_admin_dm_updatecheck_announces_available_update_with_release_url(
 
 
 @pytest.mark.asyncio
-async def test_admin_dm_updatecheck_reports_errors():
+async def test_admin_dm_updatecheck_handles_error_without_update():
     bot = DirectBot()
     bot.update_result = UpdateResult(False, "2.3.0", "network timeout")
 
@@ -587,6 +587,32 @@ async def test_admin_dm_rejects_mutating_ignore_and_whitelist_commands():
     assert bot.sent[-1]["mtype"] == "chat"
 
 
+
+@pytest.mark.asyncio
+async def test_cmd_ignore_uses_default_actor_and_command_name():
+    bot = DirectBot()
+
+    await bot.cmd_ignore(
+        ["user@example.org"],
+        "room@conference.example.org",
+    )
+
+    assert bot.calls == [
+        (
+            "ignore",
+            ("user@example.org",),
+            "room@conference.example.org",
+            "unknown",
+            "ignore",
+        )
+    ]
+    assert bot.sent[-1] == {
+        "mto": "room@conference.example.org",
+        "mbody": "ignore output",
+        "mtype": "groupchat",
+    }
+
+
 @pytest.mark.asyncio
 async def test_admin_dm_rejects_invalid_ignore_list_page_argument():
     bot = DirectBot()
@@ -617,7 +643,7 @@ async def test_admin_dm_rejects_invalid_whitelist_shortcut_page_argument():
     )
 
     assert bot.calls == []
-    assert "read-only" in bot.sent[-1]["mbody"]
+    assert "Usage: !whitelist [list] [all|page|last]" in bot.sent[-1]["mbody"]
     assert bot.sent[-1]["mtype"] == "chat"
 
 

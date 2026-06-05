@@ -272,13 +272,30 @@ class DirectMessageMixin:
                     await self.cmd_ignore(allowed_args, reply_to, actor=sender_bare, command_name=cmd)
                     return True
 
-                await self._send_direct_message(
-                    reply_to,
-                    (
-                        "❌ Direct-message ignorelist commands are read-only.\n"
-                        f"Allowed: {p}{cmd} [list] [all|page|last]"
-                    ),
-                )
+                if allowed_args[0].lower() in {
+                    "add",
+                    "remove",
+                    "delete",
+                    "del",
+                    "rm",
+                    "clear",
+                    "cleanup",
+                    "set",
+                    "enable",
+                    "disable",
+                }:
+                    await self._send_direct_message(
+                        reply_to,
+                        (
+                            "❌ Direct-message ignorelist commands are read-only.\n"
+                            f"Allowed: {p}{cmd} [list] [all|page|last]"
+                        ),
+                    )
+                else:
+                    await self._send_direct_message(
+                        reply_to,
+                        f"❌ Usage: {p}{cmd} [list] [all|page|last]",
+                    )
                 return True
 
             if cmd == "rtbl":
