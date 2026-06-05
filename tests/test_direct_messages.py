@@ -1,11 +1,13 @@
-import pytest
 from typing import NamedTuple
+
+import pytest
 
 from banbot.direct_messages import ADMIN_ROOM, DirectMessageMixin
 from banbot.utils import bare_jid
 
 
 LAST_PAGE_MARKER = -1
+VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"
 
 
 class UpdateResult(NamedTuple):
@@ -48,7 +50,7 @@ class DirectBot(DirectMessageMixin):
         self.command_prefix = "!"
         self.allow_admin_commands_in_dms = True
         self.calls = []
-        self.version_check_url = "https://github.com/envs-net/muc_banbot/releases/latest"
+        self.version_check_url = VERSION_CHECK_URL
         self.update_result = UpdateResult(False, "2.3.0", None)
 
     def bare_jid(self, jid):
