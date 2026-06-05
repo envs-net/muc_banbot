@@ -1,6 +1,5 @@
-from typing import NamedTuple
-
 import pytest
+from typing import NamedTuple
 
 from banbot.direct_messages import ADMIN_ROOM, DirectMessageMixin
 from banbot.utils import bare_jid
@@ -12,7 +11,7 @@ LAST_PAGE = -1
 class UpdateResult(NamedTuple):
     has_update: bool
     latest_version: str
-    release_url: str | None
+    error_message: str | None
 
 
 class FakeJid:
@@ -105,6 +104,39 @@ class DirectBot(DirectMessageMixin):
     async def cmd_audit(self, args, room):
         self.calls.append(("audit", tuple(args), room))
         await self.bot_send_message(mto=room, mbody="audit output", mtype="groupchat")
+
+
+@pytest.mark.asyncio
+async def test_protected_room_command_behavior():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="room@conference.example.org",
+            resource="Admin",
+            body="!config",
+        )
+    )
+
+    assert bot.calls == [("config", "room@conference.example.org/Admin")]
+    assert bot.sent[-1]["mto"] == "room@conference.example.org/Admin"
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_non_protected_room_command_behavior():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="other@conference.example.org",
+            resource="Admin",
+            body="!config",
+        )
+    )
+
+    assert bot.calls == []
+    assert bot.sent[-1]["mto"] == "other@conference.example.org"
+    assert "only listen to admins" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
 
 
 @pytest.mark.asyncio
@@ -234,6 +266,25 @@ async def test_admin_dm_can_use_updatecheck_aliases():
     assert bot.sent[-2]["mtype"] == "chat"
     assert bot.sent[-1]["mtype"] == "chat"
     assert "Bot is up to date" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_updatecheck_announces_available_update_with_release_url():
+    bot = DirectBot()
+    bot.update_result = UpdateResult(True, "2.4.0", None)
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!checkupdate",
+        )
+    )
+
+    assert bot.calls == [("checkupdate", False)]
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert "2.4.0" in bot.sent[-1]["mbody"]
+    assert bot.version_check_url in bot.sent[-1]["mbody"]
 
 
 @pytest.mark.asyncio
