@@ -495,4 +495,3 @@ async def test_admin_muc_pm_commands_can_be_disabled():
     body = bot.sent[-1]["mbody"]
     assert "admin room" in body
     assert ADMIN_ROOM in body
-

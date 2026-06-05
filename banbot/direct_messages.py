@@ -325,6 +325,7 @@ class DirectMessageMixin:
 
                 query = " ".join(query_args)
                 bansearch_params = inspect.signature(self.cmd_bansearch).parameters
+
                 if "reply_to" in bansearch_params:
                     await self.cmd_bansearch(
                         query,
