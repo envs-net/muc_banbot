@@ -1,7 +1,18 @@
+from typing import NamedTuple
+
 import pytest
 
 from banbot.direct_messages import ADMIN_ROOM, DirectMessageMixin
 from banbot.utils import bare_jid
+
+
+LAST_PAGE = -1
+
+
+class UpdateResult(NamedTuple):
+    has_update: bool
+    latest_version: str
+    release_url: str | None
 
 
 class FakeJid:
@@ -39,7 +50,7 @@ class DirectBot(DirectMessageMixin):
         self.allow_admin_commands_in_dms = True
         self.calls = []
         self.version_check_url = "https://github.com/envs-net/muc_banbot/releases/latest"
-        self.update_result = (False, "2.3.0", None)
+        self.update_result = UpdateResult(False, "2.3.0", None)
 
     def bare_jid(self, jid):
         return bare_jid(jid)
@@ -236,7 +247,7 @@ async def test_admin_dm_can_use_bansearch_readonly_command():
     )
 
     assert bot.calls[0] == ("bansearch", "spam wave", 1, True)
-    assert bot.calls[1] == ("bansearch", "spam wave", -1, False)
+    assert bot.calls[1] == ("bansearch", "spam wave", LAST_PAGE, False)
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
 
 
@@ -312,7 +323,7 @@ async def test_admin_dm_can_use_banlist_and_rtbl_banlist():
     )
 
     assert bot.calls[0] == ("banlist", "admin@example.org", 1, True)
-    assert bot.calls[1] == ("banlist_rtbl", "admin@example.org", -1, False)
+    assert bot.calls[1] == ("banlist_rtbl", "admin@example.org", LAST_PAGE, False)
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
 
 
