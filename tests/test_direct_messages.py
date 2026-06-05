@@ -587,7 +587,6 @@ async def test_admin_dm_rejects_mutating_ignore_and_whitelist_commands():
     assert bot.sent[-1]["mtype"] == "chat"
 
 
-
 @pytest.mark.asyncio
 async def test_cmd_ignore_uses_default_actor_and_command_name():
     bot = DirectBot()
