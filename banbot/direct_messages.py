@@ -218,11 +218,27 @@ class DirectMessageMixin:
                 return True
 
             if cmd == "room":
+                def valid_room_list_arg(arg: str) -> bool:
+                    value = arg.lower()
+                    return value in {"all", "last"} or value.isdigit()
+
                 if args and args[0].lower() == "list":
+                    if any(not valid_room_list_arg(arg) for arg in args[1:]):
+                        await self._send_direct_message(
+                            reply_to,
+                            f"❌ Usage: {p}room list [all|page|last]",
+                        )
+                        return True
                     await self.cmd_room(args, reply_to)
                     return True
 
                 if len(args) >= 2 and args[0].lower() == "invite" and args[1].lower() == "list":
+                    if any(not valid_room_list_arg(arg) for arg in args[2:]):
+                        await self._send_direct_message(
+                            reply_to,
+                            f"❌ Usage: {p}room invite list [all|page|last]",
+                        )
+                        return True
                     await self.cmd_room(args, reply_to)
                     return True
 
@@ -325,7 +341,6 @@ class DirectMessageMixin:
 
                 query = " ".join(query_args)
                 bansearch_params = inspect.signature(self.cmd_bansearch).parameters
-
                 if "reply_to" in bansearch_params:
                     await self.cmd_bansearch(
                         query,

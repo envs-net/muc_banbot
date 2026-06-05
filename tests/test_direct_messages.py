@@ -5,7 +5,7 @@ from banbot.direct_messages import ADMIN_ROOM, DirectMessageMixin
 from banbot.utils import bare_jid
 
 
-LAST_PAGE = -1
+LAST_PAGE_MARKER = -1
 
 
 class UpdateResult(NamedTuple):
@@ -288,6 +288,25 @@ async def test_admin_dm_updatecheck_announces_available_update_with_release_url(
 
 
 @pytest.mark.asyncio
+async def test_admin_dm_updatecheck_reports_errors():
+    bot = DirectBot()
+    bot.update_result = UpdateResult(False, "2.3.0", "network timeout")
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!checkupdate",
+        )
+    )
+
+    assert bot.calls == [("checkupdate", False)]
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert "Update check failed" in bot.sent[-1]["mbody"]
+    assert "network timeout" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
 async def test_admin_dm_can_use_bansearch_readonly_command():
     bot = DirectBot()
     await bot.on_direct_message(
@@ -298,8 +317,24 @@ async def test_admin_dm_can_use_bansearch_readonly_command():
     )
 
     assert bot.calls[0] == ("bansearch", "spam wave", 1, True)
-    assert bot.calls[1] == ("bansearch", "spam wave", LAST_PAGE, False)
+    assert bot.calls[1] == ("bansearch", "spam wave", LAST_PAGE_MARKER, False)
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_bansearch_accepts_numeric_page():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!bansearch spam wave 2",
+        )
+    )
+
+    assert bot.calls == [("bansearch", "spam wave", 2, False)]
+    assert bot.sent[-1]["mtype"] == "chat"
 
 
 @pytest.mark.asyncio
@@ -374,7 +409,7 @@ async def test_admin_dm_can_use_banlist_and_rtbl_banlist():
     )
 
     assert bot.calls[0] == ("banlist", "admin@example.org", 1, True)
-    assert bot.calls[1] == ("banlist_rtbl", "admin@example.org", LAST_PAGE, False)
+    assert bot.calls[1] == ("banlist_rtbl", "admin@example.org", LAST_PAGE_MARKER, False)
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
 
 
@@ -423,6 +458,40 @@ async def test_admin_dm_can_use_room_and_invite_lists():
     assert bot.calls[0] == ("room", ("list", "all"), "admin@example.org")
     assert bot.calls[1] == ("room", ("invite", "list", "last"), "admin@example.org")
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_invalid_room_list_page_argument():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!room list nope",
+        )
+    )
+
+    assert bot.calls == []
+    assert "Usage: !room list [all|page|last]" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_invalid_room_invite_list_page_argument():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!room invite list nope",
+        )
+    )
+
+    assert bot.calls == []
+    assert "Usage: !room invite list [all|page|last]" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
 
 
 @pytest.mark.asyncio
@@ -493,6 +562,40 @@ async def test_admin_dm_rejects_mutating_ignore_and_whitelist_commands():
     assert bot.calls == []
     assert "read-only" in bot.sent[-2]["mbody"]
     assert bot.sent[-2]["mtype"] == "chat"
+    assert "read-only" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_invalid_ignore_list_page_argument():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!ignore list nope",
+        )
+    )
+
+    assert bot.calls == []
+    assert "Usage: !ignore list [all|page|last]" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_invalid_whitelist_shortcut_page_argument():
+    bot = DirectBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!whitelist nope",
+        )
+    )
+
+    assert bot.calls == []
     assert "read-only" in bot.sent[-1]["mbody"]
     assert bot.sent[-1]["mtype"] == "chat"
 
