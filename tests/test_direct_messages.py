@@ -25,6 +25,12 @@ class FakeJid:
     """
 
     def __init__(self, bare, resource=None):
+        """Initialize a fake JID.
+
+        Args:
+            bare: Bare JID string, for example "user@example.org".
+            resource: Optional resource part of the JID.
+        """
         self.bare = bare
         self.resource = resource
 
@@ -40,6 +46,14 @@ class FakeDirectMessage:
     """
 
     def __init__(self, *, bare, resource=None, msg_type="chat", body=""):
+        """Initialize a fake direct-message stanza.
+
+        Args:
+            bare: Bare JID of the sender, without resource.
+            resource: Optional resource part of the sender JID.
+            msg_type: Message type exposed as msg["type"], for example "chat".
+            body: Message text exposed as msg["body"].
+        """
         self._data = {"from": FakeJid(bare, resource), "type": msg_type, "body": body}
 
     def __getitem__(self, key):
@@ -54,6 +68,12 @@ class DirectBot(DirectMessageMixin):
     """
 
     def __init__(self):
+        """Initialize deterministic bot state used by direct-message tests.
+
+        Sets the bot identity, protected-room membership, occupant maps used
+        for authorization checks, captured outbound messages, command parsing
+        settings, and update-check test data.
+        """
         self.boundjid = FakeJid("bot@example.org", "res")
         self.protected_rooms = {"room@conference.example.org"}
         self.occupants = {
