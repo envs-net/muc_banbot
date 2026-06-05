@@ -2,12 +2,13 @@ from typing import NamedTuple
 
 import pytest
 
-from banbot.direct_messages import ADMIN_ROOM, DirectMessageMixin
+from banbot.direct_messages import (
+    ADMIN_ROOM,
+    DirectMessageMixin,
+    LAST_PAGE_MARKER,
+    VERSION_CHECK_URL,
+)
 from banbot.utils import bare_jid
-
-
-LAST_PAGE_MARKER = -1
-VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"
 
 
 class UpdateResult(NamedTuple):
@@ -17,6 +18,12 @@ class UpdateResult(NamedTuple):
 
 
 class FakeJid:
+    """Lightweight test double for the slixmpp JID interface used here.
+
+    It only implements the attributes needed by DirectMessageMixin: bare JID,
+    optional resource, and string formatting as bare/resource.
+    """
+
     def __init__(self, bare, resource=None):
         self.bare = bare
         self.resource = resource
@@ -26,6 +33,12 @@ class FakeJid:
 
 
 class FakeDirectMessage:
+    """Test double for a slixmpp message stanza used by direct-message tests.
+
+    It mimics the mapping-style access used by the bot code: msg["from"],
+    msg["type"], and msg["body"].
+    """
+
     def __init__(self, *, bare, resource=None, msg_type="chat", body=""):
         self._data = {"from": FakeJid(bare, resource), "type": msg_type, "body": body}
 
@@ -34,6 +47,12 @@ class FakeDirectMessage:
 
 
 class DirectBot(DirectMessageMixin):
+    """Minimal DirectMessageMixin test fixture.
+
+    Provides mocked bot state and command handlers so admin-DM behavior can be
+    tested without a real XMPP client connection.
+    """
+
     def __init__(self):
         self.boundjid = FakeJid("bot@example.org", "res")
         self.protected_rooms = {"room@conference.example.org"}

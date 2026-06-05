@@ -8,6 +8,10 @@ from ._version import __version__
 from .utils import wants_all_pages, without_all_pages_arg
 
 
+LAST_PAGE_MARKER = -1
+VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"
+
+
 class DirectMessageMixin:
     def _direct_message_sender_info(self, msg) -> tuple[bool, str, str]:
         """Return (is_admin, reply_to, sender_bare) for a DM or MUC-PM."""
@@ -188,7 +192,7 @@ class DirectMessageMixin:
                     page = 1
                     if len(args) >= 2:
                         if args[1].lower() == "last":
-                            page = -1
+                            page = LAST_PAGE_MARKER
                         else:
                             try:
                                 page = max(1, int(args[1]))
@@ -204,7 +208,7 @@ class DirectMessageMixin:
                 page = 1
                 if args:
                     if args[0].lower() == "last":
-                        page = -1
+                        page = LAST_PAGE_MARKER
                     else:
                         try:
                             page = max(1, int(args[0]))
@@ -322,7 +326,7 @@ class DirectMessageMixin:
                 page = 1
                 query_args = args
                 if args and args[-1].lower() == "last":
-                    page = -1
+                    page = LAST_PAGE_MARKER
                     query_args = args[:-1]
                 elif args:
                     try:
