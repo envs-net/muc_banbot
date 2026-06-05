@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from banbot.config_cmd import ConfigCommandMixin
+from banbot.commands.config_display import ConfigCommandMixin
 
 
 class ConfigDisplayBot(ConfigCommandMixin):

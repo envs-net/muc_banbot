@@ -12,7 +12,7 @@ aiosqlite = pytest.importorskip("aiosqlite")
 from banbot.audit import AuditMixin
 from banbot.ban_queries import BanQueryMixin
 from banbot.cache import CacheMixin
-from banbot.config_cmd import ConfigCommandMixin
+from banbot.commands.config_display import ConfigCommandMixin
 from banbot.db import DatabaseMixin
 from banbot.rtbl_utils import _rtbl_hash_jid
 from banbot.status import StatusMixin

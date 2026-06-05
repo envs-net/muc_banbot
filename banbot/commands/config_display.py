@@ -1,4 +1,4 @@
-"""Configuration display, runtime editing and reload commands."""
+"""Configuration command display and runtime editing helpers."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import pathlib
 import re
 from typing import Any
 
-from ._version import __version__
-from .config_utils import ConfigMixin
-from .utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
+from .._version import __version__
+from ..config_utils import ConfigMixin
+from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class ConfigCommandMixin(ConfigMixin):
         """Return candidate config_sample.py paths for ordering !config output."""
         return [
             pathlib.Path("config_sample.py"),
-            pathlib.Path(__file__).resolve().parent.parent / "config_sample.py",
+            pathlib.Path(__file__).resolve().parents[2] / "config_sample.py",
         ]
 
     def _config_sample_sections(self) -> list[tuple[str, tuple[str, ...]]]:

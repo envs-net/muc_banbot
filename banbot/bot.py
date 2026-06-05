@@ -39,7 +39,6 @@ from .room_invites import RoomInviteMixin
 from .redaction import RedactionMixin
 from .ban_queries import BanQueryMixin
 from .status import StatusMixin
-from .config_cmd import ConfigCommandMixin
 from .muc import MucMixin
 from .health_check import HealthCheckMixin
 from .sync import SyncMixin
@@ -126,7 +125,6 @@ class BanBot(
     RedactionMixin,
     BanQueryMixin,
     StatusMixin,
-    ConfigCommandMixin,
     MucMixin,
     HealthCheckMixin,
     SyncMixin,
