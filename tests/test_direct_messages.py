@@ -463,6 +463,7 @@ async def test_muc_pm_admin_can_use_status_readonly_command():
     assert bot.sent[-1]["mto"] == "room@conference.example.org/Admin"
     assert bot.sent[-1]["mtype"] == "chat"
 
+
 @pytest.mark.asyncio
 async def test_admin_dm_commands_can_be_disabled():
     bot = DirectBot()
