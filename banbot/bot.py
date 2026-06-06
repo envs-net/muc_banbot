@@ -232,6 +232,7 @@ class BanBot(
         self.redaction_enabled: bool = getattr(config, "REDACTION_ENABLED", False)
         self.redaction_index_retention_days: int = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
         self.redaction_auto_reasons: list[str] = list(getattr(config, "REDACTION_AUTO_REASONS", []))
+        self.redaction_cleanup_task: asyncio.Task | None = None
 
         # --- RTBL ---
         self.rtbl_enabled: bool = getattr(config, "RTBL_ENABLED", False)
@@ -306,7 +307,12 @@ class BanBot(
 
     async def stop_background_tasks(self) -> None:
         """Cancel running background tasks before starting new ones."""
-        for task in (self.unban_task, self.health_check_task, self.version_check_task):
+        for task in (
+            self.unban_task,
+            self.health_check_task,
+            self.version_check_task,
+            self.redaction_cleanup_task,
+        ):
             if task and not task.done():
                 task.cancel()
                 try:
@@ -328,6 +334,8 @@ class BanBot(
         await self.stop_background_tasks()
 
         await self.setup_db()
+        if self.redaction_enabled and hasattr(self, "run_redaction_cleanup_automatic"):
+            await self.run_redaction_cleanup_automatic(actor="system")
         await self.load_pending_room_invites()
         await self.load_bans_from_db()
         await self.cleanup_old_audit_logs()
@@ -398,6 +406,10 @@ class BanBot(
 
         # --- Start health check worker ---
         self.health_check_task = asyncio.create_task(self.health_check_worker())
+
+        # --- Start redaction cleanup worker ---
+        if self.redaction_enabled and hasattr(self, "redaction_cleanup_worker"):
+            self.redaction_cleanup_task = asyncio.create_task(self.redaction_cleanup_worker())
 
         # --- Start version check worker ---
         if self.version_check_enabled and self.version_check_url:

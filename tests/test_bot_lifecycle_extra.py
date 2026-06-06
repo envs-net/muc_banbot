@@ -116,18 +116,22 @@ async def test_stop_background_tasks_cancels_running_tasks(monkeypatch):
     unban = FakeTask("unban")
     health = FakeTask("health")
     version = FakeTask("version")
+    redaction_cleanup = FakeTask("redaction_cleanup")
     bot.unban_task = unban
     bot.health_check_task = health
     bot.version_check_task = version
+    bot.redaction_cleanup_task = redaction_cleanup
 
     await bot.stop_background_tasks()
 
     assert unban.cancelled is True
     assert health.cancelled is True
     assert version.cancelled is True
+    assert redaction_cleanup.cancelled is True
     assert unban.awaited is True
     assert health.awaited is True
     assert version.awaited is True
+    assert redaction_cleanup.awaited is True
 
 
 @pytest.mark.asyncio
@@ -140,6 +144,7 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
     bot.sent = []
     bot.version_check_enabled = True
     bot.version_check_url = "https://github.com/envs-net/muc_banbot/releases/latest"
+    bot.redaction_enabled = False
     bot.announce_startup = True
     bot.reconnecting = False
 
@@ -216,6 +221,73 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_runs_redaction_cleanup_and_worker_when_enabled(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    bot.protected_rooms = set()
+    bot.registered_rooms = set()
+    bot.plugin = {"xep_0045": FakeMucPlugin()}
+    bot.sent = []
+    bot.version_check_enabled = False
+    bot.version_check_url = None
+    bot.redaction_enabled = True
+    bot.announce_startup = False
+    bot.reconnecting = False
+
+    calls = []
+
+    async def record(name, result=None):
+        calls.append(name)
+        return result
+
+    bot.setup_db = lambda: record("setup_db")
+    bot.run_redaction_cleanup_automatic = lambda actor="system": record(f"redaction_cleanup:{actor}")
+    bot.load_pending_room_invites = lambda: record("load_pending_room_invites")
+    bot.load_bans_from_db = lambda: record("load_bans_from_db")
+    bot.cleanup_old_audit_logs = lambda: record("cleanup_old_audit_logs", 0)
+    bot.setup_ignorelist = lambda: record("setup_ignorelist")
+    bot.get_roster = lambda: record("get_roster")
+    bot.wait_for_occupants = lambda timeout=20: record(f"wait_for_occupants:{timeout}")
+    bot.check_bot_admin_rights = lambda: record("check_bot_admin_rights")
+    bot.sync_admins = lambda announce=False: record(f"sync_admins:{announce}")
+    bot.sync_bans_startup = lambda: record("sync_bans_startup")
+    bot.setup_rtbl = lambda: record("setup_rtbl")
+    bot.setup_rtbl_publish = lambda: record("setup_rtbl_publish")
+    bot.update_vcard = lambda: record("update_vcard")
+    bot.bot_send_message = lambda **kwargs: record("bot_send_message", bot.sent.append(kwargs))
+    bot.send_presence = lambda: calls.append("send_presence")
+
+    async def never_running_worker():
+        await asyncio.sleep(999)
+
+    bot._rtbl_refresh_worker = never_running_worker
+    bot.unban_worker = never_running_worker
+    bot.health_check_worker = never_running_worker
+    bot.version_check_worker = never_running_worker
+    bot.redaction_cleanup_worker = never_running_worker
+
+    async def no_sleep(_delay):
+        return None
+
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+        coro.close()
+        return CompletedTask(f"task-{len(created_tasks)}")
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(bot_module.asyncio, "create_task", fake_create_task)
+
+    await bot.start(None)
+
+    assert calls.index("setup_db") < calls.index("redaction_cleanup:system")
+    assert "redaction_cleanup:system" in calls
+    assert len(created_tasks) == 4
+    assert bot.redaction_cleanup_task is not None
+
+
+@pytest.mark.asyncio
 async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     _patch_lightweight_init(monkeypatch)
     bot = bot_module.BanBot("bot@example.org", "secret")
@@ -225,6 +297,7 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     bot.sent = []
     bot.version_check_enabled = False
     bot.version_check_url = None
+    bot.redaction_enabled = False
     bot.announce_startup = True
     bot.reconnecting = True
 

@@ -11,10 +11,14 @@ import pytest
 try:
     import aiosqlite  # noqa: F401
 except ImportError:
-    aiosqlite = None
+    pytest.skip(
+        "aiosqlite is required for redaction database tests",
+        allow_module_level=True,
+    )
 
 from banbot.db import DatabaseMixin
 from banbot.redaction import (
+    REDACTION_CLEANUP_INTERVAL_SECONDS,
     REDACTION_IQ_TIMEOUT_SECONDS,
     RedactionMixin,
     SID_NS,
@@ -22,13 +26,7 @@ from banbot.redaction import (
 from banbot.utils import bare_jid as normalize_bare_jid
 
 
-pytestmark = pytest.mark.skipif(
-    aiosqlite is None,
-    reason="aiosqlite is required for redaction database tests",
-)
-
 TEST_REDACTION_IQ_SEND_DELAY_SECONDS = 0.05
-
 
 
 class FakeFrom:
@@ -293,6 +291,59 @@ async def test_redact_cleanup_deletes_old_entries(temp_db_path):
         assert "Deleted entries: 1" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
+
+
+async def test_automatic_redaction_cleanup_deletes_old_entries_without_message(temp_db_path):
+    bot = RedactionBot()
+    bot.redaction_index_retention_days = 30
+    await bot.setup_db()
+    try:
+        await bot.db.execute(
+            """
+            INSERT INTO redaction_index (room_jid, sender_jid, stanza_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "room@conference.example.test",
+                "alice@example.org",
+                "old-stanza",
+                int(time.time()) - 31 * 86400,
+            ),
+        )
+        await bot.db.commit()
+
+        result = await bot.run_redaction_cleanup_automatic(actor="system")
+
+        assert result["deleted"] == 1
+        assert bot.sent == []
+        async with bot.db.execute("SELECT COUNT(*) FROM redaction_index") as cursor:
+            row = await cursor.fetchone()
+        assert row[0] == 0
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
+    bot = RedactionBot()
+    sleeps = []
+    cleanup_calls = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    async def fake_cleanup(actor="system"):
+        cleanup_calls.append(actor)
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr("banbot.redaction.asyncio.sleep", fake_sleep)
+    bot.run_redaction_cleanup_automatic = fake_cleanup
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot.redaction_cleanup_worker()
+
+    assert sleeps == [REDACTION_CLEANUP_INTERVAL_SECONDS]
+    assert cleanup_calls == ["system"]
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ MODERATE_NS = "urn:xmpp:message-moderate:1"
 RETRACT_NS = "urn:xmpp:message-retract:1"
 SID_NS = "urn:xmpp:sid:0"
 REDACTION_IQ_TIMEOUT_SECONDS = 10
+REDACTION_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 
 _REDACTION_ALREADY_RETRACTED_CONDITIONS = {
     "item-not-found",
@@ -630,6 +631,88 @@ class RedactionMixin:
         return summary
 
 
+    async def _redaction_cleanup_old_entries(
+        self,
+        actor: str | None = "system",
+        *,
+        audit: bool = True,
+    ) -> dict[str, int | bool | str]:
+        """Delete expired redaction index rows without sending command output."""
+        result: dict[str, int | bool | str] = {
+            "enabled": bool(getattr(self, "redaction_enabled", False)),
+            "retention_days": int(getattr(self, "redaction_index_retention_days", 30) or 0),
+            "deleted": 0,
+        }
+
+        if not result["enabled"]:
+            result["skipped_reason"] = "redaction disabled"
+            return result
+
+        days = int(result["retention_days"])
+        if days <= 0:
+            result["skipped_reason"] = "retention disabled"
+            if audit:
+                await self._audit_redaction_event(
+                    "redact_cleanup",
+                    actor=actor,
+                    target_type="redaction_index",
+                    target="cleanup",
+                    comment="retention disabled; keep forever",
+                    details={"retention_days": days, "deleted": 0},
+                )
+            return result
+
+        cutoff = int(time.time()) - days * 86400
+        cur = await self.db.execute(
+            "DELETE FROM redaction_index WHERE created_at < ?",
+            (cutoff,),
+        )
+        deleted = cur.rowcount or 0
+        result["deleted"] = deleted
+        await self.db.commit()
+
+        if audit:
+            await self._audit_redaction_event(
+                "redact_cleanup",
+                actor=actor,
+                target_type="redaction_index",
+                target="cleanup",
+                comment=f"retention {days} days",
+                details={"retention_days": days, "deleted": deleted},
+            )
+
+        return result
+
+
+    async def run_redaction_cleanup_automatic(self, actor: str | None = "system") -> dict[str, int | bool | str]:
+        """Run automatic redaction index cleanup without admin-room noise."""
+        try:
+            result = await self._redaction_cleanup_old_entries(actor=actor, audit=True)
+        except Exception as exc:
+            log.warning("Automatic redaction index cleanup failed: %s", exc)
+            if hasattr(self, "send_operational_alert"):
+                await self.send_operational_alert(
+                    "redaction_cleanup_failed",
+                    "Redaction cleanup failed",
+                    f"Automatic redaction index cleanup failed: {exc}",
+                    enabled=getattr(self, "alert_on_redaction_failure", True),
+                    details={"error": str(exc)},
+                )
+            return {"enabled": bool(getattr(self, "redaction_enabled", False)), "deleted": 0, "error": str(exc)}
+
+        deleted = int(result.get("deleted", 0) or 0)
+        if deleted > 0:
+            log.info("Redaction index cleanup removed %s old entr%s", deleted, "y" if deleted == 1 else "ies")
+        return result
+
+
+    async def redaction_cleanup_worker(self) -> None:
+        """Run redaction index cleanup every 24 hours."""
+        while True:
+            await asyncio.sleep(REDACTION_CLEANUP_INTERVAL_SECONDS)
+            await self.run_redaction_cleanup_automatic(actor="system")
+
+
     async def redact_cleanup(self, room: str, actor: str | None = None) -> None:
         """Delete old redaction index rows according to configured retention."""
         if not getattr(self, "redaction_enabled", False):
@@ -643,16 +726,11 @@ class RedactionMixin:
             )
             return
 
-        days = int(getattr(self, "redaction_index_retention_days", 30) or 0)
+        result = await self._redaction_cleanup_old_entries(actor=actor, audit=True)
+        days = int(result.get("retention_days", 0) or 0)
+        deleted = int(result.get("deleted", 0) or 0)
+
         if days <= 0:
-            await self._audit_redaction_event(
-                "redact_cleanup",
-                actor=actor,
-                target_type="redaction_index",
-                target="cleanup",
-                comment="retention disabled; keep forever",
-                details={"retention_days": days, "deleted": 0},
-            )
             await self.bot_send_message(
                 mto=room,
                 mbody=(
@@ -664,23 +742,6 @@ class RedactionMixin:
                 mtype="groupchat",
             )
             return
-
-        cutoff = int(time.time()) - days * 86400
-        cur = await self.db.execute(
-            "DELETE FROM redaction_index WHERE created_at < ?",
-            (cutoff,),
-        )
-        deleted = cur.rowcount or 0
-        await self.db.commit()
-
-        await self._audit_redaction_event(
-            "redact_cleanup",
-            actor=actor,
-            target_type="redaction_index",
-            target="cleanup",
-            comment=f"retention {days} days",
-            details={"retention_days": days, "deleted": deleted},
-        )
 
         await self.bot_send_message(
             mto=room,
