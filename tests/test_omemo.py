@@ -156,6 +156,8 @@ async def test_omemo_recipients_for_room_uses_visible_occupant_jids_only():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients():
     bot = OmemoProbe()
+    # Intentionally mixed quoting to verify parser robustness against
+    # inconsistent token styles in exception messages.
     exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', \"user@example.org\"})")
 
     assert bot._extract_unusable_omemo_recipients(exc) == {
@@ -189,7 +191,11 @@ class FakeEncryptPlugin:
         self.calls = []
 
     async def encrypt_message(self, msg, recipients):
-        bares = sorted(jid.bare for jid in recipients) if isinstance(recipients, set) else [recipients.bare]
+        if isinstance(recipients, set):
+            bares = sorted(jid.bare for jid in recipients)
+        else:
+            bares = [recipients.bare]
+
         self.calls.append(bares)
         if "bad@example.test" in bares:
             raise RuntimeError("bad recipients: frozenset({'bad@example.test'})")
