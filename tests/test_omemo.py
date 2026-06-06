@@ -14,27 +14,27 @@ TEST_DEVICE_ID = 813096472
 OMEMO_RESET_SUCCESS_FRAGMENTS = (
     "OMEMO storage reset prepared",
     "OMEMO is disabled for this running process until restart",
-    "Restarting in 3 seconds",
+    f"Restarting in {TEST_OMEMO_RESET_RESTART_DELAY_SECONDS} seconds",
     "Old storage backup:",
     "Old metadata backup:",
 )
 
 
 def stat_mode(path):
-    """Return file permission bits only for test assertions."""
+    """Return file permission bits for test assertions."""
     return os.stat(path).st_mode & 0o777
 
 
 def freeze_omemo_timestamp(monkeypatch, timestamp="20260528-123456"):
     """Patch OMEMO timestamp formatting for deterministic tests.
 
-    The helper monkeypatches ``banbot.omemo.time.strftime`` with a stable
-    value derived from ``timestamp`` while still honoring the requested output
-    format string.
+    This helper monkeypatches ``banbot.omemo.time.strftime`` with a stable
+    timestamp while still honoring the requested format string. That keeps
+    backup filename assertions deterministic without hiding format mistakes.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture used to patch module attributes.
-        timestamp: Fixed timestamp string in ``YYYYMMDD-HHMMSS`` format.
+        timestamp: Fixed timestamp in ``YYYYMMDD-HHMMSS`` format.
     """
     import banbot.omemo as omemo_module
 
@@ -83,21 +83,16 @@ def test_prepare_omemo_storage_file_rejects_directory(tmp_path):
 
 
 class OmemoProbe(OmemoMixin):
-    ROOM_JID = "room@conference.example.test"
-    ROOM_OCCUPANTS = {
-        "alice": {"jid": "alice@example.test/mobile"},
-        "bob": {"jid": "bob@example.test/desktop"},
-        "anon": {},
-        "self": {"jid": "bot@example.test/service"},
-    }
-
     def __init__(self):
         self.omemo_enabled = True
         self.plugin = {}
         self.omemo_ready = None
         self.occupants = {
-            self.ROOM_JID: {
-                nick: dict(info) for nick, info in self.ROOM_OCCUPANTS.items()
+            "room@conference.example.test": {
+                "alice": {"jid": "alice@example.test/mobile"},
+                "bob": {"jid": "bob@example.test/desktop"},
+                "anon": {},
+                "self": {"jid": "bot@example.test/service"},
             }
         }
         self.boundjid = slixmpp.JID("bot@example.test/service")
@@ -106,10 +101,10 @@ class OmemoProbe(OmemoMixin):
         self.omemo_auto_encrypt_admin_room = True
         self.omemo_plaintext_fallback = False
         self.omemo_reset_on_identity_change = True
+        self.omemo_reset_pending_restart = False
         self.sent = []
         self.audited = []
         self.restart_calls = []
-        self.omemo_reset_pending_restart = False
 
     async def _restart_process(self):
         self.restart_calls.append("restart")
@@ -140,6 +135,8 @@ def make_message(xml, sender="sender@example.test"):
 
 
 class ReadyFlag:
+    """Minimal ready-state flag used by OMEMO tests."""
+
     def __init__(self, value=True):
         self.value = value
         self.cleared = False
@@ -158,13 +155,13 @@ def write_omemo_storage(storage, payload):
 
 
 def nested_device_hint_storage_payload():
-    """Return OMEMO-like storage containing device-like hints at multiple depths.
+    """Return OMEMO-like storage with nested device-hint structures.
 
-    This fixture intentionally mixes nested dictionaries, lists, and plain text
-    so tests can verify device-hint scanning logic does not rely on top-level
-    keys only. It also includes near-matching values such as prekey ranges and
-    booleans to exercise realistic traversal paths.
+    This fixture intentionally mixes nested dictionaries, lists and plain text
+    so device-hint scanning can be verified without treating internal values
+    such as prekey ranges or booleans as real device IDs.
     """
+
     return {
         "sessions": {
             "adminbot@example.org": {
@@ -184,12 +181,13 @@ def nested_device_hint_storage_payload():
 
 
 def simple_device_hint_storage_payload():
-    """Return a flat OMEMO-like storage fixture with one visible device hint.
+    """Return minimal OMEMO-like storage with one visible device hint.
 
-    Use this for straightforward detection tests where the hint is present at
-    the expected top-level location. In contrast,
-    ``nested_device_hint_storage_payload`` is used for recursive scanning tests.
+    Use this for straightforward device listing tests where the hint is present
+    at a top-level device-key location. More complex traversal and negative
+    matching are covered by ``nested_device_hint_storage_payload``.
     """
+
     return {
         "sessions": {
             "adminbot@example.org": {"device_id": TEST_DEVICE_ID},
@@ -223,9 +221,12 @@ async def test_omemo_recipients_for_room_uses_visible_occupant_jids_only():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients():
     bot = OmemoProbe()
-    # Intentionally mixed quoting to verify parser robustness against
+    # Intentionally mixed quoting verifies parser robustness against
     # inconsistent token styles in exception messages.
-    exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', \"user@example.org\"})")
+    exc = RuntimeError(
+        "bad recipients: "
+        "frozenset({'envsbot@example.org', \"user@example.org\"})"
+    )
 
     assert bot._extract_unusable_omemo_recipients(exc) == {
         "envsbot@example.org",
@@ -236,7 +237,10 @@ def test_extract_unusable_omemo_recipients():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients_filters_invalid_tokens():
     bot = OmemoProbe()
-    exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', 'No Device', \"user@example.org\"})")
+    exc = RuntimeError(
+        "bad recipients: "
+        "frozenset({'envsbot@example.org', 'No Device', \"user@example.org\"})"
+    )
 
     assert bot._extract_unusable_omemo_recipients(exc) == {
         "envsbot@example.org",
@@ -305,13 +309,23 @@ async def test_encrypt_and_send_omemo_does_not_plaintext_fallback_when_all_recip
 
 
 class FakeDecryptPlugin:
+    """Fake slixmpp XEP-0384 decrypt plugin."""
+
     def __init__(self, encrypted_namespace="eu.siacs.conversations.axolotl", result=None):
+        """Initialize the fake decrypt plugin.
+
+        Args:
+            encrypted_namespace: Namespace string returned by ``is_encrypted``.
+                The real slixmpp plugin returns a namespace when a stanza is
+                encrypted and a falsy value otherwise.
+            result: Optional decrypt result returned by ``decrypt_message``.
+        """
         self.encrypted_namespace = encrypted_namespace
         self.result = result
         self.decrypt_calls = 0
 
     def is_encrypted(self, msg):
-        """Mimic slixmpp XEP-0384: return the encryption namespace or None."""
+        """Mirror slixmpp behavior by returning the encryption namespace."""
         return self.encrypted_namespace
 
     async def decrypt_message(self, msg):
@@ -634,10 +648,14 @@ def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
 
 @pytest.mark.omemo
 def test_format_omemo_device_ids_is_stable_and_compact():
-    assert OmemoProbe._format_omemo_device_ids(set()) == "storage entry found, exact device IDs not visible"
-    assert OmemoProbe._format_omemo_device_ids({"not-a-number"}) == "storage entry found, exact device IDs not visible"
+    assert OmemoProbe._format_omemo_device_ids(set()) == (
+        "storage entry found, exact device IDs not visible"
+    )
+    assert OmemoProbe._format_omemo_device_ids({"not-a-number"}) == (
+        "storage entry found, exact device IDs not visible"
+    )
+    assert OmemoProbe._format_omemo_device_ids({"1", "2", "not-a-number"}) == "1, 2"
     assert OmemoProbe._format_omemo_device_ids({"10", "2", "1"}) == "1, 2, 10"
-    assert OmemoProbe._format_omemo_device_ids({"1", "2", "not-a-number"}) == "storage entry found, exact device IDs not visible"
 
     long_ids = {str(i) for i in range(1, 20)}
     formatted = OmemoProbe._format_omemo_device_ids(long_ids, limit=3)
@@ -701,8 +719,8 @@ async def test_cmd_omemo_reset_requires_confirm_and_rotates_storage(tmp_path, mo
 
     await bot._cmd_omemo_reset("admin@conference.example.org", actor="admin@example.org", confirm=True)
     body = bot.sent[-1]["mbody"]
-    for expected_fragment in OMEMO_RESET_SUCCESS_FRAGMENTS:
-        assert expected_fragment in body
+    for fragment in OMEMO_RESET_SUCCESS_FRAGMENTS:
+        assert fragment in body
     assert bot.omemo_ready.cleared is True
     assert bot.omemo_enabled is False
     assert bot.omemo_reset_pending_restart is True
