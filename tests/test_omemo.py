@@ -9,12 +9,13 @@ slixmpp = pytest.importorskip("slixmpp")
 from banbot.omemo import OmemoMixin, _prepare_omemo_storage_file
 
 
-TEST_OMEMO_RESET_RESTART_DELAY_SECONDS = 3
-TEST_DEVICE_ID = 813096472
+TEST_OMEMO_RESET_EXPECTED_RESTART_DELAY_SECONDS = 3
+TEST_DEVICE_HINT_ID = 813096472
+TEST_ADMINBOT_NESTED_DEVICE_HINT_ID = "9095"
 OMEMO_RESET_SUCCESS_FRAGMENTS = (
     "OMEMO storage reset prepared",
     "OMEMO is disabled for this running process until restart",
-    f"Restarting in {TEST_OMEMO_RESET_RESTART_DELAY_SECONDS} seconds",
+    f"Restarting in {TEST_OMEMO_RESET_EXPECTED_RESTART_DELAY_SECONDS} seconds",
     "Old storage backup:",
     "Old metadata backup:",
 )
@@ -167,8 +168,10 @@ def nested_device_hint_storage_payload():
             "adminbot@example.org": {
                 "prekeys": list(range(1, 101)),
                 "enabled": True,
-                "device_id": TEST_DEVICE_ID,
-                "nested": {"device": True, "dev-9095": {}},
+                "device_id": TEST_DEVICE_HINT_ID,
+                # Include a nested, device-like key pattern to verify hint
+                # extraction traverses nested dicts without mistaking booleans.
+                "nested": {"device": True, f"dev-{TEST_ADMINBOT_NESTED_DEVICE_HINT_ID}": {}},
             },
             "moderator@example.org": {
                 "session": "present",
@@ -190,7 +193,7 @@ def simple_device_hint_storage_payload():
 
     return {
         "sessions": {
-            "adminbot@example.org": {"device_id": TEST_DEVICE_ID},
+            "adminbot@example.org": {"device_id": TEST_DEVICE_HINT_ID},
         },
     }
 
@@ -315,9 +318,11 @@ class FakeDecryptPlugin:
         """Initialize the fake decrypt plugin.
 
         Args:
-            encrypted_namespace: Namespace string returned by ``is_encrypted``.
-                The real slixmpp plugin returns a namespace when a stanza is
-                encrypted and a falsy value otherwise.
+            encrypted_namespace: Value returned by ``is_encrypted`` to simulate
+                different encryption states in tests. Use a namespace string to
+                represent an encrypted stanza, or a falsy value such as ``None``
+                to represent an unencrypted stanza. The default namespace is
+                the OMEMO namespace expected by XEP-0384/slixmpp.
             result: Optional decrypt result returned by ``decrypt_message``.
         """
         self.encrypted_namespace = encrypted_namespace
@@ -638,7 +643,10 @@ def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
     bot.omemo_storage_file = str(storage)
 
     hints = bot._collect_omemo_storage_device_hints()
-    assert hints["adminbot@example.org"] == {str(TEST_DEVICE_ID), "9095"}
+    assert hints["adminbot@example.org"] == {
+        str(TEST_DEVICE_HINT_ID),
+        TEST_ADMINBOT_NESTED_DEVICE_HINT_ID,
+    }
     assert hints["moderator@example.org"] == {"123456"}
     assert hints["user2@example.org"] == set()
     assert "True" not in hints["adminbot@example.org"]
@@ -683,7 +691,7 @@ async def test_cmd_omemo_devices_lists_recipients_before_storage_hints(tmp_path,
     assert "• alice@example.test" in body
     assert "• bob@example.test" in body
     assert "Local storage hints:" in body
-    assert f"• adminbot@example.org: {TEST_DEVICE_ID}" in body
+    assert f"• adminbot@example.org: {TEST_DEVICE_HINT_ID}" in body
     assert "not a guaranteed list" in body
     assert body.index("Current admin-room recipients") < body.index("Local storage hints")
 
@@ -746,7 +754,7 @@ async def test_omemo_reset_restart_helper_waits_then_restarts(monkeypatch):
 
     await bot._restart_after_omemo_reset()
 
-    assert sleeps == [TEST_OMEMO_RESET_RESTART_DELAY_SECONDS]
+    assert sleeps == [TEST_OMEMO_RESET_EXPECTED_RESTART_DELAY_SECONDS]
     assert bot.restart_calls == ["restart"]
 
 
