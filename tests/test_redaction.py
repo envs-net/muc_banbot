@@ -48,25 +48,44 @@ class FakeMessage:
 
 
 class FakeOutgoingIq:
-    def __init__(self, sent, delay: float = 0.0, fail: bool = False, fail_error: str | None = None):
+    def __init__(
+        self,
+        sent,
+        delay: float = 0.0,
+        fail: bool = False,
+        fail_error: str | None = None,
+        inflight_tracker: dict[str, int] | None = None,
+    ):
         self.sent = sent
         self.children = []
         self.kwargs = {}
         self.delay = delay
         self.fail = fail
         self.fail_error = fail_error or "simulated retract failure"
+        self.inflight_tracker = inflight_tracker
 
     def append(self, element):
         self.children.append(element)
 
     async def send(self, timeout=None):
         self.timeout = timeout
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        if self.fail:
-            raise RuntimeError(self.fail_error)
-        self.sent.append(self)
-        return self
+        if self.inflight_tracker is not None:
+            self.inflight_tracker["current"] += 1
+            self.inflight_tracker["max"] = max(
+                self.inflight_tracker["max"],
+                self.inflight_tracker["current"],
+            )
+
+        try:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            if self.fail:
+                raise RuntimeError(self.fail_error)
+            self.sent.append(self)
+            return self
+        finally:
+            if self.inflight_tracker is not None:
+                self.inflight_tracker["current"] -= 1
 
 
 class RedactionBot(DatabaseMixin, RedactionMixin):
@@ -87,6 +106,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.redaction_iq_delay = 0.0
         self.fail_stanza_ids = set()
         self.fail_stanza_errors = {}
+        self.redaction_inflight_tracker = {"current": 0, "max": 0}
         self.alerts = []
 
     bare_jid = staticmethod(lambda jid: jid.split("/", 1)[0].lower() if jid else None)
@@ -95,7 +115,11 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.sent.append(kwargs)
 
     def make_iq_set(self, **kwargs):
-        iq = FakeOutgoingIq(self.redaction_stanzas, delay=self.redaction_iq_delay)
+        iq = FakeOutgoingIq(
+            self.redaction_stanzas,
+            delay=self.redaction_iq_delay,
+            inflight_tracker=self.redaction_inflight_tracker,
+        )
         iq.kwargs = kwargs
         original_append = iq.append
 
@@ -224,6 +248,7 @@ def test_auto_reason_matching_is_case_insensitive():
     assert bot._redaction_auto_reason_matches("Confirmed SPAM wave") == "spam"
     assert bot._redaction_auto_reason_matches("ordinary moderation note") is None
 
+
 @pytest.mark.asyncio
 async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db_path):
     bot = RedactionBot()
@@ -236,22 +261,18 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
                 FakeMessage("room@conference.example.test", "Alice", f"stanza-{i}")
             )
 
-        start = time.monotonic()
         summary = await bot.redact_jid_messages(
             "alice@example.org",
             reason="spam",
             actor="admin@example.org",
             announce=False,
         )
-        elapsed = time.monotonic() - start
 
         assert summary["found"] == 4
         assert summary["redacted"] == 4
         assert summary["failed"] == 0
         assert len(bot.redaction_stanzas) == 4
-        # With concurrency=2 and four 50ms sends, this should complete in about
-        # two batches instead of four fully serial round trips.
-        assert elapsed < 0.5
+        assert bot.redaction_inflight_tracker["max"] == 2
 
         async with bot.db.execute("SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL") as cursor:
             row = await cursor.fetchone()
@@ -287,7 +308,6 @@ async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_d
         assert rows == [("stanza-1",)]
     finally:
         await bot.db.close()
-
 
 
 @pytest.mark.asyncio

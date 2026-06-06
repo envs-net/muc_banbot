@@ -65,15 +65,15 @@ def _redaction_exception_condition(exc: Exception) -> str | None:
             condition = error["condition"] if hasattr(error, "__getitem__") else None
             if condition:
                 return str(condition).strip().lower()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not inspect redaction error stanza condition: %s", exc)
 
         try:
             error = stanza.get("error")
             if isinstance(error, dict) and error.get("condition"):
                 return str(error["condition"]).strip().lower()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not inspect redaction error stanza mapping: %s", exc)
 
     return None
 
