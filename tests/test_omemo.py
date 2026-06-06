@@ -515,7 +515,7 @@ def test_ensure_omemo_identity_metadata_rotates_existing_store_without_metadata(
     os.chmod(storage, 0o600)
     identity = {"jid": "adminbot@example.org", "resource": "bot", "nick": "AdminBot"}
 
-    freeze_omemo_timestamp(monkeypatch)
+    freeze_omemo_timestamp(monkeypatch, "20260528-123456")
 
     backup = _ensure_omemo_identity_metadata(
         storage,
@@ -548,7 +548,7 @@ def test_ensure_omemo_identity_metadata_rotates_storage_on_identity_change(tmp_p
     new_identity = {"jid": "adminbot@example.org", "resource": "new", "nick": "AdminBot"}
     _write_omemo_identity_metadata(metadata, old_identity)
 
-    freeze_omemo_timestamp(monkeypatch)
+    freeze_omemo_timestamp(monkeypatch, "20260528-123456")
 
     backup = _ensure_omemo_identity_metadata(
         storage,
