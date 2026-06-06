@@ -15,16 +15,20 @@ except ImportError:
 
 from banbot.db import DatabaseMixin
 from banbot.redaction import (
-    RedactionMixin,
     REDACTION_IQ_TIMEOUT_SECONDS,
+    RedactionMixin,
     SID_NS,
 )
 from banbot.utils import bare_jid as normalize_bare_jid
+
 
 pytestmark = pytest.mark.skipif(
     aiosqlite is None,
     reason="aiosqlite is required for redaction database tests",
 )
+
+TEST_REDACTION_IQ_SEND_DELAY_SECONDS = 0.05
+
 
 
 class FakeFrom:
@@ -64,6 +68,8 @@ class FakeOutgoingIq:
     def __init__(
         self,
         sent,
+        *,
+        iq_kwargs: dict | None = None,
         delay: float = 0.0,
         fail: bool = False,
         fail_error: str | None = None,
@@ -71,7 +77,8 @@ class FakeOutgoingIq:
     ):
         self.sent = sent
         self.children = []
-        self.kwargs = {}
+        self.kwargs = dict(iq_kwargs or {})
+        self.timeout = None
         self.delay = delay
         self.fail = fail
         self.fail_error = fail_error or "simulated retract failure"
@@ -101,6 +108,54 @@ class FakeOutgoingIq:
                 self.inflight_tracker["current"] -= 1
 
 
+def _build_iq_with_normalized_to(
+    sent,
+    *,
+    delay: float = 0.0,
+    inflight_tracker: dict[str, int] | None = None,
+    **kwargs,
+):
+    """Build a fake IQ and expose the recipient through a normalized ``to`` key.
+
+    The real XMPP implementation may pass the target room as ``ito`` or ``mto``
+    depending on the helper used. Tests assert the normalized ``to`` value so
+    recipient checks stay independent from that implementation detail.
+    """
+    normalized_kwargs = dict(kwargs)
+    if "to" not in normalized_kwargs:
+        for recipient_key in ("ito", "mto"):
+            if recipient_key in normalized_kwargs:
+                normalized_kwargs["to"] = normalized_kwargs[recipient_key]
+                break
+
+    return FakeOutgoingIq(
+        sent,
+        iq_kwargs=normalized_kwargs,
+        delay=delay,
+        inflight_tracker=inflight_tracker,
+    )
+
+
+def assert_body_contains(message_body: str, *expected_fragments: str) -> None:
+    """Assert that all expected fragments are present in a message body."""
+    for fragment in expected_fragments:
+        assert fragment in message_body
+
+
+def assert_all_failed_auto_redaction_summary(message_body: str, *, found: int) -> None:
+    """Assert common auto-redaction summary text for all-failed requests."""
+    assert_body_contains(
+        message_body,
+        "Auto-redaction completed after ban",
+        f"Messages found: {found}",
+        "Redacted: 0",
+        f"Failed: {found}",
+        "Note: The server rejected all redaction requests.",
+        "no longer redactable",
+        "lacks moderation permissions",
+    )
+
+
 class RedactionBot(DatabaseMixin, RedactionMixin):
     def __init__(self):
         self.redaction_enabled = True
@@ -116,7 +171,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.redaction_stanzas = []
         self.command_prefix = "!"
         self.redaction_retract_concurrency = 3
-        self.redaction_iq_delay = 0.0
+        self.test_redaction_iq_send_delay = 0.0
         self.fail_stanza_ids = set()
         self.fail_stanza_errors = {}
         self.redaction_inflight_tracker = {"current": 0, "max": 0}
@@ -128,16 +183,12 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.sent.append(kwargs)
 
     def make_iq_set(self, **kwargs):
-        iq = FakeOutgoingIq(
+        iq = _build_iq_with_normalized_to(
             self.redaction_stanzas,
-            delay=self.redaction_iq_delay,
+            delay=self.test_redaction_iq_send_delay,
             inflight_tracker=self.redaction_inflight_tracker,
+            **kwargs,
         )
-        iq.kwargs = dict(kwargs)
-        if "ito" in iq.kwargs and "to" not in iq.kwargs:
-            iq.kwargs["to"] = iq.kwargs["ito"]
-        if "mto" in iq.kwargs and "to" not in iq.kwargs:
-            iq.kwargs["to"] = iq.kwargs["mto"]
         original_append = iq.append
 
         def append_with_failure_marker(element):
@@ -294,7 +345,7 @@ def test_auto_reason_matching_is_case_insensitive():
 async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db_path):
     bot = RedactionBot()
     bot.redaction_retract_concurrency = 2
-    bot.redaction_iq_delay = 0.05
+    bot.test_redaction_iq_send_delay = TEST_REDACTION_IQ_SEND_DELAY_SECONDS
     await bot.setup_db()
     try:
         for i in range(4):
@@ -399,13 +450,7 @@ async def test_auto_redaction_suppresses_failure_alerts_and_adds_all_failed_note
         await bot.maybe_auto_redact_after_ban("alice@example.org", "confirmed spam", actor="admin@example.org")
 
         body = bot.sent[-1]["mbody"]
-        assert "Auto-redaction completed after ban" in body
-        assert "Messages found: 2" in body
-        assert "Redacted: 0" in body
-        assert "Failed: 2" in body
-        assert "Note: The server rejected all redaction requests." in body
-        assert "no longer redactable" in body
-        assert "lacks moderation permissions" in body
+        assert_all_failed_auto_redaction_summary(body, found=2)
         assert bot.alerts == []
     finally:
         await bot.db.close()
