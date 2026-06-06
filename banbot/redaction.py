@@ -274,9 +274,16 @@ class RedactionMixin:
         rows: list[tuple[int, str, str]],
         reason: str | None,
         actor: str | None,
-    ) -> dict[str, int]:
+        alert_on_failure: bool = True,
+    ) -> dict[str, object]:
         """Retract all rows and return summary counts."""
-        summary = {"found": len(rows), "redacted": 0, "failed": 0, "skipped": 0}
+        summary: dict[str, object] = {
+            "found": len(rows),
+            "redacted": 0,
+            "failed": 0,
+            "skipped": 0,
+            "failure_reasons": {},
+        }
         if not rows:
             return summary
 
@@ -308,7 +315,7 @@ class RedactionMixin:
                         error_summary,
                     )
                     log.debug("Raw redaction failure for stanza %s in %s", stanza_id, room_jid, exc_info=exc)
-                    if hasattr(self, "send_operational_alert"):
+                    if alert_on_failure and hasattr(self, "send_operational_alert"):
                         await self.send_operational_alert(
                             f"redaction_failed:{room_jid}",
                             "Redaction failed",
@@ -316,21 +323,31 @@ class RedactionMixin:
                             enabled=getattr(self, "alert_on_redaction_failure", True),
                             details={"room": room_jid, "stanza_id": stanza_id, "error": error_summary},
                         )
-                    return "failed", None
+                    return "failed", error_summary
 
                 return "redacted", row_id
 
         results = await asyncio.gather(*(redact_one(row) for row in rows))
 
-        for status, row_id in results:
-            if status == "redacted" and row_id is not None:
+        failure_reasons_obj = summary.get("failure_reasons")
+        failure_reasons: dict[str, int]
+        if isinstance(failure_reasons_obj, dict):
+            failure_reasons = failure_reasons_obj
+        else:
+            failure_reasons = {}
+            summary["failure_reasons"] = failure_reasons
+
+        for status, row_value in results:
+            if status == "redacted" and isinstance(row_value, int):
                 summary["redacted"] += 1
-                changed_rows.append(row_id)
-            elif status == "skipped" and row_id is not None:
+                changed_rows.append(row_value)
+            elif status == "skipped" and isinstance(row_value, int):
                 summary["skipped"] += 1
-                skipped_rows.append(row_id)
+                skipped_rows.append(row_value)
             else:
                 summary["failed"] += 1
+                if isinstance(row_value, str):
+                    failure_reasons[row_value] = failure_reasons.get(row_value, 0) + 1
 
         rows_to_mark = changed_rows + skipped_rows
         if rows_to_mark:
@@ -380,7 +397,7 @@ class RedactionMixin:
         title: str,
         target: str,
         reason: str | None,
-        summary: dict[str, int],
+        summary: dict[str, object],
     ) -> str:
         """Format a redaction summary for the admin room."""
         if summary.get("found", 0) == 0:
@@ -391,15 +408,41 @@ class RedactionMixin:
                 "Only messages seen by BanBot after redaction indexing was enabled can be redacted."
             )
 
-        return (
-            f"🧹 {title}\n\n"
-            f"Target: {safe_jid(target)}\n"
-            f"Reason: {reason or 'not specified'}\n"
-            f"Messages found: {summary.get('found', 0)}\n"
-            f"Redacted: {summary.get('redacted', 0)}\n"
-            f"Failed: {summary.get('failed', 0)}\n"
-            f"Skipped: {summary.get('skipped', 0)}"
-        )
+        lines = [
+            f"🧹 {title}",
+            "",
+            f"Target: {safe_jid(target)}",
+            f"Reason: {reason or 'not specified'}",
+            f"Messages found: {summary.get('found', 0)}",
+            f"Redacted: {summary.get('redacted', 0)}",
+            f"Failed: {summary.get('failed', 0)}",
+            f"Skipped: {summary.get('skipped', 0)}",
+        ]
+
+        found = int(summary.get("found", 0) or 0)
+        redacted = int(summary.get("redacted", 0) or 0)
+        failed = int(summary.get("failed", 0) or 0)
+        skipped = int(summary.get("skipped", 0) or 0)
+        failure_reasons = summary.get("failure_reasons", {})
+        if (
+            found > 0
+            and failed == found
+            and redacted == 0
+            and skipped == 0
+            and isinstance(failure_reasons, dict)
+            and failure_reasons
+        ):
+            if set(failure_reasons) == {"server rejected the redaction request"}:
+                lines.extend(
+                    [
+                        "",
+                        "Note: The server rejected all redaction requests.",
+                        "This usually means the messages are no longer redactable",
+                        "or the bot lacks moderation permissions for those stanza IDs.",
+                    ]
+                )
+
+        return "\n".join(lines)
 
 
     async def redact_jid_messages(
@@ -409,12 +452,17 @@ class RedactionMixin:
         actor: str | None = None,
         announce: bool = True,
         title: str = "Redaction completed",
-    ) -> dict[str, int]:
+    ) -> dict[str, object]:
         """Redact all indexed messages for a bare JID in protected rooms."""
         target = bare_jid(jid)
         await self.flush_redaction_index()
         rows = await self._redaction_fetch_targets_for_jid(target)
-        summary = await self._redaction_redact_rows(rows, reason, actor)
+        summary = await self._redaction_redact_rows(
+            rows,
+            reason,
+            actor,
+            alert_on_failure=not title.startswith("Auto-redaction"),
+        )
 
         await self._audit_redaction_event(
             "auto_redact_jid" if title.startswith("Auto-redaction") else "redact_jid",

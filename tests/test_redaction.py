@@ -340,3 +340,31 @@ async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_p
         assert row[0] == 2
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_auto_redaction_suppresses_failure_alerts_and_adds_all_failed_note(temp_db_path):
+    bot = RedactionBot()
+    bot.fail_stanza_ids = {"stanza-1", "stanza-2"}
+    bot.fail_stanza_errors = {
+        "stanza-1": '<iq type="error"><moderate id="stanza-1" /></iq>',
+        "stanza-2": '<iq type="error"><moderate id="stanza-2" /></iq>',
+    }
+    await bot.setup_db()
+    try:
+        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
+        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+
+        await bot.maybe_auto_redact_after_ban("alice@example.org", "confirmed spam", actor="admin@example.org")
+
+        body = bot.sent[-1]["mbody"]
+        assert "Auto-redaction completed after ban" in body
+        assert "Messages found: 2" in body
+        assert "Redacted: 0" in body
+        assert "Failed: 2" in body
+        assert "Note: The server rejected all redaction requests." in body
+        assert "no longer redactable" in body
+        assert "lacks moderation permissions" in body
+        assert bot.alerts == []
+    finally:
+        await bot.db.close()
