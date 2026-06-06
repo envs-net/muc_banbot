@@ -9,7 +9,7 @@ slixmpp = pytest.importorskip("slixmpp")
 from banbot.omemo import OmemoMixin, _prepare_omemo_storage_file
 
 
-OMEMO_RESET_RESTART_DELAY_SECONDS = 3
+TEST_OMEMO_RESET_RESTART_DELAY_SECONDS = 3
 OMEMO_RESET_SUCCESS_FRAGMENTS = (
     "OMEMO storage reset prepared",
     "OMEMO is disabled for this running process until restart",
@@ -20,11 +20,21 @@ OMEMO_RESET_SUCCESS_FRAGMENTS = (
 
 
 def stat_mode(path):
+    """Return file permission bits only for test assertions."""
     return os.stat(path).st_mode & 0o777
 
 
 def freeze_omemo_timestamp(monkeypatch, timestamp="20260528-123456"):
-    """Patch banbot.omemo timestamp formatting while still honoring fmt."""
+    """Patch OMEMO timestamp formatting for deterministic tests.
+
+    The helper monkeypatches ``banbot.omemo.time.strftime`` with a stable
+    value derived from ``timestamp`` while still honoring the requested output
+    format string.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to patch module attributes.
+        timestamp: Fixed timestamp string in ``YYYYMMDD-HHMMSS`` format.
+    """
     import banbot.omemo as omemo_module
 
     original_strftime = omemo_module.time.strftime
@@ -146,7 +156,13 @@ def write_omemo_storage(storage, payload):
 
 
 def nested_device_hint_storage_payload():
-    """Return OMEMO-like storage with nested device hint structures."""
+    """Return OMEMO-like storage containing device-like hints at multiple depths.
+
+    This fixture intentionally mixes nested dictionaries, lists, and plain text
+    so tests can verify device-hint scanning logic does not rely on top-level
+    keys only. It also includes near-matching values such as prekey ranges and
+    booleans to exercise realistic traversal paths.
+    """
     return {
         "sessions": {
             "adminbot@example.org": {
@@ -166,7 +182,12 @@ def nested_device_hint_storage_payload():
 
 
 def simple_device_hint_storage_payload():
-    """Return minimal OMEMO-like storage with one visible device hint."""
+    """Return a flat OMEMO-like storage fixture with one visible device hint.
+
+    Use this for straightforward detection tests where the hint is present at
+    the expected top-level location. In contrast,
+    ``nested_device_hint_storage_payload`` is used for recursive scanning tests.
+    """
     return {
         "sessions": {
             "adminbot@example.org": {"device_id": 813096472},
@@ -703,7 +724,7 @@ async def test_omemo_reset_restart_helper_waits_then_restarts(monkeypatch):
 
     await bot._restart_after_omemo_reset()
 
-    assert sleeps == [OMEMO_RESET_RESTART_DELAY_SECONDS]
+    assert sleeps == [TEST_OMEMO_RESET_RESTART_DELAY_SECONDS]
     assert bot.restart_calls == ["restart"]
 
 
