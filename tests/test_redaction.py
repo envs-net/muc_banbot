@@ -48,12 +48,13 @@ class FakeMessage:
 
 
 class FakeOutgoingIq:
-    def __init__(self, sent, delay: float = 0.0, fail: bool = False):
+    def __init__(self, sent, delay: float = 0.0, fail: bool = False, fail_error: str | None = None):
         self.sent = sent
         self.children = []
         self.kwargs = {}
         self.delay = delay
         self.fail = fail
+        self.fail_error = fail_error or "simulated retract failure"
 
     def append(self, element):
         self.children.append(element)
@@ -63,7 +64,7 @@ class FakeOutgoingIq:
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.fail:
-            raise RuntimeError("simulated retract failure")
+            raise RuntimeError(self.fail_error)
         self.sent.append(self)
         return self
 
@@ -85,6 +86,8 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.redaction_retract_concurrency = 3
         self.redaction_iq_delay = 0.0
         self.fail_stanza_ids = set()
+        self.fail_stanza_errors = {}
+        self.alerts = []
 
     bare_jid = staticmethod(lambda jid: jid.split("/", 1)[0].lower() if jid else None)
 
@@ -101,9 +104,14 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             stanza_id = element.attrib.get("id")
             if stanza_id in self.fail_stanza_ids:
                 iq.fail = True
+                iq.fail_error = self.fail_stanza_errors.get(stanza_id, iq.fail_error)
 
         iq.append = append_with_failure_marker
         return iq
+
+    async def send_operational_alert(self, key, title, message, enabled=True, details=None):
+        if enabled:
+            self.alerts.append((key, title, message, details or {}))
 
 
 @pytest.mark.asyncio
@@ -280,3 +288,35 @@ async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_d
     finally:
         await bot.db.close()
 
+
+
+@pytest.mark.asyncio
+async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_path):
+    bot = RedactionBot()
+    bot.fail_stanza_ids = {"stanza-2"}
+    bot.fail_stanza_errors = {"stanza-2": "item-not-found: stanza already retracted"}
+    await bot.setup_db()
+    try:
+        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
+        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+
+        summary = await bot.redact_jid_messages(
+            "alice@example.org",
+            reason="spam",
+            actor="admin@example.org",
+            announce=False,
+        )
+
+        assert summary["found"] == 2
+        assert summary["redacted"] == 1
+        assert summary["skipped"] == 1
+        assert summary["failed"] == 0
+        assert bot.alerts == []
+
+        async with bot.db.execute(
+            "SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL"
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row[0] == 2
+    finally:
+        await bot.db.close()

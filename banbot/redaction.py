@@ -17,6 +17,76 @@ MODERATE_NS = "urn:xmpp:message-moderate:1"
 RETRACT_NS = "urn:xmpp:message-retract:1"
 SID_NS = "urn:xmpp:sid:0"
 
+_REDACTION_ALREADY_RETRACTED_CONDITIONS = {
+    "item-not-found",
+    "gone",
+}
+
+_REDACTION_ALREADY_RETRACTED_TEXT = (
+    "already redacted",
+    "already retracted",
+    "item-not-found",
+    "message not found",
+    "stanza not found",
+    "not found",
+)
+
+
+def _redaction_exception_summary(exc: Exception) -> str:
+    """Return a compact, admin-safe redaction error summary."""
+    text = str(exc).strip()
+    if not text:
+        return exc.__class__.__name__
+
+    # slixmpp may render a full IQ stanza for some failures. That is noisy in
+    # admin-room alerts and logs, so keep the user-facing text compact.
+    if text.startswith("<iq ") or "<moderate " in text or "<retract " in text:
+        return "server rejected the redaction request"
+
+    if len(text) > 300:
+        return f"{text[:297]}..."
+    return text
+
+
+def _redaction_exception_condition(exc: Exception) -> str | None:
+    """Best-effort extraction of an XMPP error condition from an exception."""
+    for attr in ("condition", "error_condition"):
+        value = getattr(exc, attr, None)
+        if value:
+            return str(value).strip().lower()
+
+    for attr in ("iq", "stanza", "response"):
+        stanza = getattr(exc, attr, None)
+        if stanza is None:
+            continue
+
+        try:
+            error = stanza["error"]
+            condition = error["condition"] if hasattr(error, "__getitem__") else None
+            if condition:
+                return str(condition).strip().lower()
+        except Exception:
+            pass
+
+        try:
+            error = stanza.get("error")
+            if isinstance(error, dict) and error.get("condition"):
+                return str(error["condition"]).strip().lower()
+        except Exception:
+            pass
+
+    return None
+
+
+def _redaction_error_is_already_retracted(exc: Exception) -> bool:
+    """Return True when a redaction failure means the stanza is already gone."""
+    condition = _redaction_exception_condition(exc)
+    if condition in _REDACTION_ALREADY_RETRACTED_CONDITIONS:
+        return True
+
+    text = str(exc).lower()
+    return any(token in text for token in _REDACTION_ALREADY_RETRACTED_TEXT)
+
 
 class RedactionMixin:
     def _redaction_auto_reason_matches(self, comment: str | None) -> str | None:
@@ -214,41 +284,56 @@ class RedactionMixin:
         concurrency = max(1, min(concurrency, 10))
         semaphore = asyncio.Semaphore(concurrency)
         changed_rows: list[int] = []
+        skipped_rows: list[int] = []
 
-        async def redact_one(row: tuple[int, str, str]) -> tuple[bool, int | None]:
+        async def redact_one(row: tuple[int, str, str]) -> tuple[str, int | None]:
             row_id, room_jid, stanza_id = row
             async with semaphore:
                 try:
                     await self._redaction_send_retract(room_jid, stanza_id, reason)
                 except Exception as exc:
+                    if _redaction_error_is_already_retracted(exc):
+                        log.info(
+                            "Redaction skipped for stanza %s in %s: already retracted",
+                            stanza_id,
+                            room_jid,
+                        )
+                        return "skipped", row_id
+
+                    error_summary = _redaction_exception_summary(exc)
                     log.warning(
                         "Redaction failed for stanza %s in %s: %s",
                         stanza_id,
                         room_jid,
-                        exc,
+                        error_summary,
                     )
+                    log.debug("Raw redaction failure for stanza %s in %s", stanza_id, room_jid, exc_info=exc)
                     if hasattr(self, "send_operational_alert"):
                         await self.send_operational_alert(
                             f"redaction_failed:{room_jid}",
                             "Redaction failed",
-                            f"Failed to redact stanza {stanza_id} in {room_jid}: {exc}",
+                            f"Failed to redact stanza {stanza_id} in {room_jid}: {error_summary}",
                             enabled=getattr(self, "alert_on_redaction_failure", True),
-                            details={"room": room_jid, "stanza_id": stanza_id, "error": str(exc)},
+                            details={"room": room_jid, "stanza_id": stanza_id, "error": error_summary},
                         )
-                    return False, None
+                    return "failed", None
 
-                return True, row_id
+                return "redacted", row_id
 
         results = await asyncio.gather(*(redact_one(row) for row in rows))
 
-        for ok, row_id in results:
-            if ok and row_id is not None:
+        for status, row_id in results:
+            if status == "redacted" and row_id is not None:
                 summary["redacted"] += 1
                 changed_rows.append(row_id)
+            elif status == "skipped" and row_id is not None:
+                summary["skipped"] += 1
+                skipped_rows.append(row_id)
             else:
                 summary["failed"] += 1
 
-        if changed_rows:
+        rows_to_mark = changed_rows + skipped_rows
+        if rows_to_mark:
             now = int(time.time())
             await self.db.executemany(
                 """
@@ -256,7 +341,7 @@ class RedactionMixin:
                 SET redacted_at = ?, redacted_by = ?, redact_reason = ?
                 WHERE id = ?
                 """,
-                [(now, actor, reason, row_id) for row_id in changed_rows],
+                [(now, actor, reason, row_id) for row_id in rows_to_mark],
             )
 
         await self.db.commit()
@@ -369,16 +454,35 @@ class RedactionMixin:
         try:
             await self._redaction_send_retract(room_jid, stanza_id, reason)
         except Exception as exc:
-            summary["failed"] = 1
-            log.warning("Redaction failed for stanza %s in %s: %s", stanza_id, room_jid, exc)
-            if hasattr(self, "send_operational_alert"):
-                await self.send_operational_alert(
-                    f"redaction_failed:{room_jid}",
-                    "Redaction failed",
-                    f"Failed to redact stanza {stanza_id} in {room_jid}: {exc}",
-                    enabled=getattr(self, "alert_on_redaction_failure", True),
-                    details={"room": room_jid, "stanza_id": stanza_id, "error": str(exc)},
+            if _redaction_error_is_already_retracted(exc):
+                summary["skipped"] = 1
+                log.info(
+                    "Redaction skipped for stanza %s in %s: already retracted",
+                    stanza_id,
+                    room_jid,
                 )
+                await self.db.execute(
+                    """
+                    UPDATE redaction_index
+                    SET redacted_at = ?, redacted_by = ?, redact_reason = ?
+                    WHERE room_jid = ? AND stanza_id = ? AND redacted_at IS NULL
+                    """,
+                    (int(time.time()), actor, reason, room_jid, stanza_id),
+                )
+                await self.db.commit()
+            else:
+                summary["failed"] = 1
+                error_summary = _redaction_exception_summary(exc)
+                log.warning("Redaction failed for stanza %s in %s: %s", stanza_id, room_jid, error_summary)
+                log.debug("Raw redaction failure for stanza %s in %s", stanza_id, room_jid, exc_info=exc)
+                if hasattr(self, "send_operational_alert"):
+                    await self.send_operational_alert(
+                        f"redaction_failed:{room_jid}",
+                        "Redaction failed",
+                        f"Failed to redact stanza {stanza_id} in {room_jid}: {error_summary}",
+                        enabled=getattr(self, "alert_on_redaction_failure", True),
+                        details={"room": room_jid, "stanza_id": stanza_id, "error": error_summary},
+                    )
         else:
             await self.db.execute(
                 """
@@ -403,6 +507,7 @@ class RedactionMixin:
                 "stanza_id": stanza_id,
                 "redacted": summary.get("redacted", 0),
                 "failed": summary.get("failed", 0),
+                "skipped": summary.get("skipped", 0),
             },
         )
 
@@ -414,7 +519,8 @@ class RedactionMixin:
                 f"Stanza ID: {stanza_id}\n"
                 f"Reason: {reason or 'not specified'}\n"
                 f"Redacted: {summary['redacted']}\n"
-                f"Failed: {summary['failed']}"
+                f"Failed: {summary['failed']}\n"
+                f"Skipped: {summary['skipped']}"
             ),
             mtype="groupchat",
         )
