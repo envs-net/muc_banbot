@@ -120,10 +120,10 @@ async def test_omemo_recipients_for_room_uses_visible_occupant_jids_only():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients():
     bot = OmemoProbe()
-    exc = RuntimeError("bad recipients: frozenset({'envsbot@envs.net', \"user@example.org\"})")
+    exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', \"user@example.org\"})")
 
     assert bot._extract_unusable_omemo_recipients(exc) == {
-        "envsbot@envs.net",
+        "envsbot@example.org",
         "user@example.org",
     }
 
@@ -131,10 +131,10 @@ def test_extract_unusable_omemo_recipients():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients_filters_invalid_tokens():
     bot = OmemoProbe()
-    exc = RuntimeError("bad recipients: frozenset({'envsbot@envs.net', 'No Device', \"user@example.org\"})")
+    exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', 'No Device', \"user@example.org\"})")
 
     assert bot._extract_unusable_omemo_recipients(exc) == {
-        "envsbot@envs.net",
+        "envsbot@example.org",
         "user@example.org",
     }
 
@@ -531,16 +531,16 @@ def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
         json.dumps(
             {
                 "sessions": {
-                    "adminbot@envs.net": {
+                    "adminbot@example.org": {
                         "prekeys": list(range(1, 101)),
                         "enabled": True,
                         "device_id": 813096472,
                         "nested": {"device": True, "dev-9095": {}},
                     },
-                    "creme@envs.net": {"session": "present", "notes": ["OMEMO device id 123456"]},
-                    "dan@envs.net": {"device": False},
+                    "moderator@example.org": {"session": "present", "notes": ["OMEMO device id 123456"]},
+                    "user2@example.org": {"device": False},
                 },
-                "text": "known jid creme@envs.net",
+                "text": "known jid moderator@example.org",
             }
         ),
         encoding="utf8",
@@ -550,12 +550,12 @@ def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
     bot.omemo_storage_file = str(storage)
 
     hints = bot._collect_omemo_storage_device_hints()
-    assert hints["adminbot@envs.net"] == {"813096472", "9095"}
-    assert hints["creme@envs.net"] == {"123456"}
-    assert hints["dan@envs.net"] == set()
-    assert "True" not in hints["adminbot@envs.net"]
-    assert "1" not in hints["adminbot@envs.net"]
-    assert "100" not in hints["adminbot@envs.net"]
+    assert hints["adminbot@example.org"] == {"813096472", "9095"}
+    assert hints["moderator@example.org"] == {"123456"}
+    assert hints["user2@example.org"] == set()
+    assert "True" not in hints["adminbot@example.org"]
+    assert "1" not in hints["adminbot@example.org"]
+    assert "100" not in hints["adminbot@example.org"]
 
 
 def test_format_omemo_device_ids_is_stable_and_compact():
@@ -573,7 +573,16 @@ async def test_cmd_omemo_devices_lists_recipients_before_storage_hints(tmp_path,
     import config
 
     storage = tmp_path / "omemo.json"
-    storage.write_text(json.dumps({"adminbot@envs.net": {"device_id": 813096472}}), encoding="utf8")
+    storage.write_text(
+        json.dumps(
+            {
+                "sessions": {
+                    "adminbot@example.org": {"device_id": 813096472},
+                },
+            }
+        ),
+        encoding="utf8",
+    )
 
     bot = OmemoProbe()
     bot.omemo_storage_file = str(storage)
@@ -588,7 +597,7 @@ async def test_cmd_omemo_devices_lists_recipients_before_storage_hints(tmp_path,
     assert "• alice@example.test" in body
     assert "• bob@example.test" in body
     assert "Local storage hints:" in body
-    assert "• adminbot@envs.net: 813096472" in body
+    assert "• adminbot@example.org: 813096472" in body
     assert "not a guaranteed list" in body
     assert body.index("Current admin-room recipients") < body.index("Local storage hints")
 
