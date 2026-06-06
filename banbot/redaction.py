@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 MODERATE_NS = "urn:xmpp:message-moderate:1"
 RETRACT_NS = "urn:xmpp:message-retract:1"
 SID_NS = "urn:xmpp:sid:0"
+REDACTION_IQ_TIMEOUT_SECONDS = 10
 
 _REDACTION_ALREADY_RETRACTED_CONDITIONS = {
     "item-not-found",
@@ -293,7 +294,7 @@ class RedactionMixin:
 
         iq = self.make_iq_set(ito=room_jid)
         iq.append(moderate)
-        await iq.send(timeout=10)
+        await iq.send(timeout=REDACTION_IQ_TIMEOUT_SECONDS)
 
 
     async def _redaction_redact_rows(

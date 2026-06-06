@@ -8,10 +8,23 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
-aiosqlite = pytest.importorskip("aiosqlite")
+try:
+    import aiosqlite  # noqa: F401
+except ImportError:
+    aiosqlite = None
 
 from banbot.db import DatabaseMixin
-from banbot.redaction import RedactionMixin, SID_NS
+from banbot.redaction import (
+    RedactionMixin,
+    REDACTION_IQ_TIMEOUT_SECONDS,
+    SID_NS,
+)
+from banbot.utils import bare_jid as normalize_bare_jid
+
+pytestmark = pytest.mark.skipif(
+    aiosqlite is None,
+    reason="aiosqlite is required for redaction database tests",
+)
 
 
 class FakeFrom:
@@ -109,7 +122,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.redaction_inflight_tracker = {"current": 0, "max": 0}
         self.alerts = []
 
-    bare_jid = staticmethod(lambda jid: jid.split("/", 1)[0].lower() if jid else None)
+    bare_jid = staticmethod(normalize_bare_jid)
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
@@ -120,7 +133,11 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             delay=self.redaction_iq_delay,
             inflight_tracker=self.redaction_inflight_tracker,
         )
-        iq.kwargs = kwargs
+        iq.kwargs = dict(kwargs)
+        if "ito" in iq.kwargs and "to" not in iq.kwargs:
+            iq.kwargs["to"] = iq.kwargs["ito"]
+        if "mto" in iq.kwargs and "to" not in iq.kwargs:
+            iq.kwargs["to"] = iq.kwargs["mto"]
         original_append = iq.append
 
         def append_with_failure_marker(element):
@@ -166,7 +183,7 @@ async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
         await bot.cmd_redact(["alice@example.org", "spam"], "admin@conference.example.test", actor="admin@example.org")
 
         assert len(bot.redaction_stanzas) == 2
-        assert all(stanza.kwargs["ito"] == "room@conference.example.test" for stanza in bot.redaction_stanzas)
+        assert all(stanza.kwargs["to"] == "room@conference.example.test" for stanza in bot.redaction_stanzas)
         assert bot.redaction_stanzas[0].children[0].tag == "{urn:xmpp:message-moderate:1}moderate"
         assert "Messages found: 2" in bot.sent[-1]["mbody"]
         assert "Redacted: 2" in bot.sent[-1]["mbody"]
@@ -190,8 +207,8 @@ async def test_redact_id_retracts_single_stanza(temp_db_path):
 
         assert len(bot.redaction_stanzas) == 1
         iq = bot.redaction_stanzas[0]
-        assert iq.kwargs["ito"] == "room@conference.example.test"
-        assert iq.timeout == 10
+        assert iq.kwargs["to"] == "room@conference.example.test"
+        assert iq.timeout == REDACTION_IQ_TIMEOUT_SECONDS
         assert iq.children[0].tag == "{urn:xmpp:message-moderate:1}moderate"
         assert iq.children[0].attrib["id"] == "stanza-1"
         assert iq.children[0].find("{urn:xmpp:message-retract:1}retract") is not None
