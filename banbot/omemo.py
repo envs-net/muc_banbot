@@ -358,6 +358,7 @@ class OmemoMixin:
         self.omemo_reset_on_identity_change: bool = bool(
             getattr(config, "OMEMO_RESET_ON_IDENTITY_CHANGE", True)
         )
+        self.omemo_reset_pending_restart: bool = False
         self.omemo_ready_timeout: int = 15
         self.omemo_ready: asyncio.Event = asyncio.Event()
 
@@ -413,6 +414,8 @@ class OmemoMixin:
         """Return whether this outgoing bot message should be OMEMO encrypted."""
         if encrypted is False:
             return False
+        if getattr(self, "omemo_reset_pending_restart", False):
+            return False
         if not getattr(self, "omemo_enabled", False):
             return False
         if encrypted is True:
@@ -433,6 +436,8 @@ class OmemoMixin:
         return False
 
     async def _wait_for_omemo_ready(self) -> bool:
+        if getattr(self, "omemo_reset_pending_restart", False):
+            return False
         if not getattr(self, "omemo_enabled", False):
             return False
         if self.omemo_ready.is_set():
@@ -627,6 +632,14 @@ class OmemoMixin:
         stanza was encrypted but could not be decrypted, in which case callers
         should stop processing it.
         """
+        if getattr(self, "omemo_reset_pending_restart", False):
+            if self._message_has_omemo_payload(msg):
+                log.warning(
+                    "OMEMO: encrypted incoming message received while reset is pending restart"
+                )
+                return None, True
+            return msg, False
+
         if not getattr(self, "omemo_enabled", False):
             return msg, False
 
@@ -742,6 +755,7 @@ class OmemoMixin:
             f"✅ OMEMO ready: {bool(getattr(self, 'omemo_ready', None) and self.omemo_ready.is_set())}",
             f"📁 Storage file: {storage_path}",
             f"🪪 Identity reset on change: {getattr(self, 'omemo_reset_on_identity_change', True)}",
+            f"♻️ Reset pending restart: {getattr(self, 'omemo_reset_pending_restart', False)}",
             f"🔁 Admin-room auto encryption: {getattr(self, 'omemo_auto_encrypt_admin_room', True)}",
             f"🧯 Plaintext fallback: {getattr(self, 'omemo_plaintext_fallback', False)}",
         ]
@@ -909,6 +923,7 @@ class OmemoMixin:
                     f"Confirm with: {getattr(self, 'command_prefix', '!')}omemo reset confirm"
                 ),
                 mtype="groupchat",
+                encrypted=False,
             )
             return
 
@@ -921,8 +936,11 @@ class OmemoMixin:
         _write_omemo_identity_metadata(metadata_path, identity)
 
         self.omemo_ready.clear()
+        self.omemo_enabled = False
+        self.omemo_reset_pending_restart = True
         lines = [
             "✅ OMEMO storage reset prepared.",
+            "OMEMO is disabled for this running process until restart.",
             "Restart the bot now to create and publish a fresh OMEMO identity.",
         ]
         if storage_backup:
@@ -941,7 +959,12 @@ class OmemoMixin:
         except Exception as exc:
             log.debug("Failed to audit OMEMO reset: %s", exc)
 
-        await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
+        await self.bot_send_message(
+            mto=room,
+            mbody="\n".join(lines),
+            mtype="groupchat",
+            encrypted=False,
+        )
 
     async def cmd_omemo(self, args: list[str], room: str, actor: str | None = None) -> None:
         """Admin command entry point for OMEMO diagnostics and reset."""

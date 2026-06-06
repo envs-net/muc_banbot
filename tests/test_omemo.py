@@ -581,19 +581,51 @@ async def test_cmd_omemo_reset_requires_confirm_and_rotates_storage(tmp_path, mo
     await bot._cmd_omemo_reset("admin@conference.example.org", actor="admin@example.org", confirm=False)
     assert storage.exists()
     assert "Confirm with: !omemo reset confirm" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["encrypted"] is False
 
     await bot._cmd_omemo_reset("admin@conference.example.org", actor="admin@example.org", confirm=True)
     body = bot.sent[-1]["mbody"]
     assert "OMEMO storage reset prepared" in body
+    assert "OMEMO is disabled for this running process until restart" in body
     assert "Restart the bot now" in body
     assert "Old storage backup:" in body
     assert "Old metadata backup:" in body
     assert bot.omemo_ready.cleared is True
+    assert bot.omemo_enabled is False
+    assert bot.omemo_reset_pending_restart is True
+    assert bot.sent[-1]["encrypted"] is False
     assert not storage.exists()
     assert metadata.exists()
     assert bot.audited[-1][0] == "omemo_reset"
     assert list(tmp_path.glob("omemo.json.bak-*"))
     assert list(tmp_path.glob("omemo.identity.json.bak-*"))
+
+
+@pytest.mark.omemo
+def test_should_not_encrypt_while_omemo_reset_is_pending_restart():
+    bot = OmemoProbe()
+    bot.omemo_enabled = True
+    bot.omemo_reset_pending_restart = True
+
+    assert bot._should_encrypt_message(
+        mto="admin@conference.example.org",
+        mtype="groupchat",
+        encrypted=True,
+    ) is False
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_decrypt_encrypted_message_after_reset_pending_restart_is_rejected(omemo_payload_xml):
+    bot = OmemoProbe()
+    bot.omemo_enabled = True
+    bot.omemo_reset_pending_restart = True
+    msg = type("Msg", (), {"xml": omemo_payload_xml})()
+
+    result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
+
+    assert result is None
+    assert encrypted is True
 
 
 @pytest.mark.asyncio
