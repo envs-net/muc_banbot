@@ -9,6 +9,16 @@ slixmpp = pytest.importorskip("slixmpp")
 from banbot.omemo import OmemoMixin, _prepare_omemo_storage_file
 
 
+OMEMO_RESET_RESTART_DELAY_SECONDS = 3
+OMEMO_RESET_SUCCESS_FRAGMENTS = (
+    "OMEMO storage reset prepared",
+    "OMEMO is disabled for this running process until restart",
+    "Restarting in 3 seconds",
+    "Old storage backup:",
+    "Old metadata backup:",
+)
+
+
 def stat_mode(path):
     return os.stat(path).st_mode & 0o777
 
@@ -62,16 +72,21 @@ def test_prepare_omemo_storage_file_rejects_directory(tmp_path):
 
 
 class OmemoProbe(OmemoMixin):
+    ROOM_JID = "room@conference.example.test"
+    ROOM_OCCUPANTS = {
+        "alice": {"jid": "alice@example.test/mobile"},
+        "bob": {"jid": "bob@example.test/desktop"},
+        "anon": {},
+        "self": {"jid": "bot@example.test/service"},
+    }
+
     def __init__(self):
         self.omemo_enabled = True
         self.plugin = {}
         self.omemo_ready = None
         self.occupants = {
-            "room@conference.example.test": {
-                "alice": {"jid": "alice@example.test/mobile"},
-                "bob": {"jid": "bob@example.test/desktop"},
-                "anon": {},
-                "self": {"jid": "bot@example.test/service"},
+            self.ROOM_JID: {
+                nick: dict(info) for nick, info in self.ROOM_OCCUPANTS.items()
             }
         }
         self.boundjid = slixmpp.JID("bot@example.test/service")
@@ -128,6 +143,35 @@ class ReadyFlag:
 def write_omemo_storage(storage, payload):
     """Write OMEMO-like JSON storage for device-hint tests."""
     storage.write_text(json.dumps(payload), encoding="utf8")
+
+
+def nested_device_hint_storage_payload():
+    """Return OMEMO-like storage with nested device hint structures."""
+    return {
+        "sessions": {
+            "adminbot@example.org": {
+                "prekeys": list(range(1, 101)),
+                "enabled": True,
+                "device_id": 813096472,
+                "nested": {"device": True, "dev-9095": {}},
+            },
+            "moderator@example.org": {
+                "session": "present",
+                "notes": ["OMEMO device id 123456"],
+            },
+            "user2@example.org": {"device": False},
+        },
+        "text": "known jid moderator@example.org",
+    }
+
+
+def simple_device_hint_storage_payload():
+    """Return minimal OMEMO-like storage with one visible device hint."""
+    return {
+        "sessions": {
+            "adminbot@example.org": {"device_id": 813096472},
+        },
+    }
 
 
 @pytest.mark.omemo
@@ -550,25 +594,7 @@ def test_omemo_storage_status_reports_missing_file_and_identity(monkeypatch, tmp
 @pytest.mark.omemo
 def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
     storage = tmp_path / "omemo.json"
-    write_omemo_storage(
-        storage,
-        {
-            "sessions": {
-                "adminbot@example.org": {
-                    "prekeys": list(range(1, 101)),
-                    "enabled": True,
-                    "device_id": 813096472,
-                    "nested": {"device": True, "dev-9095": {}},
-                },
-                "moderator@example.org": {
-                    "session": "present",
-                    "notes": ["OMEMO device id 123456"],
-                },
-                "user2@example.org": {"device": False},
-            },
-            "text": "known jid moderator@example.org",
-        },
-    )
+    write_omemo_storage(storage, nested_device_hint_storage_payload())
 
     bot = OmemoProbe()
     bot.omemo_storage_file = str(storage)
@@ -593,19 +619,13 @@ def test_format_omemo_device_ids_is_stable_and_compact():
     assert formatted == "1, 2, 3, … (19 hints)"
 
 
+@pytest.mark.omemo
 @pytest.mark.asyncio
 async def test_cmd_omemo_devices_lists_recipients_before_storage_hints(tmp_path, monkeypatch):
     import config
 
     storage = tmp_path / "omemo.json"
-    write_omemo_storage(
-        storage,
-        {
-            "sessions": {
-                "adminbot@example.org": {"device_id": 813096472},
-            },
-        },
-    )
+    write_omemo_storage(storage, simple_device_hint_storage_payload())
 
     bot = OmemoProbe()
     bot.omemo_storage_file = str(storage)
@@ -625,6 +645,7 @@ async def test_cmd_omemo_devices_lists_recipients_before_storage_hints(tmp_path,
     assert body.index("Current admin-room recipients") < body.index("Local storage hints")
 
 
+@pytest.mark.omemo
 @pytest.mark.asyncio
 async def test_cmd_omemo_reset_requires_confirm_and_rotates_storage(tmp_path, monkeypatch):
     import config
@@ -655,11 +676,8 @@ async def test_cmd_omemo_reset_requires_confirm_and_rotates_storage(tmp_path, mo
 
     await bot._cmd_omemo_reset("admin@conference.example.org", actor="admin@example.org", confirm=True)
     body = bot.sent[-1]["mbody"]
-    assert "OMEMO storage reset prepared" in body
-    assert "OMEMO is disabled for this running process until restart" in body
-    assert "Restarting in 3 seconds" in body
-    assert "Old storage backup:" in body
-    assert "Old metadata backup:" in body
+    for expected_fragment in OMEMO_RESET_SUCCESS_FRAGMENTS:
+        assert expected_fragment in body
     assert bot.omemo_ready.cleared is True
     assert bot.omemo_enabled is False
     assert bot.omemo_reset_pending_restart is True
@@ -672,6 +690,7 @@ async def test_cmd_omemo_reset_requires_confirm_and_rotates_storage(tmp_path, mo
     assert list(tmp_path.glob("omemo.identity.json.bak-*"))
 
 
+@pytest.mark.omemo
 @pytest.mark.asyncio
 async def test_omemo_reset_restart_helper_waits_then_restarts(monkeypatch):
     bot = OmemoProbe()
@@ -684,7 +703,7 @@ async def test_omemo_reset_restart_helper_waits_then_restarts(monkeypatch):
 
     await bot._restart_after_omemo_reset()
 
-    assert sleeps == [3]
+    assert sleeps == [OMEMO_RESET_RESTART_DELAY_SECONDS]
     assert bot.restart_calls == ["restart"]
 
 
@@ -715,6 +734,7 @@ async def test_decrypt_encrypted_message_after_reset_pending_restart_is_rejected
     assert encrypted is True
 
 
+@pytest.mark.omemo
 @pytest.mark.asyncio
 async def test_cmd_omemo_usage_for_unknown_action():
     bot = OmemoProbe()
