@@ -10,6 +10,7 @@ from banbot.omemo import OmemoMixin, _prepare_omemo_storage_file
 
 
 TEST_OMEMO_RESET_RESTART_DELAY_SECONDS = 3
+TEST_DEVICE_ID = 813096472
 OMEMO_RESET_SUCCESS_FRAGMENTS = (
     "OMEMO storage reset prepared",
     "OMEMO is disabled for this running process until restart",
@@ -108,6 +109,7 @@ class OmemoProbe(OmemoMixin):
         self.sent = []
         self.audited = []
         self.restart_calls = []
+        self.omemo_reset_pending_restart = False
 
     async def _restart_process(self):
         self.restart_calls.append("restart")
@@ -168,7 +170,7 @@ def nested_device_hint_storage_payload():
             "adminbot@example.org": {
                 "prekeys": list(range(1, 101)),
                 "enabled": True,
-                "device_id": 813096472,
+                "device_id": TEST_DEVICE_ID,
                 "nested": {"device": True, "dev-9095": {}},
             },
             "moderator@example.org": {
@@ -190,7 +192,7 @@ def simple_device_hint_storage_payload():
     """
     return {
         "sessions": {
-            "adminbot@example.org": {"device_id": 813096472},
+            "adminbot@example.org": {"device_id": TEST_DEVICE_ID},
         },
     }
 
@@ -309,6 +311,7 @@ class FakeDecryptPlugin:
         self.decrypt_calls = 0
 
     def is_encrypted(self, msg):
+        """Mimic slixmpp XEP-0384: return the encryption namespace or None."""
         return self.encrypted_namespace
 
     async def decrypt_message(self, msg):
@@ -621,7 +624,7 @@ def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
     bot.omemo_storage_file = str(storage)
 
     hints = bot._collect_omemo_storage_device_hints()
-    assert hints["adminbot@example.org"] == {"813096472", "9095"}
+    assert hints["adminbot@example.org"] == {str(TEST_DEVICE_ID), "9095"}
     assert hints["moderator@example.org"] == {"123456"}
     assert hints["user2@example.org"] == set()
     assert "True" not in hints["adminbot@example.org"]
@@ -634,6 +637,7 @@ def test_format_omemo_device_ids_is_stable_and_compact():
     assert OmemoProbe._format_omemo_device_ids(set()) == "storage entry found, exact device IDs not visible"
     assert OmemoProbe._format_omemo_device_ids({"not-a-number"}) == "storage entry found, exact device IDs not visible"
     assert OmemoProbe._format_omemo_device_ids({"10", "2", "1"}) == "1, 2, 10"
+    assert OmemoProbe._format_omemo_device_ids({"1", "2", "not-a-number"}) == "storage entry found, exact device IDs not visible"
 
     long_ids = {str(i) for i in range(1, 20)}
     formatted = OmemoProbe._format_omemo_device_ids(long_ids, limit=3)
@@ -661,7 +665,7 @@ async def test_cmd_omemo_devices_lists_recipients_before_storage_hints(tmp_path,
     assert "• alice@example.test" in body
     assert "• bob@example.test" in body
     assert "Local storage hints:" in body
-    assert "• adminbot@example.org: 813096472" in body
+    assert f"• adminbot@example.org: {TEST_DEVICE_ID}" in body
     assert "not a guaranteed list" in body
     assert body.index("Current admin-room recipients") < body.index("Local storage hints")
 
@@ -690,10 +694,10 @@ async def test_cmd_omemo_reset_requires_confirm_and_rotates_storage(tmp_path, mo
 
     scheduled = []
 
-    def fake_schedule_restart():
+    def mock_schedule_restart():
         scheduled.append("restart")
 
-    monkeypatch.setattr(bot, "_schedule_omemo_reset_restart", fake_schedule_restart)
+    monkeypatch.setattr(bot, "_schedule_omemo_reset_restart", mock_schedule_restart)
 
     await bot._cmd_omemo_reset("admin@conference.example.org", actor="admin@example.org", confirm=True)
     body = bot.sent[-1]["mbody"]
