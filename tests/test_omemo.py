@@ -13,6 +13,19 @@ def stat_mode(path):
     return os.stat(path).st_mode & 0o777
 
 
+def freeze_omemo_timestamp(monkeypatch, timestamp="20260528-123456"):
+    """Patch banbot.omemo timestamp formatting while still honoring fmt."""
+    import banbot.omemo as omemo_module
+
+    original_strftime = omemo_module.time.strftime
+    parsed = omemo_module.time.strptime(timestamp, "%Y%m%d-%H%M%S")
+
+    def fake_strftime(fmt):
+        return original_strftime(fmt, parsed)
+
+    monkeypatch.setattr("banbot.omemo.time.strftime", fake_strftime)
+
+
 @pytest.mark.omemo
 def test_prepare_omemo_storage_file_creates_private_path(tmp_path):
     storage = tmp_path / "private" / "omemo.json"
@@ -103,11 +116,24 @@ async def test_omemo_recipients_for_room_uses_visible_occupant_jids_only():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients():
     bot = OmemoProbe()
-    exc = RuntimeError("bad recipients: frozenset({'envsbot@envs.net', 'No Device', \"user@example.org\"})")
+    exc = RuntimeError("bad recipients: frozenset({'envsbot@envs.net', \"user@example.org\"})")
+
     assert bot._extract_unusable_omemo_recipients(exc) == {
         "envsbot@envs.net",
         "user@example.org",
     }
+
+
+@pytest.mark.omemo
+def test_extract_unusable_omemo_recipients_filters_invalid_tokens():
+    bot = OmemoProbe()
+    exc = RuntimeError("bad recipients: frozenset({'envsbot@envs.net', 'No Device', \"user@example.org\"})")
+
+    assert bot._extract_unusable_omemo_recipients(exc) == {
+        "envsbot@envs.net",
+        "user@example.org",
+    }
+
 
 class FakeEncryptedMessage:
     def __init__(self, label="encrypted"):
@@ -363,7 +389,7 @@ def test_ensure_omemo_identity_metadata_rotates_existing_store_without_metadata(
     os.chmod(storage, 0o600)
     identity = {"jid": "adminbot@example.org", "resource": "bot", "nick": "AdminBot"}
 
-    monkeypatch.setattr("banbot.omemo.time.strftime", lambda fmt: "20260528-123456")
+    freeze_omemo_timestamp(monkeypatch)
 
     backup = _ensure_omemo_identity_metadata(
         storage,
@@ -396,7 +422,7 @@ def test_ensure_omemo_identity_metadata_rotates_storage_on_identity_change(tmp_p
     new_identity = {"jid": "adminbot@example.org", "resource": "new", "nick": "AdminBot"}
     _write_omemo_identity_metadata(metadata, old_identity)
 
-    monkeypatch.setattr("banbot.omemo.time.strftime", lambda fmt: "20260528-123456")
+    freeze_omemo_timestamp(monkeypatch)
 
     backup = _ensure_omemo_identity_metadata(
         storage,
