@@ -502,7 +502,7 @@ def test_ensure_omemo_identity_metadata_keeps_storage_when_reset_disabled(tmp_pa
     assert _read_omemo_identity_metadata(metadata) == old_identity
 
 
-
+@pytest.mark.omemo
 def test_omemo_storage_status_reports_missing_file_and_identity(monkeypatch, tmp_path):
     import config
     from banbot.omemo import _write_omemo_identity_metadata, _omemo_identity_metadata_path
@@ -541,6 +541,7 @@ def test_omemo_storage_status_reports_missing_file_and_identity(monkeypatch, tmp
     assert "Identity matches: False" in body
 
 
+@pytest.mark.omemo
 def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
     storage = tmp_path / "omemo.json"
     write_omemo_storage(
@@ -575,6 +576,7 @@ def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
     assert "100" not in hints["adminbot@example.org"]
 
 
+@pytest.mark.omemo
 def test_format_omemo_device_ids_is_stable_and_compact():
     assert OmemoProbe._format_omemo_device_ids(set()) == "storage entry found, exact device IDs not visible"
     assert OmemoProbe._format_omemo_device_ids({"not-a-number"}) == "storage entry found, exact device IDs not visible"
