@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import time
 from xml.etree import ElementTree as ET
 
 import pytest
 
-try:
-    import aiosqlite  # noqa: F401
-except ImportError:
-    pytest.skip(
-        "aiosqlite is required for redaction database tests",
-        allow_module_level=True,
-    )
+HAS_AIOSQLITE = importlib.util.find_spec("aiosqlite") is not None
+
+pytestmark = pytest.mark.skipif(
+    not HAS_AIOSQLITE,
+    reason="aiosqlite is required for redaction database tests",
+)
 
 from banbot.db import DatabaseMixin
 from banbot.redaction import (
@@ -293,6 +293,7 @@ async def test_redact_cleanup_deletes_old_entries(temp_db_path):
         await bot.db.close()
 
 
+@pytest.mark.asyncio
 async def test_automatic_redaction_cleanup_deletes_old_entries_without_message(temp_db_path):
     bot = RedactionBot()
     bot.redaction_index_retention_days = 30
