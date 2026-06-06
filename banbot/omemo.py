@@ -9,6 +9,7 @@ selected for a target room, the bot continues to use Slixmpp's normal plaintext
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -35,6 +36,8 @@ except Exception:  # pragma: no cover - depends on optional runtime dependency
     OMEMO_AVAILABLE = False
 
 log = logging.getLogger(__name__)
+
+OMEMO_RESET_RESTART_DELAY_SECONDS = 3
 
 def _omemo_identity_metadata_path(storage_path: Path) -> Path:
     """Return the metadata path tied to an OMEMO storage file."""
@@ -868,6 +871,31 @@ class OmemoMixin:
         suffix = "" if len(sorted_ids) <= limit else f", … ({len(sorted_ids)} hints)"
         return f"{', '.join(shown)}{suffix}"
 
+    async def _restart_after_omemo_reset(self) -> None:
+        """Restart the bot after OMEMO storage was reset."""
+        await asyncio.sleep(OMEMO_RESET_RESTART_DELAY_SECONDS)
+
+        restart = getattr(self, "_restart_process", None)
+        if not callable(restart):
+            log.warning(
+                "OMEMO: reset completed but no restart helper is available; "
+                "restart the bot manually"
+            )
+            return
+
+        result = restart()
+        if inspect.isawaitable(result):
+            await result
+
+    def _schedule_omemo_reset_restart(self) -> None:
+        """Schedule a delayed restart after OMEMO reset confirmation."""
+        task = asyncio.create_task(self._restart_after_omemo_reset())
+        self._restart_task = task
+
+        clear_restart_task = getattr(self, "_clear_restart_task", None)
+        if callable(clear_restart_task):
+            task.add_done_callback(clear_restart_task)
+
     async def _cmd_omemo_status(self, room: str) -> None:
         await self.bot_send_message(
             mto=room,
@@ -938,11 +966,18 @@ class OmemoMixin:
         self.omemo_ready.clear()
         self.omemo_enabled = False
         self.omemo_reset_pending_restart = True
+        restart_available = callable(getattr(self, "_restart_process", None))
         lines = [
             "✅ OMEMO storage reset prepared.",
             "OMEMO is disabled for this running process until restart.",
-            "Restart the bot now to create and publish a fresh OMEMO identity.",
         ]
+        if restart_available:
+            lines.append(
+                f"Restarting in {OMEMO_RESET_RESTART_DELAY_SECONDS} seconds "
+                "to create and publish a fresh OMEMO identity."
+            )
+        else:
+            lines.append("Restart the bot now to create and publish a fresh OMEMO identity.")
         if storage_backup:
             lines.append(f"Old storage backup: {storage_backup}")
         if metadata_backup:
@@ -965,6 +1000,9 @@ class OmemoMixin:
             mtype="groupchat",
             encrypted=False,
         )
+
+        if restart_available:
+            self._schedule_omemo_reset_restart()
 
     async def cmd_omemo(self, args: list[str], room: str, actor: str | None = None) -> None:
         """Admin command entry point for OMEMO diagnostics and reset."""

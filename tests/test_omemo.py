@@ -82,6 +82,10 @@ class OmemoProbe(OmemoMixin):
         self.omemo_reset_on_identity_change = True
         self.sent = []
         self.audited = []
+        self.restart_calls = []
+
+    async def _restart_process(self):
+        self.restart_calls.append("restart")
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
@@ -236,6 +240,7 @@ async def test_decrypt_incoming_omemo_message_returns_decrypted_message(omemo_pa
     assert result is decrypted
     assert encrypted is True
     assert plugin.decrypt_calls == 1
+
 
 class FailingDecryptPlugin(FakeDecryptPlugin):
     def __init__(self, exc):
@@ -609,22 +614,46 @@ async def test_cmd_omemo_reset_requires_confirm_and_rotates_storage(tmp_path, mo
     assert "Confirm with: !omemo reset confirm" in bot.sent[-1]["mbody"]
     assert bot.sent[-1]["encrypted"] is False
 
+    scheduled = []
+
+    def fake_schedule_restart():
+        scheduled.append("restart")
+
+    monkeypatch.setattr(bot, "_schedule_omemo_reset_restart", fake_schedule_restart)
+
     await bot._cmd_omemo_reset("admin@conference.example.org", actor="admin@example.org", confirm=True)
     body = bot.sent[-1]["mbody"]
     assert "OMEMO storage reset prepared" in body
     assert "OMEMO is disabled for this running process until restart" in body
-    assert "Restart the bot now" in body
+    assert "Restarting in 3 seconds" in body
     assert "Old storage backup:" in body
     assert "Old metadata backup:" in body
     assert bot.omemo_ready.cleared is True
     assert bot.omemo_enabled is False
     assert bot.omemo_reset_pending_restart is True
     assert bot.sent[-1]["encrypted"] is False
+    assert scheduled == ["restart"]
     assert not storage.exists()
     assert metadata.exists()
     assert bot.audited[-1][0] == "omemo_reset"
     assert list(tmp_path.glob("omemo.json.bak-*"))
     assert list(tmp_path.glob("omemo.identity.json.bak-*"))
+
+
+@pytest.mark.asyncio
+async def test_omemo_reset_restart_helper_waits_then_restarts(monkeypatch):
+    bot = OmemoProbe()
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("banbot.omemo.asyncio.sleep", fake_sleep)
+
+    await bot._restart_after_omemo_reset()
+
+    assert sleeps == [3]
+    assert bot.restart_calls == ["restart"]
 
 
 @pytest.mark.omemo
