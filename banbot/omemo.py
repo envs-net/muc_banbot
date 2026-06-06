@@ -887,7 +887,7 @@ class OmemoMixin:
         if inspect.isawaitable(result):
             restart_result = await result
             if restart_result is not None:
-                log.debug("OMEMO: restart helper returned %r", restart_result)
+                log.debug("OMEMO: reset restart helper returned %r", restart_result)
 
     def _schedule_omemo_reset_restart(self) -> None:
         """Schedule a delayed restart after OMEMO reset confirmation."""
