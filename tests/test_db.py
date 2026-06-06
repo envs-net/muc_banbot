@@ -8,6 +8,38 @@ from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
 
 
+async def create_legacy_bans_table(db):
+    """Create the pre-normalization bans table used by migration tests."""
+    await db.execute(
+        """
+        CREATE TABLE bans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_type TEXT NOT NULL CHECK(target_type IN ('jid', 'nick', 'domain')),
+            target TEXT NOT NULL,
+            jid TEXT,
+            nick TEXT,
+            until INTEGER NOT NULL DEFAULT 0,
+            issuer TEXT,
+            comment TEXT,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+            updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+            UNIQUE(target_type, target)
+        )
+        """
+    )
+
+
+async def insert_legacy_ban(db, *, target, jid, nick, until, issuer, comment):
+    """Insert a legacy ban row before setup_db normalization runs."""
+    await db.execute(
+        """
+        INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment)
+        VALUES ('jid', ?, ?, ?, ?, ?, ?)
+        """,
+        (target, jid, nick, until, issuer, comment),
+    )
+
+
 class DbBot(DatabaseMixin, CacheMixin):
     def __init__(self):
         self.protected_rooms = set()
@@ -91,28 +123,15 @@ async def test_public_policy_roundtrip(temp_db_path):
 async def test_setup_db_normalizes_existing_full_jid_bans(temp_db_path):
     db = await aiosqlite.connect(temp_db_path)
     try:
-        await db.execute(
-            """
-            CREATE TABLE bans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                target_type TEXT NOT NULL CHECK(target_type IN ('jid', 'nick', 'domain')),
-                target TEXT NOT NULL,
-                jid TEXT,
-                nick TEXT,
-                until INTEGER NOT NULL DEFAULT 0,
-                issuer TEXT,
-                comment TEXT,
-                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                UNIQUE(target_type, target)
-            )
-            """
-        )
-        await db.execute(
-            """
-            INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment)
-            VALUES ('jid', 'User@Example.org/resource', 'User@Example.org/resource', 'SomeNick', 0, 'tester', 'reason')
-            """
+        await create_legacy_bans_table(db)
+        await insert_legacy_ban(
+            db,
+            target="User@Example.org/resource",
+            jid="User@Example.org/resource",
+            nick="SomeNick",
+            until=0,
+            issuer="tester",
+            comment="reason",
         )
         await db.commit()
     finally:
@@ -137,34 +156,24 @@ async def test_setup_db_normalizes_existing_full_jid_bans(temp_db_path):
 async def test_setup_db_deduplicates_full_and_bare_jid_bans(temp_db_path):
     db = await aiosqlite.connect(temp_db_path)
     try:
-        await db.execute(
-            """
-            CREATE TABLE bans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                target_type TEXT NOT NULL CHECK(target_type IN ('jid', 'nick', 'domain')),
-                target TEXT NOT NULL,
-                jid TEXT,
-                nick TEXT,
-                until INTEGER NOT NULL DEFAULT 0,
-                issuer TEXT,
-                comment TEXT,
-                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                UNIQUE(target_type, target)
-            )
-            """
+        await create_legacy_bans_table(db)
+        await insert_legacy_ban(
+            db,
+            target="user@example.org/oldres",
+            jid="user@example.org/oldres",
+            nick="OldNick",
+            until=100,
+            issuer="old",
+            comment="old temp",
         )
-        await db.execute(
-            """
-            INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment)
-            VALUES ('jid', 'user@example.org/oldres', 'user@example.org/oldres', 'OldNick', 100, 'old', 'old temp')
-            """
-        )
-        await db.execute(
-            """
-            INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment)
-            VALUES ('jid', 'user@example.org', 'user@example.org', 'NewNick', 0, 'new', 'permanent')
-            """
+        await insert_legacy_ban(
+            db,
+            target="user@example.org",
+            jid="user@example.org",
+            nick="NewNick",
+            until=0,
+            issuer="new",
+            comment="permanent",
         )
         await db.commit()
     finally:

@@ -21,15 +21,19 @@ class FakeJid:
     """Lightweight test double for the slixmpp JID interface used here.
 
     It only implements the attributes needed by DirectMessageMixin: bare JID,
-    optional resource, and string formatting as bare/resource.
+    optional resource, and string formatting as bare/resource. In XMPP terms,
+    the bare JID is the stable ``user@domain`` identity, while the resource
+    identifies a specific connected client/session for that identity.
     """
 
     def __init__(self, bare, resource=None):
         """Initialize a fake JID.
 
         Args:
-            bare: Bare JID string, for example "user@example.org".
-            resource: Optional resource part of the JID.
+            bare: Bare JID string (the ``user@domain`` identity), for example
+                "user@example.org".
+            resource: Optional resource part of the JID identifying a specific
+                client/session.
         """
         self.bare = bare
         self.resource = resource
@@ -93,6 +97,7 @@ class DirectBot(DirectMessageMixin):
         self.update_result = UpdateResult(False, "2.3.0", None)
 
     def bare_jid(self, jid):
+        """Provide the method expected by DirectMessageMixin in this fixture."""
         return bare_jid(jid)
 
     async def bot_send_message(self, **kwargs):

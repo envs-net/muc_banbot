@@ -103,7 +103,7 @@ async def test_omemo_recipients_for_room_uses_visible_occupant_jids_only():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients():
     bot = OmemoProbe()
-    exc = RuntimeError("bad recipients: frozenset({'envsbot@envs.net', 'No Device' , \"user@example.org\"})")
+    exc = RuntimeError("bad recipients: frozenset({'envsbot@envs.net', 'No Device', \"user@example.org\"})")
     assert bot._extract_unusable_omemo_recipients(exc) == {
         "envsbot@envs.net",
         "user@example.org",
