@@ -242,6 +242,30 @@ async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
         await bot.db.close()
 
 
+@pytest.mark.asyncio
+async def test_auto_redaction_reports_previously_redacted_when_no_candidates(temp_db_path):
+    bot = RedactionBot()
+    await bot.setup_db()
+    try:
+        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
+        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+
+        await bot.maybe_auto_redact_after_ban("alice@example.org", "confirmed spam", actor="admin@example.org")
+        assert len(bot.redaction_stanzas) == 2
+
+        await bot.maybe_auto_redact_after_ban("alice@example.org", "confirmed spam", actor="admin@example.org")
+
+        body = bot.sent[-1]["mbody"]
+        assert "Auto-redaction completed after ban" in body
+        assert "No redactable indexed stanza IDs found for this JID." in body
+        assert "Previously redacted messages: 2" in body
+        assert "and not already redacted can be redacted" in body
+        assert "No indexed stanza IDs found for this JID." not in body
+        assert len(bot.redaction_stanzas) == 2
+    finally:
+        await bot.db.close()
+
+
 def test_auto_reason_matching_is_case_insensitive():
     bot = RedactionBot()
 

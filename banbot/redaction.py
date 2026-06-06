@@ -240,6 +240,33 @@ class RedactionMixin:
             return await cursor.fetchall()
 
 
+    async def _redaction_index_stats_for_jid(self, jid: str) -> dict[str, int]:
+        """Return redaction-index counters for a bare JID in protected rooms."""
+        protected_rooms = sorted(getattr(self, "protected_rooms", set()))
+        if not protected_rooms:
+            return {"indexed_total": 0, "previously_redacted": 0}
+
+        placeholders = ",".join("?" for _ in protected_rooms)
+        query = f"""
+            SELECT
+                COUNT(*) AS indexed_total,
+                SUM(CASE WHEN redacted_at IS NOT NULL THEN 1 ELSE 0 END) AS previously_redacted
+            FROM redaction_index
+            WHERE sender_jid = ?
+              AND room_jid IN ({placeholders})
+        """
+        async with self.db.execute(query, [bare_jid(jid), *protected_rooms]) as cursor:
+            row = await cursor.fetchone()
+
+        if not row:
+            return {"indexed_total": 0, "previously_redacted": 0}
+
+        return {
+            "indexed_total": int(row[0] or 0),
+            "previously_redacted": int(row[1] or 0),
+        }
+
+
     async def _redaction_mark_row(
         self,
         row_id: int,
@@ -401,12 +428,35 @@ class RedactionMixin:
     ) -> str:
         """Format a redaction summary for the admin room."""
         if summary.get("found", 0) == 0:
-            return (
-                f"ℹ️ {title}\n\n"
-                f"Target: {safe_jid(target)}\n"
-                "No indexed stanza IDs found for this JID.\n"
-                "Only messages seen by BanBot after redaction indexing was enabled can be redacted."
-            )
+            indexed_total = int(summary.get("indexed_total", 0) or 0)
+            previously_redacted = int(summary.get("previously_redacted", 0) or 0)
+
+            lines = [
+                f"ℹ️ {title}",
+                "",
+                f"Target: {safe_jid(target)}",
+            ]
+
+            if indexed_total > 0:
+                lines.append("No redactable indexed stanza IDs found for this JID.")
+                if previously_redacted > 0:
+                    lines.append(f"Previously redacted messages: {previously_redacted}")
+                lines.extend(
+                    [
+                        "",
+                        "Only messages seen by BanBot after redaction indexing was enabled",
+                        "and not already redacted can be redacted.",
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        "No indexed stanza IDs found for this JID.",
+                        "Only messages seen by BanBot after redaction indexing was enabled can be redacted.",
+                    ]
+                )
+
+            return "\n".join(lines)
 
         lines = [
             f"🧹 {title}",
@@ -463,6 +513,8 @@ class RedactionMixin:
             actor,
             alert_on_failure=not title.startswith("Auto-redaction"),
         )
+        if summary.get("found", 0) == 0:
+            summary.update(await self._redaction_index_stats_for_jid(target))
 
         await self._audit_redaction_event(
             "auto_redact_jid" if title.startswith("Auto-redaction") else "redact_jid",
@@ -476,6 +528,8 @@ class RedactionMixin:
                 "redacted": summary.get("redacted", 0),
                 "failed": summary.get("failed", 0),
                 "skipped": summary.get("skipped", 0),
+                "indexed_total": summary.get("indexed_total", 0),
+                "previously_redacted": summary.get("previously_redacted", 0),
                 "announce": announce,
             },
         )
