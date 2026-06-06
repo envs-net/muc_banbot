@@ -95,39 +95,48 @@ class OmemoProbe(OmemoMixin):
 
 
 class FakeMessage:
-    """Minimal XMPP message test double used by OMEMO tests.
+    """Minimal message stanza test double for OMEMO helpers."""
 
-    The production code reads the ``xml`` attribute to inspect OMEMO payloads
-    and sometimes calls ``get("from")`` for sanitized logging.
-    """
-
-    def __init__(self, *, xml, sender=None):
+    def __init__(self, xml, sender="sender@example.test"):
         self.xml = xml
         self._sender = sender
 
     def get(self, key, default=None):
         if key == "from":
-            return self._sender if self._sender is not None else default
+            return self._sender
         return default
 
 
-def make_message(*, xml, sender=None):
-    """Create a reusable fake message instead of dynamic ``type()`` mocks."""
-    return FakeMessage(xml=xml, sender=sender)
+def make_message(xml, sender="sender@example.test"):
+    """Create a fake message without reparsing OMEMO XML fixtures."""
+    return FakeMessage(xml, sender=sender)
+
+
+class ReadyFlag:
+    def __init__(self, value=True):
+        self.value = value
+        self.cleared = False
+
+    def is_set(self):
+        return self.value
+
+    def clear(self):
+        self.value = False
+        self.cleared = True
 
 
 def write_omemo_storage(storage, payload):
-    """Write OMEMO-like JSON test storage with a stable encoding."""
+    """Write OMEMO-like JSON storage for device-hint tests."""
     storage.write_text(json.dumps(payload), encoding="utf8")
 
 
 @pytest.mark.omemo
 def test_message_has_omemo_payload(omemo_payload_xml):
     bot = OmemoProbe()
-    msg = make_message(xml=omemo_payload_xml)
+    msg = make_message(omemo_payload_xml)
     assert bot._message_has_omemo_payload(msg) is True
 
-    plain = make_message(xml=ET.Element("message"))
+    plain = make_message(ET.Element("message"))
     assert bot._message_has_omemo_payload(plain) is False
 
 
@@ -147,7 +156,7 @@ async def test_omemo_recipients_for_room_uses_visible_occupant_jids_only():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients():
     bot = OmemoProbe()
-    exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', 'user@example.org'})")
+    exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', \"user@example.org\"})")
 
     assert bot._extract_unusable_omemo_recipients(exc) == {
         "envsbot@example.org",
@@ -158,7 +167,7 @@ def test_extract_unusable_omemo_recipients():
 @pytest.mark.omemo
 def test_extract_unusable_omemo_recipients_filters_invalid_tokens():
     bot = OmemoProbe()
-    exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', 'No Device', 'user@example.org'})")
+    exc = RuntimeError("bad recipients: frozenset({'envsbot@example.org', 'No Device', \"user@example.org\"})")
 
     assert bot._extract_unusable_omemo_recipients(exc) == {
         "envsbot@example.org",
@@ -243,7 +252,7 @@ async def test_decrypt_incoming_plaintext_message_does_not_call_omemo_backend():
     plugin = FakeDecryptPlugin()
     bot.plugin = {"xep_0384": plugin}
     bot.omemo_ready = ReadyFlag(True)
-    msg = make_message(xml=ET.Element("message"))
+    msg = make_message(ET.Element("message"))
 
     result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
 
@@ -260,7 +269,7 @@ async def test_decrypt_incoming_omemo_message_returns_decrypted_message(omemo_pa
     plugin = FakeDecryptPlugin(result=(decrypted, object()))
     bot.plugin = {"xep_0384": plugin}
     bot.omemo_ready = ReadyFlag(True)
-    msg = make_message(xml=omemo_payload_xml, sender="sender@example.test")
+    msg = make_message(omemo_payload_xml, sender="sender@example.test")
 
     result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
 
@@ -295,7 +304,7 @@ async def test_decrypt_incoming_omemo_device_info_failures_are_logged_as_info(
     )
     bot.plugin = {"xep_0384": plugin}
     bot.omemo_ready = ReadyFlag(True)
-    msg = make_message(xml=omemo_payload_xml, sender="room@example.test/dan")
+    msg = make_message(omemo_payload_xml, sender="room@example.test/dan")
 
     with caplog.at_level("INFO", logger="banbot.omemo"):
         result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
@@ -317,7 +326,7 @@ async def test_decrypt_incoming_omemo_unexpected_failures_log_sanitized_warning(
     plugin = FailingDecryptPlugin(RuntimeError("unexpected decrypt failure"))
     bot.plugin = {"xep_0384": plugin}
     bot.omemo_ready = ReadyFlag(True)
-    msg = make_message(xml=omemo_payload_xml, sender="room@example.test/dan")
+    msg = make_message(omemo_payload_xml, sender="room@example.test/dan")
 
     with caplog.at_level("WARNING", logger="banbot.omemo"):
         result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
@@ -493,18 +502,6 @@ def test_ensure_omemo_identity_metadata_keeps_storage_when_reset_disabled(tmp_pa
     assert _read_omemo_identity_metadata(metadata) == old_identity
 
 
-class ReadyFlag:
-    def __init__(self, value=True):
-        self.value = value
-        self.cleared = False
-
-    def is_set(self):
-        return self.value
-
-    def clear(self):
-        self.value = False
-        self.cleared = True
-
 
 def test_omemo_storage_status_reports_missing_file_and_identity(monkeypatch, tmp_path):
     import config
@@ -556,7 +553,10 @@ def test_collect_omemo_storage_device_hints_filters_internal_values(tmp_path):
                     "device_id": 813096472,
                     "nested": {"device": True, "dev-9095": {}},
                 },
-                "moderator@example.org": {"session": "present", "notes": ["OMEMO device id 123456"]},
+                "moderator@example.org": {
+                    "session": "present",
+                    "notes": ["OMEMO device id 123456"],
+                },
                 "user2@example.org": {"device": False},
             },
             "text": "known jid moderator@example.org",
@@ -699,7 +699,7 @@ async def test_decrypt_encrypted_message_after_reset_pending_restart_is_rejected
     bot = OmemoProbe()
     bot.omemo_enabled = True
     bot.omemo_reset_pending_restart = True
-    msg = make_message(xml=omemo_payload_xml)
+    msg = make_message(omemo_payload_xml)
 
     result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
 
