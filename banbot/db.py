@@ -11,6 +11,27 @@ from .utils import normalize_ban_target
 log = logging.getLogger(__name__)
 
 
+def _stronger_ban_row(previous: dict | None, current: dict) -> dict:
+    """Return the stronger ban row when normalizing duplicate ban targets."""
+    if previous is None:
+        return current
+
+    previous_until = int(previous["until"] or 0)
+    current_until = int(current["until"] or 0)
+
+    # Permanent bans are stronger than temporary bans.
+    if previous_until <= 0:
+        return previous
+    if current_until <= 0:
+        return current
+
+    # For temporary bans, keep the later expiration.
+    if current_until > previous_until:
+        return current
+
+    return previous
+
+
 class DatabaseMixin:
     async def setup_db(self, *, create_startup_backup: bool = True) -> None:
         """Initialize SQLite DB, migrate bans schema, create indexes, load rooms."""
@@ -123,6 +144,8 @@ class DatabaseMixin:
 
                 await self.db.execute("DROP TABLE bans_old")
                 log.info("DB migration complete: %d ban rows migrated", len(migrated))
+
+        await self.normalize_existing_ban_rows()
 
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS rooms (
@@ -326,6 +349,132 @@ class DatabaseMixin:
 
         await self.db.commit()
         self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
+
+
+    async def normalize_existing_ban_rows(self) -> None:
+        """Normalize existing ban rows so stored JID bans never keep resources.
+
+        Older code or manual database edits may leave full JIDs such as
+        user@example.org/resource in target or jid columns. Ban targets should
+        always be bare JIDs, because XMPP resources are only client sessions and
+        change frequently.
+        """
+        async with self.db.execute(
+            """
+            SELECT id, target_type, target, jid, nick, until, issuer, comment,
+                   created_at, updated_at
+            FROM bans
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        if not rows:
+            return
+
+        normalized_rows: dict[tuple[str, str], dict] = {}
+        changed = False
+
+        for (
+            row_id,
+            target_type,
+            target,
+            jid,
+            nick,
+            until,
+            issuer,
+            comment,
+            created_at,
+            updated_at,
+        ) in rows:
+            try:
+                if target_type == "domain":
+                    raw_domain = str(target or jid or "").strip().lower()
+                    raw_domain = raw_domain[2:] if raw_domain.startswith("*.") else raw_domain
+                    normalized_type = "domain"
+                    normalized_target = raw_domain.strip(".")
+                    normalized_jid = f"*.{normalized_target}"
+                    normalized_nick = nick.lower().strip() if nick else None
+                elif target_type == "nick":
+                    normalized_type, normalized_target, normalized_jid, normalized_nick = normalize_ban_target(
+                        None,
+                        nick or target,
+                    )
+                else:
+                    normalized_type, normalized_target, normalized_jid, normalized_nick = normalize_ban_target(
+                        jid or target,
+                        nick,
+                    )
+            except Exception as exc:
+                log.warning(
+                    "Skipping invalid ban row during normalization: id=%r target_type=%r target=%r jid=%r nick=%r error=%s",
+                    row_id,
+                    target_type,
+                    target,
+                    jid,
+                    nick,
+                    exc,
+                )
+                continue
+
+            if (
+                normalized_type != target_type
+                or normalized_target != target
+                or normalized_jid != jid
+                or normalized_nick != nick
+            ):
+                changed = True
+
+            key = (normalized_type, normalized_target)
+            current = {
+                "target_type": normalized_type,
+                "target": normalized_target,
+                "jid": normalized_jid,
+                "nick": normalized_nick,
+                "until": int(until or 0),
+                "issuer": issuer,
+                "comment": comment,
+                "created_at": int(created_at or time.time()),
+                "updated_at": int(updated_at or time.time()),
+            }
+
+            previous = normalized_rows.get(key)
+            selected = _stronger_ban_row(previous, current)
+            if previous is not None and selected is not previous:
+                selected["created_at"] = min(previous["created_at"], current["created_at"])
+                changed = True
+            elif previous is not None:
+                previous["created_at"] = min(previous["created_at"], current["created_at"])
+                changed = True
+
+            normalized_rows[key] = selected
+
+        if not changed and len(normalized_rows) == len(rows):
+            return
+
+        await self.db.execute("DELETE FROM bans")
+        await self.db.executemany(
+            """
+            INSERT INTO bans
+                (target_type, target, jid, nick, until, issuer, comment, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["target_type"],
+                    row["target"],
+                    row["jid"],
+                    row["nick"],
+                    row["until"],
+                    row["issuer"],
+                    row["comment"],
+                    row["created_at"],
+                    row["updated_at"],
+                )
+                for row in normalized_rows.values()
+            ],
+        )
+        await self.db.commit()
+        log.info("Normalized %d existing ban row(s)", len(rows))
 
 
     async def delete_ban_db(self, identifier: str) -> int:

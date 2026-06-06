@@ -45,6 +45,10 @@ async def test_upsert_load_and_delete_ban(temp_db_path):
             issuer="tester",
             comment="reason",
         )
+        async with bot.db.execute("SELECT target, jid FROM bans") as cursor:
+            rows = await cursor.fetchall()
+        assert rows == [("user@example.org", "user@example.org")]
+
         await bot.load_bans_from_db()
         assert "user@example.org" in bot.ban_index_by_jid
 
@@ -79,5 +83,99 @@ async def test_public_policy_roundtrip(temp_db_path):
         assert await bot.get_public_policy() == (False, "Be nice")
         await bot.clear_public_policy()
         assert await bot.get_public_policy() == (False, "")
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_db_normalizes_existing_full_jid_bans(temp_db_path):
+    db = await aiosqlite.connect(temp_db_path)
+    try:
+        await db.execute(
+            """
+            CREATE TABLE bans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_type TEXT NOT NULL CHECK(target_type IN ('jid', 'nick', 'domain')),
+                target TEXT NOT NULL,
+                jid TEXT,
+                nick TEXT,
+                until INTEGER NOT NULL DEFAULT 0,
+                issuer TEXT,
+                comment TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                UNIQUE(target_type, target)
+            )
+            """
+        )
+        await db.execute(
+            """
+            INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment)
+            VALUES ('jid', 'User@Example.org/resource', 'User@Example.org/resource', 'SomeNick', 0, 'tester', 'reason')
+            """
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    bot = DbBot()
+    await bot.setup_db()
+    try:
+        async with bot.db.execute("SELECT target, jid, nick FROM bans") as cursor:
+            rows = await cursor.fetchall()
+
+        assert rows == [("user@example.org", "user@example.org", "somenick")]
+
+        await bot.load_bans_from_db()
+        assert "user@example.org" in bot.ban_index_by_jid
+        assert all("/" not in key for key in bot.ban_index_by_jid)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_db_deduplicates_full_and_bare_jid_bans(temp_db_path):
+    db = await aiosqlite.connect(temp_db_path)
+    try:
+        await db.execute(
+            """
+            CREATE TABLE bans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_type TEXT NOT NULL CHECK(target_type IN ('jid', 'nick', 'domain')),
+                target TEXT NOT NULL,
+                jid TEXT,
+                nick TEXT,
+                until INTEGER NOT NULL DEFAULT 0,
+                issuer TEXT,
+                comment TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                UNIQUE(target_type, target)
+            )
+            """
+        )
+        await db.execute(
+            """
+            INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment)
+            VALUES ('jid', 'user@example.org/oldres', 'user@example.org/oldres', 'OldNick', 100, 'old', 'old temp')
+            """
+        )
+        await db.execute(
+            """
+            INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment)
+            VALUES ('jid', 'user@example.org', 'user@example.org', 'NewNick', 0, 'new', 'permanent')
+            """
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    bot = DbBot()
+    await bot.setup_db()
+    try:
+        async with bot.db.execute("SELECT target, jid, nick, until, issuer, comment FROM bans") as cursor:
+            rows = await cursor.fetchall()
+
+        assert rows == [("user@example.org", "user@example.org", "newnick", 0, "new", "permanent")]
     finally:
         await bot.db.close()
