@@ -38,7 +38,12 @@ except ImportError:
 
     def normalize_bare_jid(jid: str) -> str:
         """Fallback normalizer used only when redaction imports are skipped."""
-        return jid
+        if not jid:
+            return jid
+
+        # Mimic the minimal bare-JID normalization semantics expected by tests:
+        # trim whitespace, drop resources, and normalize case.
+        return jid.strip().split("/", 1)[0].lower()
 
 pytestmark = pytest.mark.skipif(
     not REDACTION_TEST_IMPORTS_OK,
@@ -213,7 +218,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.redaction_stanzas = []
         self.command_prefix = "!"
         self.redaction_retract_concurrency = 3
-        self.test_redaction_iq_send_delay = 0.0
+        self._test_iq_send_delay = 0.0
         self.fail_stanza_ids = set()
         self.fail_stanza_errors = {}
         self.redaction_inflight_tracker = {"current": 0, "max": 0}
@@ -227,7 +232,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
     def make_iq_set(self, **kwargs):
         iq = _build_iq_with_normalized_to(
             self.redaction_stanzas,
-            delay=self.test_redaction_iq_send_delay,
+            delay=self._test_iq_send_delay,
             inflight_tracker=self.redaction_inflight_tracker,
             **kwargs,
         )
@@ -402,7 +407,14 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
         cleanup_calls.append(actor)
         raise asyncio.CancelledError()
 
-    monkeypatch.setattr("banbot.redaction.asyncio.sleep", fake_sleep)
+    worker_globals = bot.redaction_cleanup_worker.__func__.__globals__
+    if "asyncio" in worker_globals:
+        monkeypatch.setattr(worker_globals["asyncio"], "sleep", fake_sleep)
+    elif "sleep" in worker_globals:
+        monkeypatch.setitem(worker_globals, "sleep", fake_sleep)
+    else:
+        pytest.fail("redaction_cleanup_worker has no patchable sleep dependency")
+
     bot.run_redaction_cleanup_automatic = fake_cleanup
 
     with pytest.raises(asyncio.CancelledError):
@@ -464,7 +476,7 @@ def test_auto_reason_matching_is_case_insensitive():
 async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db_path):
     bot = RedactionBot()
     bot.redaction_retract_concurrency = 2
-    bot.test_redaction_iq_send_delay = TEST_REDACTION_IQ_SEND_DELAY_SECONDS
+    bot._test_iq_send_delay = TEST_REDACTION_IQ_SEND_DELAY_SECONDS
     await setup_redaction_test_db(bot, temp_db_path)
     try:
         for i in range(4):
