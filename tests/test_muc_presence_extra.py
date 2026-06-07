@@ -22,9 +22,11 @@ MUC_USER_TAG = f"{{{MUC_USER_NS}}}"
 ROOM_JID = "room@conference.example.test"
 ADMIN_ROOM_JID = "admin@conference.example.test"
 USER_NICK = "User"
+USER_NICK_NORMALIZED = USER_NICK.lower()
 USER_BARE_JID = "user@example.test"
 USER_JID_RESOURCE = f"{USER_BARE_JID}/resource"
 BAD_NICK = "BadNick"
+BAD_NICK_NORMALIZED = BAD_NICK.lower()
 BAD_BARE_JID = "bad@example.test"
 BAD_JID_RESOURCE = f"{BAD_BARE_JID}/resource"
 BOT_NICK = "BanBot"
@@ -165,7 +167,7 @@ async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_
 
         assert bot.occupants[ROOM_JID][USER_NICK]["jid"] == USER_JID_RESOURCE
         assert bot.rtbl_checks == [(USER_JID_RESOURCE, USER_NICK)]
-        assert (ROOM_JID, USER_BARE_JID, "user", "jid ban", None) in bot.applied
+        assert (ROOM_JID, USER_BARE_JID, USER_NICK_NORMALIZED, "jid ban", None) in bot.applied
         assert (ROOM_JID, "*.example.test", None, "domain ban", None) in bot.applied
     finally:
         await bot.db.close()
@@ -189,7 +191,7 @@ async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
 
         await bot.load_bans_from_db()
         assert BAD_BARE_JID in bot.ban_index_by_jid
-        assert "badnick" not in bot.ban_index_by_nick
+        assert BAD_NICK_NORMALIZED not in bot.ban_index_by_nick
         assert any(call[1] == BAD_BARE_JID for call in bot.applied)
     finally:
         await bot.db.close()
@@ -354,7 +356,7 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
     bot.room_join_time = {"room": 123.0}
 
     async def fake_reconnect():
-        return None
+        pass
 
     monkeypatch.setattr(bot, "_delayed_reconnect", fake_reconnect)
     await bot.on_disconnect(None)
@@ -399,7 +401,7 @@ async def test_delayed_reconnect_waits_for_session_start_signal(monkeypatch):
     calls = {"connect": 0}
 
     async def no_sleep(_delay):
-        return None
+        pass
 
     def fake_connect_with_config():
         calls["connect"] += 1
@@ -423,7 +425,7 @@ async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch)
     calls = {"connect": 0}
 
     async def no_sleep(_delay):
-        return None
+        pass
 
     async def short_wait_for(awaitable, timeout):
         awaitable.close()
