@@ -32,8 +32,8 @@ except ImportError:
 
         pass
 
-    REDACTION_CLEANUP_INTERVAL_SECONDS = 0
-    REDACTION_IQ_TIMEOUT_SECONDS = 0
+    REDACTION_CLEANUP_INTERVAL_SECONDS = 60
+    REDACTION_IQ_TIMEOUT_SECONDS = 10
     SID_NS = "urn:xmpp:sid:0"
 
     def normalize_bare_jid(jid: str) -> str:
@@ -51,7 +51,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-TEST_REDACTION_IQ_SEND_DELAY_SECONDS = 0.05
+TEST_REDACTION_IQ_PROCESSING_DELAY_SECONDS = 0.05
 
 
 class FakeFrom:
@@ -204,25 +204,41 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
     alerting, and bounded-concurrency tracking.
     """
 
-    def __init__(self):
-        self.redaction_enabled = True
-        self.redaction_index_retention_days = 30
-        self.redaction_auto_reasons = ["spam", "harassment"]
-        self.protected_rooms = {"room@conference.example.test"}
-        self.occupants = {
-            "room@conference.example.test": {
-                "Alice": {"jid": "alice@example.org/resource"},
-            }
+    @staticmethod
+    def redaction_config_defaults() -> dict[str, object]:
+        """Return redaction settings used by the fixture."""
+        return {
+            "redaction_enabled": True,
+            "redaction_index_retention_days": 30,
+            "redaction_auto_reasons": ["spam", "harassment"],
+            "protected_rooms": {"room@conference.example.test"},
+            "occupants": {
+                "room@conference.example.test": {
+                    "Alice": {"jid": "alice@example.org/resource"},
+                }
+            },
+            "command_prefix": "!",
+            "redaction_retract_concurrency": 3,
         }
-        self.sent = []
-        self.redaction_stanzas = []
-        self.command_prefix = "!"
-        self.redaction_retract_concurrency = 3
-        self._test_iq_send_delay = 0.0
-        self.fail_stanza_ids = set()
-        self.fail_stanza_errors = {}
-        self.redaction_inflight_tracker = {"current": 0, "max": 0}
-        self.alerts = []
+
+    @staticmethod
+    def test_state_default_items() -> dict[str, object]:
+        """Return mutable test-only state captured by the fixture."""
+        return {
+            "sent": [],
+            "redaction_stanzas": [],
+            "_test_iq_send_delay": 0.0,
+            "fail_stanza_ids": set(),
+            "fail_stanza_errors": {},
+            "redaction_inflight_tracker": {"current": 0, "max": 0},
+            "alerts": [],
+        }
+
+    def __init__(self):
+        for name, value in self.redaction_config_defaults().items():
+            setattr(self, name, value)
+        for name, value in self.test_state_default_items().items():
+            setattr(self, name, value)
 
     bare_jid = staticmethod(normalize_bare_jid)
 
@@ -407,14 +423,7 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
         cleanup_calls.append(actor)
         raise asyncio.CancelledError()
 
-    worker_globals = bot.redaction_cleanup_worker.__func__.__globals__
-    if "asyncio" in worker_globals:
-        monkeypatch.setattr(worker_globals["asyncio"], "sleep", fake_sleep)
-    elif "sleep" in worker_globals:
-        monkeypatch.setitem(worker_globals, "sleep", fake_sleep)
-    else:
-        pytest.fail("redaction_cleanup_worker has no patchable sleep dependency")
-
+    monkeypatch.setattr("banbot.redaction.asyncio.sleep", fake_sleep)
     bot.run_redaction_cleanup_automatic = fake_cleanup
 
     with pytest.raises(asyncio.CancelledError):
@@ -476,7 +485,7 @@ def test_auto_reason_matching_is_case_insensitive():
 async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db_path):
     bot = RedactionBot()
     bot.redaction_retract_concurrency = 2
-    bot._test_iq_send_delay = TEST_REDACTION_IQ_SEND_DELAY_SECONDS
+    bot._test_iq_send_delay = TEST_REDACTION_IQ_PROCESSING_DELAY_SECONDS
     await setup_redaction_test_db(bot, temp_db_path)
     try:
         for i in range(4):
