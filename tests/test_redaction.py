@@ -72,6 +72,18 @@ TEST_SENDER_NICK = "Alice"
 TEST_SENDER_JID = "alice@example.org"
 TEST_SENDER_RESOURCE_JID = "alice@example.org/resource"
 TEST_REDACTION_REASON = "spam"
+TEST_OTHER_AUTO_REASON = "harassment"
+TEST_CONFIRMED_SPAM_COMMENT = "confirmed spam"
+TEST_UPPERCASE_SPAM_COMMENT = "Confirmed SPAM wave"
+TEST_NON_MATCHING_REASON = "ordinary moderation note"
+TEST_STANZA_ID_1 = "stanza-1"
+TEST_STANZA_ID_2 = "stanza-2"
+TEST_OLD_STANZA_ID = "old-stanza"
+TEST_BATCH_STANZA_PREFIX = "stanza"
+TEST_SYSTEM_ACTOR = "system"
+TEST_ALREADY_RETRACTED_ERROR = "item-not-found: stanza already retracted"
+TEST_REDACTION_FAILURE_IQ_1 = '<iq type="error"><moderate id="stanza-1" /></iq>'
+TEST_REDACTION_FAILURE_IQ_2 = '<iq type="error"><moderate id="stanza-2" /></iq>'
 
 
 class FakeFrom:
@@ -258,7 +270,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         return {
             "redaction_enabled": True,
             "redaction_index_retention_days": 30,
-            "redaction_auto_reasons": ["spam", "harassment"],
+            "redaction_auto_reasons": [TEST_REDACTION_REASON, TEST_OTHER_AUTO_REASON],
             "protected_rooms": {TEST_ROOM_JID},
             "occupants": {
                 TEST_ROOM_JID: {
@@ -336,14 +348,14 @@ async def test_redaction_indexes_message_with_room_stanza_id(temp_db_path):
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        msg = FakeMessage("room@conference.example.test", "Alice", "stanza-1")
+        msg = FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1)
 
         indexed = await bot._redaction_index_message(msg)
 
         assert indexed is True
         async with bot.db.execute("SELECT room_jid, sender_jid, stanza_id FROM redaction_index") as cursor:
             rows = await cursor.fetchall()
-        assert rows == [("room@conference.example.test", "alice@example.org", "stanza-1")]
+        assert rows == [(TEST_ROOM_JID, TEST_SENDER_JID, TEST_STANZA_ID_1)]
     finally:
         await bot.db.close()
 
@@ -353,22 +365,22 @@ async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
 
-        await bot.cmd_redact(["alice@example.org", "spam"], "admin@conference.example.test", actor="admin@example.org")
+        await bot.cmd_redact([TEST_SENDER_JID, TEST_REDACTION_REASON], TEST_ADMIN_ROOM_JID, actor=TEST_ACTOR_JID)
 
         assert len(bot.redaction_stanzas) == 2
-        assert all(stanza.kwargs["to"] == "room@conference.example.test" for stanza in bot.redaction_stanzas)
+        assert all(stanza.kwargs["to"] == TEST_ROOM_JID for stanza in bot.redaction_stanzas)
         assert_moderation_request(
             bot.redaction_stanzas[0],
-            stanza_id="stanza-1",
-            reason="spam",
+            stanza_id=TEST_STANZA_ID_1,
+            reason=TEST_REDACTION_REASON,
         )
         assert_moderation_request(
             bot.redaction_stanzas[1],
-            stanza_id="stanza-2",
-            reason="spam",
+            stanza_id=TEST_STANZA_ID_2,
+            reason=TEST_REDACTION_REASON,
         )
         assert "Messages found: 2" in bot.sent[-1]["mbody"]
         assert "Redacted: 2" in bot.sent[-1]["mbody"]
@@ -385,17 +397,17 @@ async def test_redact_id_retracts_single_stanza(temp_db_path):
     await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot.cmd_redact(
-            ["id", "room@conference.example.test", "stanza-1", "spam"],
-            "admin@conference.example.test",
-            actor="admin@example.org",
+            ["id", TEST_ROOM_JID, TEST_STANZA_ID_1, TEST_REDACTION_REASON],
+            TEST_ADMIN_ROOM_JID,
+            actor=TEST_ACTOR_JID,
         )
 
         assert len(bot.redaction_stanzas) == 1
         iq = bot.redaction_stanzas[0]
-        assert iq.kwargs["to"] == "room@conference.example.test"
+        assert iq.kwargs["to"] == TEST_ROOM_JID
         assert iq.timeout == REDACTION_IQ_TIMEOUT_SECONDS
-        assert_moderation_request(iq, stanza_id="stanza-1", reason="spam")
-        assert "Stanza ID: stanza-1" in bot.sent[-1]["mbody"]
+        assert_moderation_request(iq, stanza_id=TEST_STANZA_ID_1, reason=TEST_REDACTION_REASON)
+        assert f"Stanza ID: {TEST_STANZA_ID_1}" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
 
@@ -412,15 +424,15 @@ async def test_redact_cleanup_deletes_old_entries(temp_db_path):
             VALUES (?, ?, ?, ?)
             """,
             (
-                "room@conference.example.test",
-                "alice@example.org",
-                "old-stanza",
+                TEST_ROOM_JID,
+                TEST_SENDER_JID,
+                TEST_OLD_STANZA_ID,
                 int(time.time()) - 31 * 86400,
             ),
         )
         await bot.db.commit()
 
-        await bot.cmd_redact(["cleanup"], "admin@conference.example.test", actor="admin@example.org")
+        await bot.cmd_redact(["cleanup"], TEST_ADMIN_ROOM_JID, actor=TEST_ACTOR_JID)
 
         assert "Deleted entries: 1" in bot.sent[-1]["mbody"]
         async with bot.db.execute("SELECT COUNT(*) FROM redaction_index") as cursor:
@@ -442,15 +454,15 @@ async def test_automatic_redaction_cleanup_deletes_old_entries_without_message(t
             VALUES (?, ?, ?, ?)
             """,
             (
-                "room@conference.example.test",
-                "alice@example.org",
-                "old-stanza",
+                TEST_ROOM_JID,
+                TEST_SENDER_JID,
+                TEST_OLD_STANZA_ID,
                 int(time.time()) - 31 * 86400,
             ),
         )
         await bot.db.commit()
 
-        result = await bot.run_redaction_cleanup_automatic(actor="system")
+        result = await bot.run_redaction_cleanup_automatic(actor=TEST_SYSTEM_ACTOR)
 
         assert result["deleted"] == 1
         assert bot.sent == []
@@ -470,7 +482,7 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
     async def fake_sleep(delay):
         sleeps.append(delay)
 
-    async def fake_cleanup(actor="system"):
+    async def fake_cleanup(actor=TEST_SYSTEM_ACTOR):
         cleanup_calls.append(actor)
         raise asyncio.CancelledError()
 
@@ -481,7 +493,7 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
         await bot.redaction_cleanup_worker()
 
     assert sleeps == [REDACTION_CLEANUP_INTERVAL_SECONDS]
-    assert cleanup_calls == ["system"]
+    assert cleanup_calls == [TEST_SYSTEM_ACTOR]
 
 
 @pytest.mark.asyncio
@@ -489,9 +501,9 @@ async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
 
-        await bot.maybe_auto_redact_after_ban("alice@example.org", "confirmed spam", actor="admin@example.org")
+        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_CONFIRMED_SPAM_COMMENT, actor=TEST_ACTOR_JID)
 
         assert len(bot.redaction_stanzas) == 1
         assert "Auto-redaction completed after ban" in bot.sent[-1]["mbody"]
@@ -507,13 +519,13 @@ async def test_auto_redaction_reports_previously_redacted_when_no_candidates(tem
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
 
-        await bot.maybe_auto_redact_after_ban("alice@example.org", "confirmed spam", actor="admin@example.org")
+        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_CONFIRMED_SPAM_COMMENT, actor=TEST_ACTOR_JID)
         assert len(bot.redaction_stanzas) == 2
 
-        await bot.maybe_auto_redact_after_ban("alice@example.org", "confirmed spam", actor="admin@example.org")
+        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_CONFIRMED_SPAM_COMMENT, actor=TEST_ACTOR_JID)
 
         body = bot.sent[-1]["mbody"]
         assert "Auto-redaction completed after ban" in body
@@ -531,8 +543,8 @@ async def test_auto_redaction_reports_previously_redacted_when_no_candidates(tem
 def test_auto_reason_matching_is_case_insensitive():
     bot = RedactionBot()
 
-    assert bot._redaction_auto_reason_matches("Confirmed SPAM wave") == "spam"
-    assert bot._redaction_auto_reason_matches("ordinary moderation note") is None
+    assert bot._redaction_auto_reason_matches(TEST_UPPERCASE_SPAM_COMMENT) == TEST_REDACTION_REASON
+    assert bot._redaction_auto_reason_matches(TEST_NON_MATCHING_REASON) is None
 
 
 @pytest.mark.asyncio
@@ -544,13 +556,13 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
     try:
         for i in range(4):
             await bot._redaction_index_message(
-                FakeMessage("room@conference.example.test", "Alice", f"stanza-{i}")
+                FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, f"{TEST_BATCH_STANZA_PREFIX}-{i}")
             )
 
         summary = await bot.redact_jid_messages(
-            "alice@example.org",
-            reason="spam",
-            actor="admin@example.org",
+            TEST_SENDER_JID,
+            reason=TEST_REDACTION_REASON,
+            actor=TEST_ACTOR_JID,
             announce=False,
         )
 
@@ -570,16 +582,16 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
 @pytest.mark.asyncio
 async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_db_path):
     bot = RedactionBot()
-    bot.fail_stanza_ids = {"stanza-2"}
+    bot.fail_stanza_ids = {TEST_STANZA_ID_2}
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
 
         summary = await bot.redact_jid_messages(
-            "alice@example.org",
-            reason="spam",
-            actor="admin@example.org",
+            TEST_SENDER_JID,
+            reason=TEST_REDACTION_REASON,
+            actor=TEST_ACTOR_JID,
             announce=False,
         )
 
@@ -591,7 +603,7 @@ async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_d
             "SELECT stanza_id FROM redaction_index WHERE redacted_at IS NOT NULL"
         ) as cursor:
             rows = await cursor.fetchall()
-        assert rows == [("stanza-1",)]
+        assert rows == [(TEST_STANZA_ID_1,)]
     finally:
         await bot.db.close()
 
@@ -599,17 +611,17 @@ async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_d
 @pytest.mark.asyncio
 async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_path):
     bot = RedactionBot()
-    bot.fail_stanza_ids = {"stanza-2"}
-    bot.fail_stanza_errors = {"stanza-2": "item-not-found: stanza already retracted"}
+    bot.fail_stanza_ids = {TEST_STANZA_ID_2}
+    bot.fail_stanza_errors = {TEST_STANZA_ID_2: TEST_ALREADY_RETRACTED_ERROR}
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
 
         summary = await bot.redact_jid_messages(
-            "alice@example.org",
-            reason="spam",
-            actor="admin@example.org",
+            TEST_SENDER_JID,
+            reason=TEST_REDACTION_REASON,
+            actor=TEST_ACTOR_JID,
             announce=False,
         )
 
@@ -631,17 +643,17 @@ async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_p
 @pytest.mark.asyncio
 async def test_auto_redaction_suppresses_failure_alerts_and_adds_all_failed_note(temp_db_path):
     bot = RedactionBot()
-    bot.fail_stanza_ids = {"stanza-1", "stanza-2"}
+    bot.fail_stanza_ids = {TEST_STANZA_ID_1, TEST_STANZA_ID_2}
     bot.fail_stanza_errors = {
-        "stanza-1": '<iq type="error"><moderate id="stanza-1" /></iq>',
-        "stanza-2": '<iq type="error"><moderate id="stanza-2" /></iq>',
+        TEST_STANZA_ID_1: TEST_REDACTION_FAILURE_IQ_1,
+        TEST_STANZA_ID_2: TEST_REDACTION_FAILURE_IQ_2,
     }
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
-        await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
 
-        await bot.maybe_auto_redact_after_ban("alice@example.org", "confirmed spam", actor="admin@example.org")
+        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_CONFIRMED_SPAM_COMMENT, actor=TEST_ACTOR_JID)
 
         body = bot.sent[-1]["mbody"]
         assert_all_failed_auto_redaction_summary(body, found=2)
