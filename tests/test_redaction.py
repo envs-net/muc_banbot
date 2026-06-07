@@ -72,18 +72,13 @@ TEST_SENDER_NICK = "Alice"
 TEST_SENDER_JID = "alice@example.org"
 TEST_SENDER_RESOURCE_JID = "alice@example.org/resource"
 TEST_REDACTION_REASON = "spam"
-TEST_OTHER_AUTO_REASON = "harassment"
-TEST_CONFIRMED_SPAM_COMMENT = "confirmed spam"
-TEST_UPPERCASE_SPAM_COMMENT = "Confirmed SPAM wave"
+TEST_MATCHING_BAN_REASON = "confirmed spam"
 TEST_NON_MATCHING_REASON = "ordinary moderation note"
-TEST_STANZA_ID_1 = "stanza-1"
-TEST_STANZA_ID_2 = "stanza-2"
-TEST_OLD_STANZA_ID = "old-stanza"
-TEST_BATCH_STANZA_PREFIX = "stanza"
-TEST_SYSTEM_ACTOR = "system"
-TEST_ALREADY_RETRACTED_ERROR = "item-not-found: stanza already retracted"
-TEST_REDACTION_FAILURE_IQ_1 = '<iq type="error"><moderate id="stanza-1" /></iq>'
-TEST_REDACTION_FAILURE_IQ_2 = '<iq type="error"><moderate id="stanza-2" /></iq>'
+TEST_UPPERCASE_MATCHING_REASON = "Confirmed SPAM wave"
+TEST_STANZA_1 = "stanza-1"
+TEST_STANZA_2 = "stanza-2"
+TEST_OLD_STANZA = "old-stanza"
+TEST_SERVER_REJECTED_IQ_ERROR = '<iq type="error"><moderate id="{stanza_id}" /></iq>'
 
 
 class FakeFrom:
@@ -225,34 +220,134 @@ def _build_iq_with_normalized_to(
     )
 
 
-def assert_body_contains(message_body: str, *expected_fragments: str) -> None:
-    """Assert that all expected fragments are present in a message body."""
-    for fragment in expected_fragments:
-        assert fragment in message_body
+def latest_message_body(bot: "RedactionBot") -> str:
+    """Return the most recent message body sent by the test bot."""
+    return bot.sent[-1]["mbody"]
+
+
+def assert_body_contains(message_body: str, expected_fragment: str) -> None:
+    """Assert that one expected fragment is present in a message body."""
+    assert expected_fragment in message_body
+
+
+def assert_body_lacks(message_body: str, unexpected_fragment: str) -> None:
+    """Assert that one unexpected fragment is absent from a message body."""
+    assert unexpected_fragment not in message_body
+
+
+def assert_summary_count(message_body: str, label: str, count: int) -> None:
+    """Assert one numeric redaction summary line."""
+    assert_body_contains(message_body, f"{label}: {count}")
+
+
+def assert_auto_redaction_summary_header(message_body: str) -> None:
+    """Assert the common auto-redaction summary header."""
+    assert_body_contains(message_body, "Auto-redaction completed after ban")
+
+
+def assert_server_rejected_note(message_body: str) -> None:
+    """Assert the explanatory note for fully rejected auto-redactions."""
+    assert_body_contains(message_body, "Note: The server rejected all redaction requests.")
+    assert_body_contains(message_body, "no longer redactable")
+    assert_body_contains(message_body, "lacks moderation permissions")
 
 
 def assert_all_failed_auto_redaction_summary(message_body: str, *, found: int) -> None:
     """Assert common auto-redaction summary text for all-failed requests."""
-    assert_body_contains(
-        message_body,
-        "Auto-redaction completed after ban",
-        f"Messages found: {found}",
-        "Redacted: 0",
-        f"Failed: {found}",
-        "Note: The server rejected all redaction requests.",
-        "no longer redactable",
-        "lacks moderation permissions",
-    )
+    assert_auto_redaction_summary_header(message_body)
+    assert_summary_count(message_body, "Messages found", found)
+    assert_summary_count(message_body, "Redacted", 0)
+    assert_summary_count(message_body, "Failed", found)
+    assert_server_rejected_note(message_body)
+
+
+def assert_previously_redacted_summary(message_body: str, *, count: int) -> None:
+    """Assert the summary shown when only already-redacted rows remain."""
+    assert_auto_redaction_summary_header(message_body)
+    assert_body_contains(message_body, "No redactable indexed stanza IDs found for this JID.")
+    assert_body_contains(message_body, f"Previously redacted messages: {count}")
+    assert_body_contains(message_body, "and not already redacted can be redacted")
+    assert_body_lacks(message_body, "No indexed stanza IDs found for this JID.")
+
+
+def moderation_element(iq: FakeOutgoingIq) -> ET.Element:
+    """Return the single moderation element from a fake IQ."""
+    assert len(iq.children) == 1
+    return iq.children[0]
+
+
+def assert_moderation_identity(element: ET.Element, stanza_id: str) -> None:
+    """Assert the moderation element targets the expected stanza."""
+    assert element.tag == "{urn:xmpp:message-moderate:1}moderate"
+    assert element.attrib["id"] == stanza_id
+
+
+def assert_moderation_has_retract(element: ET.Element) -> None:
+    """Assert the moderation element contains a retract child."""
+    assert element.find("{urn:xmpp:message-retract:1}retract") is not None
+
+
+def assert_moderation_reason(element: ET.Element, reason: str) -> None:
+    """Assert the moderation element contains the expected reason text."""
+    reason_node = element.find("{urn:xmpp:message-moderate:1}reason")
+    assert reason_node is not None
+    assert reason_node.text == reason
 
 
 def assert_moderation_request(iq: FakeOutgoingIq, *, stanza_id: str, reason: str) -> None:
     """Assert that a fake IQ contains the expected moderation retract stanza."""
-    assert iq.children[0].tag == "{urn:xmpp:message-moderate:1}moderate"
-    assert iq.children[0].attrib["id"] == stanza_id
-    assert iq.children[0].find("{urn:xmpp:message-retract:1}retract") is not None
-    reason_node = iq.children[0].find("{urn:xmpp:message-moderate:1}reason")
-    assert reason_node is not None
-    assert reason_node.text == reason
+    element = moderation_element(iq)
+    assert_moderation_identity(element, stanza_id)
+    assert_moderation_has_retract(element)
+    assert_moderation_reason(element, reason)
+
+
+async def redaction_index_count(bot: "RedactionBot") -> int:
+    """Return the number of redaction index rows."""
+    async with bot.db.execute("SELECT COUNT(*) FROM redaction_index") as cursor:
+        row = await cursor.fetchone()
+    return int(row[0])
+
+
+async def redacted_index_count(bot: "RedactionBot") -> int:
+    """Return the number of redaction index rows marked redacted."""
+    async with bot.db.execute(
+        "SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL"
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row[0])
+
+
+async def first_redacted_at(bot: "RedactionBot") -> int | None:
+    """Return the first redacted_at value from the redaction index."""
+    async with bot.db.execute("SELECT redacted_at FROM redaction_index") as cursor:
+        row = await cursor.fetchone()
+    return row[0]
+
+
+async def redacted_stanza_ids(bot: "RedactionBot") -> list[tuple[str]]:
+    """Return stanza IDs for rows marked redacted."""
+    async with bot.db.execute(
+        "SELECT stanza_id FROM redaction_index WHERE redacted_at IS NOT NULL"
+    ) as cursor:
+        return await cursor.fetchall()
+
+
+async def insert_old_redaction_entry(bot: "RedactionBot") -> None:
+    """Insert one expired redaction index row for cleanup tests."""
+    await bot.db.execute(
+        """
+        INSERT INTO redaction_index (room_jid, sender_jid, stanza_id, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            TEST_ROOM_JID,
+            TEST_SENDER_JID,
+            TEST_OLD_STANZA,
+            int(time.time()) - 31 * 86400,
+        ),
+    )
+    await bot.db.commit()
 
 
 class RedactionBot(DatabaseMixin, RedactionMixin):
@@ -270,7 +365,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         return {
             "redaction_enabled": True,
             "redaction_index_retention_days": 30,
-            "redaction_auto_reasons": [TEST_REDACTION_REASON, TEST_OTHER_AUTO_REASON],
+            "redaction_auto_reasons": [TEST_REDACTION_REASON, "harassment"],
             "protected_rooms": {TEST_ROOM_JID},
             "occupants": {
                 TEST_ROOM_JID: {
@@ -348,14 +443,14 @@ async def test_redaction_indexes_message_with_room_stanza_id(temp_db_path):
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        msg = FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1)
+        msg = FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
 
         indexed = await bot._redaction_index_message(msg)
 
         assert indexed is True
         async with bot.db.execute("SELECT room_jid, sender_jid, stanza_id FROM redaction_index") as cursor:
             rows = await cursor.fetchall()
-        assert rows == [(TEST_ROOM_JID, TEST_SENDER_JID, TEST_STANZA_ID_1)]
+        assert rows == [(TEST_ROOM_JID, TEST_SENDER_JID, TEST_STANZA_1)]
     finally:
         await bot.db.close()
 
@@ -365,8 +460,8 @@ async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
 
         await bot.cmd_redact([TEST_SENDER_JID, TEST_REDACTION_REASON], TEST_ADMIN_ROOM_JID, actor=TEST_ACTOR_JID)
 
@@ -374,19 +469,17 @@ async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
         assert all(stanza.kwargs["to"] == TEST_ROOM_JID for stanza in bot.redaction_stanzas)
         assert_moderation_request(
             bot.redaction_stanzas[0],
-            stanza_id=TEST_STANZA_ID_1,
+            stanza_id=TEST_STANZA_1,
             reason=TEST_REDACTION_REASON,
         )
         assert_moderation_request(
             bot.redaction_stanzas[1],
-            stanza_id=TEST_STANZA_ID_2,
+            stanza_id=TEST_STANZA_2,
             reason=TEST_REDACTION_REASON,
         )
-        assert "Messages found: 2" in bot.sent[-1]["mbody"]
-        assert "Redacted: 2" in bot.sent[-1]["mbody"]
-        async with bot.db.execute("SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL") as cursor:
-            row = await cursor.fetchone()
-        assert row[0] == 2
+        assert_summary_count(latest_message_body(bot), "Messages found", 2)
+        assert_summary_count(latest_message_body(bot), "Redacted", 2)
+        assert await redacted_index_count(bot) == 2
     finally:
         await bot.db.close()
 
@@ -397,7 +490,7 @@ async def test_redact_id_retracts_single_stanza(temp_db_path):
     await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot.cmd_redact(
-            ["id", TEST_ROOM_JID, TEST_STANZA_ID_1, TEST_REDACTION_REASON],
+            ["id", TEST_ROOM_JID, TEST_STANZA_1, TEST_REDACTION_REASON],
             TEST_ADMIN_ROOM_JID,
             actor=TEST_ACTOR_JID,
         )
@@ -406,8 +499,8 @@ async def test_redact_id_retracts_single_stanza(temp_db_path):
         iq = bot.redaction_stanzas[0]
         assert iq.kwargs["to"] == TEST_ROOM_JID
         assert iq.timeout == REDACTION_IQ_TIMEOUT_SECONDS
-        assert_moderation_request(iq, stanza_id=TEST_STANZA_ID_1, reason=TEST_REDACTION_REASON)
-        assert f"Stanza ID: {TEST_STANZA_ID_1}" in bot.sent[-1]["mbody"]
+        assert_moderation_request(iq, stanza_id=TEST_STANZA_1, reason=TEST_REDACTION_REASON)
+        assert_body_contains(latest_message_body(bot), f"Stanza ID: {TEST_STANZA_1}")
     finally:
         await bot.db.close()
 
@@ -418,26 +511,12 @@ async def test_redact_cleanup_deletes_old_entries(temp_db_path):
     bot.redaction_index_retention_days = 30
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot.db.execute(
-            """
-            INSERT INTO redaction_index (room_jid, sender_jid, stanza_id, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                TEST_ROOM_JID,
-                TEST_SENDER_JID,
-                TEST_OLD_STANZA_ID,
-                int(time.time()) - 31 * 86400,
-            ),
-        )
-        await bot.db.commit()
+        await insert_old_redaction_entry(bot)
 
         await bot.cmd_redact(["cleanup"], TEST_ADMIN_ROOM_JID, actor=TEST_ACTOR_JID)
 
-        assert "Deleted entries: 1" in bot.sent[-1]["mbody"]
-        async with bot.db.execute("SELECT COUNT(*) FROM redaction_index") as cursor:
-            row = await cursor.fetchone()
-        assert row[0] == 0
+        assert_summary_count(latest_message_body(bot), "Deleted entries", 1)
+        assert await redaction_index_count(bot) == 0
     finally:
         await bot.db.close()
 
@@ -448,27 +527,13 @@ async def test_automatic_redaction_cleanup_deletes_old_entries_without_message(t
     bot.redaction_index_retention_days = 30
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot.db.execute(
-            """
-            INSERT INTO redaction_index (room_jid, sender_jid, stanza_id, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                TEST_ROOM_JID,
-                TEST_SENDER_JID,
-                TEST_OLD_STANZA_ID,
-                int(time.time()) - 31 * 86400,
-            ),
-        )
-        await bot.db.commit()
+        await insert_old_redaction_entry(bot)
 
-        result = await bot.run_redaction_cleanup_automatic(actor=TEST_SYSTEM_ACTOR)
+        result = await bot.run_redaction_cleanup_automatic(actor="system")
 
         assert result["deleted"] == 1
         assert bot.sent == []
-        async with bot.db.execute("SELECT COUNT(*) FROM redaction_index") as cursor:
-            row = await cursor.fetchone()
-        assert row[0] == 0
+        assert await redaction_index_count(bot) == 0
     finally:
         await bot.db.close()
 
@@ -482,7 +547,7 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
     async def fake_sleep(delay):
         sleeps.append(delay)
 
-    async def fake_cleanup(actor=TEST_SYSTEM_ACTOR):
+    async def fake_cleanup(actor="system"):
         cleanup_calls.append(actor)
         raise asyncio.CancelledError()
 
@@ -493,7 +558,7 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
         await bot.redaction_cleanup_worker()
 
     assert sleeps == [REDACTION_CLEANUP_INTERVAL_SECONDS]
-    assert cleanup_calls == [TEST_SYSTEM_ACTOR]
+    assert cleanup_calls == ["system"]
 
 
 @pytest.mark.asyncio
@@ -501,15 +566,13 @@ async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
 
-        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_CONFIRMED_SPAM_COMMENT, actor=TEST_ACTOR_JID)
+        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_MATCHING_BAN_REASON, actor=TEST_ACTOR_JID)
 
         assert len(bot.redaction_stanzas) == 1
-        assert "Auto-redaction completed after ban" in bot.sent[-1]["mbody"]
-        async with bot.db.execute("SELECT redacted_at FROM redaction_index") as cursor:
-            row = await cursor.fetchone()
-        assert row[0] is not None
+        assert_auto_redaction_summary_header(latest_message_body(bot))
+        assert await first_redacted_at(bot) is not None
     finally:
         await bot.db.close()
 
@@ -519,20 +582,15 @@ async def test_auto_redaction_reports_previously_redacted_when_no_candidates(tem
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
 
-        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_CONFIRMED_SPAM_COMMENT, actor=TEST_ACTOR_JID)
+        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_MATCHING_BAN_REASON, actor=TEST_ACTOR_JID)
         assert len(bot.redaction_stanzas) == 2
 
-        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_CONFIRMED_SPAM_COMMENT, actor=TEST_ACTOR_JID)
+        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_MATCHING_BAN_REASON, actor=TEST_ACTOR_JID)
 
-        body = bot.sent[-1]["mbody"]
-        assert "Auto-redaction completed after ban" in body
-        assert "No redactable indexed stanza IDs found for this JID." in body
-        assert "Previously redacted messages: 2" in body
-        assert "and not already redacted can be redacted" in body
-        assert "No indexed stanza IDs found for this JID." not in body
+        assert_previously_redacted_summary(latest_message_body(bot), count=2)
         assert len(bot.redaction_stanzas) == 2
     finally:
         await bot.db.close()
@@ -543,7 +601,7 @@ async def test_auto_redaction_reports_previously_redacted_when_no_candidates(tem
 def test_auto_reason_matching_is_case_insensitive():
     bot = RedactionBot()
 
-    assert bot._redaction_auto_reason_matches(TEST_UPPERCASE_SPAM_COMMENT) == TEST_REDACTION_REASON
+    assert bot._redaction_auto_reason_matches(TEST_UPPERCASE_MATCHING_REASON) == TEST_REDACTION_REASON
     assert bot._redaction_auto_reason_matches(TEST_NON_MATCHING_REASON) is None
 
 
@@ -556,7 +614,7 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
     try:
         for i in range(4):
             await bot._redaction_index_message(
-                FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, f"{TEST_BATCH_STANZA_PREFIX}-{i}")
+                FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, f"stanza-{i}")
             )
 
         summary = await bot.redact_jid_messages(
@@ -572,9 +630,7 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
         assert len(bot.redaction_stanzas) == 4
         assert bot.redaction_inflight_tracker["max"] == 2
 
-        async with bot.db.execute("SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL") as cursor:
-            row = await cursor.fetchone()
-        assert row[0] == 4
+        assert await redacted_index_count(bot) == 4
     finally:
         await bot.db.close()
 
@@ -582,11 +638,11 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
 @pytest.mark.asyncio
 async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_db_path):
     bot = RedactionBot()
-    bot.fail_stanza_ids = {TEST_STANZA_ID_2}
+    bot.fail_stanza_ids = {TEST_STANZA_2}
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
 
         summary = await bot.redact_jid_messages(
             TEST_SENDER_JID,
@@ -599,11 +655,7 @@ async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_d
         assert summary["redacted"] == 1
         assert summary["failed"] == 1
 
-        async with bot.db.execute(
-            "SELECT stanza_id FROM redaction_index WHERE redacted_at IS NOT NULL"
-        ) as cursor:
-            rows = await cursor.fetchall()
-        assert rows == [(TEST_STANZA_ID_1,)]
+        assert await redacted_stanza_ids(bot) == [(TEST_STANZA_1,)]
     finally:
         await bot.db.close()
 
@@ -611,12 +663,12 @@ async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_d
 @pytest.mark.asyncio
 async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_path):
     bot = RedactionBot()
-    bot.fail_stanza_ids = {TEST_STANZA_ID_2}
-    bot.fail_stanza_errors = {TEST_STANZA_ID_2: TEST_ALREADY_RETRACTED_ERROR}
+    bot.fail_stanza_ids = {TEST_STANZA_2}
+    bot.fail_stanza_errors = {TEST_STANZA_2: "item-not-found: stanza already retracted"}
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
 
         summary = await bot.redact_jid_messages(
             TEST_SENDER_JID,
@@ -631,11 +683,7 @@ async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_p
         assert summary["failed"] == 0
         assert bot.alerts == []
 
-        async with bot.db.execute(
-            "SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL"
-        ) as cursor:
-            row = await cursor.fetchone()
-        assert row[0] == 2
+        assert await redacted_index_count(bot) == 2
     finally:
         await bot.db.close()
 
@@ -643,20 +691,19 @@ async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_p
 @pytest.mark.asyncio
 async def test_auto_redaction_suppresses_failure_alerts_and_adds_all_failed_note(temp_db_path):
     bot = RedactionBot()
-    bot.fail_stanza_ids = {TEST_STANZA_ID_1, TEST_STANZA_ID_2}
+    bot.fail_stanza_ids = {TEST_STANZA_1, TEST_STANZA_2}
     bot.fail_stanza_errors = {
-        TEST_STANZA_ID_1: TEST_REDACTION_FAILURE_IQ_1,
-        TEST_STANZA_ID_2: TEST_REDACTION_FAILURE_IQ_2,
+        TEST_STANZA_1: TEST_SERVER_REJECTED_IQ_ERROR.format(stanza_id=TEST_STANZA_1),
+        TEST_STANZA_2: TEST_SERVER_REJECTED_IQ_ERROR.format(stanza_id=TEST_STANZA_2),
     }
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_1))
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_ID_2))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
+        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
 
-        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_CONFIRMED_SPAM_COMMENT, actor=TEST_ACTOR_JID)
+        await bot.maybe_auto_redact_after_ban(TEST_SENDER_JID, TEST_MATCHING_BAN_REASON, actor=TEST_ACTOR_JID)
 
-        body = bot.sent[-1]["mbody"]
-        assert_all_failed_auto_redaction_summary(body, found=2)
+        assert_all_failed_auto_redaction_summary(latest_message_body(bot), found=2)
         assert bot.alerts == []
     finally:
         await bot.db.close()
