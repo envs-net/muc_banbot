@@ -48,8 +48,10 @@ except ImportError:
     )
     SID_NS = _REDACTION_FALLBACK_DEFAULTS["sid_ns"]
 
-    def normalize_bare_jid(jid: str) -> str:
+    def normalize_bare_jid(jid: str | None) -> str:
         """Fallback normalizer used only when redaction imports are skipped."""
+        if jid is None:
+            return ""
         if not jid:
             return jid
 
@@ -63,7 +65,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-TEST_REDACTION_IQ_PROCESSING_DELAY_SECONDS = 0.05
+TEST_IQ_SEND_DELAY_SECONDS = 0.05
+DEFAULT_TEST_MESSAGE_BODY = "test message"
 
 
 class FakeFrom:
@@ -81,7 +84,13 @@ class FakeMessage:
     server-assigned stable stanza IDs.
     """
 
-    def __init__(self, room: str, nick: str, stanza_id: str | None = None, body: str = "hello"):
+    def __init__(
+        self,
+        room: str,
+        nick: str,
+        stanza_id: str | None = None,
+        body: str = DEFAULT_TEST_MESSAGE_BODY,
+    ):
         self.room = room
         self.nick = nick
         self.stanza_id = stanza_id
@@ -252,7 +261,9 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         for name, value in self.test_state_default_items().items():
             setattr(self, name, value)
 
-    bare_jid = staticmethod(normalize_bare_jid)
+    @staticmethod
+    def bare_jid(jid: str | None) -> str:
+        return normalize_bare_jid(jid)
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
@@ -497,7 +508,7 @@ def test_auto_reason_matching_is_case_insensitive():
 async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db_path):
     bot = RedactionBot()
     bot.redaction_retract_concurrency = 2
-    bot._test_iq_send_delay = TEST_REDACTION_IQ_PROCESSING_DELAY_SECONDS
+    bot._test_iq_send_delay = TEST_IQ_SEND_DELAY_SECONDS
     await setup_redaction_test_db(bot, temp_db_path)
     try:
         for i in range(4):
