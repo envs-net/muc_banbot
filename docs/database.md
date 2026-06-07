@@ -2,7 +2,7 @@
 
 BanBot uses SQLite for persistent state.
 
-The database path is configured with `DB_FILE` in `config.py`.
+The database path is configured with `DB_FILE` in `config.py`. Manual database checks and compaction are documented in [Maintenance](maintenance.md#sqlite-database-maintenance).
 
 ## Main Tables
 
@@ -131,6 +131,8 @@ Managed backups are self-contained ZIP archives documented in [Backups and Resto
 CSV imports create a managed full backup before writing imported rows that actually change the database. These safety backups use the same archive format and retention settings as manual backups.
 
 ## Maintenance Notes
+
+For manual SQLite maintenance, including `PRAGMA integrity_check`, `PRAGMA optimize`, and `VACUUM`, see [Maintenance](maintenance.md#sqlite-database-maintenance).
 
 * Audit events are retained up to `AUDIT_LOG_RETENTION_DAYS`, capped at 365 days.
 * Expired temporary bans are removed by the unban worker.

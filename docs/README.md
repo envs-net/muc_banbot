@@ -10,7 +10,8 @@ New operators should read:
 2. [Configuration](configuration.md)
 3. [Commands](commands.md)
 4. [Backups and Restore](backups.md)
-5. [Troubleshooting](troubleshooting.md)
+5. [Maintenance](maintenance.md)
+6. [Troubleshooting](troubleshooting.md)
 
 ## Operator Guides
 
@@ -24,11 +25,12 @@ New operators should read:
 * [Prosody PubSub Setup](rtbl_pubsub-setup.md) - manual setup for RTBL publish nodes on Prosody
 * [Public Policy / Rules](policy.md) - public `!rules` text, placeholders, enable/disable behavior, and admin commands
 * [Admin Protection](admin-protection.md) - how BanBot protects admins/owners from manual, domain, nick-based, and RTBL bans
+* [Maintenance](maintenance.md) - manual SQLite maintenance, database checks, compaction, and redaction-index cleanup notes
 * [Troubleshooting](troubleshooting.md) - common runtime, config, RTBL, OMEMO, backup, and room-rights issues
 
 ## Reference Guides
 
-* [Database](database.md) - SQLite tables and persisted state
+* [Database](database.md) - SQLite tables, persisted state, and maintenance links
 
 ## Development and Release
 
@@ -49,4 +51,5 @@ New operators should read:
 | RTBL subscriptions/publish | [RTBL / PubSub](rtbl.md) |
 | Public `!rules` | [Public Policy / Rules](policy.md) |
 | Schema details | [Database](database.md) |
+| SQLite maintenance | [Maintenance](maintenance.md#sqlite-database-maintenance), [Database](database.md#maintenance-notes) |
 | Tests and mutation tests | [Testing and CI](testing.md) |
