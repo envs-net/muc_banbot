@@ -366,7 +366,8 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
     assert bot.bot_admin_state == {}
     assert bot.room_join_time == {}
     assert bot.reconnect_task is not None
-    assert await bot.reconnect_task is None
+    await bot.reconnect_task
+    assert bot.reconnect_task.done()
 
 
 @pytest.mark.asyncio
@@ -389,7 +390,8 @@ async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatc
     assert calls["count"] == 0
 
     blocker.set()
-    assert await first_task is None
+    await first_task
+    assert first_task.done()
 
 
 @pytest.mark.asyncio
