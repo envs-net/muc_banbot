@@ -52,8 +52,6 @@ except ImportError:
         """Fallback normalizer used only when redaction imports are skipped."""
         if jid is None:
             return ""
-        if not jid:
-            return jid
 
         # Mimic the minimal bare-JID normalization semantics expected by tests:
         # trim whitespace, drop resources, and normalize case.
@@ -67,6 +65,13 @@ pytestmark = pytest.mark.skipif(
 
 TEST_IQ_SEND_DELAY_SECONDS = 0.05
 DEFAULT_TEST_MESSAGE_BODY = "test message"
+TEST_ROOM_JID = "room@conference.example.test"
+TEST_ADMIN_ROOM_JID = "admin@conference.example.test"
+TEST_ACTOR_JID = "admin@example.org"
+TEST_SENDER_NICK = "Alice"
+TEST_SENDER_JID = "alice@example.org"
+TEST_SENDER_RESOURCE_JID = "alice@example.org/resource"
+TEST_REDACTION_REASON = "spam"
 
 
 class FakeFrom:
@@ -133,6 +138,8 @@ class FakeOutgoingIq:
         delay: float = 0.0,
         fail: bool = False,
         fail_error: str | None = None,
+        fail_stanza_ids: set[str] | None = None,
+        fail_stanza_errors: dict[str, str] | None = None,
         inflight_tracker: dict[str, int] | None = None,
     ):
         self.sent = sent
@@ -142,10 +149,16 @@ class FakeOutgoingIq:
         self.delay = delay
         self.fail = fail
         self.fail_error = fail_error or "simulated retract failure"
+        self.fail_stanza_ids = fail_stanza_ids or set()
+        self.fail_stanza_errors = fail_stanza_errors or {}
         self.inflight_tracker = inflight_tracker
 
     def append(self, element):
         self.children.append(element)
+        stanza_id = element.attrib.get("id")
+        if stanza_id in self.fail_stanza_ids:
+            self.fail = True
+            self.fail_error = self.fail_stanza_errors.get(stanza_id, self.fail_error)
 
     async def send(self, timeout=None):
         self.timeout = timeout
@@ -173,6 +186,8 @@ def _build_iq_with_normalized_to(
     *,
     delay: float = 0.0,
     inflight_tracker: dict[str, int] | None = None,
+    fail_stanza_ids: set[str] | None = None,
+    fail_stanza_errors: dict[str, str] | None = None,
     **kwargs,
 ):
     """Build a fake IQ and expose the recipient through a normalized ``to`` key.
@@ -192,6 +207,8 @@ def _build_iq_with_normalized_to(
         sent,
         iq_kwargs=normalized_kwargs,
         delay=delay,
+        fail_stanza_ids=fail_stanza_ids,
+        fail_stanza_errors=fail_stanza_errors,
         inflight_tracker=inflight_tracker,
     )
 
@@ -216,6 +233,16 @@ def assert_all_failed_auto_redaction_summary(message_body: str, *, found: int) -
     )
 
 
+def assert_moderation_request(iq: FakeOutgoingIq, *, stanza_id: str, reason: str) -> None:
+    """Assert that a fake IQ contains the expected moderation retract stanza."""
+    assert iq.children[0].tag == "{urn:xmpp:message-moderate:1}moderate"
+    assert iq.children[0].attrib["id"] == stanza_id
+    assert iq.children[0].find("{urn:xmpp:message-retract:1}retract") is not None
+    reason_node = iq.children[0].find("{urn:xmpp:message-moderate:1}reason")
+    assert reason_node is not None
+    assert reason_node.text == reason
+
+
 class RedactionBot(DatabaseMixin, RedactionMixin):
     """Test fixture combining database and redaction behavior.
 
@@ -232,10 +259,10 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             "redaction_enabled": True,
             "redaction_index_retention_days": 30,
             "redaction_auto_reasons": ["spam", "harassment"],
-            "protected_rooms": {"room@conference.example.test"},
+            "protected_rooms": {TEST_ROOM_JID},
             "occupants": {
-                "room@conference.example.test": {
-                    "Alice": {"jid": "alice@example.org/resource"},
+                TEST_ROOM_JID: {
+                    TEST_SENDER_NICK: {"jid": TEST_SENDER_RESOURCE_JID},
                 }
             },
             "command_prefix": "!",
@@ -269,23 +296,14 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.sent.append(kwargs)
 
     def make_iq_set(self, **kwargs):
-        iq = _build_iq_with_normalized_to(
+        return _build_iq_with_normalized_to(
             self.redaction_stanzas,
             delay=self._test_iq_send_delay,
             inflight_tracker=self.redaction_inflight_tracker,
+            fail_stanza_ids=self.fail_stanza_ids,
+            fail_stanza_errors=self.fail_stanza_errors,
             **kwargs,
         )
-        original_append = iq.append
-
-        def append_with_failure_marker(element):
-            original_append(element)
-            stanza_id = element.attrib.get("id")
-            if stanza_id in self.fail_stanza_ids:
-                iq.fail = True
-                iq.fail_error = self.fail_stanza_errors.get(stanza_id, iq.fail_error)
-
-        iq.append = append_with_failure_marker
-        return iq
 
     async def send_operational_alert(self, key, title, message, enabled=True, details=None):
         if enabled:
@@ -342,7 +360,16 @@ async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
 
         assert len(bot.redaction_stanzas) == 2
         assert all(stanza.kwargs["to"] == "room@conference.example.test" for stanza in bot.redaction_stanzas)
-        assert bot.redaction_stanzas[0].children[0].tag == "{urn:xmpp:message-moderate:1}moderate"
+        assert_moderation_request(
+            bot.redaction_stanzas[0],
+            stanza_id="stanza-1",
+            reason="spam",
+        )
+        assert_moderation_request(
+            bot.redaction_stanzas[1],
+            stanza_id="stanza-2",
+            reason="spam",
+        )
         assert "Messages found: 2" in bot.sent[-1]["mbody"]
         assert "Redacted: 2" in bot.sent[-1]["mbody"]
         async with bot.db.execute("SELECT COUNT(*) FROM redaction_index WHERE redacted_at IS NOT NULL") as cursor:
@@ -367,9 +394,7 @@ async def test_redact_id_retracts_single_stanza(temp_db_path):
         iq = bot.redaction_stanzas[0]
         assert iq.kwargs["to"] == "room@conference.example.test"
         assert iq.timeout == REDACTION_IQ_TIMEOUT_SECONDS
-        assert iq.children[0].tag == "{urn:xmpp:message-moderate:1}moderate"
-        assert iq.children[0].attrib["id"] == "stanza-1"
-        assert iq.children[0].find("{urn:xmpp:message-retract:1}retract") is not None
+        assert_moderation_request(iq, stanza_id="stanza-1", reason="spam")
         assert "Stanza ID: stanza-1" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
@@ -398,6 +423,9 @@ async def test_redact_cleanup_deletes_old_entries(temp_db_path):
         await bot.cmd_redact(["cleanup"], "admin@conference.example.test", actor="admin@example.org")
 
         assert "Deleted entries: 1" in bot.sent[-1]["mbody"]
+        async with bot.db.execute("SELECT COUNT(*) FROM redaction_index") as cursor:
+            row = await cursor.fetchone()
+        assert row[0] == 0
     finally:
         await bot.db.close()
 
@@ -467,6 +495,9 @@ async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
 
         assert len(bot.redaction_stanzas) == 1
         assert "Auto-redaction completed after ban" in bot.sent[-1]["mbody"]
+        async with bot.db.execute("SELECT redacted_at FROM redaction_index") as cursor:
+            row = await cursor.fetchone()
+        assert row[0] is not None
     finally:
         await bot.db.close()
 
