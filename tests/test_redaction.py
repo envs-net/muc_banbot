@@ -8,6 +8,8 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+REDACTION_TEST_IMPORTS_OK = True
+
 try:
     from banbot.db import DatabaseMixin
     from banbot.redaction import (
@@ -37,8 +39,6 @@ except ImportError:
     def normalize_bare_jid(jid: str) -> str:
         """Fallback normalizer used only when redaction imports are skipped."""
         return jid
-else:
-    REDACTION_TEST_IMPORTS_OK = True
 
 pytestmark = pytest.mark.skipif(
     not REDACTION_TEST_IMPORTS_OK,
@@ -257,7 +257,15 @@ async def setup_redaction_test_db(bot: RedactionBot, temp_db_path) -> None:
     """
     import config
 
-    assert str(temp_db_path) == str(config.DB_FILE)
+    expected_db_file = str(temp_db_path)
+    configured_db_file = str(config.DB_FILE)
+    if expected_db_file != configured_db_file:
+        raise ValueError(
+            "temp_db_path must match config.DB_FILE before setup_db(); "
+            f"got temp_db_path={expected_db_file!r}, "
+            f"config.DB_FILE={configured_db_file!r}"
+        )
+
     await bot.setup_db()
 
 
@@ -443,6 +451,8 @@ async def test_auto_redaction_reports_previously_redacted_when_no_candidates(tem
         await bot.db.close()
 
 
+# Intentionally synchronous: this test only exercises pure string-matching
+# logic and does not call async redaction/database code.
 def test_auto_reason_matching_is_case_insensitive():
     bot = RedactionBot()
 
