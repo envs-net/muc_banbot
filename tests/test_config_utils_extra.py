@@ -173,12 +173,16 @@ def test_runtime_config_snapshot_includes_redaction_settings():
     bot.redaction_enabled = True
     bot.redaction_index_retention_days = 0
     bot.redaction_auto_reasons = ["spam", "abuse"]
+    bot.auto_redact_on_imported_ban_reason = True
+    bot.auto_redact_on_manual_muc_ban = True
 
     snapshot = bot._runtime_config_snapshot()
 
     assert snapshot["REDACTION_ENABLED"] is True
     assert snapshot["REDACTION_INDEX_RETENTION_DAYS"] == 0
     assert snapshot["REDACTION_AUTO_REASONS"] == ("spam", "abuse")
+    assert snapshot["AUTO_REDACT_ON_IMPORTED_BAN_REASON"] is True
+    assert snapshot["AUTO_REDACT_ON_MANUAL_MUC_BAN"] is True
 
 
 def test_format_config_import_error_for_missing_config():

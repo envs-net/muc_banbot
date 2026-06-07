@@ -28,6 +28,8 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
         self.command_prefix = "!"
         self._database_file_operation_lock = asyncio.Lock()
         self._ban_state_operation_lock = asyncio.Lock()
+        self.auto_redact_on_imported_ban_reason = False
+        self.import_auto_redactions = []
 
     def log_event(self, level, event, **fields):
         self.events.append((level, event, fields))
@@ -40,6 +42,12 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
+
+    async def maybe_auto_redact_after_imported_ban(self, jid, comment, actor=None):
+        if self.auto_redact_on_imported_ban_reason:
+            self.import_auto_redactions.append((jid, comment, actor))
+            return True
+        return False
 
 
 @pytest.mark.asyncio
@@ -106,6 +114,35 @@ async def test_import_bans_from_csv_creates_backup_and_upserts_rows(temp_db_path
             rows = await cursor.fetchall()
         assert ("domain", "example.org", "*.example.org", None, "imported", "domain spam") in rows
         assert ("jid", "user@example.org", "user@example.org", "nick", "imported", "spam") in rows
+    finally:
+        await bot.db.close()
+
+
+
+
+@pytest.mark.asyncio
+async def test_import_auto_redacts_matching_jid_bans_when_enabled(temp_db_path, tmp_path):
+    csv_file = tmp_path / "auto-redact-import.csv"
+    csv_file.write_text(
+        "jid,nick,until,issuer,comment\n"
+        "user@example.org,Nick,0,imported,spam wave\n"
+        "*.Example.org,,0,imported,domain spam\n",
+        encoding="utf-8",
+    )
+
+    bot = ImportBot()
+    bot.auto_redact_on_imported_ban_reason = True
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        successful, skipped, errors = await bot.import_bans_from_csv(
+            str(csv_file),
+            actor="importer@example.org",
+        )
+
+        assert (successful, skipped, errors) == (2, 0, [])
+        assert bot.import_auto_redactions == [
+            ("user@example.org", "spam wave", "importer@example.org")
+        ]
     finally:
         await bot.db.close()
 

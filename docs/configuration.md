@@ -280,9 +280,18 @@ REDACTION_AUTO_REASONS = [
     "spam",
     "advertising",
 ]
+AUTO_REDACT_ON_IMPORTED_BAN_REASON = False
+AUTO_REDACT_ON_MANUAL_MUC_BAN = False
 ```
 
 Redaction indexes room-assigned stanza IDs, not message bodies.
+
+`REDACTION_AUTO_REASONS` controls which ban comments trigger automatic redaction.
+Bot-created JID bans use this list directly. Imported bans and externally/manual
+MUC bans are opt-in because they may originate outside the bot command flow:
+
+* `AUTO_REDACT_ON_IMPORTED_BAN_REASON=True` allows matching CSV-imported JID bans to redact indexed messages.
+* `AUTO_REDACT_ON_MANUAL_MUC_BAN=True` allows matching outcasts recovered during startup sync, `!syncbans`, or room sync to redact indexed messages.
 
 See [Commands](commands.md#moderation).
 

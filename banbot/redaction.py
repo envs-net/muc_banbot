@@ -820,23 +820,78 @@ class RedactionMixin:
         await self.redact_jid_messages(target, reason=reason, actor=actor, announce=True)
 
 
-    async def maybe_auto_redact_after_ban(
+    async def _maybe_auto_redact_for_ban_source(
         self,
         jid: str | None,
         comment: str | None,
-        actor: str | None = None,
-    ) -> None:
-        """Run auto-redaction after a ban if the ban reason is configured."""
+        *,
+        actor: str | None,
+        enabled: bool,
+        title: str,
+    ) -> bool:
+        """Run configured auto-redaction for one JID ban source."""
+        if not enabled:
+            return False
         if not jid or jid.startswith("*."):
-            return
+            return False
+
         match = self._redaction_auto_reason_matches(comment)
         if not match:
-            return
+            return False
 
         await self.redact_jid_messages(
             jid,
             reason=comment or match,
             actor=actor,
             announce=True,
+            title=title,
+        )
+        return True
+
+
+    async def maybe_auto_redact_after_ban(
+        self,
+        jid: str | None,
+        comment: str | None,
+        actor: str | None = None,
+    ) -> None:
+        """Run auto-redaction after a bot-command ban if the reason matches."""
+        await self._maybe_auto_redact_for_ban_source(
+            jid,
+            comment,
+            actor=actor,
+            enabled=True,
             title="Auto-redaction completed after ban",
+        )
+
+
+    async def maybe_auto_redact_after_imported_ban(
+        self,
+        jid: str | None,
+        comment: str | None,
+        actor: str | None = None,
+    ) -> bool:
+        """Run optional auto-redaction after a matching imported JID ban."""
+        return await self._maybe_auto_redact_for_ban_source(
+            jid,
+            comment,
+            actor=actor,
+            enabled=getattr(self, "auto_redact_on_imported_ban_reason", False),
+            title="Auto-redaction completed after imported ban",
+        )
+
+
+    async def maybe_auto_redact_after_manual_muc_ban(
+        self,
+        jid: str | None,
+        comment: str | None,
+        actor: str | None = None,
+    ) -> bool:
+        """Run optional auto-redaction after a matching external/manual MUC ban."""
+        return await self._maybe_auto_redact_for_ban_source(
+            jid,
+            comment,
+            actor=actor,
+            enabled=getattr(self, "auto_redact_on_manual_muc_ban", False),
+            title="Auto-redaction completed after manual MUC ban",
         )

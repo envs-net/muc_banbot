@@ -443,6 +443,17 @@ class ImportExportMixin:
             await self.db.commit()
             for _target_type, _target, normalized_jid, normalized_nick, until, issuer, comment in bans_to_insert:
                 self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
+
+            maybe_auto_redact = getattr(self, "maybe_auto_redact_after_imported_ban", None)
+            if callable(maybe_auto_redact):
+                for target_type, _target, normalized_jid, _normalized_nick, _until, _issuer, comment in bans_to_insert:
+                    if target_type == "jid" and normalized_jid:
+                        await maybe_auto_redact(
+                            normalized_jid,
+                            comment,
+                            actor=actor or "import",
+                        )
+
             log.info("✅ Batch upserted %d bans", len(bans_to_insert))
         except Exception as e:
             log.error("Batch insert failed, rolling back import transaction: %s", e)

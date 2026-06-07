@@ -139,6 +139,8 @@ def test_validate_config_rejects_invalid_redaction_settings(monkeypatch):
     monkeypatch.setattr(config, "REDACTION_ENABLED", "yes", raising=False)
     monkeypatch.setattr(config, "REDACTION_INDEX_RETENTION_DAYS", -1, raising=False)
     monkeypatch.setattr(config, "REDACTION_AUTO_REASONS", ["spam", 123], raising=False)
+    monkeypatch.setattr(config, "AUTO_REDACT_ON_IMPORTED_BAN_REASON", "yes", raising=False)
+    monkeypatch.setattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", "yes", raising=False)
 
     bot = ConfigValidationBot()
     errors, _warnings = bot._validate_config()
@@ -146,6 +148,8 @@ def test_validate_config_rejects_invalid_redaction_settings(monkeypatch):
     assert "REDACTION_ENABLED must be True or False" in errors
     assert "REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)" in errors
     assert "REDACTION_AUTO_REASONS must be a list of strings" in errors
+    assert "AUTO_REDACT_ON_IMPORTED_BAN_REASON must be True or False" in errors
+    assert "AUTO_REDACT_ON_MANUAL_MUC_BAN must be True or False" in errors
 
 
 def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):

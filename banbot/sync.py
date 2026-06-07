@@ -88,10 +88,11 @@ class SyncMixin:
 
             # --- Fetch current outcasts in this room ---
             try:
-                outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
-                outcasts_bare = [self.bare_jid(str(j)) for j in outcasts]
+                outcasts_with_reasons = await self._sync_fetch_outcasts_with_reasons(room)
+                outcasts_bare = list(outcasts_with_reasons)
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
+                outcasts_with_reasons = {}
                 outcasts_bare = []
 
             # --- Apply only MISSING bans ---
@@ -247,6 +248,93 @@ class SyncMixin:
         return self.is_bot_admin_or_owner(room)
 
 
+    def _sync_extract_outcast_jid_reason(self, outcast) -> tuple[str | None, str | None]:
+        """Best-effort extraction of JID and reason from a MUC outcast item."""
+        jid = None
+        reason = None
+
+        if isinstance(outcast, dict):
+            jid = outcast.get("jid") or outcast.get("jids") or outcast.get("target")
+            reason = outcast.get("reason") or outcast.get("comment")
+        else:
+            for key in ("jid", "jids", "target"):
+                try:
+                    value = outcast[key]
+                    if value:
+                        jid = value
+                        break
+                except Exception:
+                    pass
+
+            for key in ("reason", "comment"):
+                try:
+                    value = outcast[key]
+                    if value:
+                        reason = value
+                        break
+                except Exception:
+                    pass
+
+            if jid is None:
+                for attr in ("jid", "target"):
+                    value = getattr(outcast, attr, None)
+                    if value:
+                        jid = value
+                        break
+            if reason is None:
+                for attr in ("reason", "comment"):
+                    value = getattr(outcast, attr, None)
+                    if value:
+                        reason = value
+                        break
+
+            xml = getattr(outcast, "xml", None)
+            if xml is not None:
+                if jid is None:
+                    jid = xml.attrib.get("jid")
+                if reason is None:
+                    reason_el = xml.find("reason")
+                    if reason_el is None:
+                        reason_el = xml.find("{*}reason")
+                    if reason_el is not None and reason_el.text:
+                        reason = reason_el.text
+
+            if jid is None:
+                get_method = getattr(outcast, "get", None)
+                if callable(get_method):
+                    try:
+                        jid = get_method("jid") or get_method("target")
+                    except Exception:
+                        pass
+                    try:
+                        reason = reason or get_method("reason") or get_method("comment")
+                    except Exception:
+                        pass
+
+        if jid is None:
+            jid = outcast
+
+        try:
+            jid_bare = self.bare_jid(str(jid))
+        except Exception:
+            reason_text = str(reason).strip() if reason is not None else None
+            return None, reason_text or None
+
+        reason_text = str(reason).strip() if reason is not None else None
+        return jid_bare, reason_text or None
+
+
+    async def _sync_fetch_outcasts_with_reasons(self, room: str) -> dict[str, str | None]:
+        """Return current outcasts as bare JID -> optional server-provided reason."""
+        outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
+        result: dict[str, str | None] = {}
+        for outcast in outcasts:
+            jid_bare, reason = self._sync_extract_outcast_jid_reason(outcast)
+            if jid_bare:
+                result[jid_bare] = reason
+        return result
+
+
     async def sync_bans_to_rooms_for_single_room(self, room: str) -> None:
         """
         Sync bans for a single room (after !room add or !sync).
@@ -279,10 +367,11 @@ class SyncMixin:
 
             # --- Fetch current outcasts in the room ---
             try:
-                outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
-                outcasts_bare = [self.bare_jid(str(j)) for j in outcasts]
+                outcasts_with_reasons = await self._sync_fetch_outcasts_with_reasons(room)
+                outcasts_bare = list(outcasts_with_reasons)
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
+                outcasts_with_reasons = {}
                 outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---
@@ -305,12 +394,16 @@ class SyncMixin:
                     await self.unban_all(jid_bare, issuer="system")
                     continue
 
-                to_insert.append((jid_bare, None, 0, issuer_tag, "Recovered from room"))
-                active_bans.append((jid_bare, None, 0, "Recovered from room"))
+                recovered_reason = outcasts_with_reasons.get(jid_bare) or "Recovered from room"
+                to_insert.append((jid_bare, None, 0, issuer_tag, recovered_reason))
+                active_bans.append((jid_bare, None, 0, recovered_reason))
 
             if to_insert:
+                maybe_auto_redact = getattr(self, "maybe_auto_redact_after_manual_muc_ban", None)
                 for jid_bare, nick, until_value, issuer_value, comment_value in to_insert:
                     await self.upsert_ban_db(jid_bare, nick, until_value, issuer_value, comment_value)
+                    if callable(maybe_auto_redact):
+                        await maybe_auto_redact(jid_bare, comment_value, actor=issuer_value)
                 log.info("✅ Added %d orphan outcasts to DB for room %s", len(to_insert), room)
 
             # --- Apply only MISSING bans in this room ---
@@ -438,13 +531,8 @@ class SyncMixin:
             if until == 0 or until > now
         ]
 
-        if not active_bans and announce_progress:
-            await self.bot_send_message(
-                mto=ADMIN_ROOM,
-                mbody="✅ No active bans to sync.",
-                mtype="groupchat"
-            )
-            return
+        if not active_bans:
+            log.info("No active DB bans to apply; checking rooms for manual outcasts")
 
         # --- Apply bans to each protected room ---
         for idx, room in enumerate(self.protected_rooms, start=1):
@@ -468,10 +556,11 @@ class SyncMixin:
 
             # --- Fetch current outcasts ---
             try:
-                outcasts = await self.plugin["xep_0045"].get_users_by_affiliation(room, "outcast")
-                outcasts_bare = [self.bare_jid(str(j)) for j in outcasts]
+                outcasts_with_reasons = await self._sync_fetch_outcasts_with_reasons(room)
+                outcasts_bare = list(outcasts_with_reasons)
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
+                outcasts_with_reasons = {}
                 outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---
@@ -494,11 +583,16 @@ class SyncMixin:
                     await self.unban_all(jid_bare, issuer="system")
                     continue
 
-                orphan_bans.append((jid_bare, None, "Recovered from room"))
+                recovered_reason = outcasts_with_reasons.get(jid_bare) or "Recovered from room"
+                orphan_bans.append((jid_bare, None, recovered_reason))
 
             if orphan_bans:
+                maybe_auto_redact = getattr(self, "maybe_auto_redact_after_manual_muc_ban", None)
                 for jid, nick, comment in orphan_bans:
-                    await self.upsert_ban_db(self.bare_jid(jid) if jid else None, nick, 0, "sync_room_add", comment)
+                    recovered_jid = self.bare_jid(jid) if jid else None
+                    await self.upsert_ban_db(recovered_jid, nick, 0, "sync_room_add", comment)
+                    if callable(maybe_auto_redact):
+                        await maybe_auto_redact(recovered_jid, comment, actor="sync_room_add")
                 active_bans.extend(orphan_bans)
                 log.info("✅ Added %d orphan outcasts to DB for room %s", len(orphan_bans), room)
 
