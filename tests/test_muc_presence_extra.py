@@ -387,7 +387,8 @@ async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatc
     await bot.on_disconnect(None)
 
     assert bot.reconnect_task is first_task
-    assert calls["count"] == 0
+    await asyncio.sleep(0)
+    assert calls["count"] == 1
 
     blocker.set()
     await first_task
@@ -430,7 +431,9 @@ async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch)
         pass
 
     async def short_wait_for(awaitable, timeout):
-        awaitable.close()
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            close()
         if calls["connect"] < 2:
             raise asyncio.TimeoutError
         return None
