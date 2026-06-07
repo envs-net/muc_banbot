@@ -65,7 +65,7 @@ class FakePresence:
 
 
 class MucTestBot(MucMixin, DatabaseMixin, CacheMixin):
-    def __init__(self, db_path=None):
+    def __init__(self, db_path: str | None = None):
         self.db_path = db_path
         self.protected_rooms = {"room@conference.example.test"}
         self.occupants = {}
@@ -87,21 +87,33 @@ class MucTestBot(MucMixin, DatabaseMixin, CacheMixin):
         self.show_ban_in_muc = True
 
     @staticmethod
-    def bare_jid(jid):
+    def bare_jid(jid: str) -> str:
         return bare_jid(jid)
 
-    def connect(self):
+    def connect(self) -> None:
         self.connected = True
 
-    def is_admin_or_owner(self, room, nick=None, jid=None):
+    def is_admin_or_owner(
+        self,
+        room: str,
+        nick: str | None = None,
+        jid: str | None = None,
+    ) -> bool:
         info = self.occupants.get(room, {}).get(nick or "")
         return bool(info and info.get("affiliation") in ("admin", "owner"))
 
-    async def check_jid_against_rtbl(self, jid, nick):
+    async def check_jid_against_rtbl(self, jid: str, nick: str) -> bool:
         self.rtbl_checks.append((jid, nick))
         return False
 
-    async def apply_ban_to_room(self, room, ban_jid, ban_nick, comment, issuer=None):
+    async def apply_ban_to_room(
+        self,
+        room: str,
+        ban_jid: str | None,
+        ban_nick: str | None,
+        comment: str | None,
+        issuer: str | None = None,
+    ) -> None:
         self.applied.append((room, ban_jid, ban_nick, comment, issuer))
 
     async def verify_admin_rights(self, room):
