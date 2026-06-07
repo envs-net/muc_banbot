@@ -39,11 +39,24 @@ OWNER_AFFILIATION = "owner"
 PARTICIPANT_ROLE = "participant"
 MODERATOR_ROLE = "moderator"
 
+
 class FakeMuc(dict):
+    """Mapping test double for MUC metadata.
+
+    It intentionally subclasses ``dict`` so tests can populate and access the
+    same keys that production presence handlers read from ``presence["muc"]``.
+    """
+
     pass
 
 
 class FakePresence:
+    """Synthetic XMPP MUC presence stanza used by MucMixin tests.
+
+    The fixture exposes both mapping-style MUC fields via ``presence["muc"]``
+    and serialized XML status/reason elements via ``presence.xml``.
+    """
+
     def __init__(
         self,
         *,
@@ -84,6 +97,12 @@ class FakePresence:
 
 
 class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
+    """Small test fixture combining MUC, database and cache mixins.
+
+    It provides deterministic in-memory state for presence, reconnect and
+    manual-ban recovery tests while using the real database/cache helpers.
+    """
+
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path
         self.protected_rooms = {ROOM_JID}
@@ -119,7 +138,10 @@ class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
         jid: str | None = None,
     ) -> bool:
         info = self.occupants.get(room, {}).get(nick or "")
-        return bool(info and info.get("affiliation") in (ADMIN_AFFILIATION, OWNER_AFFILIATION))
+        return bool(
+            info
+            and info.get("affiliation") in (ADMIN_AFFILIATION, OWNER_AFFILIATION)
+        )
 
     async def check_jid_against_rtbl(self, jid: str, nick: str) -> bool:
         self.rtbl_checks.append((jid, nick))
@@ -149,7 +171,7 @@ class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
 
 
 @pytest.mark.asyncio
-async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_bans(temp_db_path):
+async def test_muc_online_applies_jid_and_domain_bans(temp_db_path):
     bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     try:
@@ -309,7 +331,7 @@ async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_muc_presence_warns_when_admin_room_state_only_exists_in_occupant_cache(monkeypatch):
+async def test_muc_presence_warns_on_admin_state_mismatch(monkeypatch):
     import banbot.muc as muc_module
 
     monkeypatch.setattr(muc_module, "ADMIN_ROOM", ADMIN_ROOM_JID)
