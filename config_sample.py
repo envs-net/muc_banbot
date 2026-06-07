@@ -204,8 +204,18 @@ REDACTION_ENABLED = False
 # How long to keep indexed stanza IDs. 0 = keep indefinitely.
 REDACTION_INDEX_RETENTION_DAYS = 30
 
+# Also apply automatic redaction to matching JID bans imported from CSV.
+# Uses REDACTION_AUTO_REASONS. Disabled by default because imported data may
+# originate outside the bot command flow.
+AUTO_REDACT_ON_IMPORTED_BAN_REASON = False
+
+# Also apply automatic redaction to matching manual/external MUC bans discovered
+# during startup sync, !syncbans, or room sync. Uses REDACTION_AUTO_REASONS.
+# Disabled by default because manual room bans may not have complete bot context.
+AUTO_REDACT_ON_MANUAL_MUC_BAN = False
+
 # Ban comments matching one of these strings trigger automatic redaction for
-# JID bans created via bot commands. Matching is case-insensitive.
+# JID bans. Matching is case-insensitive.
 REDACTION_AUTO_REASONS = [
     "code of conduct violations",
     "open-reg",
@@ -225,13 +235,3 @@ REDACTION_AUTO_REASONS = [
     "cp",
     "nsfw",
 ]
-
-# Also apply automatic redaction to matching JID bans imported from CSV.
-# Uses REDACTION_AUTO_REASONS. Disabled by default because imported data may
-# originate outside the bot command flow.
-AUTO_REDACT_ON_IMPORTED_BAN_REASON = False
-
-# Also apply automatic redaction to matching manual/external MUC bans discovered
-# during startup sync, !syncbans, or room sync. Uses REDACTION_AUTO_REASONS.
-# Disabled by default because manual room bans may not have complete bot context.
-AUTO_REDACT_ON_MANUAL_MUC_BAN = False

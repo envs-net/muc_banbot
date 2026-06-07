@@ -276,22 +276,20 @@ Use `!checkupdate` / `!updatecheck` for manual checks.
 ```python
 REDACTION_ENABLED = False
 REDACTION_INDEX_RETENTION_DAYS = 30
+AUTO_REDACT_ON_IMPORTED_BAN_REASON = False
+AUTO_REDACT_ON_MANUAL_MUC_BAN = False
 REDACTION_AUTO_REASONS = [
     "spam",
     "advertising",
 ]
-AUTO_REDACT_ON_IMPORTED_BAN_REASON = False
-AUTO_REDACT_ON_MANUAL_MUC_BAN = False
 ```
 
 Redaction indexes room-assigned stanza IDs, not message bodies.
 
-`REDACTION_AUTO_REASONS` controls which ban comments trigger automatic redaction.
-Bot-created JID bans use this list directly. Imported bans and externally/manual
-MUC bans are opt-in because they may originate outside the bot command flow:
-
-* `AUTO_REDACT_ON_IMPORTED_BAN_REASON=True` allows matching CSV-imported JID bans to redact indexed messages.
-* `AUTO_REDACT_ON_MANUAL_MUC_BAN=True` allows matching outcasts recovered during startup sync, `!syncbans`, or room sync to redact indexed messages.
+`REDACTION_AUTO_REASONS` is used for automatic redaction decisions.
+Normal bot-command bans can trigger auto-redaction when their comment matches.
+`AUTO_REDACT_ON_IMPORTED_BAN_REASON` extends this behavior to matching imported JID bans.
+`AUTO_REDACT_ON_MANUAL_MUC_BAN` extends it to matching manual/external MUC bans discovered during startup sync, `!syncbans`, or room sync. Both extra modes are disabled by default because imported/manual bans may come from outside the bot command flow.
 
 See [Commands](commands.md#moderation).
 

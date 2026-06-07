@@ -129,9 +129,9 @@ class ConfigMixin:
         "RTBL_REFRESH_INTERVAL",
         "REDACTION_ENABLED",
         "REDACTION_INDEX_RETENTION_DAYS",
-        "REDACTION_AUTO_REASONS",
         "AUTO_REDACT_ON_IMPORTED_BAN_REASON",
         "AUTO_REDACT_ON_MANUAL_MUC_BAN",
+        "REDACTION_AUTO_REASONS",
         "VERSION_CHECK_ENABLED",
         "VERSION_CHECK_INTERVAL",
         "VERSION_CHECK_URL",
@@ -211,9 +211,9 @@ class ConfigMixin:
             "RTBL_REFRESH_INTERVAL": self.rtbl_refresh_interval,
             "REDACTION_ENABLED": self.redaction_enabled,
             "REDACTION_INDEX_RETENTION_DAYS": self.redaction_index_retention_days,
-            "REDACTION_AUTO_REASONS": tuple(self.redaction_auto_reasons),
             "AUTO_REDACT_ON_IMPORTED_BAN_REASON": getattr(self, "auto_redact_on_imported_ban_reason", False),
             "AUTO_REDACT_ON_MANUAL_MUC_BAN": getattr(self, "auto_redact_on_manual_muc_ban", False),
+            "REDACTION_AUTO_REASONS": tuple(self.redaction_auto_reasons),
             "VERSION_CHECK_ENABLED": self.version_check_enabled,
             "VERSION_CHECK_INTERVAL": self.version_check_interval,
             "VERSION_CHECK_URL": self.version_check_url,
@@ -489,13 +489,13 @@ class ConfigMixin:
         redaction_retention = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
         if not isinstance(redaction_retention, int) or redaction_retention < 0:
             errors.append("REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)")
-        redaction_reasons = getattr(config, "REDACTION_AUTO_REASONS", [])
-        if not isinstance(redaction_reasons, (list, tuple)) or not all(isinstance(item, str) for item in redaction_reasons):
-            errors.append("REDACTION_AUTO_REASONS must be a list of strings")
         if not isinstance(getattr(config, "AUTO_REDACT_ON_IMPORTED_BAN_REASON", False), bool):
             errors.append("AUTO_REDACT_ON_IMPORTED_BAN_REASON must be True or False")
         if not isinstance(getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", False), bool):
             errors.append("AUTO_REDACT_ON_MANUAL_MUC_BAN must be True or False")
+        redaction_reasons = getattr(config, "REDACTION_AUTO_REASONS", [])
+        if not isinstance(redaction_reasons, (list, tuple)) or not all(isinstance(item, str) for item in redaction_reasons):
+            errors.append("REDACTION_AUTO_REASONS must be a list of strings")
 
         # --- RTBL Publish ---
         rtbl_pub = getattr(config, "RTBL_PUBLISH_ENABLED", False)
@@ -670,9 +670,9 @@ class ConfigMixin:
 
         self.redaction_enabled = getattr(config, "REDACTION_ENABLED", False)
         self.redaction_index_retention_days = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
-        self.redaction_auto_reasons = list(getattr(config, "REDACTION_AUTO_REASONS", []))
         self.auto_redact_on_imported_ban_reason = getattr(config, "AUTO_REDACT_ON_IMPORTED_BAN_REASON", False)
         self.auto_redact_on_manual_muc_ban = getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", False)
+        self.redaction_auto_reasons = list(getattr(config, "REDACTION_AUTO_REASONS", []))
 
 
     # --- Runtime config file editing helpers ---

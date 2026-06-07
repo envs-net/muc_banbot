@@ -374,8 +374,6 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             },
             "command_prefix": "!",
             "redaction_retract_concurrency": 3,
-            "auto_redact_on_imported_ban_reason": False,
-            "auto_redact_on_manual_muc_ban": False,
         }
 
     @staticmethod
@@ -594,66 +592,6 @@ async def test_auto_redaction_reports_previously_redacted_when_no_candidates(tem
 
         assert_previously_redacted_summary(latest_message_body(bot), count=2)
         assert len(bot.redaction_stanzas) == 2
-    finally:
-        await bot.db.close()
-
-
-
-
-@pytest.mark.asyncio
-async def test_imported_ban_auto_redaction_requires_config_flag(temp_db_path):
-    bot = RedactionBot()
-    await setup_redaction_test_db(bot, temp_db_path)
-    try:
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
-
-        ran = await bot.maybe_auto_redact_after_imported_ban(
-            TEST_SENDER_JID,
-            TEST_MATCHING_BAN_REASON,
-            actor=TEST_ACTOR_JID,
-        )
-        assert ran is False
-        assert bot.redaction_stanzas == []
-
-        bot.auto_redact_on_imported_ban_reason = True
-        ran = await bot.maybe_auto_redact_after_imported_ban(
-            TEST_SENDER_JID,
-            TEST_MATCHING_BAN_REASON,
-            actor=TEST_ACTOR_JID,
-        )
-
-        assert ran is True
-        assert len(bot.redaction_stanzas) == 1
-        assert "Auto-redaction completed after imported ban" in latest_message_body(bot)
-    finally:
-        await bot.db.close()
-
-
-@pytest.mark.asyncio
-async def test_manual_muc_ban_auto_redaction_requires_config_flag(temp_db_path):
-    bot = RedactionBot()
-    await setup_redaction_test_db(bot, temp_db_path)
-    try:
-        await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
-
-        ran = await bot.maybe_auto_redact_after_manual_muc_ban(
-            TEST_SENDER_JID,
-            TEST_MATCHING_BAN_REASON,
-            actor="sync_room_add",
-        )
-        assert ran is False
-        assert bot.redaction_stanzas == []
-
-        bot.auto_redact_on_manual_muc_ban = True
-        ran = await bot.maybe_auto_redact_after_manual_muc_ban(
-            TEST_SENDER_JID,
-            TEST_MATCHING_BAN_REASON,
-            actor="sync_room_add",
-        )
-
-        assert ran is True
-        assert len(bot.redaction_stanzas) == 1
-        assert "Auto-redaction completed after manual MUC ban" in latest_message_body(bot)
     finally:
         await bot.db.close()
 

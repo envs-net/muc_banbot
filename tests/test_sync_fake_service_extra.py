@@ -51,8 +51,6 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.applied = []
         self.unbanned = []
         self.admin_rooms = {"room@conference.example.test"}
-        self.auto_redact_on_manual_muc_ban = False
-        self.manual_auto_redactions = []
 
     @staticmethod
     def bare_jid(jid):
@@ -75,12 +73,6 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.unbanned.append((target, issuer))
         await self.delete_ban_db(target)
         await self.load_bans_from_db()
-
-    async def maybe_auto_redact_after_manual_muc_ban(self, jid, comment, actor=None):
-        if self.auto_redact_on_manual_muc_ban:
-            self.manual_auto_redactions.append((jid, comment, actor))
-            return True
-        return False
 
 
 async def make_bot():
@@ -125,32 +117,6 @@ async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
 
         assert "orphan@example.test" in bot.ban_index_by_jid
         assert bot.applied == []  # recovered outcast was already present in the room
-    finally:
-        await bot.db.close()
-
-
-
-
-@pytest.mark.asyncio
-async def test_sync_recovers_manual_outcast_reason_and_auto_redacts_when_enabled(temp_db_path):
-    bot = await make_bot()
-    bot.auto_redact_on_manual_muc_ban = True
-    bot.plugin["xep_0045"] = FakeMucService(
-        {
-            ("room@conference.example.test", "outcast"): [
-                {"jid": "Manual@Example.Test/resource", "reason": "spam wave"}
-            ]
-        }
-    )
-    try:
-        await bot.sync_bans_to_rooms(startup=True, announce_progress=False)
-        await bot.load_bans_from_db()
-
-        assert "manual@example.test" in bot.ban_index_by_jid
-        assert bot.ban_index_by_jid["manual@example.test"][4] == "spam wave"
-        assert bot.manual_auto_redactions == [
-            ("manual@example.test", "spam wave", "sync_room_add")
-        ]
     finally:
         await bot.db.close()
 
