@@ -16,6 +16,10 @@ from banbot.muc import MucMixin
 from banbot.utils import bare_jid
 
 
+MUC_USER_NS = "http://jabber.org/protocol/muc#user"
+MUC_USER_TAG = f"{{{MUC_USER_NS}}}"
+
+
 class FakeMuc(dict):
     pass
 
@@ -40,13 +44,17 @@ class FakePresence:
             self._muc["reason"] = reason
 
         self.xml = ET.Element("presence")
-        x = ET.SubElement(self.xml, "{http://jabber.org/protocol/muc#user}x")
-        item = ET.SubElement(x, "{http://jabber.org/protocol/muc#user}item", {"affiliation": affiliation, "role": role})
+        x = ET.SubElement(self.xml, f"{MUC_USER_TAG}x")
+        item = ET.SubElement(
+            x,
+            f"{MUC_USER_TAG}item",
+            {"affiliation": affiliation, "role": role},
+        )
         if reason is not None:
-            reason_el = ET.SubElement(item, "{http://jabber.org/protocol/muc#user}reason")
+            reason_el = ET.SubElement(item, f"{MUC_USER_TAG}reason")
             reason_el.text = reason
         for code in status_codes or set():
-            ET.SubElement(x, "{http://jabber.org/protocol/muc#user}status", {"code": code})
+            ET.SubElement(x, f"{MUC_USER_TAG}status", {"code": code})
 
     def __getitem__(self, key):
         if key == "from":
@@ -57,7 +65,8 @@ class FakePresence:
 
 
 class MucTestBot(MucMixin, DatabaseMixin, CacheMixin):
-    def __init__(self):
+    def __init__(self, db_path=None):
+        self.db_path = db_path
         self.protected_rooms = {"room@conference.example.test"}
         self.occupants = {}
         self.bot_admin_state = {}
@@ -110,7 +119,7 @@ class MucTestBot(MucMixin, DatabaseMixin, CacheMixin):
 
 @pytest.mark.asyncio
 async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_bans(temp_db_path):
-    bot = MucTestBot()
+    bot = MucTestBot(temp_db_path)
     await bot.setup_db()
     try:
         await bot.upsert_ban_db("user@example.test", "User", 0, "tester", "jid ban")
@@ -135,7 +144,7 @@ async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_
 
 @pytest.mark.asyncio
 async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
-    bot = MucTestBot()
+    bot = MucTestBot(temp_db_path)
     await bot.setup_db()
     try:
         await bot.upsert_ban_db(None, "BadNick", 0, "tester", "nick ban")
@@ -173,7 +182,7 @@ async def test_muc_offline_removes_occupant():
 
 @pytest.mark.asyncio
 async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
-    bot = MucTestBot()
+    bot = MucTestBot(temp_db_path)
     await bot.setup_db()
     bot.occupants = {
         "room@conference.example.test": {
@@ -201,7 +210,7 @@ async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
 
 @pytest.mark.asyncio
 async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
-    bot = MucTestBot()
+    bot = MucTestBot(temp_db_path)
     await bot.setup_db()
     bot.occupants = {
         "room@conference.example.test": {
@@ -216,10 +225,10 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
             status_codes={"301"},
             reason=None,
         )
-        reason_el = presence.xml.find(".//{http://jabber.org/protocol/muc#user}reason")
+        reason_el = presence.xml.find(f".//{MUC_USER_TAG}reason")
         if reason_el is None:
-            item = presence.xml.find(".//{http://jabber.org/protocol/muc#user}item")
-            reason_el = ET.SubElement(item, "{http://jabber.org/protocol/muc#user}reason")
+            item = presence.xml.find(f".//{MUC_USER_TAG}item")
+            reason_el = ET.SubElement(item, f"{MUC_USER_TAG}reason")
         reason_el.text = "spam"
 
         await bot.muc_offline(presence)
@@ -271,7 +280,6 @@ async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_on_muc_presence_warns_when_admin_room_state_only_exists_in_occupant_cache(monkeypatch):
-    import time
     import banbot.muc as muc_module
 
     monkeypatch.setattr(muc_module, "ADMIN_ROOM", "admin@conference.example.test")

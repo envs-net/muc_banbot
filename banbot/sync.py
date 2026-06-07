@@ -39,11 +39,13 @@ class SyncMixin:
         # Fetch active bans once per full sync run instead of once per room.
         # This avoids repeating identical database reads for every room in the batch.
         active_bans = []
-        async with self.db.execute("SELECT jid, nick, until, comment FROM bans") as cursor:
+        async with self.db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
             db_bans = await cursor.fetchall()
-        for ban_jid, ban_nick, until, comment in db_bans:
+        for target_type, target, until, comment in db_bans:
             if until > 0 and until <= now:  # skip expired temporary bans
                 continue
+            ban_jid = target if target_type == "jid" else None
+            ban_nick = target if target_type == "nick" else None
             active_bans.append((ban_jid, ban_nick, comment))
 
         async def sync_single_room(
@@ -165,7 +167,7 @@ class SyncMixin:
                 sync_single_room(batch_num + 1 + i, room, active_bans)
                 for i, room in enumerate(batch)
             ), return_exceptions=True)
-            for room, result in zip(batch, results, strict=False):
+            for room, result in zip(batch, results):
                 if isinstance(result, Exception):
                     log.warning(
                         "Error syncing room %s in batch %d-%d: %s",
@@ -435,14 +437,16 @@ class SyncMixin:
             issuer_tag = "sync_room_add"
 
             # --- Load all bans from DB ---
-            async with self.db.execute("SELECT jid, nick, until, comment FROM bans") as cursor:
+            async with self.db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
                 db_bans = await cursor.fetchall()
 
             # --- Remove expired temporary bans from consideration ---
             active_bans = []
-            for ban_jid, ban_nick, until, comment in db_bans:
+            for target_type, target, until, comment in db_bans:
                 if until > 0 and until <= now:
                     continue  # Skip expired temporary bans
+                ban_jid = target if target_type == "jid" else None
+                ban_nick = target if target_type == "nick" else None
                 active_bans.append((ban_jid, ban_nick, until, comment))
 
             # --- Fetch current outcasts in the room ---
@@ -451,6 +455,7 @@ class SyncMixin:
                 outcasts_bare = [jid for jid, _reason in outcast_entries]
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
+                outcast_entries = []
                 outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---
@@ -605,15 +610,17 @@ class SyncMixin:
         applied_bans_set: set[tuple[str | None, str | None]] = set()
 
         # --- Load all bans from DB ---
-        async with self.db.execute("SELECT jid, nick, until, comment FROM bans") as cursor:
+        async with self.db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
             db_bans = await cursor.fetchall()
 
         # --- Filter active bans ---
-        active_bans = [
-            (ban_jid, ban_nick, comment)
-            for ban_jid, ban_nick, until, comment in db_bans
-            if until == 0 or until > now
-        ]
+        active_bans = []
+        for target_type, target, until, comment in db_bans:
+            if until > 0 and until <= now:
+                continue
+            ban_jid = target if target_type == "jid" else None
+            ban_nick = target if target_type == "nick" else None
+            active_bans.append((ban_jid, ban_nick, comment))
 
         if not active_bans and announce_progress:
             await self.bot_send_message(
@@ -648,6 +655,7 @@ class SyncMixin:
                 outcasts_bare = [jid for jid, _reason in outcast_entries]
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
+                outcast_entries = []
                 outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---

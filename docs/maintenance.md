@@ -8,18 +8,22 @@ BanBot uses SQLite for persistent state. Normal operation does not require manua
 
 Always use the database path configured as `DB_FILE` in `config.py`. The examples below use `banbot.db` as a placeholder.
 
+Use your installed systemd unit name for BanBot. The examples below use `muc_banbot.service` as a placeholder (`BANBOT_SERVICE`), but your service name may differ.
+
 ### Safe manual maintenance flow
 
 Stop BanBot before running manual SQLite maintenance:
 
 ```bash
-systemctl stop muc_banbot.service
+BANBOT_SERVICE="muc_banbot.service"
+systemctl stop "$BANBOT_SERVICE"
 ```
 
 Set the database path and create a backup first:
 
 ```bash
 DB_FILE="banbot.db"
+BANBOT_SERVICE="muc_banbot.service"
 cp "$DB_FILE" "$DB_FILE.backup-$(date +%Y%m%d-%H%M%S)"
 ```
 
@@ -50,7 +54,7 @@ sqlite3 "$DB_FILE" "VACUUM;"
 Start BanBot again:
 
 ```bash
-systemctl start muc_banbot.service
+systemctl start "$BANBOT_SERVICE"
 ```
 
 ### Notes
