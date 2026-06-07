@@ -3,27 +3,43 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import time
 from xml.etree import ElementTree as ET
 
 import pytest
 
-HAS_AIOSQLITE = importlib.util.find_spec("aiosqlite") is not None
+try:
+    from banbot.db import DatabaseMixin
+    from banbot.redaction import (
+        REDACTION_CLEANUP_INTERVAL_SECONDS,
+        REDACTION_IQ_TIMEOUT_SECONDS,
+        RedactionMixin,
+        SID_NS,
+    )
+    from banbot.utils import bare_jid as normalize_bare_jid
+except ImportError:
+    REDACTION_TEST_IMPORTS_OK = False
+
+    class DatabaseMixin:  # type: ignore[no-redef]
+        """Fallback base class used only when redaction imports are skipped."""
+
+    class RedactionMixin:  # type: ignore[no-redef]
+        """Fallback base class used only when redaction imports are skipped."""
+
+    REDACTION_CLEANUP_INTERVAL_SECONDS = 0
+    REDACTION_IQ_TIMEOUT_SECONDS = 0
+    SID_NS = "urn:xmpp:sid:0"
+
+    def normalize_bare_jid(jid):
+        """Fallback normalizer used only when redaction imports are skipped."""
+        return jid
+else:
+    REDACTION_TEST_IMPORTS_OK = True
 
 pytestmark = pytest.mark.skipif(
-    not HAS_AIOSQLITE,
-    reason="aiosqlite is required for redaction database tests",
+    not REDACTION_TEST_IMPORTS_OK,
+    reason="redaction database imports require aiosqlite",
 )
-
-from banbot.db import DatabaseMixin
-from banbot.redaction import (
-    REDACTION_CLEANUP_INTERVAL_SECONDS,
-    REDACTION_IQ_TIMEOUT_SECONDS,
-    RedactionMixin,
-    SID_NS,
-)
-from banbot.utils import bare_jid as normalize_bare_jid
 
 
 TEST_REDACTION_IQ_SEND_DELAY_SECONDS = 0.05
@@ -228,10 +244,23 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             self.alerts.append((key, title, message, details or {}))
 
 
+async def setup_redaction_test_db(bot: RedactionBot, temp_db_path) -> None:
+    """Initialize the redaction schema using the isolated DB fixture path.
+
+    The shared ``temp_db_path`` fixture monkeypatches both ``config.DB_FILE``
+    and ``banbot.db.DB_FILE`` before this helper is called. The assertion keeps
+    that relationship explicit so the parameter is not accidental test clutter.
+    """
+    import config
+
+    assert str(temp_db_path) == str(config.DB_FILE)
+    await bot.setup_db()
+
+
 @pytest.mark.asyncio
 async def test_redaction_indexes_message_with_room_stanza_id(temp_db_path):
     bot = RedactionBot()
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         msg = FakeMessage("room@conference.example.test", "Alice", "stanza-1")
 
@@ -248,7 +277,7 @@ async def test_redaction_indexes_message_with_room_stanza_id(temp_db_path):
 @pytest.mark.asyncio
 async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
     bot = RedactionBot()
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
@@ -270,7 +299,7 @@ async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
 @pytest.mark.asyncio
 async def test_redact_id_retracts_single_stanza(temp_db_path):
     bot = RedactionBot()
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot.cmd_redact(
             ["id", "room@conference.example.test", "stanza-1", "spam"],
@@ -294,7 +323,7 @@ async def test_redact_id_retracts_single_stanza(temp_db_path):
 async def test_redact_cleanup_deletes_old_entries(temp_db_path):
     bot = RedactionBot()
     bot.redaction_index_retention_days = 30
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot.db.execute(
             """
@@ -321,7 +350,7 @@ async def test_redact_cleanup_deletes_old_entries(temp_db_path):
 async def test_automatic_redaction_cleanup_deletes_old_entries_without_message(temp_db_path):
     bot = RedactionBot()
     bot.redaction_index_retention_days = 30
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot.db.execute(
             """
@@ -374,7 +403,7 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
 @pytest.mark.asyncio
 async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
     bot = RedactionBot()
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
 
@@ -389,7 +418,7 @@ async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
 @pytest.mark.asyncio
 async def test_auto_redaction_reports_previously_redacted_when_no_candidates(temp_db_path):
     bot = RedactionBot()
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
@@ -422,7 +451,7 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
     bot = RedactionBot()
     bot.redaction_retract_concurrency = 2
     bot.test_redaction_iq_send_delay = TEST_REDACTION_IQ_SEND_DELAY_SECONDS
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         for i in range(4):
             await bot._redaction_index_message(
@@ -453,7 +482,7 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
 async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_db_path):
     bot = RedactionBot()
     bot.fail_stanza_ids = {"stanza-2"}
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
@@ -483,7 +512,7 @@ async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_p
     bot = RedactionBot()
     bot.fail_stanza_ids = {"stanza-2"}
     bot.fail_stanza_errors = {"stanza-2": "item-not-found: stanza already retracted"}
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
@@ -518,7 +547,7 @@ async def test_auto_redaction_suppresses_failure_alerts_and_adds_all_failed_note
         "stanza-1": '<iq type="error"><moderate id="stanza-1" /></iq>',
         "stanza-2": '<iq type="error"><moderate id="stanza-2" /></iq>',
     }
-    await bot.setup_db()
+    await setup_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-1"))
         await bot._redaction_index_message(FakeMessage("room@conference.example.test", "Alice", "stanza-2"))
