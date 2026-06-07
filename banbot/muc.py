@@ -219,11 +219,114 @@ class MucMixin:
             await asyncio.gather(*tasks)
 
 
+    def _muc_presence_status_codes(self, presence) -> set[str]:
+        """Extract MUC user status codes from common Slixmpp/XML shapes."""
+        codes: set[str] = set()
+
+        try:
+            muc = presence["muc"]
+        except Exception:
+            muc = None
+
+        for key in ("status_codes", "status", "statuses"):
+            try:
+                value = muc.get(key) if hasattr(muc, "get") else None
+            except Exception:
+                value = None
+            if value is None:
+                continue
+            if isinstance(value, dict):
+                codes.update(str(code) for code in value.keys())
+            elif isinstance(value, (set, list, tuple)):
+                codes.update(str(code) for code in value)
+            else:
+                codes.add(str(value))
+
+        xml = getattr(presence, "xml", None)
+        if xml is not None:
+            try:
+                for element in xml.iter():
+                    tag = str(getattr(element, "tag", "")).lower()
+                    if tag.endswith("status"):
+                        code = getattr(element, "attrib", {}).get("code")
+                        if code:
+                            codes.add(str(code))
+            except Exception:
+                pass
+
+        return codes
+
+
+    def _muc_presence_ban_reason(self, presence) -> str | None:
+        """Extract a MUC ban reason from common Slixmpp/XML presence shapes."""
+        try:
+            muc = presence["muc"]
+        except Exception:
+            muc = None
+
+        for key in ("reason", "status_text", "status_message"):
+            try:
+                value = muc.get(key) if hasattr(muc, "get") else None
+            except Exception:
+                value = None
+            if value:
+                return str(value).strip() or None
+
+        xml = getattr(presence, "xml", None)
+        if xml is not None:
+            try:
+                for element in xml.iter():
+                    tag = str(getattr(element, "tag", "")).lower()
+                    if tag.endswith("reason") and getattr(element, "text", None):
+                        return str(element.text).strip() or None
+            except Exception:
+                pass
+
+        return None
+
+
+    async def _handle_manual_muc_ban_presence(
+        self,
+        room: str,
+        nick: str,
+        jid: str | None,
+        reason: str | None,
+    ) -> None:
+        """Recover and optionally redact a live manual MUC ban presence event."""
+        if room not in getattr(self, "protected_rooms", set()):
+            return
+        if not jid:
+            log.debug("Manual MUC ban for %s in %s had no visible real JID; cannot recover", nick, room)
+            return
+
+        jid_bare = self.bare_jid(jid)
+        issuer = "manual_muc_ban"
+        comment = reason or "Recovered from room"
+
+        if hasattr(self, "_sync_outcast_is_expired_tempban"):
+            try:
+                if await self._sync_outcast_is_expired_tempban(jid_bare, int(time.time())):
+                    await self.unban_all(jid_bare, issuer="system")
+                    return
+            except Exception as exc:
+                log.debug("Could not check expired tempban state for manual MUC ban %s: %s", jid_bare, exc)
+
+        async with ban_state_lock(self):
+            await self.upsert_ban_db(jid_bare, nick, 0, issuer, comment)
+            await self.load_bans_from_db()
+
+        log.info("✅ Recovered live manual MUC ban for %s in %s", jid_bare, room)
+
+        if hasattr(self, "maybe_auto_redact_after_manual_muc_ban"):
+            await self.maybe_auto_redact_after_manual_muc_ban(jid_bare, reason, actor=issuer)
+
+
     async def muc_offline(self, presence) -> None:
         """
         Called when a user goes offline in a MUC.
         - Removes them from self.occupants[room]
         - Logs offline info
+        - Recovers live manual MUC bans when the server sends status 301
         """
         room = presence["from"].bare
         nick = presence["muc"]["nick"]
@@ -231,12 +334,21 @@ class MucMixin:
         room_occ = self.occupants.get(room)
         if room_occ and nick in room_occ:
             info = room_occ.pop(nick)
+            jid = info.get("jid")
             log.debug("⛔ %s went offline in %s (jid=%s, affiliation=%s, role=%s)",
                      nick,
                      room,
-                     info.get("jid", "unknown"),
+                     jid or "unknown",
                      info.get("affiliation", "none"),
                      info.get("role", "none"))
+
+            if "301" in self._muc_presence_status_codes(presence):
+                await self._handle_manual_muc_ban_presence(
+                    room,
+                    nick,
+                    jid,
+                    self._muc_presence_ban_reason(presence),
+                )
 
 
     async def on_muc_presence(self, presence) -> None:

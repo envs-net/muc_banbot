@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from xml.etree import ElementTree as ET
 
 import pytest
 
@@ -28,9 +29,24 @@ class FakePresence:
         jid: str | None = "user@example.test/resource",
         affiliation: str = "member",
         role: str = "participant",
+        status_codes: set[str] | None = None,
+        reason: str | None = None,
     ) -> None:
         self._from = type("From", (), {"bare": room, "resource": nick})()
         self._muc = FakeMuc(nick=nick, jid=jid, affiliation=affiliation, role=role)
+        if status_codes is not None:
+            self._muc["status_codes"] = status_codes
+        if reason is not None:
+            self._muc["reason"] = reason
+
+        self.xml = ET.Element("presence")
+        x = ET.SubElement(self.xml, "{http://jabber.org/protocol/muc#user}x")
+        item = ET.SubElement(x, "{http://jabber.org/protocol/muc#user}item", {"affiliation": affiliation, "role": role})
+        if reason is not None:
+            reason_el = ET.SubElement(item, "{http://jabber.org/protocol/muc#user}reason")
+            reason_el.text = reason
+        for code in status_codes or set():
+            ET.SubElement(x, "{http://jabber.org/protocol/muc#user}status", {"code": code})
 
     def __getitem__(self, key):
         if key == "from":
@@ -55,6 +71,8 @@ class MucTestBot(MucMixin, DatabaseMixin, CacheMixin):
         self.sent = []
         self.applied = []
         self.rtbl_checks = []
+        self.manual_redactions = []
+        self.unbans = []
         self.verify_result = False
         self.connected = False
         self.show_ban_in_muc = True
@@ -82,6 +100,12 @@ class MucTestBot(MucMixin, DatabaseMixin, CacheMixin):
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
+
+    async def maybe_auto_redact_after_manual_muc_ban(self, jid, comment, actor=None):
+        self.manual_redactions.append((jid, comment, actor))
+
+    async def unban_all(self, jid, issuer="system"):
+        self.unbans.append((jid, issuer))
 
 
 @pytest.mark.asyncio
@@ -145,6 +169,66 @@ async def test_muc_offline_removes_occupant():
     await bot.muc_offline(FakePresence(room="room@conference.example.test", nick="User"))
 
     assert "User" not in bot.occupants["room@conference.example.test"]
+
+
+@pytest.mark.asyncio
+async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
+    bot = MucTestBot()
+    await bot.setup_db()
+    bot.occupants = {
+        "room@conference.example.test": {
+            "User": {"jid": "user@example.test/resource", "affiliation": "member", "role": "participant"}
+        }
+    }
+
+    try:
+        await bot.muc_offline(
+            FakePresence(
+                room="room@conference.example.test",
+                nick="User",
+                status_codes={"301"},
+                reason="spam",
+            )
+        )
+
+        await bot.load_bans_from_db()
+        assert "user@example.test" in bot.ban_index_by_jid
+        assert bot.ban_index_by_jid["user@example.test"][4] == "spam"
+        assert bot.manual_redactions == [("user@example.test", "spam", "manual_muc_ban")]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
+    bot = MucTestBot()
+    await bot.setup_db()
+    bot.occupants = {
+        "room@conference.example.test": {
+            "User": {"jid": "user@example.test/resource", "affiliation": "member", "role": "participant"}
+        }
+    }
+
+    try:
+        presence = FakePresence(
+            room="room@conference.example.test",
+            nick="User",
+            status_codes={"301"},
+            reason=None,
+        )
+        reason_el = presence.xml.find(".//{http://jabber.org/protocol/muc#user}reason")
+        if reason_el is None:
+            item = presence.xml.find(".//{http://jabber.org/protocol/muc#user}item")
+            reason_el = ET.SubElement(item, "{http://jabber.org/protocol/muc#user}reason")
+        reason_el.text = "spam"
+
+        await bot.muc_offline(presence)
+
+        await bot.load_bans_from_db()
+        assert bot.ban_index_by_jid["user@example.test"][4] == "spam"
+        assert bot.manual_redactions == [("user@example.test", "spam", "manual_muc_ban")]
+    finally:
+        await bot.db.close()
 
 
 @pytest.mark.asyncio
