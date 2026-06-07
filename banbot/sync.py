@@ -92,7 +92,6 @@ class SyncMixin:
                 outcasts_bare = [jid for jid, _reason in outcast_entries]
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
-                outcast_entries = []
                 outcasts_bare = []
 
             # --- Apply only MISSING bans ---
@@ -265,8 +264,8 @@ class SyncMixin:
                         if tag.endswith("reason") and getattr(child, "text", None):
                             reason_value = child.text
                             break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("Failed to inspect affiliation item children for reason: %s", exc)
 
         if jid_value is None:
             jid_text = str(item)
@@ -291,15 +290,15 @@ class SyncMixin:
             items = query["items"]
             if items is not None:
                 return list(items)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Failed to read mapping-style mucadmin items: %s", exc)
 
         try:
             query = result.get("mucadmin_query")
             if isinstance(query, dict) and query.get("items") is not None:
                 return list(query["items"])
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Failed to read dict-style mucadmin items: %s", exc)
 
         xml = getattr(result, "xml", None)
         if xml is None and hasattr(result, "findall"):
@@ -307,8 +306,8 @@ class SyncMixin:
         if xml is not None:
             try:
                 return [element for element in xml.findall(".//{*}item")]
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Failed to find affiliation items in XML result: %s", exc)
 
         if isinstance(result, (str, bytes)):
             return [result]
@@ -452,7 +451,6 @@ class SyncMixin:
                 outcasts_bare = [jid for jid, _reason in outcast_entries]
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
-                outcast_entries = []
                 outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---
@@ -650,7 +648,6 @@ class SyncMixin:
                 outcasts_bare = [jid for jid, _reason in outcast_entries]
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
-                outcast_entries = []
                 outcasts_bare = []
 
             # --- Add orphan outcasts to DB ---

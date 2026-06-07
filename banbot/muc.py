@@ -251,8 +251,8 @@ class MucMixin:
                         code = getattr(element, "attrib", {}).get("code")
                         if code:
                             codes.add(str(code))
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Failed to inspect MUC presence status XML: %s", exc)
 
         return codes
 
@@ -279,8 +279,8 @@ class MucMixin:
                     tag = str(getattr(element, "tag", "")).lower()
                     if tag.endswith("reason") and getattr(element, "text", None):
                         return str(element.text).strip() or None
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Failed to inspect MUC presence reason XML: %s", exc)
 
         return None
 
