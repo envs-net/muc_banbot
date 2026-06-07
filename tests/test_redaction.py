@@ -23,14 +23,18 @@ except ImportError:
     class DatabaseMixin:  # type: ignore[no-redef]
         """Fallback base class used only when redaction imports are skipped."""
 
+        pass
+
     class RedactionMixin:  # type: ignore[no-redef]
         """Fallback base class used only when redaction imports are skipped."""
+
+        pass
 
     REDACTION_CLEANUP_INTERVAL_SECONDS = 0
     REDACTION_IQ_TIMEOUT_SECONDS = 0
     SID_NS = "urn:xmpp:sid:0"
 
-    def normalize_bare_jid(jid):
+    def normalize_bare_jid(jid: str) -> str:
         """Fallback normalizer used only when redaction imports are skipped."""
         return jid
 else:
