@@ -30,11 +30,20 @@ TEST_REDACTION_IQ_SEND_DELAY_SECONDS = 0.05
 
 
 class FakeFrom:
+    """Simulate the ``from`` stanza attribute object used in tests."""
+
     def __init__(self, bare: str):
         self.bare = bare
 
 
 class FakeMessage:
+    """Test double for XMPP message stanzas used by redaction tests.
+
+    The object exposes key message fields (room, nick, body) and optionally
+    adds a namespaced stanza-id child to its XML payload to simulate
+    server-assigned stable stanza IDs.
+    """
+
     def __init__(self, room: str, nick: str, stanza_id: str | None = None, body: str = "hello"):
         self.room = room
         self.nick = nick
@@ -63,6 +72,13 @@ class FakeMessage:
 
 
 class FakeOutgoingIq:
+    """Mock outgoing XMPP IQ stanza used by redaction tests.
+
+    It captures appended XML children and send kwargs, can simulate send
+    delays or failures, and tracks in-flight sends for bounded-concurrency
+    assertions.
+    """
+
     def __init__(
         self,
         sent,
@@ -155,6 +171,14 @@ def assert_all_failed_auto_redaction_summary(message_body: str, *, found: int) -
 
 
 class RedactionBot(DatabaseMixin, RedactionMixin):
+    """Test fixture combining database and redaction behavior.
+
+    This lightweight bot captures outbound chat messages and generated
+    moderation IQ stanzas so tests can assert redaction behavior. It provides
+    mocked message sending, IQ creation, bare-JID normalization, operational
+    alerting, and bounded-concurrency tracking.
+    """
+
     def __init__(self):
         self.redaction_enabled = True
         self.redaction_index_retention_days = 30
