@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -32,9 +33,20 @@ except ImportError:
 
         pass
 
-    REDACTION_CLEANUP_INTERVAL_SECONDS = 60
-    REDACTION_IQ_TIMEOUT_SECONDS = 10
-    SID_NS = "urn:xmpp:sid:0"
+    # Keep these fallback defaults synchronized with banbot.redaction constants.
+    _REDACTION_FALLBACK_DEFAULTS = {
+        "cleanup_interval_seconds": 60,
+        "iq_timeout_seconds": 10,
+        "sid_ns": "urn:xmpp:sid:0",
+    }
+
+    REDACTION_CLEANUP_INTERVAL_SECONDS = (
+        _REDACTION_FALLBACK_DEFAULTS["cleanup_interval_seconds"]
+    )
+    REDACTION_IQ_TIMEOUT_SECONDS = (
+        _REDACTION_FALLBACK_DEFAULTS["iq_timeout_seconds"]
+    )
+    SID_NS = _REDACTION_FALLBACK_DEFAULTS["sid_ns"]
 
     def normalize_bare_jid(jid: str) -> str:
         """Fallback normalizer used only when redaction imports are skipped."""
@@ -269,7 +281,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             self.alerts.append((key, title, message, details or {}))
 
 
-async def setup_redaction_test_db(bot: RedactionBot, temp_db_path) -> None:
+async def setup_redaction_test_db(bot: RedactionBot, temp_db_path: Path | str) -> None:
     """Initialize the redaction schema using the isolated DB fixture path.
 
     The shared ``temp_db_path`` fixture monkeypatches both ``config.DB_FILE``
