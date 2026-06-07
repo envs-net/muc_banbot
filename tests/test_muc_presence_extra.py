@@ -19,6 +19,23 @@ from banbot.utils import bare_jid
 MUC_USER_NS = "http://jabber.org/protocol/muc#user"
 MUC_USER_TAG = f"{{{MUC_USER_NS}}}"
 
+ROOM_JID = "room@conference.example.test"
+ADMIN_ROOM_JID = "admin@conference.example.test"
+USER_NICK = "User"
+USER_BARE_JID = "user@example.test"
+USER_JID_RESOURCE = f"{USER_BARE_JID}/resource"
+BAD_NICK = "BadNick"
+BAD_BARE_JID = "bad@example.test"
+BAD_JID_RESOURCE = f"{BAD_BARE_JID}/resource"
+BOT_NICK = "BanBot"
+BOT_JID_RESOURCE = "bot@example.test/service"
+MANUAL_BAN_REASON = "spam"
+MANUAL_BAN_ACTOR = "manual_muc_ban"
+MEMBER_AFFILIATION = "member"
+ADMIN_AFFILIATION = "admin"
+OWNER_AFFILIATION = "owner"
+PARTICIPANT_ROLE = "participant"
+MODERATOR_ROLE = "moderator"
 
 class FakeMuc(dict):
     pass
@@ -28,11 +45,11 @@ class FakePresence:
     def __init__(
         self,
         *,
-        room: str = "room@conference.example.test",
-        nick: str = "User",
-        jid: str | None = "user@example.test/resource",
-        affiliation: str = "member",
-        role: str = "participant",
+        room: str = ROOM_JID,
+        nick: str = USER_NICK,
+        jid: str | None = USER_JID_RESOURCE,
+        affiliation: str = MEMBER_AFFILIATION,
+        role: str = PARTICIPANT_ROLE,
         status_codes: set[str] | None = None,
         reason: str | None = None,
     ) -> None:
@@ -67,7 +84,7 @@ class FakePresence:
 class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path
-        self.protected_rooms = {"room@conference.example.test"}
+        self.protected_rooms = {ROOM_JID}
         self.occupants = {}
         self.bot_admin_state = {}
         self.room_join_time = {}
@@ -100,7 +117,7 @@ class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
         jid: str | None = None,
     ) -> bool:
         info = self.occupants.get(room, {}).get(nick or "")
-        return bool(info and info.get("affiliation") in ("admin", "owner"))
+        return bool(info and info.get("affiliation") in (ADMIN_AFFILIATION, OWNER_AFFILIATION))
 
     async def check_jid_against_rtbl(self, jid: str, nick: str) -> bool:
         self.rtbl_checks.append((jid, nick))
@@ -134,22 +151,22 @@ async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_
     bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     try:
-        await bot.upsert_ban_db("user@example.test", "User", 0, "tester", "jid ban")
+        await bot.upsert_ban_db(USER_BARE_JID, USER_NICK, 0, "tester", "jid ban")
         await bot.upsert_ban_db("*.example.test", None, 0, "tester", "domain ban")
         await bot.load_bans_from_db()
 
         await bot.muc_online(
             FakePresence(
-                room="room@conference.example.test",
-                nick="User",
-                jid="user@example.test/resource",
+                room=ROOM_JID,
+                nick=USER_NICK,
+                jid=USER_JID_RESOURCE,
             )
         )
 
-        assert bot.occupants["room@conference.example.test"]["User"]["jid"] == "user@example.test/resource"
-        assert bot.rtbl_checks == [("user@example.test/resource", "User")]
-        assert ("room@conference.example.test", "user@example.test", "user", "jid ban", None) in bot.applied
-        assert ("room@conference.example.test", "*.example.test", None, "domain ban", None) in bot.applied
+        assert bot.occupants[ROOM_JID][USER_NICK]["jid"] == USER_JID_RESOURCE
+        assert bot.rtbl_checks == [(USER_JID_RESOURCE, USER_NICK)]
+        assert (ROOM_JID, USER_BARE_JID, "user", "jid ban", None) in bot.applied
+        assert (ROOM_JID, "*.example.test", None, "domain ban", None) in bot.applied
     finally:
         await bot.db.close()
 
@@ -159,21 +176,21 @@ async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
     bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     try:
-        await bot.upsert_ban_db(None, "BadNick", 0, "tester", "nick ban")
+        await bot.upsert_ban_db(None, BAD_NICK, 0, "tester", "nick ban")
         await bot.load_bans_from_db()
 
         await bot.muc_online(
             FakePresence(
-                room="room@conference.example.test",
-                nick="BadNick",
-                jid="bad@example.test/resource",
+                room=ROOM_JID,
+                nick=BAD_NICK,
+                jid=BAD_JID_RESOURCE,
             )
         )
 
         await bot.load_bans_from_db()
-        assert "bad@example.test" in bot.ban_index_by_jid
+        assert BAD_BARE_JID in bot.ban_index_by_jid
         assert "badnick" not in bot.ban_index_by_nick
-        assert any(call[1] == "bad@example.test" for call in bot.applied)
+        assert any(call[1] == BAD_BARE_JID for call in bot.applied)
     finally:
         await bot.db.close()
 
@@ -182,14 +199,14 @@ async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
 async def test_muc_offline_removes_occupant():
     bot = MucBotFixture()
     bot.occupants = {
-        "room@conference.example.test": {
-            "User": {"jid": "user@example.test/resource", "affiliation": "member", "role": "participant"}
+        ROOM_JID: {
+            USER_NICK: {"jid": USER_JID_RESOURCE, "affiliation": MEMBER_AFFILIATION, "role": PARTICIPANT_ROLE}
         }
     }
 
-    await bot.muc_offline(FakePresence(room="room@conference.example.test", nick="User"))
+    await bot.muc_offline(FakePresence(room=ROOM_JID, nick=USER_NICK))
 
-    assert "User" not in bot.occupants["room@conference.example.test"]
+    assert USER_NICK not in bot.occupants[ROOM_JID]
 
 
 @pytest.mark.asyncio
@@ -197,25 +214,25 @@ async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
     bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     bot.occupants = {
-        "room@conference.example.test": {
-            "User": {"jid": "user@example.test/resource", "affiliation": "member", "role": "participant"}
+        ROOM_JID: {
+            USER_NICK: {"jid": USER_JID_RESOURCE, "affiliation": MEMBER_AFFILIATION, "role": PARTICIPANT_ROLE}
         }
     }
 
     try:
         await bot.muc_offline(
             FakePresence(
-                room="room@conference.example.test",
-                nick="User",
+                room=ROOM_JID,
+                nick=USER_NICK,
                 status_codes={"301"},
-                reason="spam",
+                reason=MANUAL_BAN_REASON,
             )
         )
 
         await bot.load_bans_from_db()
-        assert "user@example.test" in bot.ban_index_by_jid
-        assert bot.ban_index_by_jid["user@example.test"][4] == "spam"
-        assert bot.manual_redactions == [("user@example.test", "spam", "manual_muc_ban")]
+        assert USER_BARE_JID in bot.ban_index_by_jid
+        assert bot.ban_index_by_jid[USER_BARE_JID][4] == MANUAL_BAN_REASON
+        assert bot.manual_redactions == [(USER_BARE_JID, MANUAL_BAN_REASON, MANUAL_BAN_ACTOR)]
     finally:
         await bot.db.close()
 
@@ -225,15 +242,15 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
     bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     bot.occupants = {
-        "room@conference.example.test": {
-            "User": {"jid": "user@example.test/resource", "affiliation": "member", "role": "participant"}
+        ROOM_JID: {
+            USER_NICK: {"jid": USER_JID_RESOURCE, "affiliation": MEMBER_AFFILIATION, "role": PARTICIPANT_ROLE}
         }
     }
 
     try:
         presence = FakePresence(
-            room="room@conference.example.test",
-            nick="User",
+            room=ROOM_JID,
+            nick=USER_NICK,
             status_codes={"301"},
             reason=None,
         )
@@ -241,13 +258,13 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
         if reason_el is None:
             item = presence.xml.find(f".//{MUC_USER_TAG}item")
             reason_el = ET.SubElement(item, f"{MUC_USER_TAG}reason")
-        reason_el.text = "spam"
+        reason_el.text = MANUAL_BAN_REASON
 
         await bot.muc_offline(presence)
 
         await bot.load_bans_from_db()
-        assert bot.ban_index_by_jid["user@example.test"][4] == "spam"
-        assert bot.manual_redactions == [("user@example.test", "spam", "manual_muc_ban")]
+        assert bot.ban_index_by_jid[USER_BARE_JID][4] == MANUAL_BAN_REASON
+        assert bot.manual_redactions == [(USER_BARE_JID, MANUAL_BAN_REASON, MANUAL_BAN_ACTOR)]
     finally:
         await bot.db.close()
 
@@ -256,83 +273,83 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
 async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
     import banbot.muc as muc_module
 
-    monkeypatch.setattr(muc_module, "ADMIN_ROOM", "admin@conference.example.test")
-    monkeypatch.setattr(muc_module, "NICK", "BanBot")
+    monkeypatch.setattr(muc_module, "ADMIN_ROOM", ADMIN_ROOM_JID)
+    monkeypatch.setattr(muc_module, "NICK", BOT_NICK)
 
     bot = MucBotFixture()
-    bot.bot_admin_state["room@conference.example.test"] = True
-    bot.room_join_time["room@conference.example.test"] = time.time() - 10
+    bot.bot_admin_state[ROOM_JID] = True
+    bot.room_join_time[ROOM_JID] = time.time() - 10
     bot.verify_result = False
-    bot.occupants["room@conference.example.test"] = {
-        "BanBot": {
-            "jid": "bot@example.test/service",
-            "affiliation": "admin",
-            "role": "moderator",
+    bot.occupants[ROOM_JID] = {
+        BOT_NICK: {
+            "jid": BOT_JID_RESOURCE,
+            "affiliation": ADMIN_AFFILIATION,
+            "role": MODERATOR_ROLE,
         }
     }
 
     await bot.on_muc_presence(
         FakePresence(
-            room="room@conference.example.test",
-            nick="BanBot",
-            jid="bot@example.test/service",
-            affiliation="member",
-            role="participant",
+            room=ROOM_JID,
+            nick=BOT_NICK,
+            jid=BOT_JID_RESOURCE,
+            affiliation=MEMBER_AFFILIATION,
+            role=PARTICIPANT_ROLE,
         )
     )
 
-    assert bot.bot_admin_state["room@conference.example.test"] is False
+    assert bot.bot_admin_state[ROOM_JID] is False
     assert "lost admin/owner rights" in bot.sent[-1]["mbody"]
-    presence_state = bot.occupants["room@conference.example.test"]["BanBot"]
-    assert presence_state["jid"] == "bot@example.test/service"
-    assert presence_state["affiliation"] == "member"
-    assert presence_state["role"] == "participant"
+    presence_state = bot.occupants[ROOM_JID][BOT_NICK]
+    assert presence_state["jid"] == BOT_JID_RESOURCE
+    assert presence_state["affiliation"] == MEMBER_AFFILIATION
+    assert presence_state["role"] == PARTICIPANT_ROLE
 
 
 @pytest.mark.asyncio
 async def test_on_muc_presence_warns_when_admin_room_state_only_exists_in_occupant_cache(monkeypatch):
     import banbot.muc as muc_module
 
-    monkeypatch.setattr(muc_module, "ADMIN_ROOM", "admin@conference.example.test")
-    monkeypatch.setattr(muc_module, "NICK", "BanBot")
+    monkeypatch.setattr(muc_module, "ADMIN_ROOM", ADMIN_ROOM_JID)
+    monkeypatch.setattr(muc_module, "NICK", BOT_NICK)
 
     bot = MucBotFixture()
-    bot.room_join_time["admin@conference.example.test"] = time.time() - 10
+    bot.room_join_time[ADMIN_ROOM_JID] = time.time() - 10
     bot.verify_result = False
 
     # Simulate status-visible admin rights from the occupant cache, but no
     # initialized bot_admin_state yet.
-    bot.occupants["admin@conference.example.test"] = {
-        "BanBot": {
-            "jid": "bot@example.test/service",
-            "affiliation": "admin",
-            "role": "moderator",
+    bot.occupants[ADMIN_ROOM_JID] = {
+        BOT_NICK: {
+            "jid": BOT_JID_RESOURCE,
+            "affiliation": ADMIN_AFFILIATION,
+            "role": MODERATOR_ROLE,
         }
     }
 
     await bot.on_muc_presence(
         FakePresence(
-            room="admin@conference.example.test",
-            nick="BanBot",
-            jid="bot@example.test/service",
-            affiliation="member",
-            role="participant",
+            room=ADMIN_ROOM_JID,
+            nick=BOT_NICK,
+            jid=BOT_JID_RESOURCE,
+            affiliation=MEMBER_AFFILIATION,
+            role=PARTICIPANT_ROLE,
         )
     )
 
-    assert bot.bot_admin_state["admin@conference.example.test"] is False
-    assert bot.sent[-1]["mto"] == "admin@conference.example.test"
+    assert bot.bot_admin_state[ADMIN_ROOM_JID] is False
+    assert bot.sent[-1]["mto"] == ADMIN_ROOM_JID
     assert "lost admin/owner rights in admin room admin@conference.example.test" in bot.sent[-1]["mbody"]
-    presence_state = bot.occupants["admin@conference.example.test"]["BanBot"]
-    assert presence_state["jid"] == "bot@example.test/service"
-    assert presence_state["affiliation"] == "member"
-    assert presence_state["role"] == "participant"
+    presence_state = bot.occupants[ADMIN_ROOM_JID][BOT_NICK]
+    assert presence_state["jid"] == BOT_JID_RESOURCE
+    assert presence_state["affiliation"] == MEMBER_AFFILIATION
+    assert presence_state["role"] == PARTICIPANT_ROLE
 
 
 @pytest.mark.asyncio
 async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkeypatch):
     bot = MucBotFixture()
-    bot.occupants = {"room": {"User": {}}}
+    bot.occupants = {"room": {USER_NICK: {}}}
     bot.bot_admin_state = {"room": True}
     bot.room_join_time = {"room": 123.0}
 
