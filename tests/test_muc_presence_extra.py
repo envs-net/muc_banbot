@@ -44,9 +44,9 @@ class FakePresence:
             self._muc["reason"] = reason
 
         self.xml = ET.Element("presence")
-        x = ET.SubElement(self.xml, f"{MUC_USER_TAG}x")
+        muc_user_node = ET.SubElement(self.xml, f"{MUC_USER_TAG}x")
         item = ET.SubElement(
-            x,
+            muc_user_node,
             f"{MUC_USER_TAG}item",
             {"affiliation": affiliation, "role": role},
         )
@@ -54,7 +54,7 @@ class FakePresence:
             reason_el = ET.SubElement(item, f"{MUC_USER_TAG}reason")
             reason_el.text = reason
         for code in status_codes or set():
-            ET.SubElement(x, f"{MUC_USER_TAG}status", {"code": code})
+            ET.SubElement(muc_user_node, f"{MUC_USER_TAG}status", {"code": code})
 
     def __getitem__(self, key):
         if key == "from":
@@ -64,7 +64,7 @@ class FakePresence:
         raise KeyError(key)
 
 
-class MucTestBot(MucMixin, DatabaseMixin, CacheMixin):
+class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path
         self.protected_rooms = {"room@conference.example.test"}
@@ -131,7 +131,7 @@ class MucTestBot(MucMixin, DatabaseMixin, CacheMixin):
 
 @pytest.mark.asyncio
 async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_bans(temp_db_path):
-    bot = MucTestBot(temp_db_path)
+    bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     try:
         await bot.upsert_ban_db("user@example.test", "User", 0, "tester", "jid ban")
@@ -156,7 +156,7 @@ async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_
 
 @pytest.mark.asyncio
 async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
-    bot = MucTestBot(temp_db_path)
+    bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     try:
         await bot.upsert_ban_db(None, "BadNick", 0, "tester", "nick ban")
@@ -180,7 +180,7 @@ async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
 
 @pytest.mark.asyncio
 async def test_muc_offline_removes_occupant():
-    bot = MucTestBot()
+    bot = MucBotFixture()
     bot.occupants = {
         "room@conference.example.test": {
             "User": {"jid": "user@example.test/resource", "affiliation": "member", "role": "participant"}
@@ -194,7 +194,7 @@ async def test_muc_offline_removes_occupant():
 
 @pytest.mark.asyncio
 async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
-    bot = MucTestBot(temp_db_path)
+    bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     bot.occupants = {
         "room@conference.example.test": {
@@ -222,7 +222,7 @@ async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
 
 @pytest.mark.asyncio
 async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
-    bot = MucTestBot(temp_db_path)
+    bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     bot.occupants = {
         "room@conference.example.test": {
@@ -259,7 +259,7 @@ async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
     monkeypatch.setattr(muc_module, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(muc_module, "NICK", "BanBot")
 
-    bot = MucTestBot()
+    bot = MucBotFixture()
     bot.bot_admin_state["room@conference.example.test"] = True
     bot.room_join_time["room@conference.example.test"] = time.time() - 10
     bot.verify_result = False
@@ -283,11 +283,10 @@ async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
 
     assert bot.bot_admin_state["room@conference.example.test"] is False
     assert "lost admin/owner rights" in bot.sent[-1]["mbody"]
-    assert bot.occupants["room@conference.example.test"]["BanBot"] == {
-        "jid": "bot@example.test/service",
-        "affiliation": "member",
-        "role": "participant",
-    }
+    presence_state = bot.occupants["room@conference.example.test"]["BanBot"]
+    assert presence_state["jid"] == "bot@example.test/service"
+    assert presence_state["affiliation"] == "member"
+    assert presence_state["role"] == "participant"
 
 
 @pytest.mark.asyncio
@@ -297,7 +296,7 @@ async def test_on_muc_presence_warns_when_admin_room_state_only_exists_in_occupa
     monkeypatch.setattr(muc_module, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(muc_module, "NICK", "BanBot")
 
-    bot = MucTestBot()
+    bot = MucBotFixture()
     bot.room_join_time["admin@conference.example.test"] = time.time() - 10
     bot.verify_result = False
 
@@ -324,16 +323,15 @@ async def test_on_muc_presence_warns_when_admin_room_state_only_exists_in_occupa
     assert bot.bot_admin_state["admin@conference.example.test"] is False
     assert bot.sent[-1]["mto"] == "admin@conference.example.test"
     assert "lost admin/owner rights in admin room admin@conference.example.test" in bot.sent[-1]["mbody"]
-    assert bot.occupants["admin@conference.example.test"]["BanBot"] == {
-        "jid": "bot@example.test/service",
-        "affiliation": "member",
-        "role": "participant",
-    }
+    presence_state = bot.occupants["admin@conference.example.test"]["BanBot"]
+    assert presence_state["jid"] == "bot@example.test/service"
+    assert presence_state["affiliation"] == "member"
+    assert presence_state["role"] == "participant"
 
 
 @pytest.mark.asyncio
 async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkeypatch):
-    bot = MucTestBot()
+    bot = MucBotFixture()
     bot.occupants = {"room": {"User": {}}}
     bot.bot_admin_state = {"room": True}
     bot.room_join_time = {"room": 123.0}
@@ -354,7 +352,7 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
 
 @pytest.mark.asyncio
 async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatch):
-    bot = MucTestBot()
+    bot = MucBotFixture()
     blocker = asyncio.Event()
     calls = {"count": 0}
 
@@ -379,7 +377,7 @@ async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatc
 async def test_delayed_reconnect_waits_for_session_start_signal(monkeypatch):
     import banbot.muc as muc_module
 
-    bot = MucTestBot()
+    bot = MucBotFixture()
     bot.reconnecting = True
     calls = {"connect": 0}
 
@@ -403,7 +401,7 @@ async def test_delayed_reconnect_waits_for_session_start_signal(monkeypatch):
 async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch):
     import banbot.muc as muc_module
 
-    bot = MucTestBot()
+    bot = MucBotFixture()
     bot.reconnecting = True
     calls = {"connect": 0}
 
