@@ -54,7 +54,8 @@ class FakeMucService:
 
 
 class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
-    def __init__(self):
+    def __init__(self, db_path):
+        self._test_db_path = str(db_path)
         self.protected_rooms = {"room@conference.example.test"}
         self.occupants = {}
         self.plugin = {"xep_0045": FakeMucService()}
@@ -70,6 +71,17 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.unbanned = []
         self.auto_redactions = []
         self.admin_rooms = {"room@conference.example.test"}
+
+    async def setup_db(self, *, create_startup_backup: bool = True) -> None:
+        """Initialize the test database using the explicit temp_db_path fixture."""
+        import banbot.db as db_module
+
+        original_db_file = db_module.DB_FILE
+        db_module.DB_FILE = self._test_db_path
+        try:
+            await super().setup_db(create_startup_backup=create_startup_backup)
+        finally:
+            db_module.DB_FILE = original_db_file
 
     @staticmethod
     def bare_jid(jid):
@@ -97,8 +109,8 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.auto_redactions.append((jid, reason, actor))
 
 
-async def make_bot():
-    bot = SyncBot()
+async def make_bot(temp_db_path):
+    bot = SyncBot(temp_db_path)
     await bot.setup_db()
     await bot.load_bans_from_db()
     return bot
@@ -109,7 +121,7 @@ async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, monkey
     import banbot.sync as sync_module
 
     monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): ["already@example.test"]}
     )
@@ -129,7 +141,7 @@ async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, monkey
 
 @pytest.mark.asyncio
 async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): ["orphan@example.test"]}
     )
@@ -145,7 +157,7 @@ async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
 
 @pytest.mark.asyncio
 async def test_sync_single_room_does_not_auto_redact_known_outcast(temp_db_path):
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): [("known@example.test", "spam")]}
     )
@@ -162,7 +174,7 @@ async def test_sync_single_room_does_not_auto_redact_known_outcast(temp_db_path)
 
 @pytest.mark.asyncio
 async def test_sync_single_room_auto_redacts_recovered_outcast_when_reason_is_discovered(temp_db_path):
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): [("known@example.test", "spam")]}
     )
@@ -178,7 +190,7 @@ async def test_sync_single_room_auto_redacts_recovered_outcast_when_reason_is_di
 
 @pytest.mark.asyncio
 async def test_sync_single_room_auto_redacts_new_orphan_outcast(temp_db_path):
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): [("orphan@example.test", "spam")]}
     )
@@ -192,7 +204,7 @@ async def test_sync_single_room_auto_redacts_new_orphan_outcast(temp_db_path):
 
 @pytest.mark.asyncio
 async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recovering(temp_db_path):
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): ["expired@example.test"]}
     )
@@ -212,7 +224,7 @@ async def test_sync_bans_to_rooms_skips_room_without_bot_admin_rights(temp_db_pa
     import banbot.sync as sync_module
 
     monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.admin_rooms = set()
     try:
         await bot.upsert_ban_db("new@example.test", None, 0, "tester", "new")
@@ -280,7 +292,7 @@ async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, mon
     import banbot.sync as sync_module
 
     monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     muc_service = FakeMucService(
         {
             ("admin@conference.example.test", "owner"): ["owner@example.test"],
@@ -305,7 +317,7 @@ async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, mon
 
 @pytest.mark.asyncio
 async def test_wait_for_bot_admin_rights_returns_immediate_final_state_without_sleep(temp_db_path):
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     try:
         bot.admin_rooms = {"room@conference.example.test"}
         assert await bot._wait_for_bot_admin_rights("room@conference.example.test", timeout=0, interval=0) is True
@@ -321,7 +333,7 @@ async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, monkeypa
     import banbot.sync as sync_module
 
     monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.protected_rooms = set()
     try:
         await bot.sync_rooms_and_bans()
@@ -341,7 +353,7 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
         return None
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
-    bot = await make_bot()
+    bot = await make_bot(temp_db_path)
     bot.protected_rooms = {
         "room-a@conference.example.test",
         "room-b@conference.example.test",
@@ -369,9 +381,19 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
 
 
 def prepare_bot_for_room_sync(bot, sync_module, room):
+    """Prepare a SyncBot instance as if it already occupies one protected room."""
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}
     bot.occupants = {room: {sync_module.NICK: {"jid": "bot@example.test"}}}
+
+
+async def make_bot_for_join_time_check(temp_db_path, sync_module, room, *, fail_join=False):
+    """Build a room-sync bot with explicit DB path and optional join failure."""
+    bot = await make_bot(temp_db_path)
+    prepare_bot_for_room_sync(bot, sync_module, room)
+    failed_rooms = {room} if fail_join else None
+    bot.plugin["xep_0045"] = FakeMucService(fail_join_rooms=failed_rooms)
+    return bot
 
 
 @pytest.mark.asyncio
@@ -384,10 +406,10 @@ async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_d
         return None
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
-    bot = await make_bot()
     room = "room@conference.example.test"
-    prepare_bot_for_room_sync(bot, sync_module, room)
-    bot.plugin["xep_0045"] = FakeMucService(fail_join_rooms={room})
+    bot = await make_bot_for_join_time_check(
+        temp_db_path, sync_module, room, fail_join=True
+    )
     try:
         await bot.sync_rooms_and_bans()
 
@@ -407,10 +429,8 @@ async def test_sync_rooms_and_bans_sets_join_time_after_success(temp_db_path, mo
         return None
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
-    bot = await make_bot()
     room = "room-ok@conference.example.test"
-    prepare_bot_for_room_sync(bot, sync_module, room)
-    bot.plugin["xep_0045"] = FakeMucService()
+    bot = await make_bot_for_join_time_check(temp_db_path, sync_module, room)
     try:
         await bot.sync_rooms_and_bans()
 
