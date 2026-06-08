@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sys
 
 from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
@@ -12,6 +13,23 @@ from slixmpp.exceptions import IqError, IqTimeout
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
+
+
+def _rooms_package_value(name: str, default: str) -> str:
+    """Return room package compatibility values, including monkeypatched tests."""
+    rooms_package = sys.modules.get("banbot.rooms")
+    if rooms_package is not None and hasattr(rooms_package, name):
+        return getattr(rooms_package, name)
+    return default
+
+
+def _admin_room() -> str:
+    return _rooms_package_value("ADMIN_ROOM", ADMIN_ROOM)
+
+
+def _nick() -> str:
+    return _rooms_package_value("NICK", NICK)
+
 
 class ProtectedRoomMixin:
 
@@ -153,13 +171,13 @@ class ProtectedRoomMixin:
                         self.add_event_handler(f"muc::{target}::got_offline", self.muc_offline)
                         self.registered_rooms.add(target)
 
-                    self.plugin["xep_0045"].join_muc(target, NICK)
+                    self.plugin["xep_0045"].join_muc(target, _nick())
 
                     # --- Ensure the bot itself is online ---
                     async def wait_for_bot_online():
                         for _ in range(10):
                             occ = self.occupants.get(target, {})
-                            if NICK in occ:
+                            if _nick() in occ:
                                 break
                             await asyncio.sleep(1)
 
@@ -179,7 +197,7 @@ class ProtectedRoomMixin:
                         if other_rooms:
                             log.info("🔄 Applying existing bans to other rooms due to new room addition")
                             await self.bot_send_message(
-                                mto=ADMIN_ROOM,
+                                mto=_admin_room(),
                                 mbody=f"🔄 Applying existing bans to other rooms due to new room addition",
                                 mtype="groupchat"
                             )
@@ -198,6 +216,6 @@ class ProtectedRoomMixin:
 
                 # --- Bot leaves the room immediately ---
                 try:
-                    self.plugin["xep_0045"].leave_muc(target, NICK)
+                    self.plugin["xep_0045"].leave_muc(target, _nick())
                 except Exception as e:
                     log.warning("⚠️ Failed to leave room %s: %s", target, e)

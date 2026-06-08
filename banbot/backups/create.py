@@ -1,33 +1,20 @@
-"""Managed backup mixin helpers."""
+"""Managed backup creation helpers."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import pathlib
 import shutil
 import sqlite3
 import tempfile
-import zipfile
 from datetime import datetime
 from typing import Any
 
-import config
-
 from ..locks import database_file_lock
-from ..managed_files import list_managed_files, prune_managed_files
-from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
-from .common import (
-    DatabaseBackup,
-    _BACKUP_CONFIG_ENTRY,
-    _BACKUP_DATABASE_ENTRY,
-    _BACKUP_FORMAT,
-    _BACKUP_MANIFEST_ENTRY,
-    _BACKUP_OMEMO_ENTRY,
-    _BACKUP_SAFE_RE,
-)
+from ..managed_files import prune_managed_files
+from .common import _BACKUP_CONFIG_ENTRY, _BACKUP_DATABASE_ENTRY, _BACKUP_FORMAT, _BACKUP_OMEMO_ENTRY
 
 log = logging.getLogger(__name__)
 

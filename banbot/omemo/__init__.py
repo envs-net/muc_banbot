@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import json
 import logging
 import os
-import time
 from pathlib import Path
 from typing import Any, Callable, cast
 
@@ -29,6 +26,13 @@ except Exception:  # pragma: no cover - depends on optional runtime dependency
 log = logging.getLogger(__name__)
 
 OMEMO_RESET_RESTART_DELAY_SECONDS = 3
+
+from . import helpers as _helpers_module  # noqa: E402
+from . import reset as _reset_module  # noqa: E402
+
+# Compatibility exports for tests and callers that patched the old flat module.
+time = _helpers_module.time
+asyncio = _reset_module.asyncio
 
 from .helpers import (  # noqa: E402
     _backup_existing_path,
@@ -154,6 +158,8 @@ class OmemoMixin(
 __all__ = [
     "OMEMO_AVAILABLE",
     "OMEMO_RESET_RESTART_DELAY_SECONDS",
+    "asyncio",
+    "time",
     "XEP_0384Impl",
     "XEP_0384_module",
     "OmemoMixin",

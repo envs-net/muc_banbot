@@ -1,9 +1,7 @@
-"""OMEMO mixin helpers."""
+"""OMEMO filesystem and identity metadata helpers."""
 
 from __future__ import annotations
 
-import asyncio
-import importlib
 import json
 import logging
 import os
@@ -12,10 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from slixmpp import JID
-
 log = logging.getLogger(__name__)
-
 
 def _omemo_identity_metadata_path(storage_path: Path) -> Path:
     """Return the metadata path tied to an OMEMO storage file."""

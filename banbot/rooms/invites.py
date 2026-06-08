@@ -6,7 +6,6 @@ import logging
 import time
 from xml.etree import ElementTree as ET
 
-import config
 from config import ADMIN_ROOM
 
 from ..utils import (
