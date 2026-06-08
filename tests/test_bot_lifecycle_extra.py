@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -11,6 +12,33 @@ pytest.importorskip("slixmpp")
 
 from banbot import bot as bot_module
 
+
+
+
+def test_slixmpp_statuses_warning_filter_suppresses_known_noise():
+    status_record = logging.LogRecord(
+        name="root",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=1,
+        msg="Unknown stanza interface: statuses",
+        args=(),
+        exc_info=None,
+    )
+    other_record = logging.LogRecord(
+        name="root",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=1,
+        msg="Unknown stanza interface: other",
+        args=(),
+        exc_info=None,
+    )
+
+    log_filter = bot_module._SlixmppStatusesWarningFilter()
+
+    assert log_filter.filter(status_record) is False
+    assert log_filter.filter(other_record) is True
 
 class FakeMucPlugin:
     def __init__(self):

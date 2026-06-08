@@ -58,6 +58,40 @@ if not isinstance(_log_level, int):
     _log_level = logging.INFO
 
 logging.basicConfig(level=_log_level)
+
+
+class _SlixmppStatusesWarningFilter(logging.Filter):
+    """Suppress noisy Slixmpp warnings for unknown ``statuses`` interfaces.
+
+    Some servers/clients include status-related XML that Slixmpp may expose as
+    an unknown ``statuses`` stanza interface.  Slixmpp logs this exact warning
+    via the root logger, which can spam production logs even though BanBot does
+    not need that interface.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage() != "Unknown stanza interface: statuses"
+
+
+def _install_slixmpp_statuses_warning_filter() -> None:
+    root_logger = logging.getLogger()
+    already_installed = any(
+        isinstance(existing_filter, _SlixmppStatusesWarningFilter)
+        for existing_filter in root_logger.filters
+    )
+    if not already_installed:
+        root_logger.addFilter(_SlixmppStatusesWarningFilter())
+
+    for handler in root_logger.handlers:
+        handler_has_filter = any(
+            isinstance(existing_filter, _SlixmppStatusesWarningFilter)
+            for existing_filter in handler.filters
+        )
+        if not handler_has_filter:
+            handler.addFilter(_SlixmppStatusesWarningFilter())
+
+
+_install_slixmpp_statuses_warning_filter()
 log = logging.getLogger(__name__)
 
 
