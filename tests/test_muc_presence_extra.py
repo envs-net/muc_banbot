@@ -20,10 +20,14 @@ pytestmark = pytest.mark.skipif(
     reason="aiosqlite is required for MUC presence extra tests",
 )
 
-from banbot.cache import CacheMixin
-from banbot.db import DatabaseMixin
-from banbot.muc import MucMixin
-from banbot.utils import bare_jid
+if aiosqlite is not None:
+    from banbot.cache import CacheMixin
+    from banbot.db import DatabaseMixin
+    from banbot.muc import MucMixin
+    from banbot.utils import bare_jid
+else:  # pragma: no cover - tests are skipped when aiosqlite is unavailable.
+    CacheMixin = DatabaseMixin = MucMixin = object
+    bare_jid = None
 
 
 MUC_USER_NS = "http://jabber.org/protocol/muc#user"
@@ -62,6 +66,8 @@ class FakeMuc(TypedDict, total=False):
 
 
 class FakePresence:
+    """Synthetic XMPP MUC presence stanza used by MucMixin tests."""
+
     def __init__(
         self,
         *,
@@ -102,6 +108,8 @@ class FakePresence:
 
 
 class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
+    """Minimal bot fixture combining MUC, DB and cache mixins for tests."""
+
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path
         self.protected_rooms = {ROOM_JID}
@@ -137,7 +145,15 @@ class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
         nick: str | None = None,
         jid: str | None = None,
     ) -> bool:
-        info = self.occupants.get(room, {}).get(nick or "")
+        room_occupants = self.occupants.get(room, {})
+        info = room_occupants.get(nick) if nick else None
+        if info is None and jid is not None:
+            target_bare = self.bare_jid(jid)
+            for occupant in room_occupants.values():
+                occupant_jid = occupant.get("jid")
+                if occupant_jid and self.bare_jid(occupant_jid) == target_bare:
+                    info = occupant
+                    break
         return bool(info and info.get("affiliation") in (ADMIN_AFFILIATION, OWNER_AFFILIATION))
 
     async def check_jid_against_rtbl(self, jid: str, nick: str) -> bool:
@@ -285,6 +301,8 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
         reason_el = presence.xml.find(f".//{MUC_USER_TAG}reason")
         if reason_el is None:
             item = presence.xml.find(f".//{MUC_USER_TAG}item")
+            if item is None:
+                pytest.fail("Malformed FakePresence XML: missing muc#user item element")
             reason_el = ET.SubElement(item, f"{MUC_USER_TAG}reason")
         reason_el.text = MANUAL_BAN_REASON
 
@@ -461,6 +479,9 @@ async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch)
         pass
 
     async def short_wait_for(awaitable, timeout):
+        # This test double may receive a coroutine that we intentionally do not
+        # await while simulating timeout behavior; close it to avoid coroutine
+        # warnings and release its frame/resources.
         close = getattr(awaitable, "close", None)
         if callable(close):
             close()
