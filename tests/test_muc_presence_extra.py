@@ -68,6 +68,9 @@ class FakePresence:
         role: str = PARTICIPANT_ROLE,
         status_codes: set[str] | None = None,
         reason: str | None = None,
+        xml_status_codes: set[str] | None = None,
+        xml_reason: str | None = None,
+        muc_overrides: dict[str, object] | None = None,
     ) -> None:
         self._from = SimpleNamespace(bare=room, resource=nick)
         self._muc = FakeMuc(nick=nick, jid=jid, affiliation=affiliation, role=role)
@@ -75,6 +78,8 @@ class FakePresence:
             self._muc["status_codes"] = status_codes
         if reason is not None:
             self._muc["reason"] = reason
+        if muc_overrides:
+            self._muc.update(muc_overrides)
 
         self.xml = ET.Element("presence")
         muc_user_node = ET.SubElement(self.xml, f"{MUC_USER_TAG}x")
@@ -83,10 +88,12 @@ class FakePresence:
             f"{MUC_USER_TAG}item",
             {"affiliation": affiliation, "role": role},
         )
-        if reason is not None:
+
+        reason_text = xml_reason if xml_reason is not None else reason
+        if reason_text is not None:
             reason_el = ET.SubElement(item, f"{MUC_USER_TAG}reason")
-            reason_el.text = reason
-        for code in status_codes or set():
+            reason_el.text = reason_text
+        for code in xml_status_codes if xml_status_codes is not None else (status_codes or set()):
             ET.SubElement(muc_user_node, f"{MUC_USER_TAG}status", {"code": code})
 
     def __getitem__(self, key):
@@ -233,6 +240,13 @@ async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
         await bot.db.close()
 
 
+def test_muc_presence_status_codes_reads_xml_without_mapping_status_codes():
+    bot = MucBotFixture()
+    presence = FakePresence(status_codes=None, xml_status_codes={MUC_STATUS_BANNED})
+
+    assert bot._muc_presence_status_codes(presence) == {MUC_STATUS_BANNED}
+
+
 def test_muc_presence_status_codes_does_not_probe_unregistered_statuses_interface():
     bot = MucBotFixture()
     presence = FakePresence(status_codes=None)
@@ -301,21 +315,15 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
     }
 
     try:
-        presence = FakePresence(
-            room=ROOM_JID,
-            nick=USER_NICK,
-            status_codes={MUC_STATUS_BANNED},
-            reason=None,
+        await bot.muc_offline(
+            FakePresence(
+                room=ROOM_JID,
+                nick=USER_NICK,
+                status_codes={MUC_STATUS_BANNED},
+                reason=None,
+                xml_reason=MANUAL_BAN_REASON,
+            )
         )
-        reason_el = presence.xml.find(f".//{MUC_USER_TAG}reason")
-        if reason_el is None:
-            item = presence.xml.find(f".//{MUC_USER_TAG}item")
-            if item is None:
-                pytest.fail("Malformed FakePresence XML: missing muc#user item element")
-            reason_el = ET.SubElement(item, f"{MUC_USER_TAG}reason")
-        reason_el.text = MANUAL_BAN_REASON
-
-        await bot.muc_offline(presence)
 
         await bot.load_bans_from_db()
         assert bot.ban_index_by_jid[USER_BARE_JID][4] == MANUAL_BAN_REASON

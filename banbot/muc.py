@@ -161,23 +161,21 @@ class MucMixin:
             if rtbl_hit:
                 return  # already banned via RTBL, skip the rest
 
-        # --- Auto-update JID if nick-only ban exists ---
+        # --- Auto-update JID if a nick-only ban exists ---
         if jid_str and nick:
-            async with self.db.execute(
-                "SELECT until, issuer, comment FROM bans WHERE target_type = 'nick' AND target = ?",
-                (nick.lower(),)
-            ) as cursor:
-                existing_ban = await cursor.fetchone()
+            nick_key = nick.lower()
+            existing_ban = self.ban_index_by_nick.get(nick_key)
 
             if existing_ban:
-                # Found a nick-only ban, convert it to a JID ban.
+                # Found an active nick-only ban in the in-memory index; convert it
+                # to a JID ban without querying the database on every MUC join.
                 ban_jid_bare = self.bare_jid(jid_str)
-                until, issuer, comment = existing_ban
+                _ban_jid, _ban_nick, until, issuer, comment = existing_ban
                 async with ban_state_lock(self):
-                    await self.upsert_ban_db(ban_jid_bare, nick.lower(), int(until or 0), issuer, comment)
+                    await self.upsert_ban_db(ban_jid_bare, nick_key, int(until or 0), issuer, comment)
                     await self.db.execute(
                         "DELETE FROM bans WHERE target_type = 'nick' AND target = ?",
-                        (nick.lower(),)
+                        (nick_key,)
                     )
                     await self.db.commit()
 
@@ -390,13 +388,18 @@ class MucMixin:
             "jid": jid_str,
         }
 
-        # Ignore during reconnect stabilization
-        if self.reconnecting and time.time() - self.room_join_time.get(room, 0) < 5:
-            return
-
-        # Ignore first few seconds after join
+        # Ignore briefly after join/reconnect to let occupant state stabilize.
+        grace_seconds = 5
+        now = time.time()
         join_time = self.room_join_time.get(room)
-        if join_time and (time.time() - join_time < 5):
+        if (
+            self.reconnecting
+            and (now - (join_time or 0)) < grace_seconds
+        ) or (
+            not self.reconnecting
+            and join_time
+            and (now - join_time) < grace_seconds
+        ):
             return
 
         if not affiliation:
