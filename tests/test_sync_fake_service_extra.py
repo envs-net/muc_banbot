@@ -140,11 +140,17 @@ async def make_bot(temp_db_path):
     return bot
 
 
-@pytest.mark.asyncio
-async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, monkeypatch):
-    import banbot.sync as sync_module
+@pytest.fixture
+def sync_module(monkeypatch):
+    """Return banbot.sync with ADMIN_ROOM set for sync command tests."""
+    import banbot.sync as module
 
-    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(module, "ADMIN_ROOM", "admin@conference.example.test")
+    return module
+
+
+@pytest.mark.asyncio
+async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, sync_module):
     bot = await make_bot(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): ["already@example.test"]}
@@ -244,10 +250,7 @@ async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recove
 
 
 @pytest.mark.asyncio
-async def test_sync_bans_to_rooms_skips_room_without_bot_admin_rights(temp_db_path, monkeypatch):
-    import banbot.sync as sync_module
-
-    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+async def test_sync_bans_to_rooms_skips_room_without_bot_admin_rights(temp_db_path, sync_module):
     bot = await make_bot(temp_db_path)
     bot.admin_rooms = set()
     try:
@@ -312,10 +315,7 @@ def test_fake_muc_service_handles_empty_affiliation_mapping():
 
 
 @pytest.mark.asyncio
-async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, monkeypatch):
-    import banbot.sync as sync_module
-
-    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, sync_module):
     bot = await make_bot(temp_db_path)
     muc_service = FakeMucService(
         {
@@ -353,10 +353,7 @@ async def test_wait_for_bot_admin_rights_returns_immediate_final_state_without_s
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, monkeypatch):
-    import banbot.sync as sync_module
-
-    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, sync_module):
     bot = await make_bot(temp_db_path)
     bot.protected_rooms = set()
     try:
@@ -368,10 +365,7 @@ async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch):
-    import banbot.sync as sync_module
-
-    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch, sync_module):
 
     async def no_sleep(_delay):
         return None
@@ -408,28 +402,24 @@ def prepare_bot_for_room_sync(bot, sync_module, room):
     """Configure a SyncBot for one protected room by mutating it in place.
 
     Sets protected rooms, admin rooms, and occupants on the provided bot
-    instance, then returns that same instance for convenience.
+    instance.
     """
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}
     bot.occupants = {room: {sync_module.NICK: {"jid": "bot@example.test"}}}
-    return bot
 
 
 async def make_bot_for_room_sync(temp_db_path, sync_module, room, *, fail_join=False):
     """Build a room-sync bot with explicit DB path and optional join failure."""
     bot = await make_bot(temp_db_path)
-    bot = prepare_bot_for_room_sync(bot, sync_module, room)
+    prepare_bot_for_room_sync(bot, sync_module, room)
     failed_rooms = {room} if fail_join else None
     bot.plugin["xep_0045"] = FakeMucService(fail_join_rooms=failed_rooms)
     return bot
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_db_path, monkeypatch):
-    import banbot.sync as sync_module
-
-    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_db_path, monkeypatch, sync_module):
 
     async def no_sleep(_delay):
         return None
@@ -449,10 +439,7 @@ async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_d
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_and_bans_sets_join_time_after_success(temp_db_path, monkeypatch):
-    import banbot.sync as sync_module
-
-    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+async def test_sync_rooms_and_bans_sets_join_time_after_success(temp_db_path, monkeypatch, sync_module):
 
     async def no_sleep(_delay):
         return None
