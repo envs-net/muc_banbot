@@ -15,7 +15,11 @@ from banbot.utils import bare_jid, safe_jid as real_safe_jid
 
 
 class FakeMucService:
-    """Fake MUC affiliation service used by sync tests."""
+    """Fake MUC plugin used by sync tests.
+
+    The test double records room joins/leaves and returns configured
+    affiliation lookups for both legacy tuple keys and nested mappings.
+    """
 
     def __init__(self, affiliations=None, fail_join_rooms=None):
         self.affiliations = self._normalize_affiliations(affiliations)
@@ -228,6 +232,25 @@ async def test_fake_muc_service_accepts_nested_affiliation_mapping():
                 "owner": ["owner@example.test"],
                 "admin": ["admin@example.test"],
             }
+        }
+    )
+
+    assert await service.get_users_by_affiliation("room@example.test", "owner") == [
+        "owner@example.test"
+    ]
+    assert await service.get_users_by_affiliation("room@example.test", "admin") == [
+        "admin@example.test"
+    ]
+    assert await service.get_users_by_affiliation("room@example.test", "outcast") == []
+    assert await service.get_users_by_affiliation("missing-room@example.test", "owner") == []
+
+
+@pytest.mark.asyncio
+async def test_fake_muc_service_accepts_tuple_affiliation_mapping():
+    service = FakeMucService(
+        {
+            ("room@example.test", "owner"): ["owner@example.test"],
+            ("room@example.test", "admin"): ["admin@example.test"],
         }
     )
 
