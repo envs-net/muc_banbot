@@ -50,6 +50,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.sync_batch_size = 10
         self.applied = []
         self.unbanned = []
+        self.auto_redactions = []
         self.admin_rooms = {"room@conference.example.test"}
 
     @staticmethod
@@ -73,6 +74,9 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.unbanned.append((target, issuer))
         await self.delete_ban_db(target)
         await self.load_bans_from_db()
+
+    async def maybe_auto_redact_after_manual_muc_ban(self, jid, reason, actor=None):
+        self.auto_redactions.append((jid, reason, actor))
 
 
 async def make_bot():
@@ -117,6 +121,53 @@ async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
 
         assert "orphan@example.test" in bot.ban_index_by_jid
         assert bot.applied == []  # recovered outcast was already present in the room
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_single_room_does_not_auto_redact_known_outcast(temp_db_path):
+    bot = await make_bot()
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): [("known@example.test", "spam")]}
+    )
+    try:
+        await bot.upsert_ban_db("known@example.test", None, 0, "tester", "spam")
+
+        await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+
+        assert bot.auto_redactions == []
+        assert bot.applied == []
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_single_room_auto_redacts_recovered_outcast_when_reason_is_discovered(temp_db_path):
+    bot = await make_bot()
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): [("known@example.test", "spam")]}
+    )
+    try:
+        await bot.upsert_ban_db("known@example.test", None, 0, "tester", "Recovered from room")
+
+        await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+
+        assert bot.auto_redactions == [("known@example.test", "spam", "sync_room_add")]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_single_room_auto_redacts_new_orphan_outcast(temp_db_path):
+    bot = await make_bot()
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): [("orphan@example.test", "spam")]}
+    )
+    try:
+        await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+
+        assert bot.auto_redactions == [("orphan@example.test", "spam", "sync_room_add")]
     finally:
         await bot.db.close()
 

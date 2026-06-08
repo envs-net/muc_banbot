@@ -289,7 +289,7 @@ Redaction indexes room-assigned stanza IDs, not message bodies.
 `REDACTION_AUTO_REASONS` is used for automatic redaction decisions.
 Normal bot-command bans can trigger auto-redaction when their comment matches.
 `AUTO_REDACT_ON_IMPORTED_BAN_REASON` extends this behavior to matching imported JID bans.
-`AUTO_REDACT_ON_MANUAL_MUC_BAN` extends it to matching manual/external MUC bans discovered during startup sync, `!syncbans`, or room sync. Both extra modes are disabled by default because imported/manual bans may come from outside the bot command flow.
+`AUTO_REDACT_ON_MANUAL_MUC_BAN` extends it to newly discovered manual/external MUC bans recovered during startup sync, `!syncbans`, room sync, or live MUC ban presence events. Existing known room outcasts are not auto-redacted again on every sync/startup. Both extra modes are disabled by default because imported/manual bans may come from outside the bot command flow.
 
 See [Commands](commands.md#moderation).
 

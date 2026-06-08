@@ -468,12 +468,13 @@ class SyncMixin:
                     None,
                 )
                 if existing_comment is not None:
-                    effective_reason = room_reason or existing_comment
                     if room_reason:
-                        effective_reason = await self._sync_maybe_update_recovered_ban_reason(
+                        should_auto_redact_updated_reason = existing_comment == "Recovered from room"
+                        await self._sync_maybe_update_recovered_ban_reason(
                             jid_bare, room_reason, issuer_tag
-                        ) or effective_reason
-                    await self._sync_maybe_auto_redact_manual_ban(jid_bare, effective_reason, issuer_tag)
+                        )
+                        if should_auto_redact_updated_reason:
+                            await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
                     continue
 
                 if await self._sync_outcast_is_expired_tempban(jid_bare, now):
@@ -669,12 +670,13 @@ class SyncMixin:
                     None,
                 )
                 if existing_comment is not None:
-                    effective_reason = room_reason or existing_comment
                     if room_reason:
-                        effective_reason = await self._sync_maybe_update_recovered_ban_reason(
+                        should_auto_redact_updated_reason = existing_comment == "Recovered from room"
+                        await self._sync_maybe_update_recovered_ban_reason(
                             jid_bare, room_reason, issuer_tag
-                        ) or effective_reason
-                    await self._sync_maybe_auto_redact_manual_ban(jid_bare, effective_reason, issuer_tag)
+                        )
+                        if should_auto_redact_updated_reason:
+                            await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
                     continue
 
                 if await self._sync_outcast_is_expired_tempban(jid_bare, now):
