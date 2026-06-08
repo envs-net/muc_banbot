@@ -96,7 +96,7 @@ The explicit `PYTHONPATH` keeps the local `banbot` package importable inside mut
 The default mutmut configuration focuses on low-noise, high-value targets:
 
 * `banbot/utils.py`
-* `banbot/rtbl_apply.py`
+* `banbot/rtbl/apply.py`
 
 These modules have pure helper logic and RTBL business rules where mutation testing gives useful signal. Complex XMPP-heavy moderation flows are better covered by targeted regression tests and opt-in integration tests.
 

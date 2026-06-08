@@ -1,7 +1,7 @@
 import pytest
 
-from banbot.rtbl_apply import RtblApplyMixin
-from banbot.rtbl_utils import _rtbl_hash_jid
+from banbot.rtbl.apply import RtblApplyMixin
+from banbot.rtbl.utils import _rtbl_hash_jid
 from banbot.utils import bare_jid
 
 

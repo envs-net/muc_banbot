@@ -1,6 +1,6 @@
 import logging
 
-from banbot.config_utils import ConfigMixin, format_config_import_error
+from banbot.config import ConfigMixin, format_config_import_error
 
 
 class ConfigBot(ConfigMixin):

@@ -20,12 +20,12 @@ with issuer=rtbl so !banlist, !why and sync state stay consistent.
 Admin/owner protection is always enforced before any RTBL ban is applied.
 """
 
-from .rtbl_apply import RtblApplyMixin
-from .commands.rtbl_admin import RtblCommandMixin
-from .rtbl_db import RtblDatabaseMixin
-from .rtbl_pubsub import RtblPubSubMixin
-from .rtbl_publish import RtblPublishMixin
-from .rtbl_utils import _rtbl_build_payload, _rtbl_extract_reason, _rtbl_hash_jid
+from .apply import RtblApplyMixin
+from ..commands.rtbl_admin import RtblCommandMixin
+from .db import RtblDatabaseMixin
+from .pubsub import RtblPubSubMixin
+from .publish import RtblPublishMixin
+from .utils import _rtbl_build_payload, _rtbl_extract_reason, _rtbl_hash_jid
 
 
 class RtblMixin(

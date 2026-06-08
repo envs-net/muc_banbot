@@ -1,7 +1,7 @@
 [tool.mutmut]
 paths_to_mutate = [
     "banbot/utils.py",
-    "banbot/rtbl_apply.py",
+    "banbot/rtbl/apply.py",
 ]
 
 also_copy = [

@@ -1,6 +1,6 @@
 from xml.etree import ElementTree as ET
 
-from banbot.rtbl_utils import (
+from banbot.rtbl.utils import (
     _is_domain,
     _is_sha256,
     _looks_like_pubsub_node,

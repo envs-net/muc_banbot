@@ -16,7 +16,7 @@ builtins.false = False
 try:
     import config
 except Exception as exc:
-    from .config_utils import format_config_import_error
+    from .config import format_config_import_error
     sys.stderr.write("Failed to load config.py\n" + format_config_import_error(exc) + "\n")
     raise SystemExit(1) from None
 
@@ -24,7 +24,7 @@ import aiosqlite
 from slixmpp import ClientXMPP
 
 from config import JID, PASSWORD, ADMIN_ROOM, NICK
-from .config_utils import get_config_resource
+from .config import get_config_resource
 from .utils import bare_jid, safe_jid
 from .audit import AuditMixin
 from .cache import CacheMixin
@@ -35,7 +35,7 @@ from .moderation import ModerationMixin
 from .commands import CommandMixin
 from .direct_messages import DirectMessageMixin
 from .rooms import RoomMixin
-from .room_invites import RoomInviteMixin
+from .rooms import RoomInviteMixin
 from .redaction import RedactionMixin
 from .ban_queries import BanQueryMixin
 from .status import StatusMixin

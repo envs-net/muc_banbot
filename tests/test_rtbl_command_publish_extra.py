@@ -9,9 +9,9 @@ aiosqlite = pytest.importorskip("aiosqlite")
 from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
 from banbot.commands.rtbl_admin import RtblCommandMixin
-from banbot.rtbl_db import RtblDatabaseMixin
-from banbot.rtbl_publish import RtblPublishMixin
-from banbot.rtbl_utils import _rtbl_build_payload, _rtbl_hash_jid
+from banbot.rtbl.db import RtblDatabaseMixin
+from banbot.rtbl.publish import RtblPublishMixin
+from banbot.rtbl.utils import _rtbl_build_payload, _rtbl_hash_jid
 
 
 class FakeForm:

@@ -7,9 +7,9 @@ import pytest
 pytest.importorskip("slixmpp")
 aiosqlite = pytest.importorskip("aiosqlite")
 
-from banbot.rtbl_db import RtblDatabaseMixin
-from banbot.rtbl_pubsub import RtblPubSubMixin
-from banbot.rtbl_utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _rtbl_extract_reason
+from banbot.rtbl.db import RtblDatabaseMixin
+from banbot.rtbl.pubsub import RtblPubSubMixin
+from banbot.rtbl.utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _rtbl_extract_reason
 
 PUBSUB = "http://jabber.org/protocol/pubsub"
 RSM = "http://jabber.org/protocol/rsm"

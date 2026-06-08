@@ -1,4 +1,6 @@
-"""Protected-room management commands and room JID validation."""
+"""Protected room management."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -7,12 +9,12 @@ import re
 from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
 
-from .utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
+from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
+class ProtectedRoomMixin:
 
-class RoomMixin:
     async def validate_room_jid(self, room_jid: str) -> tuple[bool, str]:
         """
         Validate a room JID in two steps:
@@ -67,7 +69,6 @@ class RoomMixin:
             return False, f"❌ Service Discovery error for '{room_jid}': {error_msg}"
         except Exception as e:
             return False, f"❌ Failed to validate room: {str(e)}"
-
 
     async def cmd_room(self, args: list[str], room: str) -> None:
         """

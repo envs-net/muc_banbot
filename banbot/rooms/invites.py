@@ -1,4 +1,4 @@
-"""Protected-room invite workflow for admin-reviewed room onboarding."""
+"""Protected room invite lifecycle handling."""
 
 from __future__ import annotations
 
@@ -6,9 +6,10 @@ import logging
 import time
 from xml.etree import ElementTree as ET
 
+import config
 from config import ADMIN_ROOM
 
-from .utils import (
+from ..utils import (
     get_list_page_size,
     paginate_lines,
     resolve_page,
@@ -24,7 +25,6 @@ _MUC_USER_NS = "http://jabber.org/protocol/muc#user"
 
 
 class RoomInviteMixin:
-    """Collect MUC invites and let admins accept or decline them."""
 
     def init_room_invite_state(self) -> None:
         """Initialize runtime pending invite cache."""
@@ -33,7 +33,6 @@ class RoomInviteMixin:
         self.pending_room_invites: dict[int, dict[str, object]] = {}
         self.pending_room_invite_index: dict[tuple[str, str], int] = {}
         self.next_room_invite_id = 1
-
 
     def _room_invite_max_age_days(self) -> int:
         """Return configured pending invite max age in days.
@@ -46,7 +45,6 @@ class RoomInviteMixin:
         except (TypeError, ValueError):
             value = 30
         return max(0, value)
-
 
     def _room_invite_is_expired(self, invite: dict[str, object], now: int | None = None) -> bool:
         """Return True when a pending room invite is older than the configured limit."""
@@ -64,7 +62,6 @@ class RoomInviteMixin:
 
         now = int(time.time()) if now is None else int(now)
         return created_at < now - (max_age_days * 86400)
-
 
     async def cleanup_expired_room_invites(self, room: str | None = None) -> int:
         """Delete expired pending room invites from DB/runtime cache and optionally report."""
@@ -122,7 +119,6 @@ class RoomInviteMixin:
             )
         return deleted
 
-
     async def setup_room_invites_db(self) -> None:
         """Create the persistent pending room invite table when needed."""
         if not getattr(self, "db", None):
@@ -142,7 +138,6 @@ class RoomInviteMixin:
             "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at ON room_invites(created_at)"
         )
         await self.db.commit()
-
 
     async def load_pending_room_invites(self) -> None:
         """Load persisted pending room invites into runtime cache."""
@@ -193,7 +188,6 @@ class RoomInviteMixin:
         self.next_room_invite_id = max_id + 1
         if rows:
             log.info("Loaded %d pending room invite(s)", len(self.pending_room_invites))
-
 
     async def _store_pending_room_invite(
         self,
@@ -269,7 +263,6 @@ class RoomInviteMixin:
         self.next_room_invite_id = max(int(getattr(self, "next_room_invite_id", 1)), invite_id + 1)
         return invite
 
-
     async def _delete_pending_room_invite(self, invite_id: int) -> dict[str, object] | None:
         """Delete a pending invite from DB and runtime cache."""
         invite = self.pending_room_invites.pop(invite_id, None)
@@ -304,7 +297,6 @@ class RoomInviteMixin:
             self.pending_room_invite_index.pop(key, None)
         return invite
 
-
     async def cleanup_pending_room_invites(self, room: str) -> None:
         """Delete all pending room invites from DB and runtime cache."""
         count = len(self.pending_room_invites)
@@ -327,7 +319,6 @@ class RoomInviteMixin:
             mtype="groupchat",
         )
 
-
     def _jid_bare(self, value) -> str:
         """Return a best-effort bare JID string from a stanza value."""
         if value is None:
@@ -339,14 +330,12 @@ class RoomInviteMixin:
 
         return self.bare_jid(str(value)) or ""
 
-
     def _room_invite_reason_from_invite(self, invite_el: ET.Element) -> str:
         """Extract an optional mediated invite reason."""
         reason_el = invite_el.find(f"{{{_MUC_USER_NS}}}reason")
         if reason_el is not None and reason_el.text:
             return reason_el.text.strip()
         return ""
-
 
     def _room_invite_inviter_from_attr(self, value: str | None, room_jid: str = "") -> str:
         """Return the best available inviter identity from an invite 'from' value."""
@@ -363,7 +352,6 @@ class RoomInviteMixin:
 
         return bare or raw.lower()
 
-
     def _safe_get_plugin(self, stanza, plugin_name: str):
         """Return a registered stanza plugin without triggering unknown-interface warnings."""
         get_plugin = getattr(stanza, "get_plugin", None)
@@ -379,7 +367,6 @@ class RoomInviteMixin:
                 return None
         except Exception:
             return None
-
 
     def _safe_plugin_value(self, plugin, key: str) -> str:
         """Return a string value from a stanza plugin."""
@@ -398,7 +385,6 @@ class RoomInviteMixin:
             return ""
 
         return str(value).strip()
-
 
     def _room_invite_from_muc_plugin(self, msg) -> dict[str, str] | None:
         """
@@ -434,7 +420,6 @@ class RoomInviteMixin:
             "reason": reason,
         }
 
-
     def _room_invite_from_direct_plugin(self, msg) -> dict[str, str] | None:
         """
         Extract XEP-0249 direct invites from a registered plugin if available.
@@ -468,14 +453,12 @@ class RoomInviteMixin:
             "reason": reason,
         }
 
-
     def _room_invite_from_plugin(self, msg) -> dict[str, str] | None:
         """Extract invites from registered Slixmpp plugins without warning spam."""
         return (
             self._room_invite_from_muc_plugin(msg)
             or self._room_invite_from_direct_plugin(msg)
         )
-
 
     def _extract_room_invite(self, msg) -> dict[str, str] | None:
         """Extract room/inviter/reason from direct or mediated MUC invite messages."""
@@ -522,7 +505,6 @@ class RoomInviteMixin:
 
         return self._room_invite_from_plugin(msg)
 
-
     async def handle_room_invite_message(self, msg) -> bool:
         """Handle a MUC invite message if present. Return True when consumed."""
         invite = self._extract_room_invite(msg)
@@ -550,7 +532,6 @@ class RoomInviteMixin:
         )
         return True
 
-
     async def on_room_invite_message(self, msg) -> None:
         """Inspect direct/normal message stanzas for MUC invites.
 
@@ -568,7 +549,6 @@ class RoomInviteMixin:
 
         await self.handle_room_invite_message(msg)
 
-
     async def on_room_invite(self, msg) -> None:
         """Event handler wrapper for Slixmpp MUC invite events."""
         handled = await self.handle_room_invite_message(msg)
@@ -577,7 +557,6 @@ class RoomInviteMixin:
                 "Room invite event received but no room JID could be extracted: %s",
                 getattr(msg, "xml", msg),
             )
-
 
     async def _handle_pending_room_invite(self, room_jid: str, inviter: str, reason: str = "") -> None:
         """Validate and store a pending invite, then announce it in the admin room."""
@@ -633,11 +612,9 @@ class RoomInviteMixin:
             mtype="groupchat",
         )
 
-
     async def _remove_pending_room_invite(self, invite_id: int) -> dict[str, object] | None:
         """Remove and return a pending invite by id."""
         return await self._delete_pending_room_invite(invite_id)
-
 
     def _room_invite_usage(self) -> str:
         """Return room invite command usage text."""
@@ -649,7 +626,6 @@ class RoomInviteMixin:
             f"  {p}room invite decline/remove/delete <id>\n"
             f"  {p}room invite cleanup [expired]"
         )
-
 
     async def cmd_room_invite(self, args: list[str], room: str) -> None:
         """Admin command for pending protected-room invites."""

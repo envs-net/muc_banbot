@@ -11,7 +11,7 @@ from ..utils import (
     wants_all_pages,
     without_all_pages_arg,
 )
-from ..rtbl_utils import _looks_like_pubsub_node, _looks_like_pubsub_service_jid
+from ..rtbl.utils import _looks_like_pubsub_node, _looks_like_pubsub_service_jid
 
 log = logging.getLogger(__name__)
 

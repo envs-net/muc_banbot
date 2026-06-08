@@ -10,8 +10,8 @@ aiosqlite = pytest.importorskip("aiosqlite")
 
 from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
-from banbot.rtbl_apply import RtblApplyMixin
-from banbot.rtbl_utils import _rtbl_hash_jid
+from banbot.rtbl.apply import RtblApplyMixin
+from banbot.rtbl.utils import _rtbl_hash_jid
 from banbot.utils import bare_jid, domain_matches
 
 
@@ -206,7 +206,7 @@ async def test_rtbl_apply_jid_locked_apply_failure_is_logged_but_db_and_audit_re
 
     bot.apply_ban_to_room = failing_apply
     try:
-        with caplog.at_level(logging.WARNING, logger="banbot.rtbl_apply"):
+        with caplog.at_level(logging.WARNING, logger="banbot.rtbl.apply"):
             await bot._rtbl_apply_ban_jid_locked("bad@example.test", "Bad", "listed spam")
 
         assert "bad@example.test" in bot.ban_index_by_jid
@@ -310,7 +310,7 @@ async def test_rtbl_cleanup_locked_ignores_empty_rows_and_logs_when_removed(temp
         await bot.db.commit()
         await bot.load_bans_from_db()
 
-        with caplog.at_level(logging.INFO, logger="banbot.rtbl_apply"):
+        with caplog.at_level(logging.INFO, logger="banbot.rtbl.apply"):
             removed = await bot._rtbl_cleanup_stale_persisted_bans_locked("cleanup-test")
 
         assert removed == 1

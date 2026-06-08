@@ -14,7 +14,7 @@ from banbot.ban_queries import BanQueryMixin
 from banbot.cache import CacheMixin
 from banbot.commands.config_display import ConfigCommandMixin
 from banbot.db import DatabaseMixin
-from banbot.rtbl_utils import _rtbl_hash_jid
+from banbot.rtbl.utils import _rtbl_hash_jid
 from banbot.status import StatusMixin
 
 

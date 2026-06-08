@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from banbot.rtbl_apply import RtblApplyMixin
-from banbot.rtbl_utils import _rtbl_hash_jid
+from banbot.rtbl.apply import RtblApplyMixin
+from banbot.rtbl.utils import _rtbl_hash_jid
 from banbot.utils import bare_jid, domain_matches
 
 
@@ -518,7 +518,7 @@ async def test_jid_locked_apply_failure_is_logged_without_rolling_back_persisten
     bot = LockedRtblMutationBot()
     bot.fail_apply_for = {"bad@example.test"}
 
-    with caplog.at_level("WARNING", logger="banbot.rtbl_apply"):
+    with caplog.at_level("WARNING", logger="banbot.rtbl.apply"):
         await bot._rtbl_apply_ban_jid_locked("bad@example.test", "Bad", "listed")
 
     assert bot.upserts == [("bad@example.test", "Bad", 0, "rtbl", "RTBL: listed")]
@@ -670,7 +670,7 @@ async def test_cleanup_locked_removes_legacy_wildcards_and_uncovered_jids_but_ke
     bot.rtbl_hash_cache[_rtbl_hash_jid("covered@example.test")] = "hash"
     bot.rtbl_domain_cache["bad.example"] = "domain"
 
-    with caplog.at_level("INFO", logger="banbot.rtbl_apply"):
+    with caplog.at_level("INFO", logger="banbot.rtbl.apply"):
         removed = await bot._rtbl_cleanup_stale_persisted_bans_locked("cleanup-test")
 
     assert removed == 2
@@ -685,7 +685,7 @@ async def test_cleanup_locked_returns_zero_without_logging_when_everything_is_co
     bot.rtbl_hash_cache[_rtbl_hash_jid("covered@example.test")] = "hash"
     bot.rtbl_domain_cache["bad.example"] = "domain"
 
-    with caplog.at_level("INFO", logger="banbot.rtbl_apply"):
+    with caplog.at_level("INFO", logger="banbot.rtbl.apply"):
         removed = await bot._rtbl_cleanup_stale_persisted_bans_locked()
 
     assert removed == 0
@@ -814,7 +814,7 @@ async def test_domain_locked_apply_failure_is_logged_per_room_without_rollback(m
     bot.protected_rooms = {"room@conference.example.test", "second@conference.example.test"}
     bot.fail_apply_for = {"spam@bad.example"}
 
-    with caplog.at_level("WARNING", logger="banbot.rtbl_apply"):
+    with caplog.at_level("WARNING", logger="banbot.rtbl.apply"):
         await bot._rtbl_apply_ban_domain_locked("bad.example", "wave")
 
     assert bot.upserts == [("spam@bad.example", "Spam", 0, "rtbl", "RTBL domain ban: *.bad.example — wave")]

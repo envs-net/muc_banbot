@@ -2,8 +2,8 @@
 
 import logging
 
-from .locks import ban_state_lock
-from .utils import domain_matches
+from ..locks import ban_state_lock
+from ..utils import domain_matches
 
 log = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ import uuid
 
 from slixmpp.exceptions import IqError, IqTimeout
 
-from .rtbl_utils import RTBL_PUBLISH_SANITY_CHECK_REASON
+from .utils import RTBL_PUBLISH_SANITY_CHECK_REASON
 
 log = logging.getLogger(__name__)
 
