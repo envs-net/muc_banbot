@@ -15,3 +15,14 @@ _BACKUP_CONFIG_ENTRY = "config.py"
 _BACKUP_OMEMO_ENTRY = "omemo.json"
 
 DatabaseBackup = ManagedFile
+
+
+__all__ = [
+    "DatabaseBackup",
+    "_BACKUP_SAFE_RE",
+    "_BACKUP_FORMAT",
+    "_BACKUP_MANIFEST_ENTRY",
+    "_BACKUP_DATABASE_ENTRY",
+    "_BACKUP_CONFIG_ENTRY",
+    "_BACKUP_OMEMO_ENTRY",
+]

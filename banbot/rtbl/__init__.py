@@ -11,6 +11,10 @@ from .utils import (
     _rtbl_hash_jid,
 )
 
+# Exported lazily via __getattr__ to keep banbot.rtbl.utils importable even
+# when optional runtime dependencies for the full RTBL mixin are unavailable.
+RtblMixin: object
+
 
 def __getattr__(name: str):
     if name == "RtblMixin":
@@ -21,6 +25,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "RtblMixin",
     "RTBL_PUBLISH_SANITY_CHECK_REASON",
     "_is_domain",
     "_is_sha256",
