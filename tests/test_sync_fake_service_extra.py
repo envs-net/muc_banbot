@@ -405,14 +405,18 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
 
 
 def prepare_bot_for_room_sync(bot, sync_module, room):
-    """Mutate and return a SyncBot prepared to occupy one protected room."""
+    """Configure a SyncBot for one protected room by mutating it in place.
+
+    Sets protected rooms, admin rooms, and occupants on the provided bot
+    instance, then returns that same instance for convenience.
+    """
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}
     bot.occupants = {room: {sync_module.NICK: {"jid": "bot@example.test"}}}
     return bot
 
 
-async def make_bot_for_join_time_check(temp_db_path, sync_module, room, *, fail_join=False):
+async def make_bot_for_room_sync(temp_db_path, sync_module, room, *, fail_join=False):
     """Build a room-sync bot with explicit DB path and optional join failure."""
     bot = await make_bot(temp_db_path)
     bot = prepare_bot_for_room_sync(bot, sync_module, room)
@@ -432,7 +436,7 @@ async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_d
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     room = "room@conference.example.test"
-    bot = await make_bot_for_join_time_check(
+    bot = await make_bot_for_room_sync(
         temp_db_path, sync_module, room, fail_join=True
     )
     try:
@@ -455,7 +459,7 @@ async def test_sync_rooms_and_bans_sets_join_time_after_success(temp_db_path, mo
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     room = "room-ok@conference.example.test"
-    bot = await make_bot_for_join_time_check(temp_db_path, sync_module, room)
+    bot = await make_bot_for_room_sync(temp_db_path, sync_module, room)
     try:
         await bot.sync_rooms_and_bans()
 
