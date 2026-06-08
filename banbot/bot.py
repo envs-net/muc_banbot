@@ -73,6 +73,10 @@ class _SlixmppStatusesWarningFilter(logging.Filter):
         return record.getMessage() != "Unknown stanza interface: statuses"
 
 
+def _is_slixmpp_statuses_warning(record: logging.LogRecord) -> bool:
+    return record.getMessage() == "Unknown stanza interface: statuses"
+
+
 def _install_slixmpp_statuses_warning_filter() -> None:
     root_logger = logging.getLogger()
     already_installed = any(
@@ -89,6 +93,23 @@ def _install_slixmpp_statuses_warning_filter() -> None:
         )
         if not handler_has_filter:
             handler.addFilter(_SlixmppStatusesWarningFilter())
+
+    # Some Slixmpp paths emit this warning through loggers/handlers that may be
+    # created after BanBot startup.  Keep the handler filters above for normal
+    # logging, but also guard Logger.handle itself so late-added handlers cannot
+    # reintroduce the same known-noisy warning.
+    if getattr(logging.Logger, "_banbot_statuses_filter_installed", False):
+        return
+
+    original_handle = logging.Logger.handle
+
+    def filtered_handle(self, record):
+        if _is_slixmpp_statuses_warning(record):
+            return
+        return original_handle(self, record)
+
+    logging.Logger.handle = filtered_handle
+    logging.Logger._banbot_statuses_filter_installed = True
 
 
 _install_slixmpp_statuses_warning_filter()

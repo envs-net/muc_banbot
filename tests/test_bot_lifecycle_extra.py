@@ -40,6 +40,27 @@ def test_slixmpp_statuses_warning_filter_suppresses_known_noise():
     assert log_filter.filter(status_record) is False
     assert log_filter.filter(other_record) is True
 
+
+def test_slixmpp_statuses_warning_filter_suppresses_late_handlers():
+    seen = []
+
+    class ListHandler(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+
+    logger = logging.getLogger("banbot-test-statuses-filter")
+    logger.setLevel(logging.WARNING)
+    logger.propagate = False
+    handler = ListHandler()
+    logger.addHandler(handler)
+    try:
+        logger.warning("Unknown stanza interface: statuses")
+        logger.warning("Unknown stanza interface: other")
+    finally:
+        logger.removeHandler(handler)
+
+    assert seen == ["Unknown stanza interface: other"]
+
 class FakeMucPlugin:
     def __init__(self):
         self.joined = []
