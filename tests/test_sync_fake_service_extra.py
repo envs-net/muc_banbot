@@ -30,14 +30,14 @@ class FakeMucService:
 
     @staticmethod
     def _normalize_affiliations(affiliations):
-        if affiliations is None:
+        if not affiliations:
             return {}
         if all(isinstance(key, tuple) and len(key) == 2 for key in affiliations):
-            return affiliations
+            return {key: list(users) for key, users in affiliations.items()}
         normalized = {}
         for room, affiliation_map in affiliations.items():
             for affiliation, users in affiliation_map.items():
-                normalized[(room, affiliation)] = users
+                normalized[(room, affiliation)] = list(users)
         return normalized
 
     def leave_muc(self, room, nick):
@@ -235,6 +235,10 @@ async def test_fake_muc_service_accepts_nested_affiliation_mapping():
         }
     )
 
+    assert service.affiliations == {
+        ("room@example.test", "owner"): ["owner@example.test"],
+        ("room@example.test", "admin"): ["admin@example.test"],
+    }
     assert await service.get_users_by_affiliation("room@example.test", "owner") == [
         "owner@example.test"
     ]
@@ -254,6 +258,10 @@ async def test_fake_muc_service_accepts_tuple_affiliation_mapping():
         }
     )
 
+    assert service.affiliations == {
+        ("room@example.test", "owner"): ["owner@example.test"],
+        ("room@example.test", "admin"): ["admin@example.test"],
+    }
     assert await service.get_users_by_affiliation("room@example.test", "owner") == [
         "owner@example.test"
     ]
@@ -262,24 +270,34 @@ async def test_fake_muc_service_accepts_tuple_affiliation_mapping():
     ]
 
 
+def test_fake_muc_service_handles_empty_affiliation_mapping():
+    assert FakeMucService().affiliations == {}
+    assert FakeMucService({}).affiliations == {}
+
+
 @pytest.mark.asyncio
 async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, monkeypatch):
     import banbot.sync as sync_module
 
     monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
-    bot.plugin["xep_0045"] = FakeMucService(
+    muc_service = FakeMucService(
         {
             ("admin@conference.example.test", "owner"): ["owner@example.test"],
             ("admin@conference.example.test", "admin"): ["admin@example.test"],
         }
     )
+    bot.plugin["xep_0045"] = muc_service
     try:
         await bot.sync_admins(announce=True)
 
         occupants = bot.occupants["admin@conference.example.test"]
         assert occupants["owner@example.test"]["affiliation"] == "owner"
         assert occupants["admin@example.test"]["affiliation"] == "admin"
+        assert {
+            ("admin@conference.example.test", "owner"),
+            ("admin@conference.example.test", "admin"),
+        } <= set(muc_service.calls)
         assert "Current admins/owners" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
@@ -350,8 +368,14 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
         await bot.db.close()
 
 
+def prepare_bot_for_room_sync(bot, sync_module, room):
+    bot.protected_rooms = {room}
+    bot.admin_rooms = {room}
+    bot.occupants = {room: {sync_module.NICK: {"jid": "bot@example.test"}}}
+
+
 @pytest.mark.asyncio
-async def test_sync_rooms_and_bans_sets_join_time_only_after_success(temp_db_path, monkeypatch):
+async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_db_path, monkeypatch):
     import banbot.sync as sync_module
 
     monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
@@ -361,29 +385,35 @@ async def test_sync_rooms_and_bans_sets_join_time_only_after_success(temp_db_pat
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     bot = await make_bot()
-    bot.protected_rooms = {"room@conference.example.test"}
-    bot.admin_rooms = {"room@conference.example.test"}
-    bot.occupants = {
-        "room@conference.example.test": {sync_module.NICK: {"jid": "bot@example.test"}}
-    }
-    bot.plugin["xep_0045"] = FakeMucService(fail_join_rooms={"room@conference.example.test"})
+    room = "room@conference.example.test"
+    prepare_bot_for_room_sync(bot, sync_module, room)
+    bot.plugin["xep_0045"] = FakeMucService(fail_join_rooms={room})
     try:
         await bot.sync_rooms_and_bans()
 
-        assert "room@conference.example.test" not in bot.room_join_time
-        assert bot.bot_admin_state["room@conference.example.test"] is True
+        assert room not in bot.room_join_time
+        assert bot.bot_admin_state[room] is True
+    finally:
+        await bot.db.close()
 
-        bot.protected_rooms = {"room-ok@conference.example.test"}
-        bot.admin_rooms = {"room-ok@conference.example.test"}
-        bot.occupants = {
-            "room-ok@conference.example.test": {
-                sync_module.NICK: {"jid": "bot@example.test"}
-            }
-        }
-        bot.plugin["xep_0045"] = FakeMucService()
 
+@pytest.mark.asyncio
+async def test_sync_rooms_and_bans_sets_join_time_after_success(temp_db_path, monkeypatch):
+    import banbot.sync as sync_module
+
+    monkeypatch.setattr(sync_module, "ADMIN_ROOM", "admin@conference.example.test")
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
+    bot = await make_bot()
+    room = "room-ok@conference.example.test"
+    prepare_bot_for_room_sync(bot, sync_module, room)
+    bot.plugin["xep_0045"] = FakeMucService()
+    try:
         await bot.sync_rooms_and_bans()
 
-        assert "room-ok@conference.example.test" in bot.room_join_time
+        assert room in bot.room_join_time
     finally:
         await bot.db.close()

@@ -225,7 +225,7 @@ class ConfigValidationMixin:
             errors.append("REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)")
         if not isinstance(config_value("AUTO_REDACT_ON_IMPORTED_BAN_REASON", False), bool):
             errors.append("AUTO_REDACT_ON_IMPORTED_BAN_REASON must be True or False")
-        if not isinstance(config_value("AUTO_REDACT_ON_MANUAL_MUC_BAN", False), bool):
+        if not isinstance(config_value("AUTO_REDACT_ON_MANUAL_MUC_BAN", True), bool):
             errors.append("AUTO_REDACT_ON_MANUAL_MUC_BAN must be True or False")
         redaction_reasons = config_value("REDACTION_AUTO_REASONS", [])
         if not isinstance(redaction_reasons, (list, tuple)) or not all(isinstance(item, str) for item in redaction_reasons):

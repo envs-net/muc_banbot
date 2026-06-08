@@ -212,7 +212,7 @@ AUTO_REDACT_ON_IMPORTED_BAN_REASON = False
 # Also apply automatic redaction to matching manual/external MUC bans discovered
 # during startup sync, !syncbans, or room sync. Uses REDACTION_AUTO_REASONS.
 # Disabled by default because manual room bans may not have complete bot context.
-AUTO_REDACT_ON_MANUAL_MUC_BAN = False
+AUTO_REDACT_ON_MANUAL_MUC_BAN = True
 
 # Ban comments matching one of these strings trigger automatic redaction for
 # JID bans. Matching is case-insensitive.

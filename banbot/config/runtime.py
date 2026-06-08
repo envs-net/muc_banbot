@@ -129,7 +129,7 @@ class ConfigRuntimeMixin:
         self.redaction_enabled = getattr(config, "REDACTION_ENABLED", False)
         self.redaction_index_retention_days = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
         self.auto_redact_on_imported_ban_reason = getattr(config, "AUTO_REDACT_ON_IMPORTED_BAN_REASON", False)
-        self.auto_redact_on_manual_muc_ban = getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", False)
+        self.auto_redact_on_manual_muc_ban = getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", True)
         self.redaction_auto_reasons = list(getattr(config, "REDACTION_AUTO_REASONS", []))
 
     def parse_config_value(self, raw: str) -> Any:

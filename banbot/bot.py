@@ -298,7 +298,7 @@ class BanBot(
         self.redaction_enabled: bool = getattr(config, "REDACTION_ENABLED", False)
         self.redaction_index_retention_days: int = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
         self.auto_redact_on_imported_ban_reason: bool = getattr(config, "AUTO_REDACT_ON_IMPORTED_BAN_REASON", False)
-        self.auto_redact_on_manual_muc_ban: bool = getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", False)
+        self.auto_redact_on_manual_muc_ban: bool = getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", True)
         self.redaction_auto_reasons: list[str] = list(getattr(config, "REDACTION_AUTO_REASONS", []))
         self.redaction_cleanup_task: asyncio.Task | None = None
 

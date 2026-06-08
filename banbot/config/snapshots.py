@@ -56,7 +56,7 @@ class ConfigSnapshotMixin:
             "REDACTION_ENABLED": self.redaction_enabled,
             "REDACTION_INDEX_RETENTION_DAYS": self.redaction_index_retention_days,
             "AUTO_REDACT_ON_IMPORTED_BAN_REASON": getattr(self, "auto_redact_on_imported_ban_reason", False),
-            "AUTO_REDACT_ON_MANUAL_MUC_BAN": getattr(self, "auto_redact_on_manual_muc_ban", False),
+            "AUTO_REDACT_ON_MANUAL_MUC_BAN": getattr(self, "auto_redact_on_manual_muc_ban", True),
             "REDACTION_AUTO_REASONS": tuple(self.redaction_auto_reasons),
             "VERSION_CHECK_ENABLED": self.version_check_enabled,
             "VERSION_CHECK_INTERVAL": self.version_check_interval,
