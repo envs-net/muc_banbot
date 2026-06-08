@@ -44,7 +44,10 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
 
 @pytest.mark.asyncio
 async def test_export_bans_to_csv_uses_cache(tmp_path, monkeypatch):
+    import banbot.import_export as import_export_module
+
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(import_export_module.config, "EXPORT_DIR", "data/exports", raising=False)
     bot = ImportBot()
     bot._cache_ban("User@Example.org/resource", "Nick", 0, "tester", "reason")
 

@@ -38,7 +38,8 @@ class ImportExportMixin:
     def _export_config_value(self, name: str, default: Any) -> Any:
         if config is None:
             return default
-        return getattr(config, name, default)
+        value = getattr(config, name, default)
+        return default if value is None else value
 
     def _export_dir(self) -> pathlib.Path:
         raw_dir = str(self._export_config_value("EXPORT_DIR", "data/exports")).strip()

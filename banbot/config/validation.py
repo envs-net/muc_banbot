@@ -19,6 +19,10 @@ class ConfigValidationMixin:
         errors: list[str] = []
         warnings: list[str] = []
 
+        def config_value(name: str, default: object) -> object:
+            value = getattr(config, name, default)
+            return default if value is None else value
+
         def require_non_empty(name: str) -> str:
             value = str(getattr(config, name, "")).strip()
             if not value:
@@ -60,18 +64,18 @@ class ConfigValidationMixin:
         ):
             warnings.append("Both RESOURCE and legacy RESSOURCE are set; RESOURCE will be used")
 
-        log_level = str(getattr(config, "LOG_LEVEL", "INFO")).upper().strip()
+        log_level = str(config_value("LOG_LEVEL", "INFO")).upper().strip()
         if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
 
-        command_prefix = str(getattr(config, "COMMAND_PREFIX", "!")).strip()
+        command_prefix = str(config_value("COMMAND_PREFIX", "!")).strip()
         if not command_prefix:
             warnings.append("COMMAND_PREFIX is empty; effective value will be '!'")
         elif any(ch.isspace() for ch in command_prefix):
             errors.append("COMMAND_PREFIX must not contain whitespace")
 
         for key in ("CONFIG_OUTPUT_MODE", "HELP_OUTPUT_MODE"):
-            mode = str(getattr(config, key, "all")).lower().strip()
+            mode = str(config_value(key, "all")).lower().strip()
             if mode not in {"all", "paginate"}:
                 errors.append(f"{key} must be one of all, paginate")
 
@@ -112,7 +116,7 @@ class ConfigValidationMixin:
             "EXPORT_KEEP": 15,
         }
         for name, (minimum, maximum) in int_ranges.items():
-            value = getattr(config, name, int_defaults.get(name))
+            value = config_value(name, int_defaults.get(name))
             if not isinstance(value, int):
                 errors.append(f"{name} must be an integer")
                 continue
@@ -160,16 +164,16 @@ class ConfigValidationMixin:
             "ALERT_ON_REDACTION_FAILURE": True,
         }
         for name in bool_names:
-            if not isinstance(getattr(config, name, bool_defaults.get(name)), bool):
+            if not isinstance(config_value(name, bool_defaults.get(name)), bool):
                 errors.append(f"{name} must be True or False")
 
-        version_url = str(getattr(config, "VERSION_CHECK_URL", "")).strip()
-        if getattr(config, "VERSION_CHECK_ENABLED", False) and not version_url:
+        version_url = str(config_value("VERSION_CHECK_URL", "")).strip()
+        if config_value("VERSION_CHECK_ENABLED", False) and not version_url:
             errors.append("VERSION_CHECK_URL must not be empty when VERSION_CHECK_ENABLED=True")
         if version_url and not version_url.startswith(("http://", "https://")):
             errors.append("VERSION_CHECK_URL must start with http:// or https://")
 
-        avatar_path = getattr(config, "AVATAR_PATH", None)
+        avatar_path = config_value("AVATAR_PATH", None)
         if avatar_path and not pathlib.Path(str(avatar_path)).exists():
             warnings.append(f"AVATAR_PATH does not exist: {avatar_path}")
 
@@ -178,7 +182,7 @@ class ConfigValidationMixin:
             if str(db_parent) not in ("", ".") and not db_parent.exists():
                 errors.append(f"DB_FILE directory does not exist: {db_parent}")
 
-        backup_dir_value = getattr(config, "DB_BACKUP_DIR", "data/backups")
+        backup_dir_value = config_value("DB_BACKUP_DIR", "data/backups")
         if not isinstance(backup_dir_value, str):
             errors.append("DB_BACKUP_DIR must be a string")
             backup_dir = ""
@@ -187,7 +191,7 @@ class ConfigValidationMixin:
         if not backup_dir:
             errors.append("DB_BACKUP_DIR must not be empty")
 
-        export_dir_value = getattr(config, "EXPORT_DIR", "data/exports")
+        export_dir_value = config_value("EXPORT_DIR", "data/exports")
         if not isinstance(export_dir_value, str):
             errors.append("EXPORT_DIR must be a string")
             export_dir = ""
@@ -197,45 +201,45 @@ class ConfigValidationMixin:
             errors.append("EXPORT_DIR must not be empty")
 
         # --- Connection ---
-        connect_host = getattr(config, "CONNECT_HOST", None)
+        connect_host = config_value("CONNECT_HOST", None)
         if connect_host is not None and not isinstance(connect_host, str):
             errors.append("CONNECT_HOST must be a string or None")
 
-        connect_port = getattr(config, "CONNECT_PORT", 5222)
+        connect_port = config_value("CONNECT_PORT", 5222)
         if not isinstance(connect_port, int) or not (1 <= connect_port <= 65535):
             errors.append("CONNECT_PORT must be an integer between 1 and 65535")
 
         # --- RTBL ---
-        if not isinstance(getattr(config, "RTBL_ENABLED", False), bool):
+        if not isinstance(config_value("RTBL_ENABLED", False), bool):
             errors.append("RTBL_ENABLED must be True or False")
-        if not isinstance(getattr(config, "RTBL_ANNOUNCE", True), bool):
+        if not isinstance(config_value("RTBL_ANNOUNCE", True), bool):
             errors.append("RTBL_ANNOUNCE must be True or False")
 
-        rtbl_refresh = getattr(config, "RTBL_REFRESH_INTERVAL", 3600)
+        rtbl_refresh = config_value("RTBL_REFRESH_INTERVAL", 3600)
         if not isinstance(rtbl_refresh, int) or rtbl_refresh < 0:
             errors.append("RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)")
 
         # --- Redaction ---
-        redaction_retention = getattr(config, "REDACTION_INDEX_RETENTION_DAYS", 30)
+        redaction_retention = config_value("REDACTION_INDEX_RETENTION_DAYS", 30)
         if not isinstance(redaction_retention, int) or redaction_retention < 0:
             errors.append("REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)")
-        if not isinstance(getattr(config, "AUTO_REDACT_ON_IMPORTED_BAN_REASON", False), bool):
+        if not isinstance(config_value("AUTO_REDACT_ON_IMPORTED_BAN_REASON", False), bool):
             errors.append("AUTO_REDACT_ON_IMPORTED_BAN_REASON must be True or False")
-        if not isinstance(getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", False), bool):
+        if not isinstance(config_value("AUTO_REDACT_ON_MANUAL_MUC_BAN", False), bool):
             errors.append("AUTO_REDACT_ON_MANUAL_MUC_BAN must be True or False")
-        redaction_reasons = getattr(config, "REDACTION_AUTO_REASONS", [])
+        redaction_reasons = config_value("REDACTION_AUTO_REASONS", [])
         if not isinstance(redaction_reasons, (list, tuple)) or not all(isinstance(item, str) for item in redaction_reasons):
             errors.append("REDACTION_AUTO_REASONS must be a list of strings")
 
         # --- RTBL Publish ---
-        rtbl_pub = getattr(config, "RTBL_PUBLISH_ENABLED", False)
+        rtbl_pub = config_value("RTBL_PUBLISH_ENABLED", False)
         if not isinstance(rtbl_pub, bool):
             errors.append("RTBL_PUBLISH_ENABLED must be True or False")
 
         if rtbl_pub:
-            pub_service = str(getattr(config, "RTBL_PUBLISH_SERVICE", "")).strip()
-            pub_jid_node = str(getattr(config, "RTBL_PUBLISH_JID_NODE", "")).strip()
-            pub_domain_node = str(getattr(config, "RTBL_PUBLISH_DOMAIN_NODE", "")).strip()
+            pub_service = str(config_value("RTBL_PUBLISH_SERVICE", "")).strip()
+            pub_jid_node = str(config_value("RTBL_PUBLISH_JID_NODE", "")).strip()
+            pub_domain_node = str(config_value("RTBL_PUBLISH_DOMAIN_NODE", "")).strip()
             if not pub_service:
                 errors.append("RTBL_PUBLISH_SERVICE must not be empty when RTBL_PUBLISH_ENABLED=True")
             elif "." not in pub_service:
@@ -246,7 +250,7 @@ class ConfigValidationMixin:
                 errors.append("RTBL_PUBLISH_DOMAIN_NODE must not be empty when RTBL_PUBLISH_ENABLED=True")
 
         # --- OMEMO ---
-        omemo_enabled = getattr(config, "OMEMO_ENABLED", False)
+        omemo_enabled = config_value("OMEMO_ENABLED", False)
         if not isinstance(omemo_enabled, bool):
             errors.append("OMEMO_ENABLED must be True or False")
 
@@ -255,7 +259,7 @@ class ConfigValidationMixin:
             ("OMEMO_PLAINTEXT_FALLBACK", False),
             ("OMEMO_RESET_ON_IDENTITY_CHANGE", True),
         ):
-            if not isinstance(getattr(config, name, default), bool):
+            if not isinstance(config_value(name, default), bool):
                 errors.append(f"{name} must be True or False")
 
         if omemo_enabled:
@@ -266,7 +270,7 @@ class ConfigValidationMixin:
                     "after installing system libraries such as libsodium-dev and libxeddsa-dev."
                 )
 
-            omemo_storage_raw = str(getattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json")).strip()
+            omemo_storage_raw = str(config_value("OMEMO_STORAGE_FILE", "data/omemo.json")).strip()
             if not omemo_storage_raw:
                 errors.append("OMEMO_STORAGE_FILE must not be empty when OMEMO_ENABLED=True")
             else:

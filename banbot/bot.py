@@ -60,24 +60,36 @@ if not isinstance(_log_level, int):
 logging.basicConfig(level=_log_level)
 
 
+_SLIXMPP_STATUSES_WARNING = "Unknown stanza interface: statuses"
+
+
+def _is_slixmpp_statuses_warning(record: logging.LogRecord) -> bool:
+    return record.getMessage() == _SLIXMPP_STATUSES_WARNING
+
+
 class _SlixmppStatusesWarningFilter(logging.Filter):
     """Suppress noisy Slixmpp warnings for unknown ``statuses`` interfaces.
 
     Some servers/clients include status-related XML that Slixmpp may expose as
-    an unknown ``statuses`` stanza interface.  Slixmpp logs this exact warning
-    via the root logger, which can spam production logs even though BanBot does
-    not need that interface.
+    an unknown ``statuses`` stanza interface. Slixmpp logs this exact warning,
+    which can spam production logs even though BanBot does not need that
+    interface.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return record.getMessage() != "Unknown stanza interface: statuses"
-
-
-def _is_slixmpp_statuses_warning(record: logging.LogRecord) -> bool:
-    return record.getMessage() == "Unknown stanza interface: statuses"
+        return not _is_slixmpp_statuses_warning(record)
 
 
 def _install_slixmpp_statuses_warning_filter() -> None:
+    """Install a narrow filter for Slixmpp's known ``statuses`` noise.
+
+    Handler filters are not enough in every runtime setup: third-party logging
+    configuration can replace root handlers after startup, and records emitted
+    by child loggers do not run through filters attached only to ancestor
+    loggers. Wrapping ``Logger.handle`` drops the single known-noisy record
+    before any handler sees it, while all other warnings continue normally.
+    """
+
     root_logger = logging.getLogger()
     already_installed = any(
         isinstance(existing_filter, _SlixmppStatusesWarningFilter)
@@ -94,22 +106,21 @@ def _install_slixmpp_statuses_warning_filter() -> None:
         if not handler_has_filter:
             handler.addFilter(_SlixmppStatusesWarningFilter())
 
-    # Some Slixmpp paths emit this warning through loggers/handlers that may be
-    # created after BanBot startup.  Keep the handler filters above for normal
-    # logging, but also guard Logger.handle itself so late-added handlers cannot
-    # reintroduce the same known-noisy warning.
-    if getattr(logging.Logger, "_banbot_statuses_filter_installed", False):
+    if getattr(logging, "_banbot_statuses_warning_handle_filter_installed", False):
         return
 
     original_handle = logging.Logger.handle
 
-    def filtered_handle(self, record):
+    def handle_with_statuses_filter(
+        self: logging.Logger,
+        record: logging.LogRecord,
+    ) -> None:
         if _is_slixmpp_statuses_warning(record):
-            return
+            return None
         return original_handle(self, record)
 
-    logging.Logger.handle = filtered_handle
-    logging.Logger._banbot_statuses_filter_installed = True
+    logging.Logger.handle = handle_with_statuses_filter
+    logging._banbot_statuses_warning_handle_filter_installed = True
 
 
 _install_slixmpp_statuses_warning_filter()
