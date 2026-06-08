@@ -15,12 +15,26 @@ from banbot.utils import bare_jid, safe_jid as real_safe_jid
 
 
 class FakeMucService:
+    """Fake MUC affiliation service used by sync tests."""
+
     def __init__(self, affiliations=None, fail_join_rooms=None):
-        self.affiliations = affiliations or {}
+        self.affiliations = self._normalize_affiliations(affiliations)
         self.fail_join_rooms = set(fail_join_rooms or [])
         self.calls = []
         self.left = []
         self.joined = []
+
+    @staticmethod
+    def _normalize_affiliations(affiliations):
+        if affiliations is None:
+            return {}
+        if all(isinstance(key, tuple) and len(key) == 2 for key in affiliations):
+            return affiliations
+        normalized = {}
+        for room, affiliation_map in affiliations.items():
+            for affiliation, users in affiliation_map.items():
+                normalized[(room, affiliation)] = users
+        return normalized
 
     def leave_muc(self, room, nick):
         self.left.append((room, nick))
@@ -207,6 +221,25 @@ async def test_sync_bans_to_rooms_skips_room_without_bot_admin_rights(temp_db_pa
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_fake_muc_service_accepts_nested_affiliation_mapping():
+    service = FakeMucService(
+        {
+            "room@example.test": {
+                "owner": ["owner@example.test"],
+                "admin": ["admin@example.test"],
+            }
+        }
+    )
+
+    assert await service.get_users_by_affiliation("room@example.test", "owner") == [
+        "owner@example.test"
+    ]
+    assert await service.get_users_by_affiliation("room@example.test", "admin") == [
+        "admin@example.test"
+    ]
+
+
 async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, monkeypatch):
     import banbot.sync as sync_module
 

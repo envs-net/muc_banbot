@@ -26,6 +26,7 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
         self._pending_database_backup_audit_events = []
         self.sent = []
         self.command_prefix = "!"
+        self.db = None
         self._database_file_operation_lock = asyncio.Lock()
         self._ban_state_operation_lock = asyncio.Lock()
 

@@ -41,6 +41,8 @@ def test_slixmpp_statuses_warning_filter_suppresses_known_noise():
     assert log_filter.filter(other_record) is True
 
 class FakeMucPlugin:
+    """Minimal fake MUC plugin that records room joins requested by the bot."""
+
     def __init__(self):
         self.joined = []
 
@@ -49,6 +51,8 @@ class FakeMucPlugin:
 
 
 class FakeTask:
+    """Cancellable awaitable test double used to verify task shutdown behavior."""
+
     def __init__(self, name="task"):
         self.name = name
         self.cancelled = False
@@ -69,6 +73,8 @@ class FakeTask:
 
 
 class CompletedTask:
+    """Simple task-like object returned by fake create_task in startup tests."""
+
     def __init__(self, name="task"):
         self.name = name
         self.cancelled = False

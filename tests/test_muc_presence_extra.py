@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from types import SimpleNamespace
+from unittest.mock import Mock
 from typing import TypedDict
 from xml.etree import ElementTree as ET
 
@@ -193,7 +194,7 @@ class MucBotFixture(CacheMixin, DatabaseMixin, MucMixin):
         self.unbans.append((jid, issuer))
 
 @pytest.mark.asyncio
-async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_bans(temp_db_path):
+async def test_muc_online_applies_jid_and_domain_bans(temp_db_path):
     bot = MucBotFixture(temp_db_path)
     await bot.setup_db()
     try:
@@ -262,7 +263,27 @@ def test_muc_presence_status_codes_does_not_probe_unregistered_statuses_interfac
     presence._muc = MucMapping({"status_codes": {MUC_STATUS_BANNED}})
 
     assert bot._muc_presence_status_codes(presence) == {MUC_STATUS_BANNED}
+    assert "status_codes" in probed_keys
     assert "statuses" not in probed_keys
+
+@pytest.mark.asyncio
+async def test_muc_offline_ignores_nonexistent_occupant():
+    bot = MucBotFixture()
+    bot.occupants = {
+        ROOM_JID: {
+            BAD_NICK: {
+                "jid": BAD_JID_RESOURCE,
+                "affiliation": MEMBER_AFFILIATION,
+                "role": PARTICIPANT_ROLE,
+            }
+        }
+    }
+
+    await bot.muc_offline(FakePresence(room=ROOM_JID, nick=USER_NICK))
+
+    assert BAD_NICK in bot.occupants[ROOM_JID]
+    assert USER_NICK not in bot.occupants[ROOM_JID]
+
 
 @pytest.mark.asyncio
 async def test_muc_offline_removes_occupant():
@@ -455,13 +476,13 @@ async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatc
 async def test_delayed_reconnect_waits_for_session_start_signal(monkeypatch):
     bot = MucBotFixture()
     bot.reconnecting = True
-    calls = {"connect": 0}
+    connect_mock = Mock(return_value=True)
 
     async def no_sleep(_delay):
         pass
 
     def fake_connect_with_config():
-        calls["connect"] += 1
+        connect_mock()
         bot._get_reconnect_success_event().set()
         return True
 
@@ -470,13 +491,13 @@ async def test_delayed_reconnect_waits_for_session_start_signal(monkeypatch):
 
     await bot._delayed_reconnect()
 
-    assert calls["connect"] == 1
+    assert connect_mock.call_count == 1
 
 @pytest.mark.asyncio
 async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch):
     bot = MucBotFixture()
     bot.reconnecting = True
-    calls = {"connect": 0}
+    connect_mock = Mock(return_value=True)
 
     async def no_sleep(_delay):
         pass
@@ -488,13 +509,13 @@ async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch)
         close = getattr(awaitable, "close", None)
         if callable(close):
             close()
-        if calls["connect"] < 2:
+        if connect_mock.call_count < 2:
             raise asyncio.TimeoutError
         return None
 
     def fake_connect_with_config():
-        calls["connect"] += 1
-        if calls["connect"] >= 2:
+        connect_mock()
+        if connect_mock.call_count >= 2:
             bot._get_reconnect_success_event().set()
         return True
 
@@ -504,4 +525,4 @@ async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch)
 
     await bot._delayed_reconnect()
 
-    assert calls["connect"] == 2
+    assert connect_mock.call_count == 2
