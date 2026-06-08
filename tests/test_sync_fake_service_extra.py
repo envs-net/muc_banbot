@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -53,6 +54,16 @@ class FakeMucService:
         return list(self.affiliations.get((room, affiliation), []))
 
 
+@dataclass
+class TestTrackingState:
+    """Mutable call tracking state shared by sync test assertions."""
+
+    sent: list = field(default_factory=list)
+    applied: list = field(default_factory=list)
+    unbanned: list = field(default_factory=list)
+    auto_redactions: list = field(default_factory=list)
+
+
 class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
     def __init__(self, db_path):
         self._test_db_path = str(db_path)
@@ -63,13 +74,10 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.ban_index_by_jid = {}
         self.ban_index_by_nick = {}
         self.ban_index_by_domain = {}
-        self.sent = []
+        self.test_state = TestTrackingState()
         self.room_join_time = {}
         self.bot_admin_state = {}
         self.sync_batch_size = 10
-        self.applied = []
-        self.unbanned = []
-        self.auto_redactions = []
         self.admin_rooms = {"room@conference.example.test"}
 
     async def setup_db(self, *, create_startup_backup: bool = True) -> None:
@@ -90,6 +98,22 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
     @staticmethod
     def safe_jid(jid):
         return real_safe_jid(jid)
+
+    @property
+    def sent(self):
+        return self.test_state.sent
+
+    @property
+    def applied(self):
+        return self.test_state.applied
+
+    @property
+    def unbanned(self):
+        return self.test_state.unbanned
+
+    @property
+    def auto_redactions(self):
+        return self.test_state.auto_redactions
 
     def is_bot_admin_or_owner(self, room):
         return room in self.admin_rooms
@@ -381,16 +405,17 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
 
 
 def prepare_bot_for_room_sync(bot, sync_module, room):
-    """Prepare a SyncBot instance as if it already occupies one protected room."""
+    """Mutate and return a SyncBot prepared to occupy one protected room."""
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}
     bot.occupants = {room: {sync_module.NICK: {"jid": "bot@example.test"}}}
+    return bot
 
 
 async def make_bot_for_join_time_check(temp_db_path, sync_module, room, *, fail_join=False):
     """Build a room-sync bot with explicit DB path and optional join failure."""
     bot = await make_bot(temp_db_path)
-    prepare_bot_for_room_sync(bot, sync_module, room)
+    bot = prepare_bot_for_room_sync(bot, sync_module, room)
     failed_rooms = {room} if fail_join else None
     bot.plugin["xep_0045"] = FakeMucService(fail_join_rooms=failed_rooms)
     return bot
