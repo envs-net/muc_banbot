@@ -232,6 +232,24 @@ async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
     finally:
         await bot.db.close()
 
+
+def test_muc_presence_status_codes_does_not_probe_unregistered_statuses_interface():
+    bot = MucBotFixture()
+    presence = FakePresence(status_codes=None)
+    probed_keys = []
+
+    class MucMapping(dict):
+        def get(self, key, default=None):
+            probed_keys.append(key)
+            if key == "statuses":
+                pytest.fail("statuses interface must not be probed")
+            return super().get(key, default)
+
+    presence._muc = MucMapping({"status_codes": {MUC_STATUS_BANNED}})
+
+    assert bot._muc_presence_status_codes(presence) == {MUC_STATUS_BANNED}
+    assert "statuses" not in probed_keys
+
 @pytest.mark.asyncio
 async def test_muc_offline_removes_occupant():
     bot = MucBotFixture()

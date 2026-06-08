@@ -306,6 +306,7 @@ async def test_sync_rooms_and_bans_sets_join_time_only_after_success(temp_db_pat
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     bot = await make_bot()
     bot.protected_rooms = {"room@conference.example.test"}
+    bot.admin_rooms = {"room@conference.example.test"}
     bot.occupants = {
         "room@conference.example.test": {sync_module.NICK: {"jid": "bot@example.test"}}
     }
@@ -315,5 +316,18 @@ async def test_sync_rooms_and_bans_sets_join_time_only_after_success(temp_db_pat
 
         assert "room@conference.example.test" not in bot.room_join_time
         assert bot.bot_admin_state["room@conference.example.test"] is True
+
+        bot.protected_rooms = {"room-ok@conference.example.test"}
+        bot.admin_rooms = {"room-ok@conference.example.test"}
+        bot.occupants = {
+            "room-ok@conference.example.test": {
+                sync_module.NICK: {"jid": "bot@example.test"}
+            }
+        }
+        bot.plugin["xep_0045"] = FakeMucService()
+
+        await bot.sync_rooms_and_bans()
+
+        assert "room-ok@conference.example.test" in bot.room_join_time
     finally:
         await bot.db.close()

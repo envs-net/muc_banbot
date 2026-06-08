@@ -228,7 +228,12 @@ class MucMixin:
         except Exception:
             muc = None
 
-        for key in ("status_codes", "status", "statuses"):
+        # Do not probe the unregistered Slixmpp ``statuses`` interface here.
+        # Some servers/clients include MUC status XML, but asking Slixmpp for
+        # an unknown stanza interface emits noisy root warnings.  Registered
+        # mapping-style values cover tests and known Slixmpp shapes; raw XML is
+        # inspected below for the actual <status code="..."/> elements.
+        for key in ("status_codes", "status"):
             try:
                 value = muc.get(key) if hasattr(muc, "get") else None
             except Exception:
