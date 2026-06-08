@@ -10,35 +10,13 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
-try:
-    import aiosqlite
-except ImportError:
-    aiosqlite = None
+pytest.importorskip("aiosqlite")
 
-pytestmark = pytest.mark.skipif(
-    aiosqlite is None,
-    reason="aiosqlite is required for MUC presence extra tests",
-)
-
-if aiosqlite is not None:
-    from banbot import muc as muc_module
-    from banbot.cache import CacheMixin
-    from banbot.db import DatabaseMixin
-    from banbot.muc import MucMixin
-    from banbot.utils import bare_jid
-else:  # pragma: no cover - tests are skipped when aiosqlite is unavailable
-    muc_module = None
-
-    class CacheMixin:
-        pass
-
-    class DatabaseMixin:
-        pass
-
-    class MucMixin:
-        pass
-
-    bare_jid = None
+from banbot import muc as muc_module
+from banbot.cache import CacheMixin
+from banbot.db import DatabaseMixin
+from banbot.muc import MucMixin
+from banbot.utils import bare_jid
 
 
 MUC_USER_NS = "http://jabber.org/protocol/muc#user"
@@ -78,6 +56,8 @@ class FakeMuc(TypedDict, total=False):
 
 
 class FakePresence:
+    """Synthetic XMPP MUC presence stanza used by MucMixin tests."""
+
     def __init__(
         self,
         *,
@@ -118,6 +98,14 @@ class FakePresence:
 
 
 class MucBotFixture(CacheMixin, DatabaseMixin, MucMixin):
+    """Compact fixture combining cache, database and MUC behavior.
+
+    It keeps all interactions in memory except for the temporary SQLite
+    database supplied by ``temp_db_path``.  Captured lists expose side effects
+    such as sent messages, applied bans, RTBL checks, manual redactions and
+    unbans for assertions.
+    """
+
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path
         self.protected_rooms = {ROOM_JID}
@@ -153,10 +141,19 @@ class MucBotFixture(CacheMixin, DatabaseMixin, MucMixin):
         nick: str | None = None,
         jid: str | None = None,
     ) -> bool:
-        info = self.occupants.get(room, {}).get(nick or "")
+        room_occupants = self.occupants.get(room, {})
+        info = room_occupants.get(nick) if nick else None
+        if info is None and jid is not None:
+            target_bare = self.bare_jid(jid)
+            for occupant in room_occupants.values():
+                occupant_jid = occupant.get("jid")
+                if occupant_jid and self.bare_jid(occupant_jid) == target_bare:
+                    info = occupant
+                    break
         return bool(info and info.get("affiliation") in (ADMIN_AFFILIATION, OWNER_AFFILIATION))
 
     async def check_jid_against_rtbl(self, jid: str, nick: str) -> bool:
+        """Record RTBL checks and return the configured fixture result."""
         self.rtbl_checks.append((jid, nick))
         return self.rtbl_result
 
@@ -168,6 +165,7 @@ class MucBotFixture(CacheMixin, DatabaseMixin, MucMixin):
         comment: str | None,
         issuer: str | None = None,
     ) -> None:
+        """Record ban application arguments for test assertions."""
         self.applied.append((room, ban_jid, ban_nick, comment, issuer))
 
     async def verify_admin_rights(self, room: str) -> bool:
@@ -186,7 +184,6 @@ class MucBotFixture(CacheMixin, DatabaseMixin, MucMixin):
 
     async def unban_all(self, jid: str, issuer: str = "system") -> None:
         self.unbans.append((jid, issuer))
-
 
 @pytest.mark.asyncio
 async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_bans(temp_db_path):
@@ -212,7 +209,6 @@ async def test_muc_online_updates_occupants_and_applies_matching_jid_and_domain_
     finally:
         await bot.db.close()
 
-
 @pytest.mark.asyncio
 async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
     bot = MucBotFixture(temp_db_path)
@@ -236,7 +232,6 @@ async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
     finally:
         await bot.db.close()
 
-
 @pytest.mark.asyncio
 async def test_muc_offline_removes_occupant():
     bot = MucBotFixture()
@@ -249,7 +244,6 @@ async def test_muc_offline_removes_occupant():
     await bot.muc_offline(FakePresence(room=ROOM_JID, nick=USER_NICK))
 
     assert USER_NICK not in bot.occupants[ROOM_JID]
-
 
 @pytest.mark.asyncio
 async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
@@ -278,7 +272,6 @@ async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
     finally:
         await bot.db.close()
 
-
 @pytest.mark.asyncio
 async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
     bot = MucBotFixture(temp_db_path)
@@ -299,6 +292,8 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
         reason_el = presence.xml.find(f".//{MUC_USER_TAG}reason")
         if reason_el is None:
             item = presence.xml.find(f".//{MUC_USER_TAG}item")
+            if item is None:
+                pytest.fail("Malformed FakePresence XML: missing muc#user item element")
             reason_el = ET.SubElement(item, f"{MUC_USER_TAG}reason")
         reason_el.text = MANUAL_BAN_REASON
 
@@ -309,7 +304,6 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
         assert bot.manual_redactions == [(USER_BARE_JID, MANUAL_BAN_REASON, MANUAL_BAN_ACTOR)]
     finally:
         await bot.db.close()
-
 
 @pytest.mark.asyncio
 async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
@@ -344,7 +338,6 @@ async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
     assert presence_state["jid"] == BOT_JID_RESOURCE
     assert presence_state["affiliation"] == MEMBER_AFFILIATION
     assert presence_state["role"] == PARTICIPANT_ROLE
-
 
 @pytest.mark.asyncio
 async def test_on_muc_presence_warns_when_admin_room_state_only_exists_in_occupant_cache(monkeypatch):
@@ -383,7 +376,6 @@ async def test_on_muc_presence_warns_when_admin_room_state_only_exists_in_occupa
     assert presence_state["affiliation"] == MEMBER_AFFILIATION
     assert presence_state["role"] == PARTICIPANT_ROLE
 
-
 @pytest.mark.asyncio
 async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkeypatch):
     bot = MucBotFixture()
@@ -406,7 +398,6 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
     assert pending == set()
     assert bot.reconnect_task in done
     assert bot.reconnect_task.done()
-
 
 @pytest.mark.asyncio
 async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatch):
@@ -434,7 +425,6 @@ async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatc
     assert first_task in done
     assert first_task.done()
 
-
 @pytest.mark.asyncio
 async def test_delayed_reconnect_waits_for_session_start_signal(monkeypatch):
     bot = MucBotFixture()
@@ -456,7 +446,6 @@ async def test_delayed_reconnect_waits_for_session_start_signal(monkeypatch):
 
     assert calls["connect"] == 1
 
-
 @pytest.mark.asyncio
 async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch):
     bot = MucBotFixture()
@@ -467,8 +456,9 @@ async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch)
         pass
 
     async def short_wait_for(awaitable, timeout):
-        # The real wait_for would own and eventually release this coroutine;
-        # close it here to avoid an un-awaited coroutine warning in the test.
+        # This test double may receive a coroutine that we intentionally do not
+        # await while simulating timeout behavior; close it to avoid coroutine
+        # warnings and release its frame/resources.
         close = getattr(awaitable, "close", None)
         if callable(close):
             close()
