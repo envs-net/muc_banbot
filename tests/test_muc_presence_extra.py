@@ -61,7 +61,6 @@ class FakeMuc(TypedDict, total=False):
     reason: str
 
 
-
 class FakePresence:
     def __init__(
         self,
@@ -142,6 +141,7 @@ class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
         return bool(info and info.get("affiliation") in (ADMIN_AFFILIATION, OWNER_AFFILIATION))
 
     async def check_jid_against_rtbl(self, jid: str, nick: str) -> bool:
+        """Record RTBL checks and return the configured fixture result."""
         self.rtbl_checks.append((jid, nick))
         return self.rtbl_result
 
@@ -153,18 +153,24 @@ class MucBotFixture(MucMixin, DatabaseMixin, CacheMixin):
         comment: str | None,
         issuer: str | None = None,
     ) -> None:
+        """Record ban application arguments for test assertions."""
         self.applied.append((room, ban_jid, ban_nick, comment, issuer))
 
-    async def verify_admin_rights(self, room: str):
+    async def verify_admin_rights(self, room: str) -> bool:
         return self.verify_result
 
-    async def bot_send_message(self, **kwargs):
+    async def bot_send_message(self, **kwargs) -> None:
         self.sent.append(kwargs)
 
-    async def maybe_auto_redact_after_manual_muc_ban(self, jid, comment, actor=None):
+    async def maybe_auto_redact_after_manual_muc_ban(
+        self,
+        jid: str,
+        comment: str,
+        actor: str | None = None,
+    ) -> None:
         self.manual_redactions.append((jid, comment, actor))
 
-    async def unban_all(self, jid, issuer="system"):
+    async def unban_all(self, jid: str, issuer: str = "system") -> None:
         self.unbans.append((jid, issuer))
 
 
