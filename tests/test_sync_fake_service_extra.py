@@ -221,7 +221,6 @@ async def test_sync_bans_to_rooms_skips_room_without_bot_admin_rights(temp_db_pa
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_fake_muc_service_accepts_nested_affiliation_mapping():
     service = FakeMucService(
         {
@@ -240,6 +239,7 @@ async def test_fake_muc_service_accepts_nested_affiliation_mapping():
     ]
 
 
+@pytest.mark.asyncio
 async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, monkeypatch):
     import banbot.sync as sync_module
 
