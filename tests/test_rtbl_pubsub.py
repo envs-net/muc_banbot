@@ -171,8 +171,9 @@ async def test_successful_fetch_reconciles_stale_hashes_and_domains(tmp_path):
         await db.commit()
 
         bot = RtblBot(db, [items_result([HASH_A, HASH_B, "*.example.org"])])
-        await bot._rtbl_fetch_all_items("service", "node", scan_occupants=True)
+        ok = await bot._rtbl_fetch_all_items("service", "node", scan_occupants=True)
 
+        assert ok is True
         assert await fetch_hashes(db) == [HASH_A, HASH_B, HASH_C]
         # Reconciliation is scoped to the fetched service/node only;
         # references from other services must be preserved.
@@ -201,8 +202,9 @@ async def test_malformed_fetch_does_not_delete_stale_entries(tmp_path):
         await db.commit()
 
         bot = RtblBot(db, [malformed_result()])
-        await bot._rtbl_fetch_all_items("service", "node", scan_occupants=False)
+        ok = await bot._rtbl_fetch_all_items("service", "node", scan_occupants=False)
 
+        assert ok is False
         assert await fetch_hashes(db) == [HASH_A]
         assert bot.cleanup_calls == []
         assert bot.rtbl_last_error[("service", "node")] == "missing pubsub element"
@@ -220,8 +222,9 @@ async def test_full_page_without_rsm_is_treated_as_incomplete(tmp_path):
         # page_size is 200 in the implementation, so exactly 200 without RSM must not cleanup.
         ids = [f"{i:064x}" for i in range(200)]
         bot = RtblBot(db, [items_result(ids)])
-        await bot._rtbl_fetch_all_items("service", "node", scan_occupants=False)
+        ok = await bot._rtbl_fetch_all_items("service", "node", scan_occupants=False)
 
+        assert ok is False
         hashes = await fetch_hashes(db)
         assert HASH_C in hashes
         assert bot.cleanup_calls == []

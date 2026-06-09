@@ -56,7 +56,7 @@ class RtblPubSubMixin:
         service_jid: str,
         node: str,
         scan_occupants: bool = True,
-    ) -> None:
+    ) -> bool:
         """
         Fetch all current items from an RTBL node using manual RSM pagination
         (XEP-0059) via fully raw XML IQ construction.
@@ -75,6 +75,10 @@ class RtblPubSubMixin:
         added subscriptions and startup fetches effective immediately without
         waiting for users to rejoin or for a manual sync. Periodic refresh uses
         scan_occupants=False to avoid noisy re-application when nothing changed.
+
+        Returns True only when the full snapshot was fetched successfully.
+        Callers can use the return value to report manual refresh failures
+        without raising for transient remote PubSub errors.
         """
         from config import ADMIN_ROOM
         from xml.etree import ElementTree as ET
@@ -452,6 +456,8 @@ class RtblPubSubMixin:
             await self._rtbl_check_all_occupants_against_caches(
                 source=f"{service_jid}/{node}"
             )
+
+        return fetch_successful and not fetch_failed
 
     async def _on_rtbl_publish(self, msg) -> None:
         """

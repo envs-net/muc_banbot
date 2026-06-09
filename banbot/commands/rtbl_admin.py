@@ -385,12 +385,15 @@ class RtblCommandMixin:
 
             for service_jid, node in selected:
                 try:
-                    await self._rtbl_fetch_all_items(
+                    ok = await self._rtbl_fetch_all_items(
                         service_jid,
                         node,
                         scan_occupants=True,
                     )
-                    refreshed += 1
+                    if ok:
+                        refreshed += 1
+                    else:
+                        failed += 1
                 except Exception as e:
                     failed += 1
                     log.warning(
