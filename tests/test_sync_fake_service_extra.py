@@ -27,7 +27,11 @@ class FakeMucService:
     affiliation lookups for both legacy tuple keys and nested mappings.
     """
 
-    def __init__(self, affiliations=None, fail_join_rooms=None):
+    def __init__(
+        self,
+        affiliations: FlatAffiliationMap | NestedAffiliationMap | None = None,
+        fail_join_rooms: Sequence[str] | None = None,
+    ):
         self.affiliations = self._normalize_affiliations(affiliations)
         self.fail_join_rooms = set(fail_join_rooms or [])
         self.calls = []
@@ -89,6 +93,17 @@ class SyncTrackingState:
 
 class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
     def __init__(self, db_path):
+        """Initialize a test bot with fake services and isolated state.
+
+        Args:
+            db_path: Path to the temporary SQLite database file provided by
+                the test fixture. Stored on the instance and used by
+                ``setup_db`` when overriding ``banbot.db.DB_FILE``.
+
+        The constructor prepares all in-memory fixtures used by sync tests,
+        including fake MUC plugin wiring, ban cache/index dictionaries,
+        mutable tracking state for assertions, and default room/admin config.
+        """
         self._test_db_path = str(db_path)
         self.protected_rooms = {"room@conference.example.test"}
         self.occupants = {}
@@ -157,6 +172,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
 
 
 async def make_bot(temp_db_path):
+    """Create and initialize a SyncBot backed by a temporary test DB."""
     bot = SyncBot(temp_db_path)
     await bot.setup_db()
     await bot.load_bans_from_db()
@@ -459,8 +475,8 @@ def prepare_bot_for_room_sync(bot, sync_module, room):
     bot.occupants = {room: {sync_module.NICK: {"jid": "bot@example.test"}}}
 
 
-async def make_bot_for_room_sync(temp_db_path, sync_module, room, *, fail_join=False):
-    """Build a room-sync bot with explicit DB path and optional join failure."""
+async def create_and_configure_bot_for_room_sync(temp_db_path, sync_module, room, *, fail_join=False):
+    """Create a SyncBot, then configure it for one room-sync scenario."""
     bot = await make_bot(temp_db_path)
     prepare_bot_for_room_sync(bot, sync_module, room)
     failed_rooms = {room} if fail_join else None
@@ -476,7 +492,7 @@ async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_d
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     room = "room@conference.example.test"
-    bot = await make_bot_for_room_sync(
+    bot = await create_and_configure_bot_for_room_sync(
         temp_db_path, sync_module, room, fail_join=True
     )
     try:
@@ -496,7 +512,7 @@ async def test_sync_rooms_and_bans_sets_join_time_after_success(temp_db_path, mo
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     room = "room-ok@conference.example.test"
-    bot = await make_bot_for_room_sync(temp_db_path, sync_module, room)
+    bot = await create_and_configure_bot_for_room_sync(temp_db_path, sync_module, room)
     try:
         await bot.sync_rooms_and_bans()
 
