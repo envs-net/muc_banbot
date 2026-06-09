@@ -10,6 +10,7 @@ from banbot.commands.config_display import ConfigCommandMixin
 class ConfigDisplayBot(ConfigCommandMixin):
     def __init__(self):
         self.sent = []
+        self.audit_events = []
         self.command_prefix = "!"
         self.omemo_auto_encrypt_admin_room = True
         self.omemo_plaintext_fallback = False
@@ -18,6 +19,9 @@ class ConfigDisplayBot(ConfigCommandMixin):
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
+
+    async def audit_event(self, event_type, **kwargs):
+        self.audit_events.append((event_type, kwargs))
 
 
 def _section(body: str, title: str) -> str:
@@ -140,3 +144,33 @@ async def test_config_show_accepts_page_and_last_args():
     body = bot.sent[-1]["mbody"]
     assert "page " in body
     assert "Commands:" in body
+
+@pytest.mark.asyncio
+async def test_config_change_audit_includes_changed_key_and_message():
+    bot = ConfigDisplayBot()
+
+    await bot._audit_config_change(
+        "admin@example.test",
+        "set",
+        "LOG_LEVEL",
+        True,
+        "✅ LOG_LEVEL updated: 'INFO' → 'DEBUG'",
+    )
+
+    assert bot.audit_events == [
+        (
+            "config_changed",
+            {
+                "actor": "admin@example.test",
+                "target_type": "config",
+                "target": "LOG_LEVEL",
+                "comment": "set: ✅ LOG_LEVEL updated: 'INFO' → 'DEBUG'",
+                "details": {
+                    "action": "set",
+                    "key": "LOG_LEVEL",
+                    "ok": True,
+                    "message": "✅ LOG_LEVEL updated: 'INFO' → 'DEBUG'",
+                },
+            },
+        )
+    ]

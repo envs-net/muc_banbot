@@ -295,6 +295,9 @@ class ConfigCommandMixin(ConfigMixin):
             await self.audit_event(
                 "config_changed" if ok else "config_change_failed",
                 actor=actor or "unknown",
+                target_type="config",
+                target=key,
+                comment=f"{action}: {message}",
                 details={"action": action, "key": key, "ok": ok, "message": message},
             )
         except Exception as exc:
