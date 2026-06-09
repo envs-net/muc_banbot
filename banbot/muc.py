@@ -232,10 +232,7 @@ class MucMixin:
         # mapping-style values cover tests and known Slixmpp shapes; raw XML is
         # inspected below for the actual <status code="..."/> elements.
         for key in ("status_codes", "status"):
-            try:
-                value = muc.get(key) if hasattr(muc, "get") else None
-            except Exception:
-                value = None
+            value = self._muc_mapping_value(muc, key)
             if value is None:
                 continue
             if isinstance(value, dict):
@@ -260,6 +257,24 @@ class MucMixin:
         return codes
 
 
+    def _muc_mapping_value(self, muc, key: str):
+        """Return a registered/explicit MUC mapping value without probing unknown interfaces."""
+        if muc is None or not hasattr(muc, "get"):
+            return None
+
+        if isinstance(muc, dict):
+            return muc.get(key)
+
+        interfaces = getattr(muc, "interfaces", None)
+        if interfaces is not None and key not in interfaces:
+            return None
+
+        try:
+            return muc.get(key)
+        except Exception:
+            return None
+
+
     def _muc_presence_ban_reason(self, presence) -> str | None:
         """Extract a MUC ban reason from common Slixmpp/XML presence shapes."""
         try:
@@ -268,10 +283,7 @@ class MucMixin:
             muc = None
 
         for key in ("reason", "status_text", "status_message"):
-            try:
-                value = muc.get(key) if hasattr(muc, "get") else None
-            except Exception:
-                value = None
+            value = self._muc_mapping_value(muc, key)
             if value:
                 return str(value).strip() or None
 
@@ -305,10 +317,23 @@ class MucMixin:
         jid_bare = self.bare_jid(jid)
         issuer = "manual_muc_ban"
         comment = reason or "Recovered from room"
+        now = int(time.time())
+
+        existing_ban = self.ban_index_by_jid.get(jid_bare)
+        if existing_ban:
+            _existing_jid, _existing_nick, existing_until, _existing_issuer, existing_comment = existing_ban
+            if existing_until <= 0 or existing_until > now:
+                if not (existing_until <= 0 and reason and existing_comment == "Recovered from room"):
+                    log.debug(
+                        "Ignoring live manual MUC ban recovery for %s in %s; active ban already exists",
+                        jid_bare,
+                        room,
+                    )
+                    return
 
         if hasattr(self, "_sync_outcast_is_expired_tempban"):
             try:
-                if await self._sync_outcast_is_expired_tempban(jid_bare, int(time.time())):
+                if await self._sync_outcast_is_expired_tempban(jid_bare, now):
                     await self.unban_all(jid_bare, issuer="system")
                     return
             except Exception as exc:

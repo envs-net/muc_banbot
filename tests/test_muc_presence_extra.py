@@ -266,6 +266,28 @@ def test_muc_presence_status_codes_does_not_probe_unregistered_statuses_interfac
     assert "status_codes" in probed_keys
     assert "statuses" not in probed_keys
 
+
+
+def test_muc_presence_ban_reason_does_not_probe_unregistered_interfaces():
+    bot = MucBotFixture()
+    presence = FakePresence(reason=None, xml_reason=MANUAL_BAN_REASON)
+    probed_keys = []
+
+    class MucMapping:
+        interfaces = {"nick", "jid", "affiliation", "role"}
+
+        def get(self, key, default=None):
+            probed_keys.append(key)
+            if key in {"reason", "status_text", "status_message"}:
+                pytest.fail(f"{key} interface must not be probed when unregistered")
+            return default
+
+    presence._muc = MucMapping()
+
+    assert bot._muc_presence_ban_reason(presence) == MANUAL_BAN_REASON
+    assert probed_keys == []
+
+
 @pytest.mark.asyncio
 async def test_muc_offline_ignores_nonexistent_occupant():
     bot = MucBotFixture()
@@ -324,6 +346,40 @@ async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
         assert bot.manual_redactions == [(USER_BARE_JID, MANUAL_BAN_REASON, MANUAL_BAN_ACTOR)]
     finally:
         await bot.db.close()
+
+
+
+@pytest.mark.asyncio
+async def test_muc_offline_does_not_convert_active_tempban_to_manual_ban(temp_db_path):
+    bot = MucBotFixture(temp_db_path)
+    await bot.setup_db()
+    bot.occupants = {
+        ROOM_JID: {
+            USER_NICK: {"jid": USER_JID_RESOURCE, "affiliation": MEMBER_AFFILIATION, "role": PARTICIPANT_ROLE}
+        }
+    }
+    tempban_until = int(time.time()) + 60
+
+    try:
+        await bot.upsert_ban_db(USER_BARE_JID, USER_NICK, tempban_until, "tester", "tempban")
+
+        await bot.muc_offline(
+            FakePresence(
+                room=ROOM_JID,
+                nick=USER_NICK,
+                status_codes={MUC_STATUS_BANNED},
+                reason=MANUAL_BAN_REASON,
+            )
+        )
+
+        await bot.load_bans_from_db()
+        assert bot.ban_index_by_jid[USER_BARE_JID][2] == tempban_until
+        assert bot.ban_index_by_jid[USER_BARE_JID][3] == "tester"
+        assert bot.ban_index_by_jid[USER_BARE_JID][4] == "tempban"
+        assert bot.manual_redactions == []
+    finally:
+        await bot.db.close()
+
 
 @pytest.mark.asyncio
 async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
