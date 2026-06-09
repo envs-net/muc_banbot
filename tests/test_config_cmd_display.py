@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import config
 import pytest
 
 from banbot.commands.config_display import ConfigCommandMixin
@@ -77,8 +78,6 @@ async def test_config_show_groups_keys_and_hides_secrets():
 
 @pytest.mark.asyncio
 async def test_config_show_shortens_long_lists_and_keeps_runtime_summary(monkeypatch):
-    import config
-
     monkeypatch.setattr(
         config,
         "REDACTION_AUTO_REASONS",
@@ -145,6 +144,12 @@ async def test_config_show_accepts_page_and_last_args():
     assert "page " in body
     assert "Commands:" in body
 
+    await bot._cmd_config_show("admin@conference.example.org", ["2"])
+    body = bot.sent[-1]["mbody"]
+    assert "page 2/" in body
+    assert "RESOURCE" in body
+
+
 @pytest.mark.asyncio
 async def test_config_change_audit_includes_changed_key_and_message():
     bot = ConfigDisplayBot()
@@ -170,6 +175,37 @@ async def test_config_change_audit_includes_changed_key_and_message():
                     "key": "LOG_LEVEL",
                     "ok": True,
                     "message": "✅ LOG_LEVEL updated: 'INFO' → 'DEBUG'",
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_config_change_audit_emits_failed_event_when_update_fails():
+    bot = ConfigDisplayBot()
+
+    await bot._audit_config_change(
+        "admin@example.test",
+        "set",
+        "LOG_LEVEL",
+        False,
+        "❌ LOG_LEVEL rejected: invalid value 'TRACE2'",
+    )
+
+    assert bot.audit_events == [
+        (
+            "config_change_failed",
+            {
+                "actor": "admin@example.test",
+                "target_type": "config",
+                "target": "LOG_LEVEL",
+                "comment": "set: ❌ LOG_LEVEL rejected: invalid value 'TRACE2'",
+                "details": {
+                    "action": "set",
+                    "key": "LOG_LEVEL",
+                    "ok": False,
+                    "message": "❌ LOG_LEVEL rejected: invalid value 'TRACE2'",
                 },
             },
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 import pytest
@@ -13,6 +14,10 @@ from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
 from banbot.sync import SyncMixin
 from banbot.utils import bare_jid, safe_jid as real_safe_jid
+
+AffiliationUsers = Sequence[str | tuple[str, str]]
+FlatAffiliationMap = Mapping[tuple[str, str], AffiliationUsers]
+NestedAffiliationMap = Mapping[str, Mapping[str, AffiliationUsers]]
 
 
 class FakeMucService:
@@ -30,11 +35,29 @@ class FakeMucService:
         self.joined = []
 
     @staticmethod
-    def _normalize_affiliations(affiliations):
+    def _normalize_affiliations(
+        affiliations: FlatAffiliationMap | NestedAffiliationMap | None,
+    ) -> dict[tuple[str, str], list]:
+        """Return affiliations as a flat (room, affiliation) mapping."""
         if not affiliations:
             return {}
-        if all(isinstance(key, tuple) and len(key) == 2 for key in affiliations):
-            return {key: list(users) for key, users in affiliations.items()}
+        first_key = next(iter(affiliations))
+        if isinstance(first_key, tuple):
+            return FakeMucService._copy_flat_affiliations(affiliations)
+        return FakeMucService._flatten_nested_affiliations(affiliations)
+
+    @staticmethod
+    def _copy_flat_affiliations(
+        affiliations: FlatAffiliationMap,
+    ) -> dict[tuple[str, str], list]:
+        """Copy legacy flat affiliation fixtures into mutable test lists."""
+        return {key: list(users) for key, users in affiliations.items()}
+
+    @staticmethod
+    def _flatten_nested_affiliations(
+        affiliations: NestedAffiliationMap,
+    ) -> dict[tuple[str, str], list]:
+        """Flatten preferred room -> affiliation -> users fixtures."""
         normalized = {}
         for room, affiliation_map in affiliations.items():
             for affiliation, users in affiliation_map.items():
@@ -55,7 +78,7 @@ class FakeMucService:
 
 
 @dataclass
-class TestTrackingState:
+class SyncTrackingState:
     """Mutable call tracking state shared by sync test assertions."""
 
     sent: list = field(default_factory=list)
@@ -74,7 +97,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.ban_index_by_jid = {}
         self.ban_index_by_nick = {}
         self.ban_index_by_domain = {}
-        self.test_state = TestTrackingState()
+        self.test_state = SyncTrackingState()
         self.room_join_time = {}
         self.bot_admin_state = {}
         self.sync_batch_size = 10
@@ -340,14 +363,41 @@ async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, syn
 
 
 @pytest.mark.asyncio
-async def test_wait_for_bot_admin_rights_returns_immediate_final_state_without_sleep(temp_db_path):
+async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path, sync_module):
     bot = await make_bot(temp_db_path)
+    muc_service = FakeMucService(
+        {
+            "admin@conference.example.test": {
+                "owner": ["owner@example.test"],
+                "admin": ["admin@example.test"],
+            }
+        }
+    )
+    bot.plugin["xep_0045"] = muc_service
     try:
-        bot.admin_rooms = {"room@conference.example.test"}
-        assert await bot._wait_for_bot_admin_rights("room@conference.example.test", timeout=0, interval=0) is True
+        bot.admin_rooms = {"admin@conference.example.test"}
 
-        bot.admin_rooms = set()
-        assert await bot._wait_for_bot_admin_rights("room@conference.example.test", timeout=0, interval=0) is False
+        await bot.sync_admins(announce=True)
+
+        assert "admin@conference.example.test" in bot.occupants
+        assert bot.occupants["admin@conference.example.test"]["owner@example.test"]["affiliation"] == "owner"
+
+        muc_service.affiliations = muc_service._normalize_affiliations(
+            {
+                "admin@conference.example.test": {
+                    "owner": ["new-owner@example.test"],
+                    "admin": [],
+                }
+            }
+        )
+        bot.occupants = {}
+
+        await bot.sync_admins(announce=True)
+
+        refreshed_occupants = bot.occupants["admin@conference.example.test"]
+        assert "new-owner@example.test" in refreshed_occupants
+        assert "owner@example.test" not in refreshed_occupants
+        assert "admin@example.test" not in refreshed_occupants
     finally:
         await bot.db.close()
 
