@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 
 import config
@@ -213,6 +214,10 @@ def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
 
     assert "ALLOW_ADMIN_COMMANDS_IN_DMS must be True or False" in errors
     assert "ROOM_INVITES_ENABLED must be True or False" in errors
+    assert (
+        "ROOM_INVITE_MAX_AGE_DAYS must be between 0 and 3650 (got -1)"
+        in errors
+    )
     assert "RTBL_ENABLED must be True or False" in errors
     assert "RTBL_ANNOUNCE must be True or False" in errors
     assert "RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)" in errors
@@ -257,15 +262,13 @@ def test_format_config_import_error_for_name_error_includes_hint():
 
 
 def test_validate_config_warns_but_does_not_error_when_omemo_dependency_missing(monkeypatch):
-    import importlib.util
-
     set_valid_config(monkeypatch)
     monkeypatch.setattr(config, "OMEMO_ENABLED", True, raising=False)
     monkeypatch.setattr(config, "OMEMO_STORAGE_FILE", "data/omemo.json", raising=False)
 
     real_find_spec = importlib.util.find_spec
 
-    def fake_find_spec(name):
+    def fake_find_spec(name: str) -> importlib.machinery.ModuleSpec | None:
         if name in {"slixmpp_omemo", "omemo"}:
             return None
         return real_find_spec(name)

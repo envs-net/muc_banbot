@@ -485,7 +485,7 @@ async def create_and_configure_bot_for_room_sync(temp_db_path, sync_module, room
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_db_path, monkeypatch, sync_module):
+async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_module):
 
     async def no_sleep(_delay):
         return None
@@ -505,7 +505,7 @@ async def test_sync_rooms_and_bans_does_not_set_join_time_when_join_fails(temp_d
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_and_bans_sets_join_time_after_success(temp_db_path, monkeypatch, sync_module):
+async def test_sync_rooms_sets_join_time_on_success(temp_db_path, monkeypatch, sync_module):
 
     async def no_sleep(_delay):
         return None
