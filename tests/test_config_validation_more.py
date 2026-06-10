@@ -214,7 +214,7 @@ def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
 
     assert "ALLOW_ADMIN_COMMANDS_IN_DMS must be True or False" in errors
     assert "ROOM_INVITES_ENABLED must be True or False" in errors
-    assert "ROOM_INVITE_MAX_AGE_DAYS must be a non-negative integer (0 = no expiry)" in errors
+    assert "ROOM_INVITE_MAX_AGE_DAYS must be between 0 and 3650 (got -1)" in errors
     assert "RTBL_ENABLED must be True or False" in errors
     assert "RTBL_ANNOUNCE must be True or False" in errors
     assert "RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)" in errors
@@ -248,7 +248,7 @@ def test_resource_prefers_resource_over_legacy_ressource(monkeypatch):
     assert get_config_resource() == "old"
 
     monkeypatch.delattr(config, "RESSOURCE", raising=False)
-    assert get_config_resource() == "banbot"
+    assert get_config_resource() is None
 
 
 def test_format_config_import_error_for_name_error_includes_hint():
