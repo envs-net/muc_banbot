@@ -195,7 +195,6 @@ def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):
     assert logging.getLogger("banbot").level == logging.ERROR
 
 
-
 def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
     set_valid_config(monkeypatch)
     monkeypatch.setattr(config, "ALLOW_ADMIN_COMMANDS_IN_DMS", "yes", raising=False)

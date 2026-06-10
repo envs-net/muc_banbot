@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -18,7 +19,7 @@ from banbot.utils import bare_jid, safe_jid as real_safe_jid
 AffiliationUsers = Sequence[str | tuple[str, str]]
 FlatAffiliationMap = Mapping[tuple[str, str], AffiliationUsers]
 NestedAffiliationMap = Mapping[str, Mapping[str, AffiliationUsers]]
-EXPIRED_SECONDS_AGO = 5
+EXPIRED_DURATION_SECONDS = 5
 
 
 class FakeMucService:
@@ -93,6 +94,8 @@ class SyncTrackingState:
 
 
 class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
+    _db_file_override_lock = asyncio.Lock()
+
     def __init__(self, db_path):
         """Initialize a test bot with fake services and isolated state.
 
@@ -123,12 +126,13 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         """Initialize the test database using the explicit temp_db_path fixture."""
         import banbot.db as db_module
 
-        original_db_file = db_module.DB_FILE
-        db_module.DB_FILE = self._test_db_path
-        try:
-            await super().setup_db(create_startup_backup=create_startup_backup)
-        finally:
-            db_module.DB_FILE = original_db_file
+        async with self._db_file_override_lock:
+            original_db_file = db_module.DB_FILE
+            db_module.DB_FILE = self._test_db_path
+            try:
+                await super().setup_db(create_startup_backup=create_startup_backup)
+            finally:
+                db_module.DB_FILE = original_db_file
 
     @staticmethod
     def bare_jid(jid):
@@ -284,7 +288,7 @@ async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recove
         await bot.upsert_ban_db(
             "expired@example.test",
             None,
-            int(time.time()) - EXPIRED_SECONDS_AGO,
+            int(time.time()) - EXPIRED_DURATION_SECONDS,
             "tester",
             "expired",
         )
@@ -473,23 +477,18 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
         await bot.db.close()
 
 
-def prepare_bot_for_room_sync(bot, sync_module, room):
-    """Configure a SyncBot for one protected room by mutating it in place.
-
-    Sets protected rooms, admin rooms, and occupants on the provided bot
-    instance.
-
-    Returns nothing; mutates the provided bot instance in place.
-    """
+async def create_and_configure_bot_for_room_sync(
+    temp_db_path,
+    sync_module,
+    room,
+    *,
+    fail_join=False,
+):
+    """Create and configure a SyncBot for one room-sync scenario."""
+    bot = await make_bot(temp_db_path)
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}
     bot.occupants = {room: {sync_module.NICK: {"jid": "bot@example.test"}}}
-
-
-async def create_and_configure_bot_for_room_sync(temp_db_path, sync_module, room, *, fail_join=False):
-    """Create a SyncBot, then configure it for one room-sync scenario."""
-    bot = await make_bot(temp_db_path)
-    prepare_bot_for_room_sync(bot, sync_module, room)
     failed_rooms = {room} if fail_join else None
     bot.plugin["xep_0045"] = FakeMucService(fail_join_rooms=failed_rooms)
     return bot
