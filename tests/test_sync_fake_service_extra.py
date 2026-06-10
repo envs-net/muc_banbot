@@ -281,7 +281,13 @@ async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recove
         {("room@conference.example.test", "outcast"): ["expired@example.test"]}
     )
     try:
-        await bot.upsert_ban_db("expired@example.test", None, int(time.time()) - EXPIRED_SECONDS_AGO, "tester", "expired")
+        await bot.upsert_ban_db(
+            "expired@example.test",
+            None,
+            int(time.time()) - EXPIRED_SECONDS_AGO,
+            "tester",
+            "expired",
+        )
         await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
 
         assert bot.unbanned == [("expired@example.test", "system")]
@@ -473,9 +479,7 @@ def prepare_bot_for_room_sync(bot, sync_module, room):
     Sets protected rooms, admin rooms, and occupants on the provided bot
     instance.
 
-    Returns:
-        None: This helper mutates the provided bot instance in place and
-        returns nothing.
+    Returns nothing; mutates the provided bot instance in place.
     """
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}

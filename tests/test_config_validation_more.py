@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.machinery
 import importlib.util
 import logging
 
@@ -194,6 +195,7 @@ def test_apply_runtime_config_updates_attributes_and_log_level(monkeypatch):
     assert logging.getLogger("banbot").level == logging.ERROR
 
 
+
 def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
     set_valid_config(monkeypatch)
     monkeypatch.setattr(config, "ALLOW_ADMIN_COMMANDS_IN_DMS", "yes", raising=False)
@@ -212,10 +214,7 @@ def test_validate_config_reports_invalid_rtbl_and_omemo_values(monkeypatch):
 
     assert "ALLOW_ADMIN_COMMANDS_IN_DMS must be True or False" in errors
     assert "ROOM_INVITES_ENABLED must be True or False" in errors
-    assert (
-        "ROOM_INVITE_MAX_AGE_DAYS must be between 0 and 3650 (got -1)"
-        in errors
-    )
+    assert "ROOM_INVITE_MAX_AGE_DAYS must be a non-negative integer (0 = no expiry)" in errors
     assert "RTBL_ENABLED must be True or False" in errors
     assert "RTBL_ANNOUNCE must be True or False" in errors
     assert "RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)" in errors
@@ -248,6 +247,9 @@ def test_resource_prefers_resource_over_legacy_ressource(monkeypatch):
     monkeypatch.delattr(config, "RESOURCE", raising=False)
     assert get_config_resource() == "old"
 
+    monkeypatch.delattr(config, "RESSOURCE", raising=False)
+    assert get_config_resource() == "banbot"
+
 
 def test_format_config_import_error_for_name_error_includes_hint():
     try:
@@ -277,7 +279,11 @@ def test_validate_config_warns_but_does_not_error_when_omemo_dependency_missing(
     errors, warnings = bot._validate_config()
 
     assert "OMEMO_ENABLED=True requires optional dependency slixmpp-omemo>=2,<3" not in errors
-    assert any("OMEMO_ENABLED=True but optional OMEMO dependencies are not installed" in warning for warning in warnings)
+    assert any(
+        "OMEMO_ENABLED=True but optional OMEMO dependencies are not installed"
+        in warning
+        for warning in warnings
+    )
 
 
 def test_validate_config_rejects_invalid_output_modes(monkeypatch):
