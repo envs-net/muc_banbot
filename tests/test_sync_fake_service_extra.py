@@ -18,6 +18,7 @@ from banbot.utils import bare_jid, safe_jid as real_safe_jid
 AffiliationUsers = Sequence[str | tuple[str, str]]
 FlatAffiliationMap = Mapping[tuple[str, str], AffiliationUsers]
 NestedAffiliationMap = Mapping[str, Mapping[str, AffiliationUsers]]
+EXPIRED_SECONDS_AGO = 5
 
 
 class FakeMucService:
@@ -203,6 +204,8 @@ async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, sync_m
         assert bot.applied == [
             ("room@conference.example.test", "new@example.test", None, "new", False)
         ]
+        assert len(bot.applied) == 1
+        assert all(applied[1] != "already@example.test" for applied in bot.applied)
         assert any("Finished syncing room" in msg["mbody"] for msg in bot.sent)
     finally:
         await bot.db.close()
@@ -278,7 +281,7 @@ async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recove
         {("room@conference.example.test", "outcast"): ["expired@example.test"]}
     )
     try:
-        await bot.upsert_ban_db("expired@example.test", None, int(time.time()) - 5, "tester", "expired")
+        await bot.upsert_ban_db("expired@example.test", None, int(time.time()) - EXPIRED_SECONDS_AGO, "tester", "expired")
         await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
 
         assert bot.unbanned == [("expired@example.test", "system")]
@@ -469,6 +472,10 @@ def prepare_bot_for_room_sync(bot, sync_module, room):
 
     Sets protected rooms, admin rooms, and occupants on the provided bot
     instance.
+
+    Returns:
+        None: This helper mutates the provided bot instance in place and
+        returns nothing.
     """
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}
