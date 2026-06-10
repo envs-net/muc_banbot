@@ -295,7 +295,7 @@ async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recove
         await bot.upsert_ban_db(
             "expired@example.test",
             None,
-            int(time.time()) - EXPIRED_DURATION_SECONDS,
+            int(time.time()) - TEST_TEMPBAN_EXPIRY_THRESHOLD_SECONDS,
             "tester",
             "expired",
         )
