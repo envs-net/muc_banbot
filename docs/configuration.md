@@ -305,6 +305,14 @@ VCARD_URL = "https://example.com"
 VCARD_NOTE = "Bot Admin Assistant"
 ```
 
+If you use a custom avatar, it is recommended to store it in a local, non-tracked path such as `data/avatar.png` or `custom/avatar.png` and then set `AVATAR_PATH` accordingly. This avoids accidentally replacing or committing the repository's default `avatar.png` during updates.
+
+Example:
+
+```python
+AVATAR_PATH = "data/avatar.png"
+```
+
 ## Systemd Service
 
 Example system service:

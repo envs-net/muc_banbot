@@ -4,6 +4,7 @@ __pycache__/
 *venv/
 
 data/
+custom/
 /config.py
 banbot*.db*
 bans_import_*.csv

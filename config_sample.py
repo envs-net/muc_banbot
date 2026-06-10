@@ -40,7 +40,7 @@ EXPORT_KEEP = 15
 
 # ================= vCARD SETTINGS =================
 
-AVATAR_PATH = "avatar.png"           # Path to avatar file (PNG/JPG), None disables avatar
+AVATAR_PATH = "avatar.png"           # Path to avatar file (PNG/JPG), None disables avatar. For custom avatars prefer data/ or custom/.
 VCARD_NICKNAME = "My Bot Nickname"   # Optional nickname for vCard
 VCARD_FN = "Admin Bot"               # Full name
 VCARD_ORG = "My Organization"        # Organization name
