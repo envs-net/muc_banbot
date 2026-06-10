@@ -82,7 +82,7 @@ MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default
 
 # Rate limit for public commands in protected rooms.
 # Example default: max 3 uses per nick/room/command every 30 seconds.
-PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 30
+PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 10
 PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 
 # Default number of lines shown per page by paginated list commands.

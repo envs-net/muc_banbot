@@ -59,7 +59,7 @@ def set_valid_config(monkeypatch):
         "ROOM_INVITE_MAX_AGE_DAYS": 30,
         "UNBAN_CHECK_INTERVAL": 60,
         "MAX_TEMPBAN_DAYS": 30,
-        "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 30,
+        "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 10,
         "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
         "LIST_PAGE_SIZE": 10,
         "CONFIG_OUTPUT_MODE": "all",
