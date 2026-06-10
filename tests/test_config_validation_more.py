@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import logging
+from typing import Optional
 
 import config
 from banbot.config import ConfigMixin, format_config_import_error, get_config_resource
@@ -238,7 +239,7 @@ def test_validate_config_requires_rtbl_publish_details_when_enabled(monkeypatch)
     assert "RTBL_PUBLISH_DOMAIN_NODE must not be empty when RTBL_PUBLISH_ENABLED=True" in errors
 
 
-def test_resource_prefers_resource_over_legacy_ressource_key(monkeypatch):
+def test_resource_prefers_resource_over_legacy_resource_key(monkeypatch):
     # NOTE: "RESSOURCE" is an intentionally misspelled legacy config key kept
     # for backward compatibility. This test ensures RESOURCE takes precedence
     # when both are present, while still supporting the legacy fallback.
@@ -270,7 +271,7 @@ def test_validate_config_warns_but_does_not_error_when_omemo_dependency_missing(
 
     real_find_spec = importlib.util.find_spec
 
-    def fake_find_spec(name: str) -> importlib.machinery.ModuleSpec | None:
+    def fake_find_spec(name: str) -> Optional[importlib.machinery.ModuleSpec]:
         if name in {"slixmpp_omemo", "omemo"}:
             return None
         return real_find_spec(name)
