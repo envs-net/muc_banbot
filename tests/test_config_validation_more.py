@@ -239,6 +239,9 @@ def test_validate_config_requires_rtbl_publish_details_when_enabled(monkeypatch)
 
 
 def test_resource_prefers_resource_over_legacy_ressource_key(monkeypatch):
+    # NOTE: "RESSOURCE" is an intentionally misspelled legacy config key kept
+    # for backward compatibility. This test ensures RESOURCE takes precedence
+    # when both are present, while still supporting the legacy fallback.
     monkeypatch.setattr(config, "RESOURCE", "new", raising=False)
     monkeypatch.setattr(config, "RESSOURCE", "old", raising=False)
     assert get_config_resource() == "new"
