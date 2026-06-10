@@ -19,7 +19,8 @@ from banbot.utils import bare_jid, safe_jid as real_safe_jid
 AffiliationUsers = Sequence[str | tuple[str, str]]
 FlatAffiliationMap = Mapping[tuple[str, str], AffiliationUsers]
 NestedAffiliationMap = Mapping[str, Mapping[str, AffiliationUsers]]
-EXPIRED_DURATION_SECONDS = 5
+# Keep expiry short so time-based sync tests complete quickly.
+TEST_TEMPBAN_EXPIRY_THRESHOLD_SECONDS = 5
 
 
 class FakeMucService:
@@ -94,8 +95,6 @@ class SyncTrackingState:
 
 
 class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
-    _db_file_override_lock = asyncio.Lock()
-
     def __init__(self, db_path):
         """Initialize a test bot with fake services and isolated state.
 
@@ -109,6 +108,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         mutable tracking state for assertions, and default room/admin config.
         """
         self._test_db_path = str(db_path)
+        self._db_file_override_lock = asyncio.Lock()
         self.protected_rooms = {"room@conference.example.test"}
         self.occupants = {}
         self.plugin = {"xep_0045": FakeMucService()}
@@ -177,7 +177,14 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
 
 
 async def make_bot(temp_db_path):
-    """Create and initialize a SyncBot backed by a temporary test DB."""
+    """Create and initialize a SyncBot backed by a temporary test DB.
+
+    Args:
+        temp_db_path: Filesystem path for the temporary SQLite database.
+
+    Returns:
+        SyncBot: A bot instance with database schema initialized and bans loaded.
+    """
     bot = SyncBot(temp_db_path)
     await bot.setup_db()
     await bot.load_bans_from_db()

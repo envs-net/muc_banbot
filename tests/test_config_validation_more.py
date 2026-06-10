@@ -238,7 +238,7 @@ def test_validate_config_requires_rtbl_publish_details_when_enabled(monkeypatch)
     assert "RTBL_PUBLISH_DOMAIN_NODE must not be empty when RTBL_PUBLISH_ENABLED=True" in errors
 
 
-def test_resource_prefers_resource_over_legacy_ressource(monkeypatch):
+def test_resource_prefers_resource_over_legacy_ressource_key(monkeypatch):
     monkeypatch.setattr(config, "RESOURCE", "new", raising=False)
     monkeypatch.setattr(config, "RESSOURCE", "old", raising=False)
     assert get_config_resource() == "new"
