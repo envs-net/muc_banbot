@@ -16,8 +16,12 @@ from banbot.db import DatabaseMixin
 from banbot.sync import SyncMixin
 from banbot.utils import bare_jid, safe_jid as real_safe_jid
 
+# Users listed under an affiliation; each item is either a bare JID string
+# or a ``(jid, reason)`` tuple used by some fixture variants.
 AffiliationUsers = Sequence[str | tuple[str, str]]
+# Legacy flat fixture shape keyed by ``(room_jid, affiliation)``.
 FlatAffiliationMap = Mapping[tuple[str, str], AffiliationUsers]
+# Preferred nested fixture shape: ``room_jid -> affiliation -> users``.
 NestedAffiliationMap = Mapping[str, Mapping[str, AffiliationUsers]]
 # Keep expiry short so time-based sync tests complete quickly.
 EXPIRED_DURATION_SECONDS = 5
@@ -73,6 +77,7 @@ class FakeMucService:
         return normalized
 
     def leave_muc(self, room, nick):
+        """Record room leave calls for leave-path test assertions."""
         self.left.append((room, nick))
 
     def join_muc(self, room, nick):
@@ -124,6 +129,14 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
 
     async def setup_db(self, *, create_startup_backup: bool = True) -> None:
         """Initialize an isolated SQLite schema for sync tests.
+
+        Args:
+            create_startup_backup: Whether to run optional startup backup
+                creation via ``create_startup_database_snapshot`` before
+                opening the test database. Keep this ``True`` for normal
+                parity with production-like setup. Set to ``False`` in tests
+                that intentionally skip backup hooks to reduce side effects or
+                avoid requiring backup-related behavior.
 
         The real ``DatabaseMixin.setup_db`` reads ``banbot.db.DB_FILE`` at
         module level. Opening the explicit temporary test path directly keeps
@@ -550,7 +563,19 @@ async def create_and_configure_bot_for_room_sync(
     *,
     fail_join=False,
 ):
-    """Create and configure a SyncBot for one room-sync scenario."""
+    """Create and configure a SyncBot for a room-sync test scenario.
+
+    Args:
+        temp_db_path: Path to the temporary SQLite database used by the bot.
+        sync_module: Imported sync module providing constants used by the bot.
+        room: Room JID to configure as both protected and admin room.
+        fail_join: Whether the fake MUC service should simulate join failure
+            for ``room``.
+
+    Returns:
+        A configured bot instance ready to run ``sync_rooms_and_bans`` for the
+        given room scenario.
+    """
     bot = await make_bot(temp_db_path)
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}
