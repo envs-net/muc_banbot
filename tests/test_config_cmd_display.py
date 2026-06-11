@@ -172,7 +172,7 @@ async def test_config_search_reports_usage_and_no_matches():
     bot = ConfigDisplayBot()
 
     await bot._cmd_config_search("admin@conference.example.org", [])
-    assert bot.sent[-1]["mbody"] == "❌ Usage: !config search <query>"
+    assert bot.sent[-1]["mbody"] == "❌ Usage: !config search/find <query>"
 
     await bot._cmd_config_search("admin@conference.example.org", ["definitely-no-such-config-key"])
     assert bot.sent[-1]["mbody"] == "🔎 Config search for 'definitely-no-such-config-key': no matches."

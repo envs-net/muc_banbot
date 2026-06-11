@@ -217,7 +217,7 @@ class ConfigCommandMixin(ConfigMixin):
             mbody=(
                 "Usage:\n"
                 f"  {self.command_prefix}config show\n"
-                f"  {self.command_prefix}config search <query>\n"
+                f"  {self.command_prefix}config search/find <query>\n"
                 f"  {self.command_prefix}config set <KEY> <value>\n"
                 f"  {self.command_prefix}config unset <KEY>\n\n"
                 "🔒 = restart-only or protected, ✏️ = runtime-writable"
@@ -233,7 +233,7 @@ class ConfigCommandMixin(ConfigMixin):
         if not query:
             await self.bot_send_message(
                 mto=room,
-                mbody=f"❌ Usage: {self.command_prefix}config search <query>",
+                mbody=f"❌ Usage: {self.command_prefix}config search/find <query>",
                 mtype="groupchat",
             )
             return
@@ -305,7 +305,7 @@ class ConfigCommandMixin(ConfigMixin):
             "Commands:\n"
             f"  {self.command_prefix}config [all|page|last]\n"
             f"  {self.command_prefix}config show [all|page|last]\n"
-            f"  {self.command_prefix}config search <query>\n"
+            f"  {self.command_prefix}config search/find <query>\n"
             f"  {self.command_prefix}config set <KEY> <value>\n"
             f"  {self.command_prefix}config unset <KEY>\n"
             f"  {self.command_prefix}reloadconfig"

@@ -135,7 +135,7 @@ class DirectMessageMixin:
                         reply_to,
                         (
                             "❌ Direct-message config commands are read-only. "
-                            f"Allowed: {p}config [all|page|last], {p}config show [all|page|last], {p}config search <query>"
+                            f"Allowed: {p}config [all|page|last], {p}config show [all|page|last], {p}config search/find <query>"
                         ),
                     )
                     return True

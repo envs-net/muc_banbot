@@ -137,7 +137,7 @@ class CommandHelpMixin:
             "🛠️ Core / Runtime\n"
             f"{p}help - show this help\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"
-            f"{p}config [all|page|last] / show/set/unset - show/edit runtime config\n"
+            f"{p}config [all|page|last] / show/search/find/set/unset - show/edit runtime config\n"
             f"{p}reload / {p}reloadconfig - reload config.py at runtime\n"
             f"{p}restart confirm - stop the bot so a supervisor can restart it\n"
             f"{p}checkupdate / {p}updatecheck - check if a newer bot release is available\n"
