@@ -176,6 +176,10 @@ class ConfigCommandMixin(ConfigMixin):
             await self._cmd_config_search(room, args[1:])
             return
 
+        if subcmd == "diff":
+            await self._cmd_config_diff(room, args[1:])
+            return
+
         if subcmd == "all" or subcmd == "last" or subcmd.isdigit():
             await self._cmd_config_show(room, args)
             return
@@ -218,6 +222,7 @@ class ConfigCommandMixin(ConfigMixin):
                 "Usage:\n"
                 f"  {self.command_prefix}config show\n"
                 f"  {self.command_prefix}config search/find <query>\n"
+                f"  {self.command_prefix}config diff [all|page|last]\n"
                 f"  {self.command_prefix}config set <KEY> <value>\n"
                 f"  {self.command_prefix}config unset <KEY>\n\n"
                 "🔒 = restart-only or protected, ✏️ = runtime-writable"
@@ -254,6 +259,76 @@ class ConfigCommandMixin(ConfigMixin):
                 lines.append("")
                 lines.append(f"Output truncated to {len(shown)} matches.")
             body = "\n".join(lines)
+
+        await self.bot_send_message(
+            mto=room,
+            mbody=body,
+            mtype="groupchat",
+        )
+
+
+    def _config_diff_entries(self) -> list[str]:
+        """Return formatted config values that differ from config_sample.py defaults."""
+        defaults = self._config_default_values_from_sample()
+        current_items = {
+            key: value
+            for key, value, _writable in self.get_ordered_config_items()
+        }
+        entries: list[str] = []
+
+        for _title, keys in self._config_sample_sections():
+            for key in keys:
+                if key not in defaults or self.is_secret_config_key(key):
+                    continue
+                current = current_items.get(key, None)
+                default = defaults[key]
+                if current == default:
+                    continue
+                entries.extend([
+                    f"• {key}",
+                    f"  current: {self._format_config_display_value(key, current)}",
+                    f"  default: {self._format_config_display_value(key, default)}",
+                    "",
+                ])
+
+        if entries and entries[-1] == "":
+            entries.pop()
+        return entries
+
+    @staticmethod
+    def _config_diff_arg_requests_page(args: list[str]) -> bool:
+        return any(str(arg).lower().strip() == "last" or str(arg).isdigit() for arg in args)
+
+    def _config_diff_should_paginate(self, args: list[str]) -> bool:
+        if wants_all_pages(args):
+            return False
+        return self._config_diff_arg_requests_page(args) or getattr(self, "config_output_mode", "all") == "paginate"
+
+    async def _cmd_config_diff(self, room: str, args: list[str] | None = None) -> None:
+        """Show config values that differ from config_sample.py defaults."""
+        args = args or []
+        entries = self._config_diff_entries()
+        diff_count = sum(1 for line in entries if line.startswith("• "))
+
+        if not entries:
+            body = "🧩 Config Diff: no differences from config_sample.py defaults."
+        elif self._config_diff_should_paginate(args):
+            per_page = get_list_page_size(self)
+            page = self._config_show_page_from_args(args, len(entries), per_page)
+            page_lines, current_page, total_pages, _total_items = paginate_lines(entries, page, per_page)
+            body = "\n".join([
+                f"🧩 Config Diff ({diff_count} change(s)) - Page {current_page}/{total_pages}:",
+                "",
+                *page_lines,
+                "",
+                f"Use {self.command_prefix}config diff all for the full output.",
+            ])
+        else:
+            body = "\n".join([
+                f"🧩 Config Diff ({diff_count} change(s)):",
+                "",
+                *entries,
+            ])
 
         await self.bot_send_message(
             mto=room,
@@ -306,6 +381,7 @@ class ConfigCommandMixin(ConfigMixin):
             f"  {self.command_prefix}config [all|page|last]\n"
             f"  {self.command_prefix}config show [all|page|last]\n"
             f"  {self.command_prefix}config search/find <query>\n"
+            f"  {self.command_prefix}config diff [all|page|last]\n"
             f"  {self.command_prefix}config set <KEY> <value>\n"
             f"  {self.command_prefix}config unset <KEY>\n"
             f"  {self.command_prefix}reloadconfig"

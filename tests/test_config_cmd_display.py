@@ -181,6 +181,53 @@ async def test_config_search_reports_usage_and_no_matches():
 
 
 @pytest.mark.asyncio
+async def test_config_diff_shows_only_supported_non_secret_changes(monkeypatch):
+    bot = ConfigDisplayBot()
+    monkeypatch.setattr(test_config, "LOG_LEVEL", "DEBUG", raising=False)
+    monkeypatch.setattr(test_config, "PASSWORD", "super-secret-test-value", raising=False)
+    monkeypatch.setattr(test_config, "LOCAL_ONLY_TEST_OPTION", "local", raising=False)
+
+    await bot._cmd_config_diff("admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+
+    assert "🧩 Config Diff" in body
+    assert "• LOG_LEVEL" in body
+    assert "current: 'DEBUG'" in body
+    assert "default: 'INFO'" in body
+    assert "PASSWORD" not in body
+    assert "super-secret-test-value" not in body
+    assert "LOCAL_ONLY_TEST_OPTION" not in body
+
+
+@pytest.mark.asyncio
+async def test_config_diff_reports_no_changes_when_values_match_defaults(monkeypatch):
+    bot = ConfigDisplayBot()
+    defaults = bot._config_default_values_from_sample()
+    for key, value in defaults.items():
+        monkeypatch.setattr(test_config, key, value, raising=False)
+
+    await bot._cmd_config_diff("admin@conference.example.org")
+
+    assert bot.sent[-1]["mbody"] == "🧩 Config Diff: no differences from config_sample.py defaults."
+
+
+@pytest.mark.asyncio
+async def test_config_diff_supports_paging(monkeypatch):
+    bot = ConfigDisplayBot()
+    bot.config_output_mode = "paginate"
+    bot.list_page_size = 4
+    monkeypatch.setattr(test_config, "LOG_LEVEL", "DEBUG", raising=False)
+    monkeypatch.setattr(test_config, "PUBLIC_COMMAND_RATE_LIMIT_WINDOW", 20, raising=False)
+
+    await bot._cmd_config_diff("admin@conference.example.org", ["last"])
+    body = bot.sent[-1]["mbody"]
+
+    assert "🧩 Config Diff" in body
+    assert "Page " in body
+    assert "Use !config diff all for the full output." in body
+
+
+@pytest.mark.asyncio
 async def test_config_change_audit_includes_changed_key_and_message():
     bot = ConfigDisplayBot()
 

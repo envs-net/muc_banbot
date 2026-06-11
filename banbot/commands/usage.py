@@ -152,6 +152,7 @@ class CommandUsageMixin:
             f"  {p}config [all|page|last]\n"
             f"  {p}config show [all|page|last]\n"
             f"  {p}config search/find <query>\n"
+            f"  {p}config diff [all|page|last]\n"
             f"  {p}config set <KEY> <value>\n"
             f"  {p}config unset <KEY>"
         )

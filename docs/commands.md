@@ -57,6 +57,7 @@ Explicit full output remains available regardless of mode:
 | `!config [all|page|last]` | Shows active configuration; secrets are hidden |
 | `!config show [all|page|last]` | Same as `!config`, explicit show form |
 | `!config search/find <query>` | Searches config option names and displayed values |
+| `!config diff [all|page|last]` | Shows current values that differ from `config_sample.py` defaults |
 | `!config set <KEY> <value>` | Updates a runtime-writable config option |
 | `!config unset <KEY>` | Resets a runtime-writable option to the `config_sample.py` default |
 | `!reload` / `!reloadconfig` | Validates and reloads runtime configuration |

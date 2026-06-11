@@ -729,6 +729,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
 
     await bot.on_message(admin_msg(fake_msg_factory, "!help config"))
     assert "!config search/find <query>" in bot.sent[-1]["mbody"]
+    assert "!config diff [all|page|last]" in bot.sent[-1]["mbody"]
 
 
 @pytest.mark.asyncio
@@ -760,7 +761,7 @@ async def test_admin_help_default_all_and_paginated_mode(fake_msg_factory, monke
     await bot.on_message(admin_msg(fake_msg_factory, "!help"))
     assert "Admin Help (page" not in bot.sent[-1]["mbody"]
     assert "🛡️ RTBL" in bot.sent[-1]["mbody"]
-    assert "!config [all|page|last] / show/search/find/set/unset" in bot.sent[-1]["mbody"]
+    assert "!config [all|page|last] / show/search/find/diff/set/unset" in bot.sent[-1]["mbody"]
     assert (
         "!banlist rtbl / !blacklist rtbl [all|page|last]"
         in bot.sent[-1]["mbody"]

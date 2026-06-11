@@ -127,6 +127,7 @@ Examples assume the default command prefix `!`.
 | `!status` | Show bot health, uptime, rooms, bans, RTBL, and DB state |
 | `!config [all|page|last]` / `!config show [all|page|last]` | Show active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config search/find <query>` | Search config option names and displayed values |
+| `!config diff [all|page|last]` | Show current values that differ from `config_sample.py` defaults |
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |
 | `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
 | `!reload` / `!reloadconfig` | Validate and reload runtime configuration |

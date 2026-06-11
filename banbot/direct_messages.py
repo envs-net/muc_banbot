@@ -124,7 +124,7 @@ class DirectMessageMixin:
                 if config_args:
                     first = config_args[0].lower()
                     is_readonly = (
-                        first in {"show", "list", "search", "find", "all", "last"}
+                        first in {"show", "list", "search", "find", "diff", "all", "last"}
                         or first.isdigit()
                     )
                 else:
@@ -135,7 +135,7 @@ class DirectMessageMixin:
                         reply_to,
                         (
                             "❌ Direct-message config commands are read-only. "
-                            f"Allowed: {p}config [all|page|last], {p}config show [all|page|last], {p}config search/find <query>"
+                            f"Allowed: {p}config [all|page|last], {p}config show [all|page|last], {p}config search/find <query>, {p}config diff [all|page|last]"
                         ),
                     )
                     return True

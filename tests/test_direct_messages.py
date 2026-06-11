@@ -256,8 +256,9 @@ async def test_muc_pm_from_regular_user_gets_rejection():
 async def test_admin_dm_can_use_config_readonly_command():
     bot = DirectBot()
     await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!config"))
+    await bot.on_direct_message(FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!config diff"))
 
-    assert bot.calls == [("config", "admin@example.org")]
+    assert bot.calls == [("config", "admin@example.org"), ("config", "admin@example.org")]
     assert bot.sent[-1]["mto"] == "admin@example.org"
     assert bot.sent[-1]["mtype"] == "chat"
     assert bot.sent[-1]["mbody"] == "config output"

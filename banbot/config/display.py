@@ -22,7 +22,7 @@ class ConfigDisplayMixin:
         return pathlib.Path("config.py").resolve()
 
     def _config_sample_path(self) -> pathlib.Path:
-        return pathlib.Path(__file__).resolve().parent.parent / "config_sample.py"
+        return pathlib.Path(__file__).resolve().parents[2] / "config_sample.py"
 
     def _ordered_config_keys_from_sample(self) -> list[str]:
         """Return config keys in config.py order, with config_sample.py as fallback.
@@ -93,7 +93,13 @@ class ConfigDisplayMixin:
             items.append((key, value, writable))
         return items
 
+    def is_secret_config_key(self, key: str) -> bool:
+        """Return True for config keys whose values must not be shown."""
+        return key in self.CONFIG_SECRET_KEYS or any(
+            token in key for token in ("PASSWORD", "SECRET", "TOKEN")
+        )
+
     def format_config_value_for_display(self, key: str, value: Any) -> str:
-        if key in self.CONFIG_SECRET_KEYS or any(token in key for token in ("PASSWORD", "SECRET", "TOKEN")):
+        if self.is_secret_config_key(key):
             return "****" if value not in (None, "") else "None"
         return repr(value)
