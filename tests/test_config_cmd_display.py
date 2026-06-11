@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import config
+import config as test_config
 import pytest
 
 from banbot.commands.config_display import ConfigCommandMixin
@@ -79,7 +79,7 @@ async def test_config_show_groups_keys_and_hides_secrets():
 @pytest.mark.asyncio
 async def test_config_show_shortens_long_lists_and_keeps_runtime_summary(monkeypatch):
     monkeypatch.setattr(
-        config,
+        test_config,
         "REDACTION_AUTO_REASONS",
         ["one", "two", "three", "four", "five", "six", "seven"],
         raising=False,
@@ -164,7 +164,9 @@ async def test_config_search_finds_key_and_keeps_secret_values_hidden():
     body = bot.sent[-1]["mbody"]
 
     assert "PASSWORD = ****" in body
-    assert getattr(config, "PASSWORD", None) not in body
+    password = getattr(test_config, "PASSWORD", None)
+    if password is not None:
+        assert str(password) not in body
 
 
 @pytest.mark.asyncio

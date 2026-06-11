@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 import pytest
@@ -20,7 +20,8 @@ AffiliationUsers = Sequence[str | tuple[str, str]]
 FlatAffiliationMap = Mapping[tuple[str, str], AffiliationUsers]
 NestedAffiliationMap = Mapping[str, Mapping[str, AffiliationUsers]]
 # Keep expiry short so time-based sync tests complete quickly.
-TEST_TEMPBAN_EXPIRY_THRESHOLD_SECONDS = 5
+EXPIRED_DURATION_SECONDS = 5
+TEST_ADMIN_ROOM = "admin@conference.example.test"
 
 
 class FakeMucService:
@@ -101,14 +102,13 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         Args:
             db_path: Path to the temporary SQLite database file provided by
                 the test fixture. Stored on the instance and used by
-                ``setup_db`` when overriding ``banbot.db.DB_FILE``.
+                ``setup_db`` when opening the isolated test database.
 
         The constructor prepares all in-memory fixtures used by sync tests,
         including fake MUC plugin wiring, ban cache/index dictionaries,
         mutable tracking state for assertions, and default room/admin config.
         """
         self._test_db_path = str(db_path)
-        self._db_file_override_lock = asyncio.Lock()
         self.protected_rooms = {"room@conference.example.test"}
         self.occupants = {}
         self.plugin = {"xep_0045": FakeMucService()}
@@ -123,16 +123,62 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.admin_rooms = {"room@conference.example.test"}
 
     async def setup_db(self, *, create_startup_backup: bool = True) -> None:
-        """Initialize the test database using the explicit temp_db_path fixture."""
-        import banbot.db as db_module
+        """Initialize an isolated SQLite schema for sync tests.
 
-        async with self._db_file_override_lock:
-            original_db_file = db_module.DB_FILE
-            db_module.DB_FILE = self._test_db_path
-            try:
-                await super().setup_db(create_startup_backup=create_startup_backup)
-            finally:
-                db_module.DB_FILE = original_db_file
+        The real ``DatabaseMixin.setup_db`` reads ``banbot.db.DB_FILE`` at
+        module level. Opening the explicit temporary test path directly keeps
+        this fixture independent from global DB configuration and safe for
+        parallel test execution.
+        """
+        if create_startup_backup and hasattr(self, "create_startup_database_snapshot"):
+            await self.create_startup_database_snapshot()
+
+        self.db = await aiosqlite.connect(self._test_db_path)
+        await self.db.execute("PRAGMA foreign_keys = ON")
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_type TEXT NOT NULL CHECK(target_type IN ('jid', 'nick', 'domain')),
+                target TEXT NOT NULL,
+                jid TEXT,
+                nick TEXT,
+                until INTEGER NOT NULL DEFAULT 0,
+                issuer TEXT,
+                comment TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                UNIQUE(target_type, target)
+            )
+            """
+        )
+        await self.db.execute("CREATE TABLE IF NOT EXISTS rooms (room TEXT PRIMARY KEY)")
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                event_type TEXT NOT NULL,
+                actor TEXT,
+                room TEXT,
+                target_type TEXT,
+                target TEXT,
+                jid TEXT,
+                nick TEXT,
+                until INTEGER,
+                comment TEXT,
+                details TEXT
+            )
+            """
+        )
+        await self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bans_target ON bans(target_type, target)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_jid ON bans(jid)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_nick ON bans(LOWER(nick))")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_until ON bans(until)")
+        await self.db.commit()
+
+        if hasattr(self, "flush_pending_database_backup_audit_events"):
+            await self.flush_pending_database_backup_audit_events()
 
     @staticmethod
     def bare_jid(jid):
@@ -192,12 +238,22 @@ async def make_bot(temp_db_path):
 
 
 @pytest.fixture
-def sync_module(monkeypatch):
-    """Return banbot.sync with ADMIN_ROOM set for sync command tests."""
+def sync_module():
+    """Return the sync module for tests that need NICK or asyncio hooks."""
     import banbot.sync as module
 
-    monkeypatch.setattr(module, "ADMIN_ROOM", "admin@conference.example.test")
     return module
+
+
+@asynccontextmanager
+async def admin_room_override(sync_module, value: str = TEST_ADMIN_ROOM) -> AsyncIterator[None]:
+    """Temporarily override sync.ADMIN_ROOM for a single async test scope."""
+    original = sync_module.ADMIN_ROOM
+    sync_module.ADMIN_ROOM = value
+    try:
+        yield
+    finally:
+        sync_module.ADMIN_ROOM = original
 
 
 @pytest.mark.asyncio
@@ -295,7 +351,7 @@ async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recove
         await bot.upsert_ban_db(
             "expired@example.test",
             None,
-            int(time.time()) - TEST_TEMPBAN_EXPIRY_THRESHOLD_SECONDS,
+            int(time.time()) - EXPIRED_DURATION_SECONDS,
             "tester",
             "expired",
         )
@@ -378,20 +434,21 @@ async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, syn
     bot = await make_bot(temp_db_path)
     muc_service = FakeMucService(
         {
-            ("admin@conference.example.test", "owner"): ["owner@example.test"],
-            ("admin@conference.example.test", "admin"): ["admin@example.test"],
+            (TEST_ADMIN_ROOM, "owner"): ["owner@example.test"],
+            (TEST_ADMIN_ROOM, "admin"): ["admin@example.test"],
         }
     )
     bot.plugin["xep_0045"] = muc_service
     try:
-        await bot.sync_admins(announce=True)
+        async with admin_room_override(sync_module):
+            await bot.sync_admins(announce=True)
 
-        occupants = bot.occupants["admin@conference.example.test"]
+        occupants = bot.occupants[TEST_ADMIN_ROOM]
         assert occupants["owner@example.test"]["affiliation"] == "owner"
         assert occupants["admin@example.test"]["affiliation"] == "admin"
         assert {
-            ("admin@conference.example.test", "owner"),
-            ("admin@conference.example.test", "admin"),
+            (TEST_ADMIN_ROOM, "owner"),
+            (TEST_ADMIN_ROOM, "admin"),
         } <= set(muc_service.calls)
         assert "Current admins/owners" in bot.sent[-1]["mbody"]
     finally:
@@ -403,7 +460,7 @@ async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path
     bot = await make_bot(temp_db_path)
     muc_service = FakeMucService(
         {
-            "admin@conference.example.test": {
+            TEST_ADMIN_ROOM: {
                 "owner": ["owner@example.test"],
                 "admin": ["admin@example.test"],
             }
@@ -411,16 +468,17 @@ async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path
     )
     bot.plugin["xep_0045"] = muc_service
     try:
-        bot.admin_rooms = {"admin@conference.example.test"}
+        bot.admin_rooms = {TEST_ADMIN_ROOM}
 
-        await bot.sync_admins(announce=True)
+        async with admin_room_override(sync_module):
+            await bot.sync_admins(announce=True)
 
-        assert "admin@conference.example.test" in bot.occupants
-        assert bot.occupants["admin@conference.example.test"]["owner@example.test"]["affiliation"] == "owner"
+        assert TEST_ADMIN_ROOM in bot.occupants
+        assert bot.occupants[TEST_ADMIN_ROOM]["owner@example.test"]["affiliation"] == "owner"
 
         muc_service.affiliations = muc_service._normalize_affiliations(
             {
-                "admin@conference.example.test": {
+                TEST_ADMIN_ROOM: {
                     "owner": ["new-owner@example.test"],
                     "admin": [],
                 }
@@ -428,9 +486,10 @@ async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path
         )
         bot.occupants = {}
 
-        await bot.sync_admins(announce=True)
+        async with admin_room_override(sync_module):
+            await bot.sync_admins(announce=True)
 
-        refreshed_occupants = bot.occupants["admin@conference.example.test"]
+        refreshed_occupants = bot.occupants[TEST_ADMIN_ROOM]
         assert "new-owner@example.test" in refreshed_occupants
         assert "owner@example.test" not in refreshed_occupants
         assert "admin@example.test" not in refreshed_occupants
