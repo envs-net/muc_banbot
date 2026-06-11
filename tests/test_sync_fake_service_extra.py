@@ -101,18 +101,21 @@ class SyncTrackingState:
 
 
 class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
-    def __init__(self, db_path):
+    def __init__(self, db_path: str) -> None:
         """Initialize a test bot with fake services and isolated state.
 
         Args:
-            db_path: Path to the temporary SQLite database file provided by
-                the test fixture. Stored on the instance and used by
-                ``setup_db`` when opening the isolated test database.
+            db_path: Non-None path to the temporary SQLite database file
+                provided by the test fixture. Stored on the instance and used
+                by ``setup_db`` when opening the isolated test database.
 
         The constructor prepares all in-memory fixtures used by sync tests,
         including fake MUC plugin wiring, ban cache/index dictionaries,
         mutable tracking state for assertions, and default room/admin config.
         """
+        if db_path is None:
+            raise ValueError("db_path must not be None")
+
         self._test_db_path = str(db_path)
         self.protected_rooms = {"room@conference.example.test"}
         self.occupants = {}
@@ -235,14 +238,19 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.auto_redactions.append((jid, reason, actor))
 
 
-async def make_bot(temp_db_path):
-    """Create and initialize a SyncBot backed by a temporary test DB.
+async def make_bot(temp_db_path: str) -> SyncBot:
+    """Asynchronously create and initialize a SyncBot backed by a temporary test DB.
+
+    This helper must be awaited.
 
     Args:
-        temp_db_path: Filesystem path for the temporary SQLite database.
+        temp_db_path: Non-None filesystem path string for the temporary SQLite
+            database. The path must be valid for creating/opening the test
+            database.
 
     Returns:
-        SyncBot: A bot instance with database schema initialized and bans loaded.
+        SyncBot: The initialized bot instance (awaited result) with schema
+        created and bans loaded from the database.
     """
     bot = SyncBot(temp_db_path)
     await bot.setup_db()
@@ -562,7 +570,7 @@ async def create_and_configure_bot_for_room_sync(
     room,
     *,
     fail_join=False,
-):
+) -> SyncBot:
     """Create and configure a SyncBot for a room-sync test scenario.
 
     Args:
