@@ -170,7 +170,7 @@ class CommandHelpMixin:
 
             "🔎 Ban Queries\n"
             f"{p}banlist / {p}blacklist [all|page|last] - show all active bans with remaining time and comments\n"
-            f"{p}banlist / {p}blacklist rtbl [all|page|last] - show RTBL hash and domain entries\n"
+            f"{p}banlist rtbl / {p}blacklist rtbl [all|page|last] - show RTBL hash and domain entries\n"
             f"{p}bansearch <query> [all|page|last] - search bans by nick, domain, jid or RTBL reason\n"
             f"{p}why <nick|jid> - show the reason and remaining time for a ban\n\n"
 

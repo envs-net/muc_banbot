@@ -126,7 +126,7 @@ See [Public Policy / Rules](policy.md).
 | --- | --- |
 | `!banlist [all|page|last]` | Shows active local bans |
 | `!blacklist ...` | Alias for `!banlist ...` |
-| `!banlist rtbl [all|page|last]` | Shows raw RTBL hash/domain cache entries |
+| `!banlist rtbl [all|page|last]` / `!blacklist rtbl [all|page|last]` | Shows raw RTBL hash/domain cache entries |
 | `!bansearch <query> [all|page|last]` | Searches bans by target, issuer, comment, or RTBL reason |
 | `!why <nick|jid>` | Explains why a user is banned |
 

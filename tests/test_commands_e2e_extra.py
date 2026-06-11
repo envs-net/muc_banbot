@@ -685,7 +685,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
     expected = {
         "help": "!help <command>",
         "status": "!status",
-        "config": "!config search <query>",
+        "config": "!config show [all|page|last]",
         "reload": "!reload / !reloadconfig",
         "reloadconfig": "!reload / !reloadconfig",
         "restart": "!restart confirm",
@@ -757,6 +757,10 @@ async def test_admin_help_default_all_and_paginated_mode(fake_msg_factory, monke
     await bot.on_message(admin_msg(fake_msg_factory, "!help"))
     assert "Admin Help (page" not in bot.sent[-1]["mbody"]
     assert "🛡️ RTBL" in bot.sent[-1]["mbody"]
+    assert (
+        "!banlist rtbl / !blacklist rtbl [all|page|last]"
+        in bot.sent[-1]["mbody"]
+    )
 
     bot.help_output_mode = "paginate"
     await bot.on_message(admin_msg(fake_msg_factory, "!help"))

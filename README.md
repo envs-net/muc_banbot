@@ -151,7 +151,7 @@ Examples assume the default command prefix `!`.
 | `!unban <jid/nick/domain>` | Remove a ban |
 | `!redact <jid> [reason]` / `!redact id ...` / `!redact cleanup` | Redact indexed messages or clean old redaction index entries |
 | `!banlist` / `!blacklist [all/page/last]` | Show active bans |
-| `!banlist` / `!blacklist rtbl [all/page/last]` | Show raw RTBL hash/domain entries |
+| `!banlist rtbl` / `!blacklist rtbl [all/page/last]` | Show raw RTBL hash/domain entries |
 | `!bansearch <query> [all/page/last]` | Search bans by target, issuer, comment, or RTBL reason |
 | `!why <nick/jid>` | Explain why a user is banned |
 | `!ignore [list/all/page/last]` | Show the global ignorelist |
