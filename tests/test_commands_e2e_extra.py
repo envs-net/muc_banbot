@@ -685,7 +685,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
     expected = {
         "help": "!help <command>",
         "status": "!status",
-        "config": "!config show [all|page|last]",
+        "config": "!config search <query>",
         "reload": "!reload / !reloadconfig",
         "reloadconfig": "!reload / !reloadconfig",
         "restart": "!restart confirm",

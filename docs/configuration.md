@@ -42,6 +42,7 @@ DB_FILE = "banbot.db"
 ```text
 !config [all|page|last]
 !config show [all|page|last]
+!config search <query>
 !config set <KEY> <value>
 !config unset <KEY>
 !reloadconfig
@@ -52,6 +53,8 @@ DB_FILE = "banbot.db"
 Runtime-writable values are marked with `✏️` in the output. Protected/startup-only values are marked as protected and cannot be changed through chat commands.
 
 `!config unset <KEY>` resets a runtime-writable value to the default from `config_sample.py`.
+
+`!config search <query>` searches config option names and displayed values, for example `!config search CONNECT_DIRECT_TLS`. Secret values remain hidden in search output.
 
 ## Output Modes and Paging
 

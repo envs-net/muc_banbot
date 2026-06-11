@@ -56,6 +56,7 @@ Explicit full output remains available regardless of mode:
 | `!status` | Shows health, uptime, rooms, bans, DB, RTBL, workers, alerts, and reconnect state |
 | `!config [all|page|last]` | Shows active configuration; secrets are hidden |
 | `!config show [all|page|last]` | Same as `!config`, explicit show form |
+| `!config search <query>` | Searches config option names and displayed values |
 | `!config set <KEY> <value>` | Updates a runtime-writable config option |
 | `!config unset <KEY>` | Resets a runtime-writable option to the `config_sample.py` default |
 | `!reload` / `!reloadconfig` | Validates and reloads runtime configuration |

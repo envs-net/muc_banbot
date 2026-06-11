@@ -172,6 +172,10 @@ class ConfigCommandMixin(ConfigMixin):
             await self._cmd_config_show(room, args[1:])
             return
 
+        if subcmd in ("search", "find"):
+            await self._cmd_config_search(room, args[1:])
+            return
+
         if subcmd == "all" or subcmd == "last" or subcmd.isdigit():
             await self._cmd_config_show(room, args)
             return
@@ -213,10 +217,47 @@ class ConfigCommandMixin(ConfigMixin):
             mbody=(
                 "Usage:\n"
                 f"  {self.command_prefix}config show\n"
+                f"  {self.command_prefix}config search <query>\n"
                 f"  {self.command_prefix}config set <KEY> <value>\n"
                 f"  {self.command_prefix}config unset <KEY>\n\n"
                 "🔒 = restart-only or protected, ✏️ = runtime-writable"
             ),
+            mtype="groupchat",
+        )
+
+
+    async def _cmd_config_search(self, room: str, args: list[str] | None = None) -> None:
+        """Search visible config keys and values by case-insensitive substring."""
+        args = args or []
+        query = " ".join(str(arg).strip() for arg in args).strip()
+        if not query:
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"❌ Usage: {self.command_prefix}config search <query>",
+                mtype="groupchat",
+            )
+            return
+
+        query_lower = query.lower()
+        matches: list[str] = []
+        for key, value, writable in self.get_ordered_config_items():
+            display_value = self._format_config_display_value(key, value)
+            if query_lower in key.lower() or query_lower in display_value.lower():
+                matches.append(self._format_config_line(key, value, writable))
+
+        if not matches:
+            body = f"🔎 Config search for {query!r}: no matches."
+        else:
+            shown = matches[:50]
+            lines = [f"🔎 Config search for {query!r}: {len(matches)} match(es)", "", *shown]
+            if len(matches) > len(shown):
+                lines.append("")
+                lines.append(f"Output truncated to {len(shown)} matches.")
+            body = "\n".join(lines)
+
+        await self.bot_send_message(
+            mto=room,
+            mbody=body,
             mtype="groupchat",
         )
 
@@ -264,6 +305,7 @@ class ConfigCommandMixin(ConfigMixin):
             "Commands:\n"
             f"  {self.command_prefix}config [all|page|last]\n"
             f"  {self.command_prefix}config show [all|page|last]\n"
+            f"  {self.command_prefix}config search <query>\n"
             f"  {self.command_prefix}config set <KEY> <value>\n"
             f"  {self.command_prefix}config unset <KEY>\n"
             f"  {self.command_prefix}reloadconfig"

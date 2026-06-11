@@ -151,6 +151,34 @@ async def test_config_show_accepts_page_and_last_args():
 
 
 @pytest.mark.asyncio
+async def test_config_search_finds_key_and_keeps_secret_values_hidden():
+    bot = ConfigDisplayBot()
+
+    await bot._cmd_config_search("admin@conference.example.org", ["CONNECT_DIRECT_TLS"])
+    body = bot.sent[-1]["mbody"]
+
+    assert "Config search for 'CONNECT_DIRECT_TLS': 1 match(es)" in body
+    assert "CONNECT_DIRECT_TLS =" in body
+
+    await bot._cmd_config_search("admin@conference.example.org", ["PASSWORD"])
+    body = bot.sent[-1]["mbody"]
+
+    assert "PASSWORD = ****" in body
+    assert getattr(config, "PASSWORD", None) not in body
+
+
+@pytest.mark.asyncio
+async def test_config_search_reports_usage_and_no_matches():
+    bot = ConfigDisplayBot()
+
+    await bot._cmd_config_search("admin@conference.example.org", [])
+    assert bot.sent[-1]["mbody"] == "❌ Usage: !config search <query>"
+
+    await bot._cmd_config_search("admin@conference.example.org", ["definitely-no-such-config-key"])
+    assert bot.sent[-1]["mbody"] == "🔎 Config search for 'definitely-no-such-config-key': no matches."
+
+
+@pytest.mark.asyncio
 async def test_config_change_audit_includes_changed_key_and_message():
     bot = ConfigDisplayBot()
 
