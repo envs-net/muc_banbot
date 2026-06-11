@@ -81,7 +81,7 @@ UNBAN_CHECK_INTERVAL = 60  # Interval (seconds) for checking expired temporary b
 MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default: 30
 
 # Rate limit for public commands in protected rooms.
-# Example default: max 3 uses per nick/room/command every 30 seconds.
+# Example default: max 3 uses per nick/room/command every 10 seconds.
 PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 10
 PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 
@@ -210,8 +210,9 @@ REDACTION_INDEX_RETENTION_DAYS = 30
 AUTO_REDACT_ON_IMPORTED_BAN_REASON = False
 
 # Also apply automatic redaction to matching manual/external MUC bans discovered
-# during startup sync, !syncbans, or room sync. Uses REDACTION_AUTO_REASONS.
-# Disabled by default because manual room bans may not have complete bot context.
+# from room state or live MUC ban events. Uses REDACTION_AUTO_REASONS.
+# Enabled by default. Only matching reasons trigger redaction; already-known bans
+# are not auto-redacted again during startup or sync.
 AUTO_REDACT_ON_MANUAL_MUC_BAN = True
 
 # Ban comments matching one of these strings trigger automatic redaction for
