@@ -54,14 +54,14 @@ When `redact=True` and `REDACTION_ENABLED=True`, message protections try to retr
 !protection enable flood
 !protections flood set max_messages 8
 !protections flood set window_seconds 60
-!protections flood set action tempban
+!protections flood set action ban
 !protections flood set tempban_seconds 1h
 ```
 
 ```text
 !protection enable mention
 !protections mention set max_mentions 5
-!protections mention set action kick
+!protections mention set action tempban
 ```
 
 ```text
