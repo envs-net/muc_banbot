@@ -38,22 +38,49 @@ def message_looks_like_media(body: str) -> bool:
     return False
 
 
+def _nick_match_variants(nick: str) -> set[str]:
+    """Return conservative body-match variants for a MUC nick."""
+    nick_text = str(nick or "").strip()
+    if not nick_text:
+        return set()
+
+    variants = {nick_text.lower()}
+
+    # Some clients display affiliation prefixes such as ~creme/@alice.  The
+    # actual MUC nick in the occupant cache may or may not contain that prefix,
+    # so allow both forms for mention detection.
+    stripped = nick_text.lstrip("~&@%+").strip()
+    if stripped:
+        variants.add(stripped.lower())
+
+    # Common textual mention form.
+    for variant in list(variants):
+        variants.add(f"@{variant}")
+
+    return {variant for variant in variants if variant}
+
+
 def count_mentions(body: str, known_nicks: list[str]) -> int:
     """Count how many distinct known MUC nicks are mentioned in a message."""
-    text = str(body or "")
-    text_lower = text.lower()
+    text_lower = str(body or "").lower()
     count = 0
+    seen: set[str] = set()
+
     for nick in known_nicks:
         nick_text = str(nick or "").strip()
         if not nick_text:
             continue
-        # Avoid counting tiny/common tokens too aggressively.
-        if len(nick_text) < 3:
-            pattern = rf"(?<!\w){re.escape(nick_text.lower())}(?!\w)"
-        else:
-            pattern = rf"(?<!\w){re.escape(nick_text.lower())}(?!\w)"
-        if re.search(pattern, text_lower):
-            count += 1
+        nick_key = nick_text.lower()
+        if nick_key in seen:
+            continue
+
+        for variant in _nick_match_variants(nick_text):
+            pattern = rf"(?<!\w){re.escape(variant)}(?!\w)"
+            if re.search(pattern, text_lower):
+                count += 1
+                seen.add(nick_key)
+                break
+
     return count
 
 

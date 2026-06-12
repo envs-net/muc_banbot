@@ -173,3 +173,72 @@ async def test_policy_alias_works_for_config_and_enable() -> None:
     )
     assert bot.protections["PolicyChangeNotification"]["enabled"] is False
     assert "PolicyChangeNotification disabled" in bot.sent[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_mention_limit_counts_prefixed_display_nicks(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["MentionLimitProtection"]["enabled"] = True
+    bot.protections["MentionLimitProtection"]["max_mentions"] = 2
+    bot.protections["MentionLimitProtection"]["action"] = "notify"
+    bot.occupants = {
+        "room@conference.example.org": {
+            "Spammer": {"jid": "spam@example.org", "role": "participant", "affiliation": "member"},
+            "creme": {"jid": "creme@example.org", "role": "participant", "affiliation": "member"},
+            "adminbot_dev": {"jid": "bot@example.org", "role": "participant", "affiliation": "member"},
+            "fab": {"jid": "fab@example.org", "role": "participant", "affiliation": "member"},
+        }
+    }
+    msg = fake_msg_factory(
+        room="room@conference.example.org",
+        nick="Spammer",
+        body="hi ~creme adminbot_dev fab",
+    )
+
+    handled = await bot.protections_on_message(
+        msg,
+        "room@conference.example.org",
+        "Spammer",
+        "hi ~creme adminbot_dev fab",
+    )
+
+    assert handled is True
+    assert "MentionLimitProtection triggered" in bot.sent[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_mention_limit_uses_xep0045_roster_cache(fake_msg_factory) -> None:
+    class DummyMucPlugin:
+        rooms = {
+            "room@conference.example.org": {
+                "creme": {},
+                "adminbot_dev": {},
+                "fab": {},
+            }
+        }
+
+    bot = DummyProtections()
+    bot.protections["MentionLimitProtection"]["enabled"] = True
+    bot.protections["MentionLimitProtection"]["max_mentions"] = 2
+    bot.protections["MentionLimitProtection"]["action"] = "notify"
+    bot.plugin = {"xep_0045": DummyMucPlugin()}
+    bot.occupants = {
+        "room@conference.example.org": {
+            "Spammer": {"jid": "spam@example.org", "role": "participant", "affiliation": "member"},
+        }
+    }
+    msg = fake_msg_factory(
+        room="room@conference.example.org",
+        nick="Spammer",
+        body="hi ~creme adminbot_dev fab",
+    )
+
+    handled = await bot.protections_on_message(
+        msg,
+        "room@conference.example.org",
+        "Spammer",
+        "hi ~creme adminbot_dev fab",
+    )
+
+    assert handled is True
+    assert "MentionLimitProtection triggered" in bot.sent[-1][1]

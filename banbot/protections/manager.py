@@ -142,6 +142,27 @@ class ProtectionMixin:
         jid = bare_jid(info.get("jid")) if info.get("jid") else None
         return jid, nick.lower()
 
+    def _protection_known_nicks(self, room: str) -> list[str]:
+        """Return known room nicks from BanBot state and the XEP-0045 roster cache."""
+        nicks: set[str] = set()
+
+        occupants = getattr(self, "occupants", {}).get(room, {})
+        if isinstance(occupants, dict):
+            nicks.update(str(nick) for nick in occupants if str(nick).strip())
+
+        try:
+            muc_plugin = self.plugin["xep_0045"]
+            rooms = getattr(muc_plugin, "rooms", {})
+            room_roster = rooms.get(room, {}) if isinstance(rooms, dict) else {}
+            if isinstance(room_roster, dict):
+                nicks.update(str(nick) for nick in room_roster if str(nick).strip())
+            elif isinstance(room_roster, (set, list, tuple)):
+                nicks.update(str(nick) for nick in room_roster if str(nick).strip())
+        except Exception:
+            pass
+
+        return sorted(nicks, key=str.lower)
+
     def _protection_is_exempt(self, room: str, nick: str, jid: str | None = None) -> bool:
         if room not in getattr(self, "protected_rooms", set()):
             return True
@@ -447,8 +468,21 @@ class ProtectionMixin:
             return False
         config = self.protection_config(protection)
         limit = max(1, int(config.get("max_mentions", 5) or 5))
-        nicks = [n for n in self.occupants.get(room, {}) if n.lower() != nick.lower()]
+        nicks = [
+            known_nick
+            for known_nick in self._protection_known_nicks(room)
+            if known_nick.lower() != nick.lower()
+        ]
         mention_count = count_mentions(body, nicks)
+        log.debug(
+            "%s checked in %s: nick=%s mentions=%d limit=%d known_nicks=%d",
+            protection,
+            room,
+            nick,
+            mention_count,
+            limit,
+            len(nicks),
+        )
         if mention_count <= limit:
             return False
         await self._protection_apply_action(
