@@ -84,6 +84,17 @@ Message bodies are not stored.
 
 Pending room invites are persisted so they survive bot restarts. Entries are removed when accepted, declined/rejected, expired via `ROOM_INVITE_MAX_AGE_DAYS`, or cleared with `!room invite cleanup`; `!room invite cleanup expired` removes only expired entries.
 
+### `protections`
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `name` | TEXT | Canonical protection name |
+| `enabled` | INTEGER | Whether the protection is enabled |
+| `config_json` | TEXT | JSON object containing runtime config overrides |
+| `updated_at` | INTEGER | Last update timestamp |
+
+Protection defaults live in code. This table stores only the current enabled state and configured overrides changed through `!protections`.
+
 ### `public_policy`
 
 | Column | Type | Description |

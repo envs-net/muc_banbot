@@ -39,6 +39,11 @@ class CommandEntryPointMixin:
         if not body:
             return
 
+        if hasattr(self, "protections_on_message"):
+            handled_by_protection = await self.protections_on_message(msg, room, nick, body)
+            if handled_by_protection:
+                return
+
         if not body.startswith(self.command_prefix):
             return
 

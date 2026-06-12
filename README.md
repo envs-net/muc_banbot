@@ -2,7 +2,7 @@
 
 BanBot is an XMPP bot for centralized ban management across multiple MUC rooms (Multi-User Chat).
 
-It provides admin-room based moderation, protects configured MUCs from unwanted users, and supports temporary bans, domain bans, ban synchronization, audit logging, ignorelists, health checks, RTBL/PubSub integration, and optional OMEMO support for encrypted commands and replies.
+It provides admin-room based moderation, protects configured MUCs from unwanted users, and supports temporary bans, domain bans, ban synchronization, audit logging, ignorelists, health checks, Draupnir-inspired protections, RTBL/PubSub integration, and optional OMEMO support for encrypted commands and replies.
 
 ---
 
@@ -29,6 +29,7 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 * 🗄️ Managed ZIP backup archives with manifest, restore command, verification, and automatic startup backups
 * ✅ Startup/runtime config validation with safe `!reloadconfig`
 * 🚦 Rate limiting for public protected-room commands
+* 🧯 Protections for flood spam, first-message media, mention limits, wordlists, join waves, trusted reporters, and policy-change notifications
 * 📜 Optional public room policy text via `!rules` / `!policy`
 * ⬆️ Optional GitHub release checks
 * 🖼️ Avatar/vCard support via XEP-0054, XEP-0084, and XEP-0153
@@ -151,6 +152,10 @@ Examples assume the default command prefix `!`.
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add a temporary ban |
 | `!unban <jid/nick/domain>` | Remove a ban |
 | `!redact <jid> [reason]` / `!redact id ...` / `!redact cleanup` | Redact indexed messages or clean old redaction index entries |
+| `!protections list [all/page/last]` | List protection enabled/disabled state |
+| `!protection enable/disable <name>` | Toggle a protection |
+| `!protections <name> config/set` | Show or edit one protection config |
+| `!report <nick/jid> [reason]` | Trusted reporter command when enabled |
 | `!banlist` / `!blacklist [all/page/last]` | Show active bans |
 | `!banlist rtbl` / `!blacklist rtbl [all/page/last]` | Show raw RTBL hash/domain entries |
 | `!bansearch <query> [all/page/last]` | Search bans by target, issuer, comment, or RTBL reason |
@@ -260,6 +265,7 @@ The full documentation is split into focused guides. Start with the [documentati
 * [RTBL / PubSub](docs/rtbl.md)
 * [Prosody PubSub Setup](docs/rtbl_pubsub-setup.md)
 * [Public Policy / Rules](docs/policy.md)
+* [Protections](docs/protections.md)
 * [Admin Protection](docs/admin-protection.md)
 * [Database](docs/database.md)
 * [Testing and CI](docs/testing.md)

@@ -158,6 +158,11 @@ class CommandRouterMixin:
             await self._cmd_whoami(room, nick)
             return True
 
+        if cmd == "report" and (room == admin_room() or self.user_cmds_allowed(room)):
+            if hasattr(self, "cmd_protection_report"):
+                await self.cmd_protection_report(room, nick, args)
+            return True
+
         if cmd in ("rules", "policy"):
             # In the admin room, !policy is handled by the admin command below.
             # In protected rooms, !rules / !policy show the public policy text.

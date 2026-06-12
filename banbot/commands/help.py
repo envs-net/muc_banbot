@@ -65,6 +65,9 @@ class CommandHelpMixin:
             "syncadmins": self._syncadmins_usage_text,
             "syncbans": self._syncbans_usage_text,
             "omemo": self._omemo_usage_text,
+            "protection": self._protection_usage_text,
+            "protections": self._protection_usage_text,
+            "report": self._report_usage_text,
         }
 
         help_factory = topic_help.get(normalized)
@@ -128,6 +131,9 @@ class CommandHelpMixin:
         policy_enabled, policy_text = await self.get_public_policy()
         if policy_enabled and policy_text.strip():
             lines.append(f"{p}rules / {p}policy - show room moderation policy")
+
+        if getattr(self, "protection_enabled", lambda _name: False)("TrustedReporters"):
+            lines.append(f"{p}report <nick|jid> [reason] - report abuse as trusted reporter")
 
         return "\n".join(lines)
 
