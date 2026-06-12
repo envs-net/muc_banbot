@@ -51,8 +51,8 @@ async def test_protections_list_shows_enabled_disabled_icons() -> None:
     await bot.cmd_protections_list("admin@conference.example.org", ["all"])
 
     body = bot.sent[-1][1]
-    assert "🟢 (enabled) FloodSpamProtection" in body
-    assert "🔴 (disabled) MentionLimitProtection" in body
+    assert "🟢 (enabled) FloodSpamProtection [flood]" in body
+    assert "🔴 (disabled) MentionLimitProtection [mentions]" in body
 
 
 @pytest.mark.asyncio

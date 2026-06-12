@@ -34,6 +34,7 @@ from ..utils import (
 from .definitions import (
     PROTECTION_ALLOWED_ACTIONS,
     PROTECTION_DEFAULTS,
+    PROTECTION_DISPLAY_ALIASES,
     PROTECTION_ORDER,
     canonical_protection_name,
     default_protection_config,
@@ -668,7 +669,8 @@ class ProtectionMixin:
             config = self.protection_config(name)
             icon = "🟢" if config.get("enabled") else "🔴"
             state = "enabled" if config.get("enabled") else "disabled"
-            lines.append(f"{icon} ({state}) {name}")
+            alias = PROTECTION_DISPLAY_ALIASES.get(name, name)
+            lines.append(f"{icon} ({state}) {name} [{alias}]")
         if show_all:
             body = "🛡️ Protections:\n" + "\n".join(lines)
         else:

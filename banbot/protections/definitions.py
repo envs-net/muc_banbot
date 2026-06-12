@@ -78,6 +78,17 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     },
 }
 
+
+PROTECTION_DISPLAY_ALIASES = {
+    "FloodSpamProtection": "flood",
+    "FirstMessageMediaProtection": "media",
+    "MentionLimitProtection": "mentions",
+    "WordListNewJoinerProtection": "wordlist",
+    "JoinWaveShortCircuitProtection": "joinwave",
+    "TrustedReporters": "reporters",
+    "PolicyChangeNotification": "policy",
+}
+
 PROTECTION_ALIASES = {
     "flood": "FloodSpamProtection",
     "spam": "FloodSpamProtection",

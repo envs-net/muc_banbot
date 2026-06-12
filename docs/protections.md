@@ -7,7 +7,7 @@ Protections are stored in SQLite and can be enabled, disabled, and tuned at runt
 
 | Command | Description |
 | --- | --- |
-| `!protections list [all|page|last]` | Lists all protections with 🟢 enabled / 🔴 disabled state |
+| `!protections list [all|page|last]` | Lists all protections with 🟢 enabled / 🔴 disabled state and their short alias |
 | `!protection enable <name>` | Enables a protection |
 | `!protection disable <name>` | Disables a protection |
 | `!protections <name> config` / `show` | Shows the current config for one protection |
@@ -18,7 +18,7 @@ Protections are stored in SQLite and can be enabled, disabled, and tuned at runt
 | `!protections reporters list [all|page|last]` | Lists configured trusted reporter JIDs |
 | `!report <nick|jid> [reason]` | Trusted reporter command, only useful when `TrustedReporters` is enabled |
 
-Common aliases such as `flood`, `mention`, `wordlist`, `joinwave`, and `reporters` can be used instead of the full protection name.
+Common aliases such as `flood`, `media`, `mentions`, `wordlist`, `joinwave`, `reporters`, and `policy` can be used instead of the full protection name. The list output shows the main alias in square brackets.
 
 Use `!protections <name> reset` to return a protection to its built-in defaults, including its default enabled/disabled state.
 
