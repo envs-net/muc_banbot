@@ -41,6 +41,8 @@ def test_protection_aliases_resolve_common_names() -> None:
     assert canonical_protection_name("flood") == "FloodSpamProtection"
     assert canonical_protection_name("FirstMessageIsImageProtection") == "FirstMessageMediaProtection"
     assert canonical_protection_name("mention-limit") == "MentionLimitProtection"
+    assert canonical_protection_name("media") == "FirstMessageMediaProtection"
+    assert canonical_protection_name("policy") == "PolicyChangeNotification"
 
 
 @pytest.mark.asyncio
@@ -154,3 +156,20 @@ async def test_protections_dispatch_supports_reporter_shortcuts() -> None:
     )
 
     assert bot.protections["TrustedReporters"]["reporters"] == ["bob@example.org"]
+
+
+@pytest.mark.asyncio
+async def test_policy_alias_works_for_config_and_enable() -> None:
+    bot = DummyProtections()
+
+    await bot.cmd_protection_config("admin@conference.example.org", "policy")
+    assert "PolicyChangeNotification config" in bot.sent[-1][1]
+
+    await bot.cmd_protection_set_enabled(
+        "admin@conference.example.org",
+        "policy",
+        False,
+        "Admin",
+    )
+    assert bot.protections["PolicyChangeNotification"]["enabled"] is False
+    assert "PolicyChangeNotification disabled" in bot.sent[-1][1]
