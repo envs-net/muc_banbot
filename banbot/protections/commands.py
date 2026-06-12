@@ -50,9 +50,10 @@ class ProtectionCommandsMixin:
         if bare_jid(str(reporter)) not in reporters:
             await self.bot_send_message(mto=room, mbody="❌ You are not a trusted reporter.", mtype="groupchat")
             return
-        target = args[0].lower()
+        raw_target = args[0].strip()
+        target = raw_target.lower() if "@" in raw_target else raw_target
         reason = " ".join(args[1:]).strip() or str(config.get("reason") or "trusted report")
-        key = (room, target)
+        key = (room, target.lower())
         now = time.time()
         window = max(1, int(config.get("window_seconds", 900) or 900))
         reports = [entry for entry in self.protection_trusted_reports[key] if now - entry[0] <= window]
@@ -68,12 +69,15 @@ class ProtectionCommandsMixin:
             )
             return
         target_nick = target
-        # If a JID was reported, prefer current nick if known for redaction/action context.
-        if "@" in target:
-            for n, info in self.occupants.get(room, {}).items():
+        # Prefer current nick casing when a reported nick/JID can be resolved from occupants.
+        for n, info in self.occupants.get(room, {}).items():
+            if "@" in target:
                 if info.get("jid") and bare_jid(info.get("jid")) == bare_jid(target):
                     target_nick = n
                     break
+            elif n.lower() == target.lower():
+                target_nick = n
+                break
         await self._protection_apply_action(
             protection=protection,
             room=room,

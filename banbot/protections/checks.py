@@ -6,6 +6,8 @@ import logging
 import time
 from typing import Any
 
+from config import ADMIN_ROOM
+
 from ..utils import bare_jid
 from .detection import body_contains_blocked_word, count_mentions, message_looks_like_media
 
