@@ -1,7 +1,7 @@
 """Command name constants for BanBot command dispatch."""
 
 # PUBLIC_COMMANDS is also used for public-room rate limits.
-PUBLIC_COMMANDS = {"help", "whoami", "banlist", "blacklist", "why", "rules", "policy"}
+PUBLIC_COMMANDS = {"help", "whoami", "banlist", "blacklist", "why", "rules", "policy", "report"}
 
 ADMIN_COMMANDS = {
     "config",
@@ -31,4 +31,6 @@ ADMIN_COMMANDS = {
     "whitelist",
     "policy",
     "rules",
+    "protection",
+    "protections",
 }

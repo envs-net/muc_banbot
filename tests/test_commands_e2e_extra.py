@@ -761,6 +761,10 @@ async def test_admin_help_default_all_and_paginated_mode(fake_msg_factory, monke
     await bot.on_message(admin_msg(fake_msg_factory, "!help"))
     assert "Admin Help (page" not in bot.sent[-1]["mbody"]
     assert "🛡️ RTBL" in bot.sent[-1]["mbody"]
+    assert "🛡️ Protections" in bot.sent[-1]["mbody"]
+    assert "!protections list [all|page|last]" in bot.sent[-1]["mbody"]
+    assert "!protection enable/disable <name>" in bot.sent[-1]["mbody"]
+    assert "!protections reporters add/remove/list <jid>" in bot.sent[-1]["mbody"]
     assert "!config [all|page|last] / show/search/find/diff/set/unset" in bot.sent[-1]["mbody"]
     assert (
         "!banlist rtbl / !blacklist rtbl [all|page|last]"
@@ -776,6 +780,7 @@ async def test_admin_help_default_all_and_paginated_mode(fake_msg_factory, monke
     await bot.on_message(admin_msg(fake_msg_factory, "!help all"))
     assert "Admin Help (page" not in bot.sent[-1]["mbody"]
     assert "🛡️ RTBL" in bot.sent[-1]["mbody"]
+    assert "🛡️ Protections" in bot.sent[-1]["mbody"]
 
     await bot.on_message(admin_msg(fake_msg_factory, "!help room"))
     assert "Usage:" in bot.sent[-1]["mbody"]

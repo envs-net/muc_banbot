@@ -50,6 +50,7 @@ from .messaging import MessagingMixin
 from .omemo import OmemoMixin
 from .alerts import AlertMixin
 from .backups import BackupMixin
+from .protections import ProtectionMixin
 
 _log_level_name = str(getattr(config, "LOG_LEVEL", "INFO")).upper()
 _log_level = getattr(logging, _log_level_name, None)
@@ -178,6 +179,7 @@ class BanBot(
     OmemoMixin,
     AlertMixin,
     BackupMixin,
+    ProtectionMixin,
     AuditMixin,
     CacheMixin,
     DatabaseMixin,
@@ -246,6 +248,7 @@ class BanBot(
         self.protected_rooms: set[str] = set()
         self.registered_rooms: set[str] = set()
         self.init_room_invite_state()
+        self.init_protection_state()
         self.room_join_time: dict[str, float] = {}
         self.reconnecting = False
         self.last_reconnect_time: float | None = None
@@ -408,6 +411,7 @@ class BanBot(
         await self.load_bans_from_db()
         await self.cleanup_old_audit_logs()
         await self.setup_ignorelist()
+        await self.load_protections()
 
         was_reconnecting = bool(self.reconnecting)
 

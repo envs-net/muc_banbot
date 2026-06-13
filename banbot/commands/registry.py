@@ -23,4 +23,6 @@ ADMIN_COMMAND_HANDLERS = {
     "whitelist": "_dispatch_ignore_command",
     "policy": "_dispatch_policy_command",
     "rules": "_dispatch_policy_command",
+    "protection": "_dispatch_protections_command",
+    "protections": "_dispatch_protections_command",
 }

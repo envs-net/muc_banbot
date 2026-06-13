@@ -2,6 +2,35 @@
 
 
 class CommandUsageMixin:
+
+    def _protection_usage_text(self) -> str:
+        """Return usage text for protection commands."""
+        p = self.command_prefix
+        return (
+            "Usage:\n"
+            f"  {p}protections list [all|page|last]\n"
+            f"  {p}protection enable <name>\n"
+            f"  {p}protection disable <name>\n"
+            f"  {p}protections <name> config/show\n"
+            f"  {p}protections <name> set <key> <value>\n"
+            f"  {p}protections <name> reset\n"
+            f"  {p}protections reporters add/remove/list <jid>\n\n"
+            "Examples:\n"
+            f"  {p}protection enable FloodSpamProtection\n"
+            f"  {p}protections MentionLimitProtection set max_mentions 5\n"
+            f"  {p}protections FloodSpamProtection set tempban_seconds 1h\n"
+            f"  {p}protections reporters add alice@example.org"
+        )
+
+    def _report_usage_text(self) -> str:
+        """Return usage text for trusted reporter command."""
+        p = self.command_prefix
+        return (
+            "Usage:\n"
+            f"  {p}report <nick|jid> [reason]\n\n"
+            "Reports only count when TrustedReporters is enabled and the sender JID is configured as trusted."
+        )
+
     def _policy_usage_text(self) -> str:
         """Return usage text for the admin policy command."""
         p = self.command_prefix

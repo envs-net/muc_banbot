@@ -121,6 +121,19 @@ See [Public Policy / Rules](policy.md).
 | `!syncadmins` | Updates admin state from the admin room |
 | `!syncbans` | Syncs bans from rooms into the database and enforces them |
 
+### Protections
+
+| Command | Description |
+| --- | --- |
+| `!protections list [all|page|last]` | Lists protections with 🟢 enabled / 🔴 disabled state |
+| `!protection enable <name>` | Enables a protection |
+| `!protection disable <name>` | Disables a protection |
+| `!protections <name> config` | Shows one protection config |
+| `!protections <name> set <key> <value>` | Updates one protection config value |
+| `!report <nick|jid> [reason]` | Trusted reporter command when `TrustedReporters` is enabled |
+
+See [Protections](protections.md).
+
 ### Ban Queries
 
 | Command | Description |
@@ -187,6 +200,7 @@ When `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS=True`, users in protected rooms can
 | `!banlist` / `!blacklist` | Shows active local bans |
 | `!why <nick|jid>` | Shows why a target is banned |
 | `!rules` / `!policy` | Shows public policy text when configured and enabled |
+| `!report <nick|jid> [reason]` | Reports abuse when `TrustedReporters` is enabled and the sender is trusted |
 
 Public commands are rate-limited with `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` and `PUBLIC_COMMAND_RATE_LIMIT_MAX`.
 

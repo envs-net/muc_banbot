@@ -65,6 +65,9 @@ class CommandHelpMixin:
             "syncadmins": self._syncadmins_usage_text,
             "syncbans": self._syncbans_usage_text,
             "omemo": self._omemo_usage_text,
+            "protection": self._protection_usage_text,
+            "protections": self._protection_usage_text,
+            "report": self._report_usage_text,
         }
 
         help_factory = topic_help.get(normalized)
@@ -128,6 +131,9 @@ class CommandHelpMixin:
         policy_enabled, policy_text = await self.get_public_policy()
         if policy_enabled and policy_text.strip():
             lines.append(f"{p}rules / {p}policy - show room moderation policy")
+
+        if getattr(self, "protection_enabled", lambda _name: False)("TrustedReporters"):
+            lines.append(f"{p}report <nick|jid> [reason] - report abuse as trusted reporter")
 
         return "\n".join(lines)
 
@@ -197,6 +203,15 @@ class CommandHelpMixin:
             f"{p}rtbl refresh [service_jid] [node] - refresh RTBL subscriptions now\n"
             f"{p}rtbl publish status - status of your own RTBL feed\n"
             f"{p}rtbl publish sync - publish all current bans to your own feed\n\n"
+
+            "🛡️ Protections\n"
+            f"{p}protections list [all|page|last] - list available protections with enabled/disabled state\n"
+            f"{p}protection enable/disable <name> - enable or disable a protection\n"
+            f"{p}protections <name> show/config - show protection configuration\n"
+            f"{p}protections <name> set <key> <value> - update protection configuration\n"
+            f"{p}protections <name> reset - reset a protection to defaults\n"
+            f"{p}protections reporters add/remove/list <jid> - manage trusted reporters\n"
+            f"{p}report <nick|jid> [reason] - report abuse as trusted reporter\n\n"
 
             "📦 Import / Export\n"
             f"{p}export [list|show|delete|remove|del|rm] [all|page|last] - export/list/show/delete managed CSV ban exports\n"

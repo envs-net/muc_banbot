@@ -155,6 +155,10 @@ class MucMixin:
         if self.is_admin_or_owner(room, nick=nick, jid=jid_str):
             return
 
+        # --- Protection join hooks (protected rooms only, not admin room) ---
+        if room in self.protected_rooms and hasattr(self, "protection_on_join"):
+            await self.protection_on_join(room, nick, jid_str)
+
         # --- RTBL check (protected rooms only, not admin room) ---
         if jid_str and room in self.protected_rooms:
             rtbl_hit = await self.check_jid_against_rtbl(jid_str, nick)

@@ -376,6 +376,14 @@ class ModerationMixin:
         self.log_event(logging.INFO, event_type, actor=issuer, identifier=identifier, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment)
         await self.audit_event(event_type, actor=issuer, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment, details={"identifier": identifier})
 
+        if hasattr(self, "notify_policy_change"):
+            await self.notify_policy_change(
+                event_type,
+                actor=issuer,
+                target=normalized_jid or normalized_nick or target,
+                comment=comment,
+            )
+
         if hasattr(self, "maybe_auto_redact_after_ban") and normalized_jid and target_type == "jid":
             await self.maybe_auto_redact_after_ban(normalized_jid, comment, actor=issuer)
 
@@ -645,3 +653,9 @@ class ModerationMixin:
         event_type = "tempban_expired" if issuer == "system" else "unban_applied"
         self.log_event(logging.INFO, event_type, actor=issuer or "system", identifier=identifier, target_type=target_type, target=target, jid=ban_jid, nick=ban_nick)
         await self.audit_event(event_type, actor=issuer or "system", target_type=target_type, target=target, jid=ban_jid, nick=ban_nick, details={"identifier": identifier})
+        if hasattr(self, "notify_policy_change"):
+            await self.notify_policy_change(
+                event_type,
+                actor=issuer or "system",
+                target=ban_jid or ban_nick or identifier,
+            )
