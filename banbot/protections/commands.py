@@ -368,7 +368,7 @@ class ProtectionCommandsMixin:
                 return
         else:
             value = self._parse_protection_value(raw_value)
-        ok, error_text = self._validate_protection_config_value(key, value)
+        ok, error_text = self._validate_protection_config_value(key, value, protection=name)
         if not ok:
             await self.bot_send_message(mto=room, mbody=f"❌ {error_text}", mtype="groupchat")
             return
@@ -383,15 +383,37 @@ class ProtectionCommandsMixin:
             mtype="groupchat",
         )
 
-    def _validate_protection_config_value(self, key: str, value: Any) -> tuple[bool, str]:
-        if key in {"window_seconds", "max_messages", "tempban_seconds", "join_grace_seconds", "max_mentions", "max_joins", "lockdown_seconds", "threshold"}:
+    def _validate_protection_config_value(
+        self,
+        key: str,
+        value: Any,
+        *,
+        protection: str | None = None,
+    ) -> tuple[bool, str]:
+        if key in {
+            "window_seconds",
+            "max_messages",
+            "tempban_seconds",
+            "join_grace_seconds",
+            "startup_grace_seconds",
+            "cooldown_seconds",
+            "max_mentions",
+            "max_joins",
+            "lockdown_seconds",
+            "threshold",
+        }:
             if not isinstance(value, int) or value < 1:
                 return False, f"{key} must be a positive integer or duration like 10m."
         if key in {"enabled", "redact", "members_only", "moderated", "notify_only", "notify_bans", "notify_unbans", "notify_config"}:
             if not isinstance(value, bool):
                 return False, f"{key} must be True or False."
-        if key == "action" and str(value).lower() not in PROTECTION_ALLOWED_ACTIONS:
-            return False, f"action must be one of: {', '.join(sorted(PROTECTION_ALLOWED_ACTIONS))}."
+        if key == "action":
+            if protection == "JoinWaveShortCircuitProtection":
+                allowed_actions = {"lockdown", "notify"}
+            else:
+                allowed_actions = PROTECTION_ALLOWED_ACTIONS
+            if str(value).lower() not in allowed_actions:
+                return False, f"action must be one of: {', '.join(sorted(allowed_actions))}."
         if key in {"words", "reporters"}:
             if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
                 return False, f"{key} must be a list of strings."

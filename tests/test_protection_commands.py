@@ -210,3 +210,14 @@ async def test_report_threshold_ignores_duplicate_reporter_and_then_triggers_act
     assert issuer == "protection:TrustedReporters"
     assert comment == "spam"
     assert (ROOM, "spammer") not in bot.protection_trusted_reports
+
+@pytest.mark.asyncio
+async def test_joinwave_action_accepts_notify_and_rejects_other_actions() -> None:
+    bot = DummyProtections()
+
+    await bot.cmd_protection_set_config(ADMIN_ROOM, "joinwave", "action", "notify", "Admin")
+    assert bot.protections["JoinWaveShortCircuitProtection"]["action"] == "notify"
+    assert "updated" in last_body(bot)
+
+    await bot.cmd_protection_set_config(ADMIN_ROOM, "joinwave", "action", "ban", "Admin")
+    assert "action must be one of: lockdown, notify" in last_body(bot)

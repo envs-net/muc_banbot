@@ -21,6 +21,24 @@ class ProtectionChecksMixin:
             return
 
         now = time.time()
+
+        # Slixmpp emits ``got_online`` for the initial room roster right after
+        # the bot joins or reconnects to a MUC.  Those presences are not real
+        # new joins and must not seed first-message/new-joiner state or trigger
+        # join-wave lockdowns.  Otherwise existing occupants can be treated as
+        # fresh joiners after every restart.
+        join_grace = max(0, int(
+            self.protection_config("JoinWaveShortCircuitProtection").get("startup_grace_seconds", 30) or 0
+        ))
+        room_join_time = getattr(self, "room_join_time", {}).get(room)
+        if room_join_time and join_grace and now - float(room_join_time) < join_grace:
+            log.debug(
+                "Skipping protection join hook during initial room population in %s: nick=%s",
+                room,
+                nick,
+            )
+            return
+
         subject = bare_jid(jid) if jid else nick.lower()
         self.protection_joined_at[(room, subject)] = now
         self.protection_first_message_seen.discard((room, subject))
@@ -35,30 +53,47 @@ class ProtectionChecksMixin:
         joins.append(now)
         while joins and now - joins[0] > window:
             joins.popleft()
-        if len(joins) > max_joins:
+        if len(joins) >= max_joins:
             await self._protection_handle_join_wave(room, len(joins), config)
 
     async def _protection_handle_join_wave(self, room: str, join_count: int, config: dict[str, Any]) -> None:
         protection = "JoinWaveShortCircuitProtection"
         now = time.time()
-        lockdown_seconds = max(0, int(config.get("lockdown_seconds", 900) or 0))
+        cooldown_seconds = max(0, int(config.get("cooldown_seconds", 60) or 0))
         existing_until = self.protection_room_lockdown_until.get(room, 0)
         if existing_until > now:
+            log.debug(
+                "%s suppressed in %s: cooldown active for %.1fs",
+                protection,
+                room,
+                existing_until - now,
+            )
             return
-        if lockdown_seconds > 0:
-            self.protection_room_lockdown_until[room] = now + lockdown_seconds
+        if cooldown_seconds > 0:
+            self.protection_room_lockdown_until[room] = now + cooldown_seconds
+
+        # Reset the current wave after a trigger.  This makes repeated live
+        # smoke tests deterministic and avoids one large wave causing a new
+        # trigger on every follow-up join after the cooldown expires.
+        self.protection_join_windows[room].clear()
 
         reason = str(config.get("reason") or "join wave detected")
-        if not bool(config.get("notify_only", False)):
-            await self._protection_lockdown_room(room, config, reason)
+        action = str(config.get("action") or "lockdown").lower().strip()
+        notify_only = bool(config.get("notify_only", False)) or action == "notify"
+        lockdown_applied = False
+        if not notify_only:
+            lockdown_applied = await self._protection_lockdown_room(room, config, reason)
 
+        action_text = "notify only" if notify_only else "members-only/moderated"
         await self.bot_send_message(
             mto=ADMIN_ROOM,
             mbody=(
                 f"🚨 {protection} triggered\n"
                 f"Room: {room}\n"
                 f"Joins in window: {join_count}\n"
-                f"Action: {'notify only' if config.get('notify_only') else 'members-only/moderated'}\n"
+                f"Action: {action_text}\n"
+                f"Lockdown applied: {'yes' if lockdown_applied else 'no'}\n"
+                f"Cooldown: {cooldown_seconds}s\n"
                 f"Reason: {reason}"
             ),
             mtype="groupchat",
@@ -67,7 +102,7 @@ class ProtectionChecksMixin:
             protection,
             room,
             room,
-            "lockdown" if not config.get("notify_only") else "notify",
+            "notify" if notify_only else "lockdown",
             reason,
             details={"join_count": join_count},
         )
@@ -205,3 +240,4 @@ class ProtectionChecksMixin:
             details={"word": word},
         )
         return True
+

@@ -313,3 +313,45 @@ async def test_message_protections_stop_after_first_trigger(fake_msg_factory) ->
 
     assert handled is True
     assert bot.bans == [("spam@example.org", None, "protection:FloodSpamProtection", "spam/flood detected")]
+
+@pytest.mark.asyncio
+async def test_join_wave_triggers_at_configured_threshold() -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"].update({
+        "enabled": True,
+        "max_joins": 2,
+        "window_seconds": 60,
+        "cooldown_seconds": 60,
+    })
+
+    await bot.protection_on_join(ROOM, "Alice", "alice@example.org")
+    await bot.protection_on_join(ROOM, "Bob", "bob@example.org")
+
+    assert bot.muc_plugin.room_configs == [
+        (ROOM, {"muc#roomconfig_membersonly": "1", "muc#roomconfig_moderatedroom": "1"})
+    ]
+    assert "Joins in window: 2" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_join_hooks_ignore_initial_room_roster_population(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.room_join_time = {ROOM: time.time()}
+    bot.protections["JoinWaveShortCircuitProtection"].update({
+        "enabled": True,
+        "max_joins": 1,
+        "startup_grace_seconds": 30,
+    })
+    bot.protections["FirstMessageMediaProtection"].update({"enabled": True, "action": "ban"})
+
+    await bot.protection_on_join(ROOM, "Existing", "existing@example.org")
+
+    assert bot.muc_plugin.room_configs == []
+    assert (ROOM, "existing@example.org") not in bot.protection_joined_at
+
+    bot.occupants[ROOM]["Existing"] = {"jid": "existing@example.org", "role": "participant", "affiliation": "member"}
+    msg = fake_msg_factory(room=ROOM, nick="Existing", body="https://upload.example.org/existing.jpg")
+    handled = await bot.protections_on_message(msg, ROOM, "Existing", "https://upload.example.org/existing.jpg")
+
+    assert handled is False
+    assert bot.bans == []

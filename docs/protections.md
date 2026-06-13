@@ -74,6 +74,9 @@ When `redact=True` and `REDACTION_ENABLED=True`, message protections try to retr
 !protection enable joinwave
 !protections joinwave set max_joins 8
 !protections joinwave set window_seconds 60
+!protections joinwave set action lockdown
+!protections joinwave set cooldown_seconds 60
+!protections joinwave set startup_grace_seconds 30
 !protections joinwave set lockdown_seconds 15m
 ```
 
@@ -91,4 +94,4 @@ When `redact=True` and `REDACTION_ENABLED=True`, message protections try to retr
 
 `FirstMessageMediaProtection` and `WordListNewJoinerProtection` only act on users whose join was observed by the running bot. This avoids false positives after a bot restart where existing occupants would otherwise look like new users.
 
-`JoinWaveShortCircuitProtection` uses the MUC service's room configuration support. The bot must have sufficient room admin/owner rights, and the server must support changing the relevant MUC config fields.
+`JoinWaveShortCircuitProtection` uses the MUC service's room configuration support. The bot must have sufficient room admin/owner rights, and the server must support changing the relevant MUC config fields. The protection ignores the initial room roster for `startup_grace_seconds` after the bot joins a room, so existing occupants are not treated as a join wave after restarts. It also has a short `cooldown_seconds` period after each trigger to avoid repeated notifications during the same wave.
