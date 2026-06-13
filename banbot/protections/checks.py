@@ -80,16 +80,19 @@ class ProtectionChecksMixin:
         subject = jid or normalized_nick
         now = time.time()
 
-        handled = False
+        # Stop after the first matching protection.  A single message should
+        # never apply multiple punitive actions to the same target because that
+        # can produce noisy duplicate moderation output such as a successful ban
+        # followed by "Ban already exists" from a second protection path.
         if await self._protection_check_flood(msg, room, nick, subject, now):
-            handled = True
+            return True
         if await self._protection_check_first_media(msg, room, nick, subject, body, now):
-            handled = True
+            return True
         if await self._protection_check_mentions(msg, room, nick, body):
-            handled = True
+            return True
         if await self._protection_check_wordlist(msg, room, nick, subject, body, now):
-            handled = True
-        return handled
+            return True
+        return False
 
     async def _protection_check_flood(self, msg, room: str, nick: str, subject: str, now: float) -> bool:
         protection = "FloodSpamProtection"

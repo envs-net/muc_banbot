@@ -298,3 +298,18 @@ def test_public_protection_api_stays_available() -> None:
         "notify_policy_change",
     ]:
         assert callable(getattr(bot, name))
+
+
+@pytest.mark.asyncio
+async def test_message_protections_stop_after_first_trigger(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update({"enabled": True, "max_messages": 1, "action": "ban"})
+    bot.protections["MentionLimitProtection"].update({"enabled": True, "max_mentions": 1, "action": "ban"})
+    first = fake_msg_factory(room=ROOM, nick="Spammer", body="hello")
+    second = fake_msg_factory(room=ROOM, nick="Spammer", body="hi Alice Bob")
+
+    assert await bot.protections_on_message(first, ROOM, "Spammer", "hello") is False
+    handled = await bot.protections_on_message(second, ROOM, "Spammer", "hi Alice Bob")
+
+    assert handled is True
+    assert bot.bans == [("spam@example.org", None, "protection:FloodSpamProtection", "spam/flood detected")]
