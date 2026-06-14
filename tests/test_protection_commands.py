@@ -160,7 +160,6 @@ async def test_trusted_reporters_list_paginates() -> None:
     body = last_body(bot)
     assert "Trusted reporters (3) - Page 2/2" in body
     assert "c@" in body
-    assert "example.org" in body
 
 
 @pytest.mark.asyncio

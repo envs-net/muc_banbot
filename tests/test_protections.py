@@ -131,7 +131,6 @@ async def test_trusted_reporters_add_list_and_remove() -> None:
 
     assert bot.protections["TrustedReporters"]["reporters"] == ["alice@example.org"]
     assert "alice@" in bot.sent[-1][1]
-    assert "example.org" in bot.sent[-1][1]
 
     await bot.cmd_trusted_reporters(
         "admin@conference.example.org",

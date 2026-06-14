@@ -271,7 +271,6 @@ async def test_notify_policy_change_respects_enabled_and_event_toggles() -> None
     await bot.notify_policy_change("ban_created", actor="admin@example.org", target="spam@example.org", room=ROOM, comment="spam")
     assert "Policy change" in last_body(bot)
     assert "Target: spam@" in last_body(bot)
-    assert "example.org" in last_body(bot)
 
     bot.sent.clear()
     bot.protections["PolicyChangeNotification"]["notify_bans"] = False

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import logging
 from typing import Any
 
 from ..utils import bare_jid
@@ -16,6 +17,9 @@ from .definitions import (
 )
 from .notifications import ProtectionNotificationMixin
 from .storage import ProtectionStorageMixin
+
+
+log = logging.getLogger(__name__)
 
 
 class ProtectionMixin(
@@ -77,8 +81,8 @@ class ProtectionMixin(
                 nicks.update(str(nick) for nick in room_roster if str(nick).strip())
             elif isinstance(room_roster, (set, list, tuple)):
                 nicks.update(str(nick) for nick in room_roster if str(nick).strip())
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Unable to read XEP-0045 room roster cache for %s: %s", room, exc)
 
         return sorted(nicks, key=str.lower)
 
