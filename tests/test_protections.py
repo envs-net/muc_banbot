@@ -11,11 +11,12 @@ class DummyProtections(ProtectionMixin):
     list_page_size = 10
 
     def __init__(self) -> None:
-        self.sent: list[tuple[str, str, str]] = []
+        self.sent: list[tuple[str, str, str]] = []  # (recipient, body, message type)
         self.audit: list[tuple] = []
         self.protected_rooms = {"room@conference.example.org"}
         self.occupants = {}
         self.db = None
+        self.persisted: str | None = None
         self.init_protection_state()
 
     async def bot_send_message(self, *, mto: str, mbody: str, mtype: str = "groupchat") -> None:

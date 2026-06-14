@@ -624,6 +624,35 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_redaction_cleanup_worker_continues_after_successful_iterations(monkeypatch):
+    bot = RedactionBot()
+    sleeps = []
+    cleanup_calls = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    async def fake_cleanup(actor="system"):
+        cleanup_calls.append(actor)
+        if len(cleanup_calls) >= 3:
+            raise asyncio.CancelledError()
+        return {"deleted": 0}
+
+    monkeypatch.setattr("banbot.redaction.asyncio.sleep", fake_sleep)
+    bot.run_redaction_cleanup_automatic = fake_cleanup
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot.redaction_cleanup_worker()
+
+    assert sleeps == [
+        REDACTION_CLEANUP_INTERVAL_SECONDS,
+        REDACTION_CLEANUP_INTERVAL_SECONDS,
+        REDACTION_CLEANUP_INTERVAL_SECONDS,
+    ]
+    assert cleanup_calls == ["system", "system", "system"]
+
+
+@pytest.mark.asyncio
 async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
     bot = RedactionBot()
     await setup_redaction_test_db(bot, temp_db_path)
@@ -671,10 +700,10 @@ def test_auto_reason_matching_is_case_insensitive():
 async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db_path):
     bot = RedactionBot()
     bot.redaction_retract_concurrency = 2
-    bot._test_iq_send_delay = TEST_IQ_SEND_DELAY_SECONDS
+    bot._test_iq_send_delay = TEST_IQ_SEND_DELAY_SECONDS * 4
     await setup_redaction_test_db(bot, temp_db_path)
     try:
-        for i in range(4):
+        for i in range(8):
             await bot._redaction_index_message(
                 FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, f"stanza-{i}")
             )
@@ -686,13 +715,13 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
             announce=False,
         )
 
-        assert summary["found"] == 4
-        assert summary["redacted"] == 4
+        assert summary["found"] == 8
+        assert summary["redacted"] == 8
         assert summary["failed"] == 0
-        assert len(bot.redaction_stanzas) == 4
+        assert len(bot.redaction_stanzas) == 8
         assert bot.redaction_inflight_tracker["max"] == 2
 
-        assert await redacted_index_count(bot) == 4
+        assert await redacted_index_count(bot) == 8
     finally:
         await bot.db.close()
 

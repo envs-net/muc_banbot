@@ -26,6 +26,30 @@ NestedAffiliationMap = Mapping[str, Mapping[str, AffiliationUsers]]
 # Keep expiry short so time-based sync tests complete quickly.
 EXPIRED_DURATION_SECONDS = 5
 TEST_ADMIN_ROOM = "admin@conference.example.test"
+TEST_ROOM = "room@example.test"
+TEST_OWNER_JID = "owner@example.test"
+TEST_ADMIN_JID = "admin@example.test"
+TEST_NEW_OWNER_JID = "new-owner@example.test"
+TEST_ROOM_OWNER_ADMIN_NESTED = {
+    TEST_ROOM: {
+        "owner": [TEST_OWNER_JID],
+        "admin": [TEST_ADMIN_JID],
+    }
+}
+TEST_ROOM_OWNER_ADMIN_FLAT = {
+    (TEST_ROOM, "owner"): [TEST_OWNER_JID],
+    (TEST_ROOM, "admin"): [TEST_ADMIN_JID],
+}
+TEST_ADMIN_ROOM_OWNER_ADMIN_NESTED = {
+    TEST_ADMIN_ROOM: {
+        "owner": [TEST_OWNER_JID],
+        "admin": [TEST_ADMIN_JID],
+    }
+}
+TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
+    (TEST_ADMIN_ROOM, "owner"): [TEST_OWNER_JID],
+    (TEST_ADMIN_ROOM, "admin"): [TEST_ADMIN_JID],
+}
 
 
 class FakeMucService:
@@ -401,48 +425,22 @@ async def test_sync_bans_to_rooms_skips_room_without_bot_admin_rights(temp_db_pa
 
 @pytest.mark.asyncio
 async def test_fake_muc_service_accepts_nested_affiliation_mapping():
-    service = FakeMucService(
-        {
-            "room@example.test": {
-                "owner": ["owner@example.test"],
-                "admin": ["admin@example.test"],
-            }
-        }
-    )
+    service = FakeMucService(TEST_ROOM_OWNER_ADMIN_NESTED)
 
-    assert service.affiliations == {
-        ("room@example.test", "owner"): ["owner@example.test"],
-        ("room@example.test", "admin"): ["admin@example.test"],
-    }
-    assert await service.get_users_by_affiliation("room@example.test", "owner") == [
-        "owner@example.test"
-    ]
-    assert await service.get_users_by_affiliation("room@example.test", "admin") == [
-        "admin@example.test"
-    ]
-    assert await service.get_users_by_affiliation("room@example.test", "outcast") == []
+    assert service.affiliations == TEST_ROOM_OWNER_ADMIN_FLAT
+    assert await service.get_users_by_affiliation(TEST_ROOM, "owner") == [TEST_OWNER_JID]
+    assert await service.get_users_by_affiliation(TEST_ROOM, "admin") == [TEST_ADMIN_JID]
+    assert await service.get_users_by_affiliation(TEST_ROOM, "outcast") == []
     assert await service.get_users_by_affiliation("missing-room@example.test", "owner") == []
 
 
 @pytest.mark.asyncio
 async def test_fake_muc_service_accepts_tuple_affiliation_mapping():
-    service = FakeMucService(
-        {
-            ("room@example.test", "owner"): ["owner@example.test"],
-            ("room@example.test", "admin"): ["admin@example.test"],
-        }
-    )
+    service = FakeMucService(TEST_ROOM_OWNER_ADMIN_FLAT)
 
-    assert service.affiliations == {
-        ("room@example.test", "owner"): ["owner@example.test"],
-        ("room@example.test", "admin"): ["admin@example.test"],
-    }
-    assert await service.get_users_by_affiliation("room@example.test", "owner") == [
-        "owner@example.test"
-    ]
-    assert await service.get_users_by_affiliation("room@example.test", "admin") == [
-        "admin@example.test"
-    ]
+    assert service.affiliations == TEST_ROOM_OWNER_ADMIN_FLAT
+    assert await service.get_users_by_affiliation(TEST_ROOM, "owner") == [TEST_OWNER_JID]
+    assert await service.get_users_by_affiliation(TEST_ROOM, "admin") == [TEST_ADMIN_JID]
 
 
 def test_fake_muc_service_handles_empty_affiliation_mapping():
@@ -453,20 +451,15 @@ def test_fake_muc_service_handles_empty_affiliation_mapping():
 @pytest.mark.asyncio
 async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, sync_module):
     bot = await make_bot(temp_db_path)
-    muc_service = FakeMucService(
-        {
-            (TEST_ADMIN_ROOM, "owner"): ["owner@example.test"],
-            (TEST_ADMIN_ROOM, "admin"): ["admin@example.test"],
-        }
-    )
+    muc_service = FakeMucService(TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT)
     bot.plugin["xep_0045"] = muc_service
     try:
         async with admin_room_override(sync_module):
             await bot.sync_admins(announce=True)
 
         occupants = bot.occupants[TEST_ADMIN_ROOM]
-        assert occupants["owner@example.test"]["affiliation"] == "owner"
-        assert occupants["admin@example.test"]["affiliation"] == "admin"
+        assert occupants[TEST_OWNER_JID]["affiliation"] == "owner"
+        assert occupants[TEST_ADMIN_JID]["affiliation"] == "admin"
         assert {
             (TEST_ADMIN_ROOM, "owner"),
             (TEST_ADMIN_ROOM, "admin"),
@@ -479,14 +472,7 @@ async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, syn
 @pytest.mark.asyncio
 async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path, sync_module):
     bot = await make_bot(temp_db_path)
-    muc_service = FakeMucService(
-        {
-            TEST_ADMIN_ROOM: {
-                "owner": ["owner@example.test"],
-                "admin": ["admin@example.test"],
-            }
-        }
-    )
+    muc_service = FakeMucService(TEST_ADMIN_ROOM_OWNER_ADMIN_NESTED)
     bot.plugin["xep_0045"] = muc_service
     try:
         bot.admin_rooms = {TEST_ADMIN_ROOM}
@@ -495,15 +481,10 @@ async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path
             await bot.sync_admins(announce=True)
 
         assert TEST_ADMIN_ROOM in bot.occupants
-        assert bot.occupants[TEST_ADMIN_ROOM]["owner@example.test"]["affiliation"] == "owner"
+        assert bot.occupants[TEST_ADMIN_ROOM][TEST_OWNER_JID]["affiliation"] == "owner"
 
         muc_service.affiliations = muc_service._normalize_affiliations(
-            {
-                TEST_ADMIN_ROOM: {
-                    "owner": ["new-owner@example.test"],
-                    "admin": [],
-                }
-            }
+            {TEST_ADMIN_ROOM: {"owner": [TEST_NEW_OWNER_JID], "admin": []}}
         )
         bot.occupants = {}
 
@@ -511,9 +492,9 @@ async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path
             await bot.sync_admins(announce=True)
 
         refreshed_occupants = bot.occupants[TEST_ADMIN_ROOM]
-        assert "new-owner@example.test" in refreshed_occupants
-        assert "owner@example.test" not in refreshed_occupants
-        assert "admin@example.test" not in refreshed_occupants
+        assert TEST_NEW_OWNER_JID in refreshed_occupants
+        assert TEST_OWNER_JID not in refreshed_occupants
+        assert TEST_ADMIN_JID not in refreshed_occupants
     finally:
         await bot.db.close()
 
