@@ -220,3 +220,28 @@ async def test_joinwave_action_accepts_notify_and_rejects_other_actions() -> Non
 
     await bot.cmd_protection_set_config(ADMIN_ROOM, "joinwave", "action", "ban", "Admin")
     assert "action must be one of: lockdown, notify" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_set_same_config_value_is_noop() -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"]["max_joins"] = 3
+
+    await bot.cmd_protection_set_config(ADMIN_ROOM, "joinwave", "max_joins", "3", "Admin")
+
+    assert bot.protections["JoinWaveShortCircuitProtection"]["max_joins"] == 3
+    assert bot.persisted == []
+    assert bot.audit == []
+    assert "is already 3" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_enable_same_state_is_noop() -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"]["enabled"] = True
+
+    await bot.cmd_protection_set_enabled(ADMIN_ROOM, "flood", True, "Admin")
+
+    assert bot.persisted == []
+    assert bot.audit == []
+    assert "already enabled" in last_body(bot)

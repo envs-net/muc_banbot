@@ -320,10 +320,19 @@ class ProtectionCommandsMixin:
         if error:
             await self.bot_send_message(mto=room, mbody=error, mtype="groupchat")
             return
-        self.protection_config(name)["enabled"] = bool(enabled)
+        old = bool(self.protection_config(name).get("enabled", False))
+        value = bool(enabled)
+        if old == value:
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"ℹ️ {name} is already {'enabled' if value else 'disabled'}.",
+                mtype="groupchat",
+            )
+            return
+        self.protection_config(name)["enabled"] = value
         await self.persist_protection(name)
         actor = self._actor_jid_from_room_nick(room, nick)
-        await self._audit_protection_config_change(actor, name, "enabled", bool(enabled))
+        await self._audit_protection_config_change(actor, name, "enabled", value, old=old)
         await self.bot_send_message(
             mto=room,
             mbody=f"✅ {name} {'enabled' if enabled else 'disabled'}.",
@@ -373,6 +382,13 @@ class ProtectionCommandsMixin:
             await self.bot_send_message(mto=room, mbody=f"❌ {error_text}", mtype="groupchat")
             return
         old = config.get(key)
+        if old == value:
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"ℹ️ {name}.{key} is already {value!r}.",
+                mtype="groupchat",
+            )
+            return
         config[key] = value
         await self.persist_protection(name)
         actor = self._actor_jid_from_room_nick(room, nick)

@@ -19,14 +19,29 @@ class AsyncNullContext:
         return False
 
 
+class DummyRoomConfigForm:
+    def __init__(self) -> None:
+        self.type = "form"
+        self.values: dict[str, str] = {"muc#roomconfig_persistentroom": "1"}
+
+    def set_type(self, value: str) -> None:
+        self.type = value
+
+    def set_values(self, values: dict[str, str]) -> None:
+        self.values.update(values)
+
+
 class DummyMucPlugin:
     def __init__(self) -> None:
-        self.room_configs: list[tuple[str, dict]] = []
+        self.room_configs: list[tuple[str, dict, str]] = []
         self.roles: list[tuple[str, str, str, str | None]] = []
         self.rooms = {ROOM: {"Alice": {}, "Bob": {}, "Carol": {}, "Spammer": {}}}
 
-    async def set_room_config(self, room: str, config: dict) -> None:
-        self.room_configs.append((room, dict(config)))
+    async def get_room_config(self, room: str) -> DummyRoomConfigForm:
+        return DummyRoomConfigForm()
+
+    async def set_room_config(self, room: str, config: DummyRoomConfigForm) -> None:
+        self.room_configs.append((room, dict(config.values), config.type))
 
     async def set_role(self, *, room: str, nick: str, role: str, reason: str | None = None) -> None:
         self.roles.append((room, nick, role, reason))
@@ -247,7 +262,15 @@ async def test_join_wave_locks_room_and_notifies_once_during_lockdown() -> None:
     await bot.protection_on_join(ROOM, "Carol", "carol@example.org")
 
     assert bot.muc_plugin.room_configs == [
-        (ROOM, {"muc#roomconfig_membersonly": "1", "muc#roomconfig_moderatedroom": "1"})
+        (
+            ROOM,
+            {
+                "muc#roomconfig_persistentroom": "1",
+                "muc#roomconfig_membersonly": "1",
+                "muc#roomconfig_moderatedroom": "1",
+            },
+            "submit",
+        )
     ]
     assert len([body for _, body, _ in bot.sent if "JoinWaveShortCircuitProtection triggered" in body]) == 1
 
@@ -327,7 +350,15 @@ async def test_join_wave_triggers_at_configured_threshold() -> None:
     await bot.protection_on_join(ROOM, "Bob", "bob@example.org")
 
     assert bot.muc_plugin.room_configs == [
-        (ROOM, {"muc#roomconfig_membersonly": "1", "muc#roomconfig_moderatedroom": "1"})
+        (
+            ROOM,
+            {
+                "muc#roomconfig_persistentroom": "1",
+                "muc#roomconfig_membersonly": "1",
+                "muc#roomconfig_moderatedroom": "1",
+            },
+            "submit",
+        )
     ]
     assert "Joins in window: 2" in last_body(bot)
 

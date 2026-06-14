@@ -104,6 +104,7 @@ async def test_first_media_does_not_trigger_without_observed_join(fake_msg_facto
 
     assert handled is False
 
+
 @pytest.mark.asyncio
 async def test_protection_reset_restores_defaults() -> None:
     bot = DummyProtections()

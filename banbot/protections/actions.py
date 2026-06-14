@@ -161,28 +161,72 @@ class ProtectionActionsMixin:
         except Exception as exc:
             log.debug("Failed to audit protection event for %s: %s", protection, exc)
 
+    def _protection_room_config_value(self, value: Any) -> str:
+        """Return a MUC data-form compatible value for room config fields."""
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        return str(value)
+
+    def _protection_update_room_config_form(self, form: Any, fields: dict[str, Any]) -> Any:
+        """Update a Slixmpp XEP-0004 room config form with the requested fields."""
+        values = {key: self._protection_room_config_value(value) for key, value in fields.items()}
+        set_type = getattr(form, "set_type", None)
+        if callable(set_type):
+            set_type("submit")
+        else:
+            try:
+                form["type"] = "submit"
+            except Exception:
+                log.debug("Room config form does not expose a writable type field")
+
+        set_values = getattr(form, "set_values", None) or getattr(form, "setValues", None)
+        if callable(set_values):
+            set_values(values)
+            return form
+
+        for key, value in values.items():
+            try:
+                form[key] = value
+            except Exception:
+                log.debug("Room config form does not expose field %s via item assignment", key)
+        return form
+
     async def _protection_lockdown_room(self, room: str, config: dict[str, Any], reason: str) -> bool:
         """Best-effort set members-only + moderated during a join wave."""
         if not self.is_bot_admin_or_owner(room):
             return False
         fields: dict[str, Any] = {}
         if bool(config.get("members_only", True)):
-            fields["muc#roomconfig_membersonly"] = "1"
+            fields["muc#roomconfig_membersonly"] = True
         if bool(config.get("moderated", True)):
-            fields["muc#roomconfig_moderatedroom"] = "1"
+            fields["muc#roomconfig_moderatedroom"] = True
         if not fields:
             return False
         try:
             async with self.muc_write_semaphore:
                 muc_plugin = self.plugin["xep_0045"]
+                get_room_config = getattr(muc_plugin, "get_room_config", None)
                 set_room_config = getattr(muc_plugin, "set_room_config", None)
-                if callable(set_room_config):
-                    result = set_room_config(room, config=fields)
-                    if inspect.isawaitable(result):
-                        await result
-                else:
+                if not callable(set_room_config):
                     log.warning("MUC plugin has no set_room_config helper; cannot lockdown %s", room)
                     return False
+
+                # Slixmpp expects set_room_config() to receive a filled XEP-0004
+                # Form, not a plain dict.  Fetch the current form first so we
+                # preserve unrelated room settings while changing only the
+                # lockdown fields.
+                if callable(get_room_config):
+                    form_result = get_room_config(room)
+                    form = await form_result if inspect.isawaitable(form_result) else form_result
+                    payload = self._protection_update_room_config_form(form, fields)
+                else:
+                    # Unit-test/dummy fallback for plugins that intentionally
+                    # accept a dict.  Real Slixmpp has get_room_config().
+                    payload = {key: self._protection_room_config_value(value) for key, value in fields.items()}
+
+                result = set_room_config(room, payload)
+                if inspect.isawaitable(result):
+                    await result
             log.warning("Protection lockdown applied in %s: %s", room, reason)
             return True
         except Exception as exc:
