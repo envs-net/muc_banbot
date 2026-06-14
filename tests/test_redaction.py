@@ -387,6 +387,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             "fail_stanza_errors": {},
             "redaction_inflight_tracker": {"current": 0, "max": 0},
             "alerts": [],
+            "audit_events": [],
         }
 
     def __init__(self):
@@ -415,6 +416,9 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
     async def send_operational_alert(self, key, title, message, enabled=True, details=None):
         if enabled:
             self.alerts.append((key, title, message, details or {}))
+
+    async def audit_event(self, event_type: str, **kwargs):
+        self.audit_events.append((event_type, kwargs))
 
 
 async def setup_redaction_test_db(bot: RedactionBot, temp_db_path: Path | str) -> None:
@@ -534,6 +538,64 @@ async def test_automatic_redaction_cleanup_deletes_old_entries_without_message(t
         assert result["deleted"] == 1
         assert bot.sent == []
         assert await redaction_index_count(bot) == 0
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_automatic_redaction_cleanup_skips_noop_audit_when_retention_disabled(temp_db_path):
+    bot = RedactionBot()
+    bot.redaction_index_retention_days = 0
+    await setup_redaction_test_db(bot, temp_db_path)
+    try:
+        result = await bot.run_redaction_cleanup_automatic(actor="system")
+
+        assert result["deleted"] == 0
+        assert result["skipped_reason"] == "retention disabled"
+        assert bot.sent == []
+        assert bot.audit_events == []
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_automatic_redaction_cleanup_skips_noop_audit_when_nothing_expired(temp_db_path):
+    bot = RedactionBot()
+    bot.redaction_index_retention_days = 30
+    await setup_redaction_test_db(bot, temp_db_path)
+    try:
+        result = await bot.run_redaction_cleanup_automatic(actor="system")
+
+        assert result["deleted"] == 0
+        assert bot.sent == []
+        assert bot.audit_events == []
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_manual_redaction_cleanup_keeps_noop_audit_when_retention_disabled(temp_db_path):
+    bot = RedactionBot()
+    bot.redaction_index_retention_days = 0
+    await setup_redaction_test_db(bot, temp_db_path)
+    try:
+        await bot.redact_cleanup(TEST_ADMIN_ROOM_JID, actor=TEST_ACTOR_JID)
+
+        assert "Retention: keep forever" in latest_message_body(bot)
+        assert bot.audit_events == [
+            (
+                "redact_cleanup",
+                {
+                    "actor": TEST_ACTOR_JID,
+                    "room": None,
+                    "target_type": "redaction_index",
+                    "target": "cleanup",
+                    "jid": None,
+                    "comment": "retention disabled; keep forever",
+                    "details": {"retention_days": 0, "deleted": 0},
+                },
+            )
+        ]
     finally:
         await bot.db.close()
 

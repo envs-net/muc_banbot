@@ -636,8 +636,15 @@ class RedactionMixin:
         actor: str | None = "system",
         *,
         audit: bool = True,
+        audit_noop: bool = True,
     ) -> dict[str, int | bool | str]:
-        """Delete expired redaction index rows without sending command output."""
+        """Delete expired redaction index rows without sending command output.
+
+        ``audit_noop`` controls whether no-op cleanup runs are written to the
+        audit log. Manual cleanup keeps no-op audit entries, while automatic
+        cleanup only records runs that actually delete rows. This avoids noisy
+        recurring audit events when retention is disabled or nothing expired.
+        """
         result: dict[str, int | bool | str] = {
             "enabled": bool(getattr(self, "redaction_enabled", False)),
             "retention_days": int(getattr(self, "redaction_index_retention_days", 30) or 0),
@@ -651,7 +658,7 @@ class RedactionMixin:
         days = int(result["retention_days"])
         if days <= 0:
             result["skipped_reason"] = "retention disabled"
-            if audit:
+            if audit and audit_noop:
                 await self._audit_redaction_event(
                     "redact_cleanup",
                     actor=actor,
@@ -671,7 +678,7 @@ class RedactionMixin:
         result["deleted"] = deleted
         await self.db.commit()
 
-        if audit:
+        if audit and (deleted > 0 or audit_noop):
             await self._audit_redaction_event(
                 "redact_cleanup",
                 actor=actor,
@@ -687,7 +694,7 @@ class RedactionMixin:
     async def run_redaction_cleanup_automatic(self, actor: str | None = "system") -> dict[str, int | bool | str]:
         """Run automatic redaction index cleanup without admin-room noise."""
         try:
-            result = await self._redaction_cleanup_old_entries(actor=actor, audit=True)
+            result = await self._redaction_cleanup_old_entries(actor=actor, audit=True, audit_noop=False)
         except Exception as exc:
             log.warning("Automatic redaction index cleanup failed: %s", exc)
             if hasattr(self, "send_operational_alert"):
