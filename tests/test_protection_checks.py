@@ -454,3 +454,85 @@ async def test_join_hooks_ignore_initial_room_roster_population(fake_msg_factory
 
     assert handled is False
     assert bot.bans == []
+
+@pytest.mark.asyncio
+async def test_similar_message_triggers_on_repeated_normalized_spam(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["SimilarMessageProtection"].update({
+        "enabled": True,
+        "max_similar": 3,
+        "window_seconds": 120,
+        "similarity_percent": 90,
+        "min_length": 10,
+        "min_words": 2,
+        "action": "ban",
+    })
+    body = "cheap spam offer visit now"
+
+    first = fake_msg_factory(room=ROOM, nick="Alice", body=body)
+    second = fake_msg_factory(room=ROOM, nick="Bob", body=body)
+    third = fake_msg_factory(room=ROOM, nick="Spammer", body=body)
+
+    assert await bot.protections_on_message(first, ROOM, "Alice", body) is False
+    assert await bot.protections_on_message(second, ROOM, "Bob", body) is False
+    assert await bot.protections_on_message(third, ROOM, "Spammer", body) is True
+
+    assert bot.bans == [("spam@example.org", None, "protection:SimilarMessageProtection", "repeated/similar spam detected")]
+    assert list(bot.protection_similar_messages[ROOM]) == []
+
+
+@pytest.mark.asyncio
+async def test_similar_message_normalizes_changing_urls(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["SimilarMessageProtection"].update({
+        "enabled": True,
+        "max_similar": 2,
+        "window_seconds": 120,
+        "similarity_percent": 90,
+        "min_length": 10,
+        "min_words": 3,
+        "action": "notify",
+    })
+    first_body = "claim your free gift now https://one.invalid/a123"
+    second_body = "claim your free gift now https://two.invalid/b456"
+    first = fake_msg_factory(room=ROOM, nick="Alice", body=first_body)
+    second = fake_msg_factory(room=ROOM, nick="Spammer", body=second_body)
+
+    assert await bot.protections_on_message(first, ROOM, "Alice", first_body) is False
+    assert await bot.protections_on_message(second, ROOM, "Spammer", second_body) is True
+
+    assert "SimilarMessageProtection triggered" in last_body(bot)
+    assert "Action: notify" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_similar_message_ignores_short_messages(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["SimilarMessageProtection"].update({"enabled": True, "max_similar": 2, "action": "ban"})
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="ok")
+
+    assert await bot.protections_on_message(msg, ROOM, "Spammer", "ok") is False
+    assert bot.bans == []
+
+
+@pytest.mark.asyncio
+async def test_similar_message_window_expires_old_entries(fake_msg_factory, monkeypatch) -> None:
+    bot = DummyProtections()
+    bot.protections["SimilarMessageProtection"].update({
+        "enabled": True,
+        "max_similar": 2,
+        "window_seconds": 10,
+        "min_length": 10,
+        "min_words": 2,
+        "action": "ban",
+    })
+    body = "same spam payload here"
+    times = iter([100.0, 111.0])
+    monkeypatch.setattr("banbot.protections.checks.time.time", lambda: next(times))
+
+    first = fake_msg_factory(room=ROOM, nick="Alice", body=body)
+    second = fake_msg_factory(room=ROOM, nick="Spammer", body=body)
+
+    assert await bot.protections_on_message(first, ROOM, "Alice", body) is False
+    assert await bot.protections_on_message(second, ROOM, "Spammer", body) is False
+    assert bot.bans == []

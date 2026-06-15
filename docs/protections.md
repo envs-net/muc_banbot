@@ -18,7 +18,7 @@ Protections are stored in SQLite and can be enabled, disabled, and tuned at runt
 | `!protections reporters list [all|page|last]` | Lists configured trusted reporter JIDs |
 | `!report <nick|jid> [reason]` | Trusted reporter command, only useful when `TrustedReporters` is enabled |
 
-Common aliases such as `flood`, `media`, `mentions`, `wordlist`, `joinwave`, `reporters`, and `policy` can be used instead of the full protection name. The list output shows the main alias in square brackets.
+Common aliases such as `flood`, `similar`, `media`, `mentions`, `wordlist`, `joinwave`, `reporters`, and `policy` can be used instead of the full protection name. The list output shows the main alias in square brackets.
 
 Use `!protections <name> reset` to return a protection to its built-in defaults, including its default enabled/disabled state.
 
@@ -27,6 +27,7 @@ Use `!protections <name> reset` to return a protection to its built-in defaults,
 | Protection | Default | Purpose |
 | --- | --- | --- |
 | `FloodSpamProtection` | disabled | Detects too many messages from one user in a time window |
+| `SimilarMessageProtection` | disabled | Reacts when identical or highly similar messages appear repeatedly in a room |
 | `FirstMessageMediaProtection` | disabled | Reacts when a newly observed joiner sends media as their first message |
 | `MentionLimitProtection` | disabled | Reacts to messages mentioning too many current room occupants |
 | `WordListNewJoinerProtection` | disabled | Reacts to configured words/phrases from recent joiners |
@@ -56,6 +57,18 @@ When `redact=True` and `REDACTION_ENABLED=True`, message protections try to retr
 !protections flood set window_seconds 60
 !protections flood set action ban
 !protections flood set tempban_seconds 1h
+```
+
+
+```text
+!protection enable similar
+!protections similar set max_similar 3
+!protections similar set window_seconds 2m
+!protections similar set similarity_percent 90
+!protections similar set min_length 20
+!protections similar set min_words 3
+!protections similar set action tempban
+!protections similar set tempban_seconds 1d
 ```
 
 ```text
@@ -93,6 +106,8 @@ When `redact=True` and `REDACTION_ENABLED=True`, message protections try to retr
 ```
 
 ## Notes
+
+`SimilarMessageProtection` normalizes URLs and email addresses before comparison, so repeated spam with changing tracking URLs can still be detected. Short messages are ignored through `min_length` and `min_words` to avoid false positives from normal chatter.
 
 `FirstMessageMediaProtection` and `WordListNewJoinerProtection` only act on users whose join was observed by the running bot. This avoids false positives after a bot restart where existing occupants would otherwise look like new users.
 

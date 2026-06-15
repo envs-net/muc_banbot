@@ -409,6 +409,9 @@ class ProtectionCommandsMixin:
         if key in {
             "window_seconds",
             "max_messages",
+            "max_similar",
+            "min_length",
+            "min_words",
             "tempban_seconds",
             "join_grace_seconds",
             "startup_grace_seconds",
@@ -423,6 +426,9 @@ class ProtectionCommandsMixin:
         if key in {"enabled", "redact", "members_only", "moderated", "notify_only", "notify_bans", "notify_unbans", "notify_config"}:
             if not isinstance(value, bool):
                 return False, f"{key} must be True or False."
+        if key == "similarity_percent":
+            if not isinstance(value, int) or not 1 <= value <= 100:
+                return False, "similarity_percent must be an integer from 1 to 100."
         if key == "action":
             if protection == "JoinWaveShortCircuitProtection":
                 allowed_actions = {"lockdown", "notify"}

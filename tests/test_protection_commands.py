@@ -65,8 +65,9 @@ async def test_dispatch_without_args_lists_protections() -> None:
 
     await bot._dispatch_protections_command(ADMIN_ROOM, "Admin", [], "protections")
 
-    assert "🛡️ Protections (7) - Page 1/4:" in last_body(bot)
+    assert "🛡️ Protections (8) - Page 1/4:" in last_body(bot)
     assert "FloodSpamProtection [flood]" in last_body(bot)
+    assert "SimilarMessageProtection [similar]" in last_body(bot)
 
 
 @pytest.mark.asyncio
@@ -130,6 +131,18 @@ async def test_duration_values_are_parsed_for_time_config() -> None:
 
     assert bot.protections["FloodSpamProtection"]["window_seconds"] == 120
     assert "FloodSpamProtection.window_seconds updated" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_similar_message_alias_and_similarity_percent_validation() -> None:
+    bot = DummyProtections()
+
+    await bot.cmd_protection_set_config(ADMIN_ROOM, "similar", "similarity_percent", "85", "Admin")
+    assert bot.protections["SimilarMessageProtection"]["similarity_percent"] == 85
+    assert "SimilarMessageProtection.similarity_percent updated" in last_body(bot)
+
+    await bot.cmd_protection_set_config(ADMIN_ROOM, "similar", "similarity_percent", "101", "Admin")
+    assert "similarity_percent must be an integer from 1 to 100" in last_body(bot)
 
 
 @pytest.mark.asyncio

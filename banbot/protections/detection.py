@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from urllib.parse import urlparse
 
 MEDIA_EXTENSIONS = (
@@ -11,7 +12,38 @@ MEDIA_EXTENSIONS = (
 )
 
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+EMAIL_RE = re.compile(r"\b[\w.+-]+@[a-z0-9.-]+\.[a-z]{2,}\b", re.IGNORECASE)
+TOKEN_RE = re.compile(r"[a-z0-9]+|<url>|<email>", re.IGNORECASE)
 
+
+
+def normalize_spam_body(body: str) -> str:
+    """Return a stable comparable form for repeated/similar spam checks."""
+    text = str(body or "").lower().strip()
+    if not text:
+        return ""
+
+    text = URL_RE.sub(" <url> ", text)
+    text = EMAIL_RE.sub(" <email> ", text)
+    text = re.sub(r"[^a-z0-9<>]+", " ", text)
+    return " ".join(text.split())
+
+
+def normalized_word_count(normalized: str) -> int:
+    """Return a conservative token count for normalized spam text."""
+    return len(TOKEN_RE.findall(str(normalized or "")))
+
+
+def messages_are_similar(left: str, right: str, *, similarity_percent: int) -> bool:
+    """Return True when two normalized messages are equal or very similar."""
+    left_text = str(left or "")
+    right_text = str(right or "")
+    if not left_text or not right_text:
+        return False
+    if left_text == right_text:
+        return True
+    threshold = max(1, min(100, int(similarity_percent))) / 100.0
+    return SequenceMatcher(None, left_text, right_text).ratio() >= threshold
 
 def message_looks_like_media(body: str) -> bool:
     """Best-effort detection for HTTP-upload/media-only spam messages."""

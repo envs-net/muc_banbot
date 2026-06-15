@@ -7,6 +7,7 @@ from typing import Any
 
 PROTECTION_ORDER = (
     "FloodSpamProtection",
+    "SimilarMessageProtection",
     "FirstMessageMediaProtection",
     "MentionLimitProtection",
     "WordListNewJoinerProtection",
@@ -23,6 +24,18 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "action": "ban",
         "tempban_seconds": 86400,
         "reason": "spam/flood detected",
+        "redact": True,
+    },
+    "SimilarMessageProtection": {
+        "enabled": False,
+        "window_seconds": 120,
+        "max_similar": 3,
+        "similarity_percent": 90,
+        "min_length": 20,
+        "min_words": 3,
+        "action": "tempban",
+        "tempban_seconds": 86400,
+        "reason": "repeated/similar spam detected",
         "redact": True,
     },
     "FirstMessageMediaProtection": {
@@ -86,6 +99,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
 
 PROTECTION_DISPLAY_ALIASES = {
     "FloodSpamProtection": "flood",
+    "SimilarMessageProtection": "similar",
     "FirstMessageMediaProtection": "media",
     "MentionLimitProtection": "mentions",
     "WordListNewJoinerProtection": "wordlist",
@@ -99,6 +113,14 @@ PROTECTION_ALIASES = {
     "spam": "FloodSpamProtection",
     "floodspam": "FloodSpamProtection",
     "floodspamprotection": "FloodSpamProtection",
+    "similar": "SimilarMessageProtection",
+    "similarspam": "SimilarMessageProtection",
+    "repeated": "SimilarMessageProtection",
+    "repeat": "SimilarMessageProtection",
+    "repeatedmessages": "SimilarMessageProtection",
+    "similarmessage": "SimilarMessageProtection",
+    "similarmessages": "SimilarMessageProtection",
+    "similarmessageprotection": "SimilarMessageProtection",
     "media": "FirstMessageMediaProtection",
     "firstmedia": "FirstMessageMediaProtection",
     "firstmessagemedia": "FirstMessageMediaProtection",

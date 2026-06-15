@@ -125,7 +125,7 @@ See [Public Policy / Rules](policy.md).
 
 | Command | Description |
 | --- | --- |
-| `!protections list [all|page|last]` | Lists protections with 🟢 enabled / 🔴 disabled state |
+| `!protections list [all|page|last]` | Lists protections with 🟢 enabled / 🔴 disabled state and aliases |
 | `!protection enable <name>` | Enables a protection |
 | `!protection disable <name>` | Disables a protection |
 | `!protections <name> config` | Shows one protection config |

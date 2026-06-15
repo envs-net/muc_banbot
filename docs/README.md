@@ -24,7 +24,7 @@ New operators should read:
 * [RTBL / PubSub](rtbl.md) - inbound RTBL subscriptions, snapshot reconciliation, stale-ban cleanup, and own publish feed
 * [Prosody PubSub Setup](rtbl_pubsub-setup.md) - manual setup for RTBL publish nodes on Prosody
 * [Public Policy / Rules](policy.md) - public `!rules` text, placeholders, enable/disable behavior, and admin commands
-* [Protections](protections.md) - flood, media, mention, wordlist, join-wave, reporter, and policy-change protections
+* [Protections](protections.md) - flood, similar-message, media, mention, wordlist, join-wave, reporter, and policy-change protections
 * [Admin Protection](admin-protection.md) - how BanBot protects admins/owners from manual, domain, nick-based, and RTBL bans
 * [Maintenance](maintenance.md) - manual SQLite maintenance, database checks, compaction, and redaction-index cleanup notes
 * [Troubleshooting](troubleshooting.md) - common runtime, config, RTBL, OMEMO, backup, and room-rights issues

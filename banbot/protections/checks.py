@@ -8,7 +8,14 @@ from typing import Any
 
 from config import ADMIN_ROOM
 
-from .detection import body_contains_blocked_word, count_mentions, message_looks_like_media
+from .detection import (
+    body_contains_blocked_word,
+    count_mentions,
+    message_looks_like_media,
+    messages_are_similar,
+    normalize_spam_body,
+    normalized_word_count,
+)
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +150,8 @@ class ProtectionChecksMixin:
             return True
         if await self._protection_check_first_media(msg, room, nick, subject, body, now):
             return True
+        if await self._protection_check_similar_messages(msg, room, nick, subject, body, now):
+            return True
         if await self._protection_check_mentions(msg, room, nick, body):
             return True
         if await self._protection_check_wordlist(msg, room, nick, subject, body, now):
@@ -199,6 +208,55 @@ class ProtectionChecksMixin:
             msg=msg,
             details={"first_message": True},
         )
+        return True
+
+
+    async def _protection_check_similar_messages(
+        self,
+        msg,
+        room: str,
+        nick: str,
+        subject: str,
+        body: str,
+        now: float,
+    ) -> bool:
+        protection = "SimilarMessageProtection"
+        if not self.protection_enabled(protection):
+            return False
+        config = self.protection_config(protection)
+        normalized = normalize_spam_body(body)
+        min_length = max(1, int(config.get("min_length", 20) or 20))
+        min_words = max(1, int(config.get("min_words", 3) or 3))
+        if len(normalized) < min_length or normalized_word_count(normalized) < min_words:
+            return False
+
+        window = max(1, int(config.get("window_seconds", 120) or 120))
+        max_similar = max(2, int(config.get("max_similar", 3) or 3))
+        similarity_percent = max(1, min(100, int(config.get("similarity_percent", 90) or 90)))
+        entries = self.protection_similar_messages[room]
+        entries.append((now, subject, normalized))
+        while entries and now - entries[0][0] > window:
+            entries.popleft()
+
+        similar_entries = [
+            entry for entry in entries
+            if messages_are_similar(normalized, entry[2], similarity_percent=similarity_percent)
+        ]
+        if len(similar_entries) < max_similar:
+            return False
+
+        await self._protection_apply_action(
+            protection=protection,
+            room=room,
+            nick=nick,
+            msg=msg,
+            details={
+                "similar_messages": len(similar_entries),
+                "window_seconds": window,
+                "similarity_percent": similarity_percent,
+            },
+        )
+        entries.clear()
         return True
 
     async def _protection_check_mentions(self, msg, room: str, nick: str, body: str) -> bool:

@@ -35,6 +35,7 @@ class ProtectionMixin(
         """Initialize in-memory protection config and runtime counters."""
         self.protections: dict[str, dict[str, Any]] = default_protection_config()
         self.protection_message_windows: dict[tuple[str, str, str], deque[float]] = defaultdict(deque)
+        self.protection_similar_messages: dict[str, deque[tuple[float, str, str]]] = defaultdict(deque)
         self.protection_join_windows: dict[str, deque[float]] = defaultdict(deque)
         self.protection_joined_at: dict[tuple[str, str], float] = {}
         self.protection_first_message_seen: set[tuple[str, str]] = set()

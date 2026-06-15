@@ -40,6 +40,8 @@ class DummyProtections(ProtectionMixin):
 
 def test_protection_aliases_resolve_common_names() -> None:
     assert canonical_protection_name("flood") == "FloodSpamProtection"
+    assert canonical_protection_name("SimilarMessageProtection") == "SimilarMessageProtection"
+    assert canonical_protection_name("similar") == "SimilarMessageProtection"
     assert canonical_protection_name("FirstMessageIsImageProtection") == "FirstMessageMediaProtection"
     assert canonical_protection_name("mention-limit") == "MentionLimitProtection"
     assert canonical_protection_name("media") == "FirstMessageMediaProtection"
@@ -55,6 +57,7 @@ async def test_protections_list_shows_enabled_disabled_icons() -> None:
 
     body = bot.sent[-1][1]
     assert "🟢 (enabled) FloodSpamProtection [flood]" in body
+    assert "🔴 (disabled) SimilarMessageProtection [similar]" in body
     assert "🔴 (disabled) MentionLimitProtection [mentions]" in body
 
 
