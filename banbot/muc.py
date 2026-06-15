@@ -42,6 +42,12 @@ class MucMixin:
         self.reconnecting = True
         self._get_reconnect_success_event().clear()
 
+        # Remember existing occupants before clearing runtime state.  If the
+        # XMPP server restarts, everyone can leave and rejoin in a burst; those
+        # rejoin presences should not be counted as a JoinWave raid.
+        if hasattr(self, "protection_remember_current_occupants"):
+            self.protection_remember_current_occupants()
+
         # runtime state reset
         self.occupants.clear()
         self.bot_admin_state.clear()

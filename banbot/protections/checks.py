@@ -8,7 +8,6 @@ from typing import Any
 
 from config import ADMIN_ROOM
 
-from ..utils import bare_jid
 from .detection import body_contains_blocked_word, count_mentions, message_looks_like_media
 
 log = logging.getLogger(__name__)
@@ -39,7 +38,16 @@ class ProtectionChecksMixin:
             )
             return
 
-        subject = bare_jid(jid) if jid else nick.lower()
+        subject = self._protection_join_subject(nick, jid)
+        if self._protection_is_recent_rejoin(room, subject, now):
+            log.debug(
+                "Skipping protection join hook for recent rejoin in %s: nick=%s subject=%s",
+                room,
+                nick,
+                subject,
+            )
+            return
+
         self.protection_joined_at[(room, subject)] = now
         self.protection_first_message_seen.discard((room, subject))
 
@@ -47,6 +55,18 @@ class ProtectionChecksMixin:
         if not self.protection_enabled(protection):
             return
         config = self.protection_config(protection)
+        affiliation = str(
+            getattr(self, "occupants", {}).get(room, {}).get(nick, {}).get("affiliation") or ""
+        ).lower()
+        if bool(config.get("ignore_member_affiliations", True)) and affiliation in {"member", "admin", "owner"}:
+            log.debug(
+                "Skipping %s count for member-affiliated occupant in %s: nick=%s affiliation=%s",
+                protection,
+                room,
+                nick,
+                affiliation,
+            )
+            return
         window = max(1, int(config.get("window_seconds", 60) or 60))
         max_joins = max(1, int(config.get("max_joins", 8) or 8))
         joins = self.protection_join_windows[room]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 import logging
+import time
 from typing import Any
 
 from ..utils import bare_jid
@@ -39,6 +40,7 @@ class ProtectionMixin(
         self.protection_first_message_seen: set[tuple[str, str]] = set()
         self.protection_trusted_reports: dict[tuple[str, str], list[tuple[float, str, str]]] = defaultdict(list)
         self.protection_room_lockdown_until: dict[str, float] = {}
+        self.protection_recent_rejoin_subjects: dict[str, dict[str, float]] = defaultdict(dict)
 
     def protection_enabled(self, name: str) -> bool:
         """Return True when a protection is enabled."""
@@ -47,6 +49,60 @@ class ProtectionMixin(
     def protection_config(self, name: str) -> dict[str, Any]:
         """Return the effective mutable config for a protection."""
         return self.protections.setdefault(name, dict(PROTECTION_DEFAULTS[name]))
+
+    def _protection_join_subject(self, nick: str, jid: str | None = None) -> str:
+        """Return the stable subject key used for join/rejoin tracking."""
+        return bare_jid(jid) if jid else str(nick or "").lower()
+
+    def protection_remember_current_occupants(self) -> None:
+        """Remember current occupants so reconnect/restart waves do not look like raids.
+
+        A server restart or XMPP reconnect can make every existing occupant leave
+        and rejoin.  Those presences are not a new join wave, so keep a short
+        cache of subjects that were already present before the disconnect.
+        """
+        now = time.time()
+        config = self.protection_config("JoinWaveShortCircuitProtection")
+        grace = max(0, int(config.get("rejoin_grace_seconds", 300) or 0))
+        if grace <= 0:
+            self.protection_recent_rejoin_subjects.clear()
+            return
+
+        rooms = getattr(self, "protected_rooms", set())
+        occupants = getattr(self, "occupants", {})
+        for room in rooms:
+            room_occupants = occupants.get(room, {})
+            if not isinstance(room_occupants, dict):
+                continue
+            remembered = self.protection_recent_rejoin_subjects[room]
+            for nick, info in room_occupants.items():
+                if not isinstance(info, dict):
+                    continue
+                jid = info.get("jid")
+                subject = self._protection_join_subject(str(nick), str(jid) if jid else None)
+                if subject:
+                    remembered[subject] = now
+
+            cutoff = now - grace
+            for subject, seen_at in list(remembered.items()):
+                if seen_at < cutoff:
+                    remembered.pop(subject, None)
+
+    def _protection_is_recent_rejoin(self, room: str, subject: str, now: float) -> bool:
+        """Return True for occupants that were present before a recent reconnect."""
+        config = self.protection_config("JoinWaveShortCircuitProtection")
+        grace = max(0, int(config.get("rejoin_grace_seconds", 300) or 0))
+        if grace <= 0:
+            return False
+
+        remembered = self.protection_recent_rejoin_subjects.get(room, {})
+        seen_at = remembered.get(subject)
+        if not seen_at:
+            return False
+        if now - float(seen_at) > grace:
+            remembered.pop(subject, None)
+            return False
+        return True
 
     def _resolve_protection_or_error(self, name: str) -> tuple[str | None, str | None]:
         canonical = canonical_protection_name(name)

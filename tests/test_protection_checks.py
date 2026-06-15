@@ -257,9 +257,9 @@ async def test_join_wave_locks_room_and_notifies_once_during_lockdown() -> None:
     bot = DummyProtections()
     bot.protections["JoinWaveShortCircuitProtection"].update({"enabled": True, "max_joins": 1, "window_seconds": 60, "lockdown_seconds": 900})
 
-    await bot.protection_on_join(ROOM, "Alice", "alice@example.org")
-    await bot.protection_on_join(ROOM, "Bob", "bob@example.org")
-    await bot.protection_on_join(ROOM, "Carol", "carol@example.org")
+    await bot.protection_on_join(ROOM, "Joiner1", "joiner1@example.org")
+    await bot.protection_on_join(ROOM, "Joiner2", "joiner2@example.org")
+    await bot.protection_on_join(ROOM, "Joiner3", "joiner3@example.org")
 
     assert bot.muc_plugin.room_configs == [
         (
@@ -280,11 +280,80 @@ async def test_join_wave_notify_only_skips_room_config() -> None:
     bot = DummyProtections()
     bot.protections["JoinWaveShortCircuitProtection"].update({"enabled": True, "max_joins": 1, "notify_only": True})
 
-    await bot.protection_on_join(ROOM, "Alice", "alice@example.org")
-    await bot.protection_on_join(ROOM, "Bob", "bob@example.org")
+    await bot.protection_on_join(ROOM, "Joiner1", "joiner1@example.org")
+    await bot.protection_on_join(ROOM, "Joiner2", "joiner2@example.org")
 
     assert bot.muc_plugin.room_configs == []
-    assert "Action: notify only" in last_body(bot)
+
+    assert "JoinWaveShortCircuitProtection triggered" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_join_wave_ignores_member_affiliated_occupants_by_default() -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"].update({"enabled": True, "max_joins": 1})
+    bot.occupants[ROOM]["MemberJoiner"] = {
+        "jid": "member-joiner@example.org",
+        "role": "participant",
+        "affiliation": "member",
+    }
+
+    await bot.protection_on_join(ROOM, "MemberJoiner", "member-joiner@example.org")
+
+    assert bot.muc_plugin.room_configs == []
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_join_wave_can_count_members_when_configured() -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"].update({
+        "enabled": True,
+        "max_joins": 1,
+        "ignore_member_affiliations": False,
+    })
+
+    await bot.protection_on_join(ROOM, "Alice", "alice@example.org")
+
+    assert bot.muc_plugin.room_configs
+
+
+@pytest.mark.asyncio
+async def test_join_wave_ignores_recent_rejoin_subjects_after_reconnect() -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"].update({
+        "enabled": True,
+        "max_joins": 1,
+        "rejoin_grace_seconds": 300,
+    })
+    bot.protection_remember_current_occupants()
+
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org")
+
+    assert bot.muc_plugin.room_configs == []
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_recent_rejoin_subjects_expire(monkeypatch) -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"].update({
+        "enabled": True,
+        "max_joins": 1,
+        "rejoin_grace_seconds": 10,
+    })
+    bot.occupants[ROOM]["Recent"] = {
+        "jid": "recent@example.org",
+        "role": "participant",
+        "affiliation": "none",
+    }
+    monkeypatch.setattr("banbot.protections.manager.time.time", lambda: 100.0)
+    bot.protection_remember_current_occupants()
+    monkeypatch.setattr("banbot.protections.checks.time.time", lambda: 111.0)
+
+    await bot.protection_on_join(ROOM, "Recent", "recent@example.org")
+
+    assert bot.muc_plugin.room_configs
 
 
 @pytest.mark.asyncio
@@ -346,8 +415,8 @@ async def test_join_wave_triggers_at_configured_threshold() -> None:
         "cooldown_seconds": 60,
     })
 
-    await bot.protection_on_join(ROOM, "Alice", "alice@example.org")
-    await bot.protection_on_join(ROOM, "Bob", "bob@example.org")
+    await bot.protection_on_join(ROOM, "Joiner1", "joiner1@example.org")
+    await bot.protection_on_join(ROOM, "Joiner2", "joiner2@example.org")
 
     assert bot.muc_plugin.room_configs == [
         (
