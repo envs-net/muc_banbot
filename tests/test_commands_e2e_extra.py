@@ -62,7 +62,7 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
     async def _decrypt_incoming_omemo_message(self, msg):
         return msg, False
 
-    async def ban_all(self, target, until, issuer, comment=None):
+    async def ban_all(self, target, until, issuer, comment=None, *, auto_redact=True):
         self.ban_calls.append((target, until, issuer, comment))
 
     async def unban_all(self, target, issuer):

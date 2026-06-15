@@ -56,6 +56,7 @@ class DummyProtections(ProtectionMixin):
         self.audit: list[tuple[tuple, dict]] = []
         self.bans: list[tuple[str, int | None, str, str | None]] = []
         self.redactions: list[tuple[object, str, str | None]] = []
+        self.target_redactions: list[tuple[str, str | None, str | None, bool, str]] = []
         self.protected_rooms = {ROOM}
         self.admin_nicks: set[str] = set()
         self.bot_is_admin = True
@@ -93,11 +94,27 @@ class DummyProtections(ProtectionMixin):
     async def audit_event(self, *args, **kwargs) -> None:
         self.audit.append((args, kwargs))
 
-    async def ban_all(self, target, until, issuer, comment=None):
+    async def ban_all(self, target, until, issuer, comment=None, *, auto_redact=True):
         self.bans.append((target, until, issuer, comment))
 
     async def _protection_redact_message(self, msg, reason: str, actor: str | None) -> None:
         self.redactions.append((msg, reason, actor))
+
+    async def redact_jid_messages(
+        self,
+        jid: str,
+        reason: str | None = None,
+        actor: str | None = None,
+        announce: bool = True,
+        title: str = "Redaction completed",
+    ) -> dict[str, object]:
+        self.target_redactions.append((jid, reason, actor, announce, title))
+        await self.bot_send_message(
+            mto=ADMIN_ROOM,
+            mbody=f"{title}\nTarget: {jid}\nReason: {reason}",
+            mtype="groupchat",
+        )
+        return {"found": 1, "redacted": 1, "failed": 0, "skipped": 0}
 
 
 def last_body(bot: DummyProtections) -> str:
@@ -536,3 +553,51 @@ async def test_similar_message_window_expires_old_entries(fake_msg_factory, monk
     assert await bot.protections_on_message(first, ROOM, "Alice", body) is False
     assert await bot.protections_on_message(second, ROOM, "Spammer", body) is False
     assert bot.bans == []
+
+
+@pytest.mark.asyncio
+async def test_tempban_protection_redacts_target_messages_even_when_reason_is_not_auto_reason(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["MentionLimitProtection"].update({
+        "enabled": True,
+        "max_mentions": 1,
+        "action": "tempban",
+        "tempban_seconds": 120,
+        "redact": True,
+    })
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="hi Alice Bob")
+
+    handled = await bot.protections_on_message(msg, ROOM, "Spammer", "hi Alice Bob")
+
+    assert handled is True
+    assert bot.bans[0][0] == "spam@example.org"
+    assert bot.bans[0][2] == "protection:MentionLimitProtection"
+    assert bot.target_redactions == [
+        (
+            "spam@example.org",
+            "too many mentions",
+            "protection:MentionLimitProtection",
+            True,
+            "Auto-redaction completed after ban",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repeated_punitive_protection_actions_are_suppressed_during_cooldown(monkeypatch) -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update({"action": "ban", "redact": False})
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+
+    await bot._protection_apply_action(
+        protection="FloodSpamProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+    await bot._protection_apply_action(
+        protection="FloodSpamProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+
+    assert bot.bans == [("spam@example.org", None, "protection:FloodSpamProtection", "spam/flood detected")]

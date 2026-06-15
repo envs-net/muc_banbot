@@ -42,6 +42,7 @@ class ProtectionMixin(
         self.protection_trusted_reports: dict[tuple[str, str], list[tuple[float, str, str]]] = defaultdict(list)
         self.protection_room_lockdown_until: dict[str, float] = {}
         self.protection_recent_rejoin_subjects: dict[str, dict[str, float]] = defaultdict(dict)
+        self.protection_action_cooldowns: dict[tuple[str, str], float] = {}
 
     def protection_enabled(self, name: str) -> bool:
         """Return True when a protection is enabled."""

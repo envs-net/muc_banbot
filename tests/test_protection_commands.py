@@ -51,7 +51,7 @@ class DummyProtections(ProtectionMixin):
     async def audit_event(self, *args, **kwargs) -> None:
         self.audit.append((args, kwargs))
 
-    async def ban_all(self, target, until, issuer, comment=None):
+    async def ban_all(self, target, until, issuer, comment=None, *, auto_redact=True):
         self.bans.append((target, until, issuer, comment))
 
 

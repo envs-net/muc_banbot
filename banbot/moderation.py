@@ -153,12 +153,34 @@ class ModerationMixin:
                 await self.bot_send_message(mto=room, mbody=msg, mtype="groupchat")
 
 
-    async def ban_all(self, identifier: str, until: int | None, issuer: str, comment: str | None = None) -> None:
+    async def ban_all(
+        self,
+        identifier: str,
+        until: int | None,
+        issuer: str,
+        comment: str | None = None,
+        *,
+        auto_redact: bool = True,
+    ) -> None:
         """Ban a target while holding the shared ban-state lock."""
         async with ban_state_lock(self):
-            await self._ban_all_locked(identifier, until, issuer, comment)
+            await self._ban_all_locked(
+                identifier,
+                until,
+                issuer,
+                comment,
+                auto_redact=auto_redact,
+            )
 
-    async def _ban_all_locked(self, identifier: str, until: int | None, issuer: str, comment: str | None = None) -> None:
+    async def _ban_all_locked(
+        self,
+        identifier: str,
+        until: int | None,
+        issuer: str,
+        comment: str | None = None,
+        *,
+        auto_redact: bool = True,
+    ) -> None:
         """
         Bans a user by JID, nick, or domain (*.domain.tld):
         - Validates JID/domain format
@@ -384,7 +406,7 @@ class ModerationMixin:
                 comment=comment,
             )
 
-        if hasattr(self, "maybe_auto_redact_after_ban") and normalized_jid and target_type == "jid":
+        if auto_redact and hasattr(self, "maybe_auto_redact_after_ban") and normalized_jid and target_type == "jid":
             await self.maybe_auto_redact_after_ban(normalized_jid, comment, actor=issuer)
 
         if not skip_final_message:

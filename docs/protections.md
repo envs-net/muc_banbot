@@ -47,7 +47,7 @@ Message protections support these actions:
 | `tempban` | Add a temporary global ban through the existing ban system |
 | `ban` | Add a permanent global ban through the existing ban system |
 
-When `redact=True` and `REDACTION_ENABLED=True`, message protections try to retract the triggering message using the existing redaction system.
+When `redact=True` and `REDACTION_ENABLED=True`, message protections first try to retract the triggering message and punitive actions (`kick`, `tempban`, `ban`) also run the normal indexed JID redaction path with an admin-room summary. A short `action_cooldown_seconds` window suppresses repeated punitive actions for the same room/target during message bursts.
 
 ## Examples
 
@@ -57,6 +57,7 @@ When `redact=True` and `REDACTION_ENABLED=True`, message protections try to retr
 !protections flood set window_seconds 60
 !protections flood set action ban
 !protections flood set tempban_seconds 1h
+!protections flood set action_cooldown_seconds 5
 ```
 
 

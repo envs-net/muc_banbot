@@ -72,6 +72,59 @@ class ProtectionActionsMixin:
         except Exception as exc:
             log.debug("Protection redaction mark failed for stanza %s: %s", stanza_id, exc)
 
+    def _protection_action_cooldown_seconds(self, config: dict[str, Any]) -> int:
+        """Return the short duplicate-action cooldown for message bursts."""
+        return max(0, int(config.get("action_cooldown_seconds", 5) or 0))
+
+    def _protection_action_on_cooldown(self, room: str, target: str, now: float) -> bool:
+        """Return True when this target recently received a protection action."""
+        key = (room, str(target).lower())
+        until = getattr(self, "protection_action_cooldowns", {}).get(key, 0)
+        if until > now:
+            log.debug(
+                "Protection action suppressed in %s for %s: cooldown active for %.1fs",
+                room,
+                target,
+                until - now,
+            )
+            return True
+        if until:
+            self.protection_action_cooldowns.pop(key, None)
+        return False
+
+    def _protection_set_action_cooldown(self, room: str, target: str, seconds: int, now: float) -> None:
+        """Set a short duplicate-action cooldown for this room/target pair."""
+        if seconds <= 0:
+            return
+        self.protection_action_cooldowns[(room, str(target).lower())] = now + seconds
+
+    async def _protection_redact_target_messages(
+        self,
+        target: str,
+        reason: str,
+        actor: str,
+        *,
+        title: str = "Auto-redaction completed after protection action",
+    ) -> None:
+        """Run announced auto-redaction for all indexed messages from a protected target."""
+        if not getattr(self, "redaction_enabled", False):
+            return
+        if not target or "@" not in str(target) or str(target).startswith("*."):
+            return
+        redact_jid_messages = getattr(self, "redact_jid_messages", None)
+        if not callable(redact_jid_messages):
+            return
+        try:
+            await redact_jid_messages(
+                target,
+                reason=reason,
+                actor=actor,
+                announce=True,
+                title=title,
+            )
+        except Exception as exc:
+            log.warning("Protection target redaction failed for %s: %s", target, exc)
+
     async def _protection_apply_action(
         self,
         *,
@@ -96,6 +149,13 @@ class ProtectionActionsMixin:
         jid, normalized_nick = self._protection_subject(room, nick)
         actor = f"protection:{protection}"
         target = jid or normalized_nick
+        now = time.time()
+        punitive_action = action in {"kick", "tempban", "ban"}
+        if punitive_action:
+            cooldown_seconds = self._protection_action_cooldown_seconds(config)
+            if self._protection_action_on_cooldown(room, target, now):
+                return
+            self._protection_set_action_cooldown(room, target, cooldown_seconds, now)
 
         if redact_enabled and msg is not None:
             await self._protection_redact_message(msg, reason, actor)
@@ -122,9 +182,22 @@ class ProtectionActionsMixin:
             await self._protection_kick(room, nick, reason)
         elif action == "tempban":
             until = int(time.time()) + max(1, tempban_seconds)
-            await self.ban_all(target, until, actor, reason)
+            await self.ban_all(target, until, actor, reason, auto_redact=False)
         elif action == "ban":
-            await self.ban_all(target, None, actor, reason)
+            await self.ban_all(target, None, actor, reason, auto_redact=False)
+
+        if redact_enabled and punitive_action:
+            title = (
+                "Auto-redaction completed after ban"
+                if action in {"tempban", "ban"}
+                else "Auto-redaction completed after protection action"
+            )
+            await self._protection_redact_target_messages(
+                target,
+                reason,
+                actor,
+                title=title,
+            )
 
         await self._audit_protection_event(
             protection,

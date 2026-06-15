@@ -25,6 +25,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "tempban_seconds": 86400,
         "reason": "spam/flood detected",
         "redact": True,
+        "action_cooldown_seconds": 5,
     },
     "SimilarMessageProtection": {
         "enabled": False,
@@ -37,6 +38,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "tempban_seconds": 86400,
         "reason": "repeated/similar spam detected",
         "redact": True,
+        "action_cooldown_seconds": 5,
     },
     "FirstMessageMediaProtection": {
         "enabled": False,
@@ -45,6 +47,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "tempban_seconds": 86400,
         "reason": "first message was media spam",
         "redact": True,
+        "action_cooldown_seconds": 5,
     },
     "MentionLimitProtection": {
         "enabled": False,
@@ -53,6 +56,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "tempban_seconds": 3600,
         "reason": "too many mentions",
         "redact": True,
+        "action_cooldown_seconds": 5,
     },
     "WordListNewJoinerProtection": {
         "enabled": False,
@@ -62,6 +66,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "tempban_seconds": 86400,
         "reason": "blocked word from new joiner",
         "redact": True,
+        "action_cooldown_seconds": 5,
     },
     "JoinWaveShortCircuitProtection": {
         "enabled": False,
@@ -87,6 +92,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "tempban_seconds": 86400,
         "reason": "trusted reporter threshold reached",
         "redact": True,
+        "action_cooldown_seconds": 5,
     },
     "PolicyChangeNotification": {
         "enabled": True,
