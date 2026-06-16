@@ -53,7 +53,7 @@ TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
 }
 
 
-async def noop_sleep(delay):
+async def noop_sleep(delay: float) -> None:
     """No-op async sleep used in tests to avoid real waiting."""
     pass
 
@@ -111,11 +111,17 @@ class FakeMucService:
         self.left.append((room, nick))
 
     def join_muc(self, room, nick):
+        """Record room joins or raise to simulate configured join failures.
+
+        If ``room`` is listed in ``fail_join_rooms``, raise ``RuntimeError`` so
+        tests can exercise error-handling paths in sync logic.
+        """
         if room in self.fail_join_rooms:
             raise RuntimeError(f"join failed for {room}")
         self.joined.append((room, nick))
 
     async def get_users_by_affiliation(self, room, affiliation):
+        """Record lookup calls for assertions and return mocked affiliation users."""
         self.calls.append((room, affiliation))
         return list(self.affiliations.get((room, affiliation), []))
 
@@ -252,6 +258,12 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         self.sent.append(kwargs)
 
     async def apply_ban_to_room(self, room, ban_jid, ban_nick, comment, announce_missing_rights=True):
+        """Record a requested room ban operation for test assertions.
+
+        This test-double implementation intentionally avoids real MUC actions
+        and stores the call arguments in ``self.applied`` so tests can verify
+        sync behavior.
+        """
         self.applied.append((room, ban_jid, ban_nick, comment, announce_missing_rights))
 
     async def unban_all(self, target, issuer="system"):
@@ -260,6 +272,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         await self.load_bans_from_db()
 
     async def maybe_auto_redact_after_manual_muc_ban(self, jid, reason, actor=None):
+        """Record manual MUC ban auto-redaction checks for test assertions."""
         self.auto_redactions.append((jid, reason, actor))
 
 
@@ -554,9 +567,9 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
 async def create_and_configure_bot_for_room_sync(
     temp_db_path: str,
     sync_module: Any,
-    room,
+    room: str,
     *,
-    fail_join=False,
+    fail_join: bool = False,
 ) -> SyncBot:
     """Create and configure a SyncBot for a room-sync test scenario.
 

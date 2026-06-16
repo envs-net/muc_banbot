@@ -53,9 +53,16 @@ except ImportError:
     def normalize_bare_jid(jid: str | None) -> str:
         """Fallback-only mirror of ``banbot.utils.bare_jid``.
 
-        This local implementation is intentionally minimal and exists only
-        when optional imports are unavailable in the test environment. Keep
-        behavior aligned with the real helper to avoid divergence in tests.
+        This helper is used only when optional imports are unavailable in the
+        test environment. It intentionally implements only the subset relied on
+        by these tests:
+
+        * ``None`` -> ``""``
+        * remove any resource part after the first ``/``
+
+        It does *not* attempt broader JID normalization or validation
+        semantics. If ``banbot.utils.bare_jid`` changes for these two rules,
+        update this fallback to keep tests aligned.
         """
         if jid is None:
             return ""

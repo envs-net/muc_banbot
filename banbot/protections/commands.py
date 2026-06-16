@@ -367,11 +367,13 @@ class ProtectionCommandsMixin:
 
         If ``self.parse_config_value`` exists and is callable, it is invoked
         after duration parsing fails and before bool/int/string fallbacks.
-        Implementations should accept a stripped string and return a parsed
-        value, or the original/normalized string when no special parsing
-        applies. Implementations should not raise for normal "no match" cases;
-        raised exceptions are treated as hard errors and are allowed to
-        propagate to the caller.
+        Implementations should accept a stripped string and return a
+        parsed/normalized value for custom config value formats. When no
+        special parsing applies, they should return the original or normalized
+        string. Implementations should not raise for ordinary "no match"
+        cases. Raised exceptions are treated as hard errors; this method logs
+        them and re-raises so callers can fail loudly instead of silently
+        accepting a bad config value.
         """
         text = str(raw_value).strip()
         try:
@@ -386,7 +388,15 @@ class ProtectionCommandsMixin:
         # parsed/normalized value for custom config value formats.
         parser = getattr(self, "parse_config_value", None)
         if callable(parser):
-            value = parser(text)
+            try:
+                value = parser(text)
+            except Exception:
+                log.exception(
+                    "Custom protection value parser failed: raw=%r normalized=%r",
+                    raw_value,
+                    text,
+                )
+                raise
             log.debug("Parsed protection value with custom parser: raw=%r parsed=%r", raw_value, value)
             return value
 
@@ -465,7 +475,8 @@ class ProtectionCommandsMixin:
 
         Validation rules:
             - Integer threshold/window/count keys (for example
-              ``window_seconds``, ``max_messages``, ``threshold``) must be
+              ``window_seconds``, ``max_messages``, ``threshold``,
+              ``rejoin_grace_seconds``, ``action_cooldown_seconds``) must be
               positive integers (>= 1).
             - Boolean toggle keys (for example ``enabled``, ``redact``,
               ``members_only``, ``notify_config``) must be ``bool``.
