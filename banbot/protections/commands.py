@@ -45,6 +45,8 @@ class ProtectionCommandsMixin:
                 mtype="groupchat",
             )
             return
+        # _protection_actor_jid is provided by the shared protection/base mixin layer.
+        # It resolves the real actor JID for permission checks when nick differs from JID.
         reporter = self._protection_actor_jid(room, nick)
         config = self.protection_config(protection)
         reporter_values = [str(item).strip() for item in config.get("reporters", [])]
@@ -466,7 +468,8 @@ class ProtectionCommandsMixin:
                 allowed_actions = {"lockdown", "notify"}
             else:
                 allowed_actions = PROTECTION_ALLOWED_ACTIONS
-            if str(value).lower() not in allowed_actions:
+            normalized_value = value.lower() if isinstance(value, str) else str(value).lower()
+            if normalized_value not in allowed_actions:
                 return False, f"action must be one of: {', '.join(sorted(allowed_actions))}."
         if key in {"words", "reporters"}:
             if not isinstance(value, list) or not all(isinstance(item, str) for item in value):

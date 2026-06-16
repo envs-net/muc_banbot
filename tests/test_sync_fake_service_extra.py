@@ -53,6 +53,7 @@ TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
 
 
 async def noop_sleep(delay):
+    """No-op async sleep used in tests to avoid real waiting."""
     pass
 
 
@@ -273,8 +274,6 @@ def test_syncbot_init_rejects_none_db_path() -> None:
 
 async def make_bot(temp_db_path: str) -> SyncBot:
     """Asynchronously create and initialize a SyncBot backed by a temporary test DB.
-
-    This helper must be awaited.
 
     Args:
         temp_db_path: Non-None filesystem path string for the temporary SQLite

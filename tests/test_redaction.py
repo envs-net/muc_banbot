@@ -52,10 +52,9 @@ except ImportError:
 
     def normalize_bare_jid(jid: str | None) -> str:
         """Fallback placeholder used only when redaction imports are skipped."""
-        raise NotImplementedError(
-            "normalize_bare_jid fallback is intentionally not implemented; "
-            "tests are skipped when redaction imports are unavailable."
-        )
+        if jid is None:
+            return ""
+        return jid.split("/", 1)[0]
 
 pytestmark = pytest.mark.skipif(
     not REDACTION_TEST_IMPORTS_OK,
