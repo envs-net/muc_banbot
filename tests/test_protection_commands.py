@@ -65,6 +65,8 @@ class DummyProtections(ProtectionMixin):
 
 
 def last_body(bot: DummyProtections) -> str:
+    if not bot.sent:
+        raise AssertionError("Expected at least one sent message, but none were recorded.")
     return bot.sent[-1][1]
 
 

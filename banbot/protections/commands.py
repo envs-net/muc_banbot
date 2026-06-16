@@ -30,6 +30,8 @@ from .definitions import (
 
 log = logging.getLogger(__name__)
 
+POLICY_CHANGE_NOTIFICATION_PROTECTION = "PolicyChangeNotification"
+
 
 class ProtectionCommandsMixin:
     async def cmd_protection_report(self, room: str, nick: str, args: list[str]) -> None:
@@ -352,8 +354,11 @@ class ProtectionCommandsMixin:
 
     def _parse_protection_value(self, raw_value: str) -> Any:
         text = str(raw_value).strip()
-        if text.endswith(("s", "m", "h", "d")) and text[:-1].isdigit():
+        try:
             return parse_duration(text)
+        except (TypeError, ValueError):
+            pass
+
         parser = getattr(self, "parse_config_value", None)
         if callable(parser):
             return parser(text)
@@ -473,7 +478,9 @@ class ProtectionCommandsMixin:
                 )
             except Exception as exc:
                 log.debug("Failed to audit protection config change: %s", exc)
-        if self.protection_enabled("PolicyChangeNotification") and self.protection_config("PolicyChangeNotification").get("notify_config", True):
+        if self.protection_enabled(POLICY_CHANGE_NOTIFICATION_PROTECTION) and self.protection_config(
+            POLICY_CHANGE_NOTIFICATION_PROTECTION
+        ).get("notify_config", True):
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"📣 Protection config changed\nProtection: {protection}\nKey: {key}\nActor: {safe_jid(actor or 'unknown')}",

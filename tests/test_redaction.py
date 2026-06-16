@@ -232,6 +232,8 @@ def _build_iq_with_normalized_to(
 
 def latest_message_body(bot: "RedactionBot") -> str:
     """Return the most recent message body sent by the test bot."""
+    if not bot.sent:
+        raise AssertionError("No messages have been sent by the test bot.")
     return bot.sent[-1]["mbody"]
 
 
