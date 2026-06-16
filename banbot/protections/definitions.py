@@ -158,6 +158,12 @@ PROTECTION_ALIASES = {
 
 PROTECTION_ALLOWED_ACTIONS = {"notify", "warn", "kick", "tempban", "ban"}
 
+# Protection-specific action restrictions used by command validation.
+# Protections not listed here accept PROTECTION_ALLOWED_ACTIONS.
+PROTECTION_ACTIONS_BY_PROTECTION = {
+    "JoinWaveShortCircuitProtection": {"lockdown", "notify"},
+}
+
 
 def default_protection_config() -> dict[str, dict[str, Any]]:
     """Return a deep copy of the default protection configuration."""

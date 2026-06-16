@@ -21,6 +21,7 @@ from ..utils import (
     without_all_pages_arg,
 )
 from .definitions import (
+    PROTECTION_ACTIONS_BY_PROTECTION,
     PROTECTION_ALLOWED_ACTIONS,
     PROTECTION_DEFAULTS,
     PROTECTION_DISPLAY_ALIASES,
@@ -369,6 +370,9 @@ class ProtectionCommandsMixin:
         except ValueError:
             log.debug("Protection value is not a duration, falling back: raw=%r", raw_value)
 
+        # Optional extension hook supplied by the config-command mixin:
+        # parse_config_value(text: str) -> Any.  It may return a
+        # parsed/normalized value for custom config value formats.
         parser = getattr(self, "parse_config_value", None)
         if callable(parser):
             value = parser(text)
@@ -464,10 +468,10 @@ class ProtectionCommandsMixin:
             if not isinstance(value, int) or not 1 <= value <= 100:
                 return False, "similarity_percent must be an integer from 1 to 100."
         if key == "action":
-            if protection == "JoinWaveShortCircuitProtection":
-                allowed_actions = {"lockdown", "notify"}
-            else:
-                allowed_actions = PROTECTION_ALLOWED_ACTIONS
+            allowed_actions = PROTECTION_ACTIONS_BY_PROTECTION.get(
+                protection or "",
+                PROTECTION_ALLOWED_ACTIONS,
+            )
             normalized_value = value.lower() if isinstance(value, str) else str(value).lower()
             if normalized_value not in allowed_actions:
                 return False, f"action must be one of: {', '.join(sorted(allowed_actions))}."

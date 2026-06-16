@@ -14,7 +14,7 @@ aiosqlite = pytest.importorskip("aiosqlite")
 from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
 from banbot.sync import SyncMixin
-from banbot.utils import bare_jid, safe_jid as real_safe_jid
+from banbot.utils import bare_jid as real_bare_jid, safe_jid as real_safe_jid
 
 # Users listed under an affiliation; each item is either a bare JID string
 # or a ``(jid, reason)`` tuple used by some fixture variants.
@@ -52,7 +52,7 @@ TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
 }
 
 
-async def noop_sleep(delay):
+async def noop_sleep(_delay):
     """No-op async sleep used in tests to avoid real waiting."""
     pass
 
@@ -225,13 +225,8 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         if hasattr(self, "flush_pending_database_backup_audit_events"):
             await self.flush_pending_database_backup_audit_events()
 
-    @staticmethod
-    def bare_jid(jid):
-        return bare_jid(jid)
-
-    @staticmethod
-    def safe_jid(jid):
-        return real_safe_jid(jid)
+    bare_jid = staticmethod(real_bare_jid)
+    safe_jid = staticmethod(real_safe_jid)
 
     @property
     def sent(self):

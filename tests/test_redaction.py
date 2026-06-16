@@ -51,7 +51,12 @@ except ImportError:
     SID_NS = _REDACTION_FALLBACK_DEFAULTS["sid_ns"]
 
     def normalize_bare_jid(jid: str | None) -> str:
-        """Fallback placeholder used only when redaction imports are skipped."""
+        """Fallback-only mirror of ``banbot.utils.bare_jid``.
+
+        This local implementation is intentionally minimal and exists only
+        when optional imports are unavailable in the test environment. Keep
+        behavior aligned with the real helper to avoid divergence in tests.
+        """
         if jid is None:
             return ""
         return jid.split("/", 1)[0]
@@ -406,9 +411,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         for name, value in self.test_state_default_items().items():
             setattr(self, name, value)
 
-    @staticmethod
-    def bare_jid(jid: str | None) -> str:
-        return normalize_bare_jid(jid)
+    bare_jid = staticmethod(normalize_bare_jid)
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
