@@ -5,6 +5,7 @@ import time
 import pytest
 
 from banbot.protections import ProtectionMixin
+from banbot.utils import bare_jid
 
 
 ROOM = "room@conference.example.org"
@@ -21,7 +22,6 @@ class DummyProtections(ProtectionMixin):
         self.audit: list[tuple[tuple, dict]] = []
         self.bans: list[tuple[str, int | None, str, str | None]] = []
         self.protected_rooms = {ROOM}
-        self.admin_nicks: set[str] = {"Admin"}
         self.occupants = {
             ROOM: {
                 "Admin": {"jid": "admin@example.org", "role": "moderator", "affiliation": "owner"},
@@ -41,12 +41,14 @@ class DummyProtections(ProtectionMixin):
         return info.get("jid") or f"{nick.lower()}@example.org"
 
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
-        if nick is not None and nick in self.admin_nicks:
-            return True
+        if nick is not None:
+            info = self.occupants.get(room, {}).get(nick)
+            if info and info.get("affiliation") in {"owner", "admin"}:
+                return True
 
         if jid is not None:
             for info in self.occupants.get(room, {}).values():
-                if info.get("jid") == jid and info.get("affiliation") in {"owner", "admin"}:
+                if bare_jid(info.get("jid")) == bare_jid(jid) and info.get("affiliation") in {"owner", "admin"}:
                     return True
 
         return False
@@ -66,7 +68,7 @@ class DummyProtections(ProtectionMixin):
 
 def last_body(bot: DummyProtections) -> str:
     if not bot.sent:
-        raise AssertionError("Expected at least one sent message, but none were recorded.")
+        raise AssertionError("Expected at least one sent message, but none was recorded.")
     return bot.sent[-1][1]
 
 
@@ -232,7 +234,7 @@ async def test_report_threshold_ignores_duplicate_reporter_and_then_triggers_act
     assert until is not None and until >= before
     assert issuer == "protection:TrustedReporters"
     assert comment == "spam"
-    assert (ROOM, "Spammer") not in bot.protection_trusted_reports
+    assert (ROOM, "spammer") not in bot.protection_trusted_reports
 
 
 @pytest.mark.asyncio

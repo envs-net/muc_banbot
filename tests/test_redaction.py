@@ -40,6 +40,7 @@ except ImportError:
 
         pass
 
+
     REDACTION_CLEANUP_INTERVAL_SECONDS = (
         _REDACTION_FALLBACK_DEFAULTS["cleanup_interval_seconds"]
     )
@@ -51,7 +52,7 @@ except ImportError:
     def normalize_bare_jid(jid: str | None) -> str:
         """Fallback normalizer used only when redaction imports are skipped."""
         if jid is None:
-            return ""
+            raise TypeError("jid must be a non-None string")
 
         # Mimic the minimal bare-JID normalization semantics expected by tests:
         # trim whitespace, drop resources, and normalize case.
@@ -63,6 +64,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+# Small non-zero delay used by concurrency tests to force overlap between tasks
+# without making the suite slow/flaky; some assertions derive total wait via "* 4".
 TEST_IQ_SEND_DELAY_SECONDS = 0.05
 DEFAULT_TEST_MESSAGE_BODY = "test message"
 TEST_ROOM_JID = "room@conference.example.test"

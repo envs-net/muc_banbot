@@ -48,7 +48,11 @@ class ProtectionCommandsMixin:
             return
         reporter = self._protection_actor_jid(room, nick)
         config = self.protection_config(protection)
-        reporters = {bare_jid(str(item)) for item in config.get("reporters", []) if str(item).strip()}
+        reporters = set()
+        for item in config.get("reporters", []):
+            item_str = str(item).strip()
+            if item_str:
+                reporters.add(bare_jid(item_str))
         if bare_jid(str(reporter)) not in reporters:
             await self.bot_send_message(mto=room, mbody="❌ You are not a trusted reporter.", mtype="groupchat")
             return
@@ -356,9 +360,8 @@ class ProtectionCommandsMixin:
         text = str(raw_value).strip()
         try:
             return parse_duration(text)
-        except (TypeError, ValueError):
+        except ValueError:
             pass
-
         parser = getattr(self, "parse_config_value", None)
         if callable(parser):
             return parser(text)
@@ -478,9 +481,10 @@ class ProtectionCommandsMixin:
                 )
             except Exception as exc:
                 log.debug("Failed to audit protection config change: %s", exc)
-        if self.protection_enabled(POLICY_CHANGE_NOTIFICATION_PROTECTION) and self.protection_config(
-            POLICY_CHANGE_NOTIFICATION_PROTECTION
-        ).get("notify_config", True):
+        if (
+            self.protection_enabled(POLICY_CHANGE_NOTIFICATION_PROTECTION)
+            and self.protection_config(POLICY_CHANGE_NOTIFICATION_PROTECTION).get("notify_config", True)
+        ):
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"📣 Protection config changed\nProtection: {protection}\nKey: {key}\nActor: {safe_jid(actor or 'unknown')}",

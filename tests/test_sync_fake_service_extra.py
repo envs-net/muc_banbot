@@ -24,7 +24,7 @@ FlatAffiliationMap = Mapping[tuple[str, str], AffiliationUsers]
 # Preferred nested fixture shape: ``room_jid -> affiliation -> users``.
 NestedAffiliationMap = Mapping[str, Mapping[str, AffiliationUsers]]
 # Keep expiry short so time-based sync tests complete quickly.
-EXPIRED_DURATION_SECONDS = 5
+EXPIRY_THRESHOLD_SECONDS = 5
 TEST_ADMIN_ROOM = "admin@conference.example.test"
 TEST_ROOM = "room@example.test"
 TEST_OWNER_JID = "owner@example.test"
@@ -53,7 +53,7 @@ TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
 
 
 async def noop_sleep(_delay):
-    return None
+    pass
 
 
 class FakeMucService:
@@ -129,7 +129,7 @@ class SyncTrackingState:
 
 
 class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str | None) -> None:
         """Initialize a test bot with fake services and isolated state.
 
         Args:
@@ -405,7 +405,7 @@ async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recove
         await bot.upsert_ban_db(
             "expired@example.test",
             None,
-            int(time.time()) - EXPIRED_DURATION_SECONDS,
+            int(time.time()) - EXPIRY_THRESHOLD_SECONDS,
             "tester",
             "expired",
         )
@@ -522,7 +522,6 @@ async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, sync_mod
 
 @pytest.mark.asyncio
 async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch, sync_module):
-
     monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
     bot = await make_bot(temp_db_path)
     bot.protected_rooms = {
@@ -582,7 +581,6 @@ async def create_and_configure_bot_for_room_sync(
 
 @pytest.mark.asyncio
 async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_module):
-
     monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
     room = "room@conference.example.test"
     bot = await create_and_configure_bot_for_room_sync(
@@ -599,7 +597,6 @@ async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_m
 
 @pytest.mark.asyncio
 async def test_sync_rooms_sets_join_time_on_success(temp_db_path, monkeypatch, sync_module):
-
     monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
     room = "room-ok@conference.example.test"
     bot = await create_and_configure_bot_for_room_sync(temp_db_path, sync_module, room)

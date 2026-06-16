@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
+
+import time
 
 import pytest
 
@@ -26,7 +27,9 @@ class DummyProtections(ProtectionMixin):
         self.sent.append((mto, mbody, mtype))
 
     def _actor_jid_from_room_nick(self, room: str, nick: str) -> str:
-        return f"{nick.lower()}@example.org"
+        room_occupants = self.occupants.get(room, {})
+        occupant = room_occupants.get(nick, {})
+        return occupant.get("jid", f"{nick.lower()}@example.org")
 
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
         return False
@@ -115,16 +118,18 @@ async def test_first_media_does_not_trigger_without_observed_join(fake_msg_facto
 @pytest.mark.asyncio
 async def test_first_media_triggers_with_observed_join(fake_msg_factory: Callable[..., object]) -> None:
     bot = DummyProtections()
-    bot.protections["FirstMessageMediaProtection"].update({
-        "enabled": True,
-        "action": "notify",
-    })
+    bot.protections["FirstMessageMediaProtection"].update({"enabled": True, "action": "notify"})
     bot.occupants = {
         "room@conference.example.org": {
-            "Spammer": {"jid": "spam@example.org", "role": "participant", "affiliation": "member"},
+            "Spammer": {
+                "jid": "spam@example.org",
+                "role": "participant",
+                "affiliation": "member",
+            },
         }
     }
     bot.protection_joined_at[("room@conference.example.org", "spam@example.org")] = time.time()
+    bot.join_observed = {"room@conference.example.org": {"Spammer"}}
     msg = fake_msg_factory(
         room="room@conference.example.org",
         nick="Spammer",
