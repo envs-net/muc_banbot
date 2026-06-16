@@ -29,7 +29,6 @@ from .definitions import (
 )
 
 log = logging.getLogger(__name__)
-
 POLICY_CHANGE_NOTIFICATION_PROTECTION = "PolicyChangeNotification"
 
 
@@ -48,11 +47,8 @@ class ProtectionCommandsMixin:
             return
         reporter = self._protection_actor_jid(room, nick)
         config = self.protection_config(protection)
-        reporters = set()
-        for item in config.get("reporters", []):
-            item_str = str(item).strip()
-            if item_str:
-                reporters.add(bare_jid(item_str))
+        reporter_values = [str(item).strip() for item in config.get("reporters", [])]
+        reporters = {bare_jid(item) for item in reporter_values if item}
         if bare_jid(str(reporter)) not in reporters:
             await self.bot_send_message(mto=room, mbody="❌ You are not a trusted reporter.", mtype="groupchat")
             return
@@ -357,22 +353,39 @@ class ProtectionCommandsMixin:
         )
 
     def _parse_protection_value(self, raw_value: str) -> Any:
+        """Parse protection config values using ordered fallbacks.
+
+        Order: duration -> custom config parser -> bool -> int -> raw string.
+        Earlier parser failures are expected for non-matching value shapes and
+        intentionally fall through to the next parser.
+        """
         text = str(raw_value).strip()
         try:
-            return parse_duration(text)
+            value = parse_duration(text)
+            log.debug("Parsed protection value as duration: raw=%r parsed=%r", raw_value, value)
+            return value
         except ValueError:
-            pass
+            log.debug("Protection value is not a duration, falling back: raw=%r", raw_value)
+
         parser = getattr(self, "parse_config_value", None)
         if callable(parser):
-            return parser(text)
+            value = parser(text)
+            log.debug("Parsed protection value with custom parser: raw=%r parsed=%r", raw_value, value)
+            return value
+
         lowered = text.lower()
         if lowered == "true":
+            log.debug("Parsed protection value as bool: raw=%r parsed=True", raw_value)
             return True
         if lowered == "false":
+            log.debug("Parsed protection value as bool: raw=%r parsed=False", raw_value)
             return False
         try:
-            return int(text)
+            value = int(text)
+            log.debug("Parsed protection value as int: raw=%r parsed=%r", raw_value, value)
+            return value
         except ValueError:
+            log.debug("Leaving protection value as string after fallbacks: raw=%r", raw_value)
             return text
 
     async def cmd_protection_set_config(self, room: str, raw_name: str, key: str, raw_value: str, nick: str) -> None:
@@ -441,7 +454,7 @@ class ProtectionCommandsMixin:
             "threshold",
         }:
             if not isinstance(value, int) or value < 1:
-                return False, f"{key} must be a positive integer or duration like 10m."
+                return False, f"{key} must be a positive integer."
         if key in {"enabled", "redact", "members_only", "moderated", "notify_only", "notify_bans", "notify_unbans", "notify_config"}:
             if not isinstance(value, bool):
                 return False, f"{key} must be True or False."

@@ -52,7 +52,7 @@ TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
 }
 
 
-async def noop_sleep(_delay):
+async def noop_sleep(delay):
     pass
 
 
@@ -293,7 +293,12 @@ async def make_bot(temp_db_path: str) -> SyncBot:
 
 @pytest.fixture
 def sync_module():
-    """Return the sync module for tests that need NICK or asyncio hooks."""
+    """Return ``banbot.sync`` for tests that patch/read module-level globals.
+
+    The import is intentionally local to this fixture so tests access the
+    current module object used during execution (for example when temporarily
+    overriding ``ADMIN_ROOM``) without depending on import order at collection.
+    """
     import banbot.sync as module
 
     return module
@@ -522,6 +527,7 @@ async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, sync_mod
 
 @pytest.mark.asyncio
 async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch, sync_module):
+
     monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
     bot = await make_bot(temp_db_path)
     bot.protected_rooms = {
@@ -581,6 +587,7 @@ async def create_and_configure_bot_for_room_sync(
 
 @pytest.mark.asyncio
 async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_module):
+
     monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
     room = "room@conference.example.test"
     bot = await create_and_configure_bot_for_room_sync(
@@ -597,6 +604,7 @@ async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_m
 
 @pytest.mark.asyncio
 async def test_sync_rooms_sets_join_time_on_success(temp_db_path, monkeypatch, sync_module):
+
     monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
     room = "room-ok@conference.example.test"
     bot = await create_and_configure_bot_for_room_sync(temp_db_path, sync_module, room)

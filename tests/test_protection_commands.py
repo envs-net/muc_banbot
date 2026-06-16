@@ -5,11 +5,10 @@ import time
 import pytest
 
 from banbot.protections import ProtectionMixin
-from banbot.utils import bare_jid
 
 
-ROOM = "room@conference.example.org"
-ADMIN_ROOM = "admin@conference.example.org"
+ROOM = "room@conference.example.test"
+ADMIN_ROOM = "admin@conference.example.test"
 
 
 class DummyProtections(ProtectionMixin):
@@ -24,10 +23,10 @@ class DummyProtections(ProtectionMixin):
         self.protected_rooms = {ROOM}
         self.occupants = {
             ROOM: {
-                "Admin": {"jid": "admin@example.org", "role": "moderator", "affiliation": "owner"},
-                "Alice": {"jid": "alice@example.org", "role": "participant", "affiliation": "member"},
-                "Bob": {"jid": "bob@example.org", "role": "participant", "affiliation": "member"},
-                "Spammer": {"jid": "spam@example.org", "role": "participant", "affiliation": "member"},
+                "Admin": {"jid": "admin@example.test", "role": "moderator", "affiliation": "owner"},
+                "Alice": {"jid": "alice@example.test", "role": "participant", "affiliation": "member"},
+                "Bob": {"jid": "bob@example.test", "role": "participant", "affiliation": "member"},
+                "Spammer": {"jid": "spam@example.test", "role": "participant", "affiliation": "member"},
             }
         }
         self.db = None
@@ -38,17 +37,17 @@ class DummyProtections(ProtectionMixin):
 
     def _actor_jid_from_room_nick(self, room: str, nick: str) -> str:
         info = self.occupants.get(room, {}).get(nick, {})
-        return info.get("jid") or f"{nick.lower()}@example.org"
+        return info.get("jid") or f"{nick.lower()}@example.test"
 
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
         if nick is not None:
-            info = self.occupants.get(room, {}).get(nick)
-            if info and info.get("affiliation") in {"owner", "admin"}:
+            info = self.occupants.get(room, {}).get(nick, {})
+            if info.get("affiliation") in {"owner", "admin"}:
                 return True
 
         if jid is not None:
             for info in self.occupants.get(room, {}).values():
-                if bare_jid(info.get("jid")) == bare_jid(jid) and info.get("affiliation") in {"owner", "admin"}:
+                if info.get("jid") == jid and info.get("affiliation") in {"owner", "admin"}:
                     return True
 
         return False
@@ -162,12 +161,12 @@ async def test_similar_message_alias_and_similarity_percent_validation() -> None
 async def test_trusted_reporters_manage_jids_without_json() -> None:
     bot = DummyProtections()
 
-    await bot.cmd_trusted_reporters(ADMIN_ROOM, "add", ["Bob@Example.ORG/resource"], "Admin")
-    await bot.cmd_trusted_reporters(ADMIN_ROOM, "add", ["bob@example.org"], "Admin")
-    assert bot.protections["TrustedReporters"]["reporters"] == ["bob@example.org"]
+    await bot.cmd_trusted_reporters(ADMIN_ROOM, "add", ["Bob@Example.TEST/resource"], "Admin")
+    await bot.cmd_trusted_reporters(ADMIN_ROOM, "add", ["bob@example.test"], "Admin")
+    assert bot.protections["TrustedReporters"]["reporters"] == ["bob@example.test"]
     assert "already exists" in last_body(bot)
 
-    await bot.cmd_trusted_reporters(ADMIN_ROOM, "rm", ["bob@example.org"], "Admin")
+    await bot.cmd_trusted_reporters(ADMIN_ROOM, "rm", ["bob@example.test"], "Admin")
     assert bot.protections["TrustedReporters"]["reporters"] == []
     assert "removed" in last_body(bot)
 
@@ -201,7 +200,7 @@ async def test_report_command_is_noop_when_disabled() -> None:
 @pytest.mark.asyncio
 async def test_report_rejects_untrusted_reporter() -> None:
     bot = DummyProtections()
-    bot.protections["TrustedReporters"].update({"enabled": True, "reporters": ["bob@example.org"]})
+    bot.protections["TrustedReporters"].update({"enabled": True, "reporters": ["bob@example.test"]})
 
     await bot.cmd_protection_report(ROOM, "Alice", ["Spammer", "spam"])
 
@@ -214,7 +213,7 @@ async def test_report_threshold_ignores_duplicate_reporter_and_then_triggers_act
     bot = DummyProtections()
     bot.protections["TrustedReporters"].update({
         "enabled": True,
-        "reporters": ["alice@example.org", "bob@example.org"],
+        "reporters": ["alice@example.test", "bob@example.test"],
         "threshold": 2,
         "action": "tempban",
         "tempban_seconds": 60,
@@ -230,7 +229,7 @@ async def test_report_threshold_ignores_duplicate_reporter_and_then_triggers_act
 
     assert len(bot.bans) == 1
     target, until, issuer, comment = bot.bans[0]
-    assert target == "spam@example.org"
+    assert target == "spam@example.test"
     assert until is not None and until >= before
     assert issuer == "protection:TrustedReporters"
     assert comment == "spam"
@@ -242,7 +241,7 @@ async def test_report_does_not_act_on_admin_or_owner_target() -> None:
     bot = DummyProtections()
     bot.protections["TrustedReporters"].update({
         "enabled": True,
-        "reporters": ["alice@example.org"],
+        "reporters": ["alice@example.test"],
         "threshold": 1,
         "action": "tempban",
     })
@@ -251,7 +250,6 @@ async def test_report_does_not_act_on_admin_or_owner_target() -> None:
 
     assert bot.bans == []
     assert "exempt" in last_body(bot).lower()
-
 
 @pytest.mark.asyncio
 async def test_joinwave_action_accepts_notify_and_rejects_other_actions() -> None:

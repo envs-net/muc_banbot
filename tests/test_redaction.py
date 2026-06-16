@@ -11,7 +11,9 @@ import pytest
 
 REDACTION_TEST_IMPORTS_OK = True
 
-# Keep these fallback defaults synchronized with banbot.redaction constants.
+# Keep fallback defaults synchronized with banbot.redaction constants.
+# They are used only if imports fail, and also asserted against imported
+# constants when the real module is available.
 _REDACTION_FALLBACK_DEFAULTS = {
     "cleanup_interval_seconds": 24 * 60 * 60,
     "iq_timeout_seconds": 10,
@@ -40,7 +42,6 @@ except ImportError:
 
         pass
 
-
     REDACTION_CLEANUP_INTERVAL_SECONDS = (
         _REDACTION_FALLBACK_DEFAULTS["cleanup_interval_seconds"]
     )
@@ -50,13 +51,11 @@ except ImportError:
     SID_NS = _REDACTION_FALLBACK_DEFAULTS["sid_ns"]
 
     def normalize_bare_jid(jid: str | None) -> str:
-        """Fallback normalizer used only when redaction imports are skipped."""
-        if jid is None:
-            raise TypeError("jid must be a non-None string")
-
-        # Mimic the minimal bare-JID normalization semantics expected by tests:
-        # trim whitespace, drop resources, and normalize case.
-        return jid.strip().split("/", 1)[0].lower()
+        """Fallback placeholder used only when redaction imports are skipped."""
+        raise NotImplementedError(
+            "normalize_bare_jid fallback is intentionally not implemented; "
+            "tests are skipped when redaction imports are unavailable."
+        )
 
 pytestmark = pytest.mark.skipif(
     not REDACTION_TEST_IMPORTS_OK,
@@ -82,7 +81,6 @@ TEST_STANZA_1 = "stanza-1"
 TEST_STANZA_2 = "stanza-2"
 TEST_OLD_STANZA = "old-stanza"
 TEST_SERVER_REJECTED_IQ_ERROR = '<iq type="error"><moderate id="{stanza_id}" /></iq>'
-
 
 def test_redaction_fallback_defaults_match_module_constants() -> None:
     """Ensure fallback constants remain aligned with banbot.redaction values."""
@@ -235,8 +233,6 @@ def _build_iq_with_normalized_to(
 
 def latest_message_body(bot: "RedactionBot") -> str:
     """Return the most recent message body sent by the test bot."""
-    if not bot.sent:
-        raise AssertionError("No messages have been sent by the test bot.")
     return bot.sent[-1]["mbody"]
 
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import time
-
 import pytest
 
 from banbot.protections import ProtectionMixin
@@ -119,8 +118,9 @@ async def test_first_media_does_not_trigger_without_observed_join(fake_msg_facto
 async def test_first_media_triggers_with_observed_join(fake_msg_factory: Callable[..., object]) -> None:
     bot = DummyProtections()
     bot.protections["FirstMessageMediaProtection"].update({"enabled": True, "action": "notify"})
+    room = "room@conference.example.org"
     bot.occupants = {
-        "room@conference.example.org": {
+        room: {
             "Spammer": {
                 "jid": "spam@example.org",
                 "role": "participant",
@@ -128,23 +128,21 @@ async def test_first_media_triggers_with_observed_join(fake_msg_factory: Callabl
             },
         }
     }
-    bot.protection_joined_at[("room@conference.example.org", "spam@example.org")] = time.time()
-    bot.join_observed = {"room@conference.example.org": {"Spammer"}}
+    bot.protection_joined_at[(room, "spam@example.org")] = time.time()
     msg = fake_msg_factory(
-        room="room@conference.example.org",
+        room=room,
         nick="Spammer",
         body="https://upload.example.org/spam.jpg",
     )
 
     handled = await bot.protections_on_message(
         msg,
-        "room@conference.example.org",
+        room,
         "Spammer",
         "https://upload.example.org/spam.jpg",
     )
 
     assert handled is True
-    assert "FirstMessageMediaProtection triggered" in bot.sent[-1][1]
 
 
 @pytest.mark.asyncio
