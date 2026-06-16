@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
 from banbot.protections import ProtectionMixin
@@ -85,7 +87,7 @@ async def test_protection_enable_and_config_set() -> None:
 
 
 @pytest.mark.asyncio
-async def test_first_media_does_not_trigger_without_observed_join(fake_msg_factory) -> None:
+async def test_first_media_does_not_trigger_without_observed_join(fake_msg_factory: Callable[..., object]) -> None:
     bot = DummyProtections()
     bot.protections["FirstMessageMediaProtection"]["enabled"] = True
     bot.occupants = {
@@ -180,7 +182,7 @@ async def test_policy_alias_works_for_config_and_enable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mention_limit_counts_prefixed_display_nicks(fake_msg_factory) -> None:
+async def test_mention_limit_counts_prefixed_display_nicks(fake_msg_factory: Callable[..., object]) -> None:
     bot = DummyProtections()
     bot.protections["MentionLimitProtection"]["enabled"] = True
     bot.protections["MentionLimitProtection"]["max_mentions"] = 2
@@ -211,7 +213,7 @@ async def test_mention_limit_counts_prefixed_display_nicks(fake_msg_factory) -> 
 
 
 @pytest.mark.asyncio
-async def test_mention_limit_uses_xep0045_roster_cache(fake_msg_factory) -> None:
+async def test_mention_limit_uses_xep0045_roster_cache(fake_msg_factory: Callable[..., object]) -> None:
     class DummyMucPlugin:
         rooms = {
             "room@conference.example.org": {

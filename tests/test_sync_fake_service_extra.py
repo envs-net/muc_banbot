@@ -52,6 +52,10 @@ TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
 }
 
 
+async def no_sleep(_delay):
+    return None
+
+
 class FakeMucService:
     """Fake MUC plugin used by sync tests.
 
@@ -260,6 +264,11 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
 
     async def maybe_auto_redact_after_manual_muc_ban(self, jid, reason, actor=None):
         self.auto_redactions.append((jid, reason, actor))
+
+
+def test_syncbot_init_rejects_none_db_path() -> None:
+    with pytest.raises(ValueError, match="db_path must not be None"):
+        SyncBot(None)
 
 
 async def make_bot(temp_db_path: str) -> SyncBot:
@@ -514,9 +523,6 @@ async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, sync_mod
 @pytest.mark.asyncio
 async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch, sync_module):
 
-    async def no_sleep(_delay):
-        return None
-
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     bot = await make_bot(temp_db_path)
     bot.protected_rooms = {
@@ -577,9 +583,6 @@ async def create_and_configure_bot_for_room_sync(
 @pytest.mark.asyncio
 async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_module):
 
-    async def no_sleep(_delay):
-        return None
-
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     room = "room@conference.example.test"
     bot = await create_and_configure_bot_for_room_sync(
@@ -596,9 +599,6 @@ async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_m
 
 @pytest.mark.asyncio
 async def test_sync_rooms_sets_join_time_on_success(temp_db_path, monkeypatch, sync_module):
-
-    async def no_sleep(_delay):
-        return None
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", no_sleep)
     room = "room-ok@conference.example.test"

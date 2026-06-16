@@ -69,15 +69,26 @@ class ProtectionCommandsMixin:
             )
             return
         target_nick = target
+        target_jid = target if "@" in target else None
         # Prefer current nick casing when a reported nick/JID can be resolved from occupants.
         for n, info in self.occupants.get(room, {}).items():
             if "@" in target:
                 if info.get("jid") and bare_jid(info.get("jid")) == bare_jid(target):
                     target_nick = n
+                    target_jid = info.get("jid")
                     break
             elif n.lower() == target.lower():
                 target_nick = n
+                target_jid = info.get("jid")
                 break
+        if self._protection_is_exempt(room, target_nick, target_jid):
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"❌ Target {safe_jid(target)} is exempt from protection actions.",
+                mtype="groupchat",
+            )
+            self.protection_trusted_reports.pop(key, None)
+            return
         await self._protection_apply_action(
             protection=protection,
             room=room,

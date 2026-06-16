@@ -16,11 +16,12 @@ class DummyProtections(ProtectionMixin):
     list_page_size = 2
 
     def __init__(self) -> None:
-        self.sent: list[tuple[str, str, str]] = []
+        self.sent: list[tuple[str, str, str]] = []  # (recipient, body, message type)
         self.persisted: list[str] = []
         self.audit: list[tuple[tuple, dict]] = []
         self.bans: list[tuple[str, int | None, str, str | None]] = []
         self.protected_rooms = {ROOM}
+        self.admin_nicks: set[str] = {"Admin"}
         self.occupants = {
             ROOM: {
                 "Admin": {"jid": "admin@example.org", "role": "moderator", "affiliation": "owner"},
@@ -40,6 +41,14 @@ class DummyProtections(ProtectionMixin):
         return info.get("jid") or f"{nick.lower()}@example.org"
 
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
+        if nick is not None and nick in self.admin_nicks:
+            return True
+
+        if jid is not None:
+            for info in self.occupants.get(room, {}).values():
+                if info.get("jid") == jid and info.get("affiliation") in {"owner", "admin"}:
+                    return True
+
         return False
 
     def is_bot_admin_or_owner(self, room: str) -> bool:
@@ -221,7 +230,24 @@ async def test_report_threshold_ignores_duplicate_reporter_and_then_triggers_act
     assert until is not None and until >= before
     assert issuer == "protection:TrustedReporters"
     assert comment == "spam"
-    assert (ROOM, "spammer") not in bot.protection_trusted_reports
+    assert (ROOM, "Spammer") not in bot.protection_trusted_reports
+
+
+@pytest.mark.asyncio
+async def test_report_does_not_act_on_admin_or_owner_target() -> None:
+    bot = DummyProtections()
+    bot.protections["TrustedReporters"].update({
+        "enabled": True,
+        "reporters": ["alice@example.org"],
+        "threshold": 1,
+        "action": "tempban",
+    })
+
+    await bot.cmd_protection_report(ROOM, "Alice", ["Admin", "spam"])
+
+    assert bot.bans == []
+    assert "exempt" in last_body(bot).lower()
+
 
 @pytest.mark.asyncio
 async def test_joinwave_action_accepts_notify_and_rejects_other_actions() -> None:

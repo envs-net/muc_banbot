@@ -11,6 +11,13 @@ import pytest
 
 REDACTION_TEST_IMPORTS_OK = True
 
+# Keep these fallback defaults synchronized with banbot.redaction constants.
+_REDACTION_FALLBACK_DEFAULTS = {
+    "cleanup_interval_seconds": 24 * 60 * 60,
+    "iq_timeout_seconds": 10,
+    "sid_ns": "urn:xmpp:sid:0",
+}
+
 try:
     from banbot.db import DatabaseMixin
     from banbot.redaction import (
@@ -32,13 +39,6 @@ except ImportError:
         """Fallback base class used only when redaction imports are skipped."""
 
         pass
-
-    # Keep these fallback defaults synchronized with banbot.redaction constants.
-    _REDACTION_FALLBACK_DEFAULTS = {
-        "cleanup_interval_seconds": 60,
-        "iq_timeout_seconds": 10,
-        "sid_ns": "urn:xmpp:sid:0",
-    }
 
     REDACTION_CLEANUP_INTERVAL_SECONDS = (
         _REDACTION_FALLBACK_DEFAULTS["cleanup_interval_seconds"]
@@ -79,6 +79,16 @@ TEST_STANZA_1 = "stanza-1"
 TEST_STANZA_2 = "stanza-2"
 TEST_OLD_STANZA = "old-stanza"
 TEST_SERVER_REJECTED_IQ_ERROR = '<iq type="error"><moderate id="{stanza_id}" /></iq>'
+
+
+def test_redaction_fallback_defaults_match_module_constants() -> None:
+    """Ensure fallback constants remain aligned with banbot.redaction values."""
+    assert (
+        _REDACTION_FALLBACK_DEFAULTS["cleanup_interval_seconds"]
+        == REDACTION_CLEANUP_INTERVAL_SECONDS
+    )
+    assert _REDACTION_FALLBACK_DEFAULTS["iq_timeout_seconds"] == REDACTION_IQ_TIMEOUT_SECONDS
+    assert _REDACTION_FALLBACK_DEFAULTS["sid_ns"] == SID_NS
 
 
 class FakeFrom:
@@ -440,6 +450,15 @@ async def setup_redaction_test_db(bot: RedactionBot, temp_db_path: Path | str) -
         )
 
     await bot.setup_db()
+
+
+def test_setup_redaction_test_db_rejects_mismatched_db_file(tmp_path, monkeypatch) -> None:
+    import config
+
+    monkeypatch.setattr(config, "DB_FILE", str(tmp_path / "configured.db"), raising=False)
+
+    with pytest.raises(ValueError, match="temp_db_path must match config.DB_FILE"):
+        asyncio.run(setup_redaction_test_db(RedactionBot(), tmp_path / "actual.db"))
 
 
 @pytest.mark.asyncio
