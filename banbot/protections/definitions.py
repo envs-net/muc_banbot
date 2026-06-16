@@ -171,6 +171,12 @@ def default_protection_config() -> dict[str, dict[str, Any]]:
 
 
 def canonical_protection_name(name: str) -> str | None:
-    """Return the canonical protection name for a user-provided name/alias."""
+    """Return the canonical protection name for a user-provided name/alias.
+
+    The input is normalized to lowercase alphanumeric characters before lookup.
+    Returns the canonical protection class name when a matching alias exists,
+    otherwise returns ``None``. Callers should explicitly handle the ``None``
+    case for unknown/unsupported names.
+    """
     normalized = "".join(ch for ch in str(name or "").lower() if ch.isalnum())
     return PROTECTION_ALIASES.get(normalized)

@@ -361,6 +361,17 @@ class ProtectionCommandsMixin:
         Order: duration -> custom config parser -> bool -> int -> raw string.
         Earlier parser failures are expected for non-matching value shapes and
         intentionally fall through to the next parser.
+
+        Optional hook interface:
+            parse_config_value(text: str) -> Any
+
+        If ``self.parse_config_value`` exists and is callable, it is invoked
+        after duration parsing fails and before bool/int/string fallbacks.
+        Implementations should accept a stripped string and return a parsed
+        value, or the original/normalized string when no special parsing
+        applies. Implementations should not raise for normal "no match" cases;
+        raised exceptions are treated as hard errors and are allowed to
+        propagate to the caller.
         """
         text = str(raw_value).strip()
         try:
@@ -444,6 +455,27 @@ class ProtectionCommandsMixin:
         *,
         protection: str | None = None,
     ) -> tuple[bool, str]:
+        """Validate a protection config value for a specific key.
+
+        Returns:
+            tuple[bool, str]: ``(is_valid, error_message)``.
+            ``is_valid`` is ``True`` when the value passes all checks for
+            ``key``. ``error_message`` is empty when valid, otherwise contains
+            a user-facing explanation of the validation failure.
+
+        Validation rules:
+            - Integer threshold/window/count keys (for example
+              ``window_seconds``, ``max_messages``, ``threshold``) must be
+              positive integers (>= 1).
+            - Boolean toggle keys (for example ``enabled``, ``redact``,
+              ``members_only``, ``notify_config``) must be ``bool``.
+            - ``similarity_percent`` must satisfy its configured numeric range
+              check.
+            - ``action`` must be one of the allowed actions for the selected
+              protection, falling back to global allowed actions when
+              unspecified.
+            - ``words`` and ``reporters`` must be lists of strings.
+        """
         if key in {
             "window_seconds",
             "max_messages",

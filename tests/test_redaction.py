@@ -96,6 +96,27 @@ def test_redaction_fallback_defaults_match_module_constants() -> None:
     assert _REDACTION_FALLBACK_DEFAULTS["sid_ns"] == SID_NS
 
 
+@pytest.mark.skipif(False, reason="Run even when module-level skip is set.")
+def test_redaction_fallback_constants_and_helper_when_imports_fail() -> None:
+    """Validate fallback constants/helper behavior when optional imports fail."""
+    if REDACTION_TEST_IMPORTS_OK:
+        return
+
+    assert (
+        REDACTION_CLEANUP_INTERVAL_SECONDS
+        == _REDACTION_FALLBACK_DEFAULTS["cleanup_interval_seconds"]
+    )
+    assert (
+        REDACTION_IQ_TIMEOUT_SECONDS
+        == _REDACTION_FALLBACK_DEFAULTS["iq_timeout_seconds"]
+    )
+    assert SID_NS == _REDACTION_FALLBACK_DEFAULTS["sid_ns"]
+
+    assert normalize_bare_jid(None) == ""
+    assert normalize_bare_jid("alice@example.org/resource") == "alice@example.org"
+    assert normalize_bare_jid("alice@example.org") == "alice@example.org"
+
+
 class FakeFrom:
     """Simulate the ``from`` stanza attribute object used in tests."""
 
@@ -237,6 +258,10 @@ def _build_iq_with_normalized_to(
 
 def latest_message_body(bot: "RedactionBot") -> str:
     """Return the most recent message body sent by the test bot."""
+    if not bot.sent:
+        raise AssertionError(
+            "latest_message_body() called before any message was sent"
+        )
     return bot.sent[-1]["mbody"]
 
 
@@ -434,7 +459,9 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.audit_events.append((event_type, kwargs))
 
 
-async def setup_redaction_test_db(bot: RedactionBot, temp_db_path: Path | str) -> None:
+async def setup_and_validate_redaction_test_db(
+    bot: RedactionBot, temp_db_path: Path | str
+) -> None:
     """Initialize the redaction schema using the isolated DB fixture path.
 
     The shared ``temp_db_path`` fixture monkeypatches both ``config.DB_FILE``
@@ -455,19 +482,19 @@ async def setup_redaction_test_db(bot: RedactionBot, temp_db_path: Path | str) -
     await bot.setup_db()
 
 
-def test_setup_redaction_test_db_rejects_mismatched_db_file(tmp_path, monkeypatch) -> None:
+def test_setup_and_validate_redaction_test_db_rejects_mismatched_db_file(tmp_path, monkeypatch) -> None:
     import config
 
     monkeypatch.setattr(config, "DB_FILE", str(tmp_path / "configured.db"), raising=False)
 
     with pytest.raises(ValueError, match="temp_db_path must match config.DB_FILE"):
-        asyncio.run(setup_redaction_test_db(RedactionBot(), tmp_path / "actual.db"))
+        asyncio.run(setup_and_validate_redaction_test_db(RedactionBot(), tmp_path / "actual.db"))
 
 
 @pytest.mark.asyncio
 async def test_redaction_indexes_message_with_room_stanza_id(temp_db_path):
     bot = RedactionBot()
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         msg = FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
 
@@ -484,7 +511,7 @@ async def test_redaction_indexes_message_with_room_stanza_id(temp_db_path):
 @pytest.mark.asyncio
 async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
     bot = RedactionBot()
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
@@ -513,7 +540,7 @@ async def test_redact_jid_retracts_all_indexed_messages(temp_db_path):
 @pytest.mark.asyncio
 async def test_redact_id_retracts_single_stanza(temp_db_path):
     bot = RedactionBot()
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await bot.cmd_redact(
             ["id", TEST_ROOM_JID, TEST_STANZA_1, TEST_REDACTION_REASON],
@@ -535,7 +562,7 @@ async def test_redact_id_retracts_single_stanza(temp_db_path):
 async def test_redact_cleanup_deletes_old_entries(temp_db_path):
     bot = RedactionBot()
     bot.redaction_index_retention_days = 30
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await insert_old_redaction_entry(bot)
 
@@ -551,7 +578,7 @@ async def test_redact_cleanup_deletes_old_entries(temp_db_path):
 async def test_automatic_redaction_cleanup_deletes_old_entries_without_message(temp_db_path):
     bot = RedactionBot()
     bot.redaction_index_retention_days = 30
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await insert_old_redaction_entry(bot)
 
@@ -568,7 +595,7 @@ async def test_automatic_redaction_cleanup_deletes_old_entries_without_message(t
 async def test_automatic_redaction_cleanup_skips_noop_audit_when_retention_disabled(temp_db_path):
     bot = RedactionBot()
     bot.redaction_index_retention_days = 0
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         result = await bot.run_redaction_cleanup_automatic(actor="system")
 
@@ -584,7 +611,7 @@ async def test_automatic_redaction_cleanup_skips_noop_audit_when_retention_disab
 async def test_automatic_redaction_cleanup_skips_noop_audit_when_nothing_expired(temp_db_path):
     bot = RedactionBot()
     bot.redaction_index_retention_days = 30
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         result = await bot.run_redaction_cleanup_automatic(actor="system")
 
@@ -599,7 +626,7 @@ async def test_automatic_redaction_cleanup_skips_noop_audit_when_nothing_expired
 async def test_manual_redaction_cleanup_keeps_noop_audit_when_retention_disabled(temp_db_path):
     bot = RedactionBot()
     bot.redaction_index_retention_days = 0
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await bot.redact_cleanup(TEST_ADMIN_ROOM_JID, actor=TEST_ACTOR_JID)
 
@@ -677,7 +704,7 @@ async def test_redaction_cleanup_worker_continues_after_successful_iterations(mo
 @pytest.mark.asyncio
 async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
     bot = RedactionBot()
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
 
@@ -693,7 +720,7 @@ async def test_auto_redaction_runs_for_matching_ban_reason(temp_db_path):
 @pytest.mark.asyncio
 async def test_auto_redaction_reports_previously_redacted_when_no_candidates(temp_db_path):
     bot = RedactionBot()
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
@@ -723,7 +750,7 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
     bot = RedactionBot()
     bot.redaction_retract_concurrency = 2
     bot._test_iq_send_delay = TEST_IQ_SEND_DELAY_SECONDS * 4
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         for i in range(8):
             await bot._redaction_index_message(
@@ -752,7 +779,7 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
 async def test_redact_rows_counts_failed_retractions_without_marking_rows(temp_db_path):
     bot = RedactionBot()
     bot.fail_stanza_ids = {TEST_STANZA_2}
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
@@ -778,7 +805,7 @@ async def test_redact_rows_treats_already_retracted_stanzas_as_skipped(temp_db_p
     bot = RedactionBot()
     bot.fail_stanza_ids = {TEST_STANZA_2}
     bot.fail_stanza_errors = {TEST_STANZA_2: "item-not-found: stanza already retracted"}
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))
@@ -809,7 +836,7 @@ async def test_auto_redaction_suppresses_failure_alerts_and_adds_all_failed_note
         TEST_STANZA_1: TEST_SERVER_REJECTED_IQ_ERROR.format(stanza_id=TEST_STANZA_1),
         TEST_STANZA_2: TEST_SERVER_REJECTED_IQ_ERROR.format(stanza_id=TEST_STANZA_2),
     }
-    await setup_redaction_test_db(bot, temp_db_path)
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
     try:
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1))
         await bot._redaction_index_message(FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2))

@@ -6,6 +6,7 @@ import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
@@ -52,7 +53,7 @@ TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
 }
 
 
-async def noop_sleep(_delay):
+async def noop_sleep(delay):
     """No-op async sleep used in tests to avoid real waiting."""
     pass
 
@@ -267,7 +268,7 @@ def test_syncbot_init_rejects_none_db_path() -> None:
         SyncBot(None)
 
 
-async def make_bot(temp_db_path: str) -> SyncBot:
+async def initialize_sync_bot_for_test(temp_db_path: str) -> SyncBot:
     """Asynchronously create and initialize a SyncBot backed by a temporary test DB.
 
     Args:
@@ -311,7 +312,7 @@ async def admin_room_override(sync_module, value: str = TEST_ADMIN_ROOM) -> Asyn
 
 @pytest.mark.asyncio
 async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, sync_module):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): ["already@example.test"]}
     )
@@ -333,7 +334,7 @@ async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, sync_m
 
 @pytest.mark.asyncio
 async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): ["orphan@example.test"]}
     )
@@ -349,7 +350,7 @@ async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
 
 @pytest.mark.asyncio
 async def test_sync_single_room_does_not_auto_redact_known_outcast(temp_db_path):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): [("known@example.test", "spam")]}
     )
@@ -366,7 +367,7 @@ async def test_sync_single_room_does_not_auto_redact_known_outcast(temp_db_path)
 
 @pytest.mark.asyncio
 async def test_sync_single_room_auto_redacts_recovered_outcast_when_reason_is_discovered(temp_db_path):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): [("known@example.test", "spam")]}
     )
@@ -382,7 +383,7 @@ async def test_sync_single_room_auto_redacts_recovered_outcast_when_reason_is_di
 
 @pytest.mark.asyncio
 async def test_sync_single_room_auto_redacts_new_orphan_outcast(temp_db_path):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): [("orphan@example.test", "spam")]}
     )
@@ -396,7 +397,7 @@ async def test_sync_single_room_auto_redacts_new_orphan_outcast(temp_db_path):
 
 @pytest.mark.asyncio
 async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recovering(temp_db_path):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
         {("room@conference.example.test", "outcast"): ["expired@example.test"]}
     )
@@ -419,7 +420,7 @@ async def test_sync_single_room_unbans_expired_tempban_outcast_instead_of_recove
 
 @pytest.mark.asyncio
 async def test_sync_bans_to_rooms_skips_room_without_bot_admin_rights(temp_db_path, sync_module):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.admin_rooms = set()
     try:
         await bot.upsert_ban_db("new@example.test", None, 0, "tester", "new")
@@ -458,7 +459,7 @@ def test_fake_muc_service_handles_empty_affiliation_mapping():
 
 @pytest.mark.asyncio
 async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, sync_module):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     muc_service = FakeMucService(TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT)
     bot.plugin["xep_0045"] = muc_service
     try:
@@ -479,7 +480,7 @@ async def test_sync_admins_populates_owner_and_admin_occupants(temp_db_path, syn
 
 @pytest.mark.asyncio
 async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path, sync_module):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     muc_service = FakeMucService(TEST_ADMIN_ROOM_OWNER_ADMIN_NESTED)
     bot.plugin["xep_0045"] = muc_service
     try:
@@ -509,7 +510,7 @@ async def test_sync_admins_refreshes_admin_occupants_via_public_api(temp_db_path
 
 @pytest.mark.asyncio
 async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, sync_module):
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.protected_rooms = set()
     try:
         await bot.sync_rooms_and_bans()
@@ -523,7 +524,7 @@ async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, sync_mod
 async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch, sync_module):
 
     monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.protected_rooms = {
         "room-a@conference.example.test",
         "room-b@conference.example.test",
@@ -551,8 +552,8 @@ async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monk
 
 
 async def create_and_configure_bot_for_room_sync(
-    temp_db_path,
-    sync_module,
+    temp_db_path: str,
+    sync_module: Any,
     room,
     *,
     fail_join=False,
@@ -570,7 +571,7 @@ async def create_and_configure_bot_for_room_sync(
         A configured bot instance ready to run ``sync_rooms_and_bans`` for the
         given room scenario.
     """
-    bot = await make_bot(temp_db_path)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.protected_rooms = {room}
     bot.admin_rooms = {room}
     bot.occupants = {room: {sync_module.NICK: {"jid": "bot@example.test"}}}
