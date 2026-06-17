@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -319,7 +320,7 @@ def sync_module():
     current module object used during execution (for example when temporarily
     overriding ``ADMIN_ROOM``) without depending on import order at collection.
     """
-    import banbot.sync as module
+    module = importlib.import_module("banbot.sync")
 
     return module
 

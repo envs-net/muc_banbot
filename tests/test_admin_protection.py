@@ -1,3 +1,4 @@
+import importlib
 import pytest
 
 pytest.importorskip("slixmpp")
@@ -47,7 +48,7 @@ class AdminBot(AdminMixin):
 
 
 def test_is_admin_or_owner_uses_live_occupant_cache(monkeypatch):
-    import banbot.admin as admin_module
+    admin_module = importlib.import_module("banbot.admin")
 
     monkeypatch.setattr(admin_module, "NICK", "BanBot")
     bot = AdminBot()
@@ -58,7 +59,7 @@ def test_is_admin_or_owner_uses_live_occupant_cache(monkeypatch):
 
 
 def test_is_authorized_requires_admin_room_and_admin_affiliation(monkeypatch, fake_msg_factory):
-    import banbot.admin as admin_module
+    admin_module = importlib.import_module("banbot.admin")
 
     monkeypatch.setattr(admin_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = AdminBot()
@@ -74,7 +75,7 @@ def test_is_authorized_requires_admin_room_and_admin_affiliation(monkeypatch, fa
 
 @pytest.mark.asyncio
 async def test_protected_admin_target_detects_cached_admin_nick(monkeypatch):
-    import banbot.admin as admin_module
+    admin_module = importlib.import_module("banbot.admin")
 
     monkeypatch.setattr(admin_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = AdminBot()
@@ -87,7 +88,7 @@ async def test_protected_admin_target_detects_cached_admin_nick(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_protected_admin_target_detects_server_affiliation_jid(monkeypatch):
-    import banbot.admin as admin_module
+    admin_module = importlib.import_module("banbot.admin")
 
     monkeypatch.setattr(admin_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = AdminBot()
@@ -101,7 +102,7 @@ async def test_protected_admin_target_detects_server_affiliation_jid(monkeypatch
 
 @pytest.mark.asyncio
 async def test_protected_admin_target_detects_domain_ban_covering_admin(monkeypatch):
-    import banbot.admin as admin_module
+    admin_module = importlib.import_module("banbot.admin")
 
     monkeypatch.setattr(admin_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = AdminBot()

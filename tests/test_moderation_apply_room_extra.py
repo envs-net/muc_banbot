@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import asyncio
 
 import pytest
@@ -57,7 +58,7 @@ class ApplyRoomBot(ModerationMixin):
 
 @pytest.mark.asyncio
 async def test_apply_ban_to_room_sets_outcast_and_kicks_matching_non_admin(monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = ApplyRoomBot()
@@ -79,7 +80,7 @@ async def test_apply_ban_to_room_sets_outcast_and_kicks_matching_non_admin(monke
 
 @pytest.mark.asyncio
 async def test_apply_ban_to_room_skips_admin_kick_and_reports_missing_bot_rights(monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = ApplyRoomBot()
@@ -100,7 +101,7 @@ async def test_apply_ban_to_room_skips_admin_kick_and_reports_missing_bot_rights
 
 @pytest.mark.asyncio
 async def test_apply_domain_ban_kicks_matching_domain_only(monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = ApplyRoomBot()
@@ -120,7 +121,7 @@ async def test_apply_domain_ban_kicks_matching_domain_only(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_apply_unban_to_room_removes_outcast_and_restores_online_user(monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = ApplyRoomBot()

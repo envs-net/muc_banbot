@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import hashlib
 
 import pytest
@@ -58,7 +59,7 @@ class VCardBot(VCardMixin):
 
 @pytest.mark.asyncio
 async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, monkeypatch):
-    import banbot.vcard as vcard_module
+    vcard_module = importlib.import_module("banbot.vcard")
     import config
 
     avatar = tmp_path / "avatar.png"
@@ -115,7 +116,7 @@ async def test_update_vcard_skips_avatar_hash_presence_without_active_stream(
     monkeypatch,
     caplog,
 ):
-    import banbot.vcard as vcard_module
+    vcard_module = importlib.import_module("banbot.vcard")
     import config
 
     avatar = tmp_path / "avatar.png"

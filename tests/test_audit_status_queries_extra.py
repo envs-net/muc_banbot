@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import time
 
@@ -201,7 +202,7 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
         assert "RTBL_ENABLED =" in body
 
         # Avoid the one-second psutil sampling delay and host-specific values.
-        import banbot.status as status_module
+        status_module = importlib.import_module("banbot.status")
 
         class FakeProcess:
             def memory_info(self):
@@ -235,7 +236,7 @@ async def test_status_shows_rtbl_publish_runtime_disabled_reason(temp_db_path, m
     bot.rtbl_publish_disabled_reason = "muc_bans_sha256: test publish failed: forbidden"
     await bot.setup_db()
     try:
-        import banbot.status as status_module
+        status_module = importlib.import_module("banbot.status")
 
         class FakeProcess:
             def memory_info(self):
@@ -266,7 +267,7 @@ async def test_status_shows_rtbl_publish_sanity_check_ok(temp_db_path, monkeypat
     bot.rtbl_publish_sanity_check_ok = True
     await bot.setup_db()
     try:
-        import banbot.status as status_module
+        status_module = importlib.import_module("banbot.status")
 
         class FakeProcess:
             def memory_info(self):

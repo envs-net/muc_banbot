@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import asyncio
 import time
 
@@ -96,7 +97,7 @@ async def make_bot():
 
 @pytest.mark.asyncio
 async def test_ban_all_rejects_plain_domain_and_invalid_jid(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
@@ -113,7 +114,7 @@ async def test_ban_all_rejects_plain_domain_and_invalid_jid(temp_db_path, monkey
 
 @pytest.mark.asyncio
 async def test_ban_all_updates_existing_active_jid_ban_for_matching_nick(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
@@ -140,7 +141,7 @@ async def test_ban_all_updates_existing_active_jid_ban_for_matching_nick(temp_db
 
 @pytest.mark.asyncio
 async def test_domain_ban_publishes_domain_and_applies_only_matching_occupants(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
@@ -157,7 +158,7 @@ async def test_domain_ban_publishes_domain_and_applies_only_matching_occupants(t
 
 @pytest.mark.asyncio
 async def test_unban_all_rejects_plain_domain_and_missing_target(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
@@ -173,7 +174,7 @@ async def test_unban_all_rejects_plain_domain_and_missing_target(temp_db_path, m
 
 @pytest.mark.asyncio
 async def test_unban_all_can_resolve_jid_ban_by_localpart(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()

@@ -1,3 +1,4 @@
+import importlib
 import pytest
 
 from banbot.commands import CommandMixin
@@ -50,7 +51,7 @@ class CommandBot(CommandMixin, MessagingMixin):
 
 @pytest.mark.asyncio
 async def test_on_message_ignores_non_commands(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "NICK", "adminbot")
     bot = CommandBot()
@@ -61,7 +62,7 @@ async def test_on_message_ignores_non_commands(fake_msg_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_on_message_routes_user_command_and_preserves_plain_context(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "NICK", "adminbot")
     bot = CommandBot()
@@ -73,7 +74,7 @@ async def test_on_message_routes_user_command_and_preserves_plain_context(fake_m
 
 @pytest.mark.asyncio
 async def test_on_message_sets_encrypted_context_for_decrypted_command(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "NICK", "adminbot")
     bot = CommandBot()
@@ -84,7 +85,7 @@ async def test_on_message_sets_encrypted_context_for_decrypted_command(fake_msg_
 
 @pytest.mark.asyncio
 async def test_on_message_stops_when_omemo_decrypt_fails(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "NICK", "adminbot")
     bot = CommandBot()
@@ -95,7 +96,7 @@ async def test_on_message_stops_when_omemo_decrypt_fails(fake_msg_factory, monke
 
 
 def test_public_command_rate_limit(monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     bot = CommandBot()

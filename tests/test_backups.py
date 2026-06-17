@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import asyncio
 import os
 import pathlib
@@ -66,8 +67,8 @@ class BackupBot(BackupMixin, DatabaseMixin, CacheMixin):
 
 @pytest.fixture
 def backup_config(tmp_path, monkeypatch):
-    import banbot.backups as backups_module
-    import banbot.db as db_module
+    backups_module = importlib.import_module("banbot.backups")
+    db_module = importlib.import_module("banbot.db")
 
     db_path = tmp_path / "banbot.sqlite3"
     backup_dir = tmp_path / "backups"
@@ -150,7 +151,7 @@ async def test_backup_verify_latest_reports_integrity_ok(backup_config):
 @pytest.mark.asyncio
 async def test_startup_snapshot_honors_keep_limit(backup_config, monkeypatch):
     _db_path, backup_dir = backup_config
-    import banbot.backups as backups_module
+    backups_module = importlib.import_module("banbot.backups")
 
     monkeypatch.setattr(backups_module.config, "DB_BACKUP_KEEP", 2, raising=False)
     bot = BackupBot()
@@ -181,7 +182,7 @@ async def test_restore_requires_confirmation_and_restores_database(backup_config
         ok, backup_path = await bot.create_database_backup("manual")
         assert ok is True
 
-        import banbot.backups as backups_module
+        backups_module = importlib.import_module("banbot.backups")
         config_path = os.fspath(backups_module.config.__file__)
         with open(config_path, "w", encoding="utf-8") as handle:
             handle.write('JID = "after@example.org"\nPASSWORD = "changed"\n')
@@ -314,7 +315,7 @@ async def test_backup_verify_rejects_invalid_config_companion(backup_config):
 
 @pytest.mark.asyncio
 async def test_backup_verify_rejects_invalid_omemo_companion(backup_config, tmp_path, monkeypatch):
-    import banbot.backups as backups_module
+    backups_module = importlib.import_module("banbot.backups")
 
     omemo_path = tmp_path / "data" / "omemo.json"
     omemo_path.parent.mkdir(parents=True)

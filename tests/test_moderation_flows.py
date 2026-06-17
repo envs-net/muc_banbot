@@ -1,3 +1,4 @@
+import importlib
 import asyncio
 import time
 
@@ -76,7 +77,7 @@ async def make_bot():
 
 @pytest.mark.asyncio
 async def test_ban_all_persists_publishes_and_applies_to_protected_rooms(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
@@ -95,7 +96,7 @@ async def test_ban_all_persists_publishes_and_applies_to_protected_rooms(temp_db
 
 @pytest.mark.asyncio
 async def test_ban_all_refuses_admin_protected_target(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
@@ -114,7 +115,7 @@ async def test_ban_all_refuses_admin_protected_target(temp_db_path, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_unban_all_removes_db_cache_applies_unban_and_retracts(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
@@ -134,7 +135,7 @@ async def test_unban_all_removes_db_cache_applies_unban_and_retracts(temp_db_pat
 
 @pytest.mark.asyncio
 async def test_tempban_duration_limit_is_enforced(temp_db_path, monkeypatch):
-    import banbot.moderation as moderation_module
+    moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()

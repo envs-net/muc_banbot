@@ -1,3 +1,4 @@
+import importlib
 import asyncio
 import csv
 import pathlib
@@ -45,7 +46,7 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
 
 @pytest.mark.asyncio
 async def test_export_bans_to_csv_uses_cache(tmp_path, monkeypatch):
-    import banbot.import_export as import_export_module
+    import_export_module = importlib.import_module("banbot.import_export")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(import_export_module.config, "EXPORT_DIR", "data/exports", raising=False)
@@ -85,7 +86,7 @@ async def test_import_rejects_invalid_header(tmp_path):
 
 @pytest.mark.asyncio
 async def test_import_bans_from_csv_creates_backup_and_upserts_rows(temp_db_path, tmp_path, monkeypatch):
-    import banbot.backups as backups_module
+    backups_module = importlib.import_module("banbot.backups")
 
     monkeypatch.setattr(backups_module.config, "DB_BACKUP_DIR", str(tmp_path / "backups"), raising=False)
     csv_file = tmp_path / "bans.csv"

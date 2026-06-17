@@ -13,7 +13,7 @@ try:  # Optional dependency; only required when OMEMO_ENABLED=True.
     from omemo.types import DeviceInformation, JSONType
     from slixmpp.plugins import register_plugin  # type: ignore[attr-defined]
     import slixmpp_omemo as XEP_0384_module
-    from slixmpp_omemo import XEP_0384
+    XEP_0384 = XEP_0384_module.XEP_0384
 
     OMEMO_AVAILABLE = True
 except Exception:  # pragma: no cover - depends on optional runtime dependency

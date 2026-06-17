@@ -16,15 +16,19 @@ builtins.false = False
 try:
     import config
 except Exception as exc:
-    from .config import format_config_import_error
-    sys.stderr.write("Failed to load config.py\n" + format_config_import_error(exc) + "\n")
+    from . import config as banbot_config
+    sys.stderr.write("Failed to load config.py\n" + banbot_config.format_config_import_error(exc) + "\n")
     raise SystemExit(1) from None
 
 import aiosqlite
 from slixmpp import ClientXMPP
 
-from config import JID, PASSWORD, ADMIN_ROOM, NICK
-from .config import get_config_resource
+JID = config.JID
+PASSWORD = config.PASSWORD
+ADMIN_ROOM = config.ADMIN_ROOM
+NICK = config.NICK
+from . import config as banbot_config
+get_config_resource = banbot_config.get_config_resource
 from .utils import bare_jid, safe_jid
 from .audit import AuditMixin
 from .cache import CacheMixin

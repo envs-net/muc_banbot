@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import asyncio
 import time
 
@@ -151,7 +152,7 @@ def admin_msg(fake_msg_factory, body: str, nick: str = "Admin"):
 
 @pytest.mark.asyncio
 async def test_admin_ban_command_routes_to_ban_all_with_real_actor(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -166,7 +167,7 @@ async def test_admin_ban_command_routes_to_ban_all_with_real_actor(fake_msg_fact
 
 @pytest.mark.asyncio
 async def test_admin_tempban_command_parses_duration_and_comment(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -184,7 +185,7 @@ async def test_admin_tempban_command_parses_duration_and_comment(fake_msg_factor
 
 @pytest.mark.asyncio
 async def test_admin_tempban_invalid_duration_is_reported(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -198,7 +199,7 @@ async def test_admin_tempban_invalid_duration_is_reported(fake_msg_factory, monk
 
 @pytest.mark.asyncio
 async def test_admin_unban_command_routes_to_unban_all(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -211,7 +212,7 @@ async def test_admin_unban_command_routes_to_unban_all(fake_msg_factory, monkeyp
 
 @pytest.mark.asyncio
 async def test_admin_export_and_import_commands_send_summaries(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -230,7 +231,7 @@ async def test_admin_export_and_import_commands_send_summaries(fake_msg_factory,
 
 @pytest.mark.asyncio
 async def test_admin_import_without_filename_shows_usage(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -243,7 +244,7 @@ async def test_admin_import_without_filename_shows_usage(fake_msg_factory, monke
 
 @pytest.mark.asyncio
 async def test_admin_import_dryrun_command_path_is_exercised(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -265,7 +266,7 @@ async def test_admin_import_dryrun_command_path_is_exercised(fake_msg_factory, m
 
 @pytest.mark.asyncio
 async def test_admin_updatecheck_alias_routes_like_checkupdate(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -284,7 +285,7 @@ async def test_admin_updatecheck_alias_routes_like_checkupdate(fake_msg_factory,
 
 @pytest.mark.asyncio
 async def test_admin_reload_alias_routes_to_reloadconfig(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -297,7 +298,7 @@ async def test_admin_reload_alias_routes_to_reloadconfig(fake_msg_factory, monke
 
 @pytest.mark.asyncio
 async def test_admin_restart_requires_confirmation(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -313,7 +314,7 @@ async def test_admin_restart_requires_confirmation(fake_msg_factory, monkeypatch
 
 @pytest.mark.asyncio
 async def test_admin_restart_confirm_flushes_stops_disconnects_and_exits(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -354,7 +355,7 @@ async def test_admin_restart_confirm_flushes_stops_disconnects_and_exits(fake_ms
 
 @pytest.mark.asyncio
 async def test_admin_rtbl_disabled_reports_config_hint(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -369,7 +370,7 @@ async def test_admin_rtbl_disabled_reports_config_hint(fake_msg_factory, monkeyp
 
 @pytest.mark.asyncio
 async def test_admin_rtbl_ignore_policy_and_room_commands_route_with_actor(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -398,7 +399,7 @@ async def test_admin_rtbl_ignore_policy_and_room_commands_route_with_actor(fake_
 
 @pytest.mark.asyncio
 async def test_unauthorized_admin_command_is_rejected(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -414,7 +415,7 @@ async def test_unauthorized_admin_command_is_rejected(fake_msg_factory, monkeypa
 
 @pytest.mark.asyncio
 async def test_admin_paged_commands_parse_all_marker(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -441,7 +442,7 @@ async def test_admin_paged_commands_parse_all_marker(fake_msg_factory, monkeypat
 
 @pytest.mark.asyncio
 async def test_admin_incomplete_commands_show_usage(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -470,7 +471,7 @@ async def test_admin_incomplete_commands_show_usage(fake_msg_factory, monkeypatc
 
 @pytest.mark.asyncio
 async def test_why_without_target_shows_usage_in_admin_room(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -519,7 +520,7 @@ class PolicyCommandBot(CommandMixin, MessagingMixin):
 
 @pytest.mark.asyncio
 async def test_policy_without_text_shows_usage(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "adminbot")
@@ -536,7 +537,7 @@ async def test_policy_without_text_shows_usage(fake_msg_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_policy_help_shows_usage(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "adminbot")
@@ -553,7 +554,7 @@ async def test_policy_help_shows_usage(fake_msg_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_policy_set_without_text_shows_usage(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "adminbot")
@@ -568,7 +569,7 @@ async def test_policy_set_without_text_shows_usage(fake_msg_factory, monkeypatch
 
 @pytest.mark.asyncio
 async def test_policy_show_with_existing_text_includes_commands(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "adminbot")
@@ -586,7 +587,7 @@ async def test_policy_show_with_existing_text_includes_commands(fake_msg_factory
 
 @pytest.mark.asyncio
 async def test_rules_alias_works_in_admin_room(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "adminbot")
@@ -603,7 +604,7 @@ async def test_rules_alias_works_in_admin_room(fake_msg_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_policy_delete_and_remove_alias_clear_text(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "adminbot")
@@ -626,7 +627,7 @@ async def test_policy_delete_and_remove_alias_clear_text(fake_msg_factory, monke
 
 @pytest.mark.asyncio
 async def test_admin_help_room_shows_focused_room_usage(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -643,7 +644,7 @@ async def test_admin_help_room_shows_focused_room_usage(fake_msg_factory, monkey
 
 @pytest.mark.asyncio
 async def test_admin_help_redact_shows_focused_redact_usage_without_running_command(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -660,7 +661,7 @@ async def test_admin_help_redact_shows_focused_redact_usage_without_running_comm
 
 @pytest.mark.asyncio
 async def test_admin_help_topic_aliases_and_unknown_topic(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -676,7 +677,7 @@ async def test_admin_help_topic_aliases_and_unknown_topic(fake_msg_factory, monk
 
 @pytest.mark.asyncio
 async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -734,7 +735,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
 
 @pytest.mark.asyncio
 async def test_help_subtopics_do_not_execute_commands(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -750,7 +751,7 @@ async def test_help_subtopics_do_not_execute_commands(fake_msg_factory, monkeypa
 
 @pytest.mark.asyncio
 async def test_admin_help_default_all_and_paginated_mode(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")
@@ -789,7 +790,7 @@ async def test_admin_help_default_all_and_paginated_mode(fake_msg_factory, monke
 
 @pytest.mark.asyncio
 async def test_config_command_passes_page_args_to_config_handler(fake_msg_factory, monkeypatch):
-    import banbot.commands as commands
+    commands = importlib.import_module("banbot.commands")
 
     monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
     monkeypatch.setattr(commands, "NICK", "BanBot")

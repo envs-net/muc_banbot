@@ -1,3 +1,4 @@
+import importlib
 import json
 import os
 from xml.etree import ElementTree as ET
@@ -37,7 +38,7 @@ def freeze_omemo_timestamp(monkeypatch, timestamp="20260528-123456"):
         monkeypatch: Pytest monkeypatch fixture used to patch module attributes.
         timestamp: Fixed timestamp in ``YYYYMMDD-HHMMSS`` format.
     """
-    import banbot.omemo as omemo_module
+    omemo_module = importlib.import_module("banbot.omemo")
 
     original_strftime = omemo_module.time.strftime
     parsed = omemo_module.time.strptime(timestamp, "%Y%m%d-%H%M%S")
@@ -436,7 +437,7 @@ async def test_decrypt_incoming_omemo_unexpected_failures_log_sanitized_warning(
 
 @pytest.mark.omemo
 def test_configure_omemo_missing_optional_dependencies_disables_feature(monkeypatch, caplog):
-    import banbot.omemo as omemo_module
+    omemo_module = importlib.import_module("banbot.omemo")
     import config
 
     bot = OmemoProbe()

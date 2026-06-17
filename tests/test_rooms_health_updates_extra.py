@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import asyncio
 import time
 from xml.etree import ElementTree as ET
@@ -107,7 +108,7 @@ async def test_validate_room_jid_rejects_bad_format_and_accepts_muc(temp_db_path
 
 @pytest.mark.asyncio
 async def test_room_list_add_and_remove_flow(temp_db_path, monkeypatch):
-    import banbot.rooms as rooms_module
+    rooms_module = importlib.import_module("banbot.rooms")
 
     monkeypatch.setattr(rooms_module, "ADMIN_ROOM", "admin@conference.example.org")
     monkeypatch.setattr(rooms_module, "NICK", "BanBot")
@@ -192,7 +193,7 @@ async def test_version_check_helpers_and_announcement(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_room_list_all_disables_paging(temp_db_path, monkeypatch):
-    import banbot.rooms as rooms_module
+    rooms_module = importlib.import_module("banbot.rooms")
 
     monkeypatch.setattr(rooms_module, "ADMIN_ROOM", "admin@conference.example.org")
     monkeypatch.setattr(rooms_module, "NICK", "BanBot")
@@ -228,7 +229,7 @@ async def test_version_check_disabled_returns_explanatory_error():
 
 @pytest.mark.asyncio
 async def test_version_check_same_version_does_not_announce(monkeypatch):
-    import banbot.updates as updates_module
+    updates_module = importlib.import_module("banbot.updates")
 
     bot = RoomHealthBot()
     local = updates_module.__version__.lstrip("v").strip()
@@ -258,7 +259,7 @@ async def test_version_check_error_is_returned(monkeypatch):
 
 
 def test_fetch_latest_release_uses_github_api(monkeypatch):
-    import banbot.updates as updates_module
+    updates_module = importlib.import_module("banbot.updates")
 
     class FakeResponse:
         def __enter__(self):
@@ -286,7 +287,7 @@ def test_fetch_latest_release_uses_github_api(monkeypatch):
 
 
 def test_fetch_latest_release_falls_back_to_redirect(monkeypatch):
-    import banbot.updates as updates_module
+    updates_module = importlib.import_module("banbot.updates")
 
     class FakeResponse:
         def __enter__(self):
@@ -309,7 +310,7 @@ def test_fetch_latest_release_falls_back_to_redirect(monkeypatch):
 
 
 def test_fetch_latest_release_reports_bad_redirect(monkeypatch):
-    import banbot.updates as updates_module
+    updates_module = importlib.import_module("banbot.updates")
 
     class FakeResponse:
         def __enter__(self):
@@ -331,7 +332,7 @@ def test_fetch_latest_release_reports_bad_redirect(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_room_invite_creates_pending_invite_and_announces_admin_room(fake_msg_factory, monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
@@ -359,7 +360,7 @@ async def test_room_invite_creates_pending_invite_and_announces_admin_room(fake_
 
 @pytest.mark.asyncio
 async def test_room_invite_deduplicates_same_room_and_inviter(fake_msg_factory, monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
@@ -376,7 +377,7 @@ async def test_room_invite_deduplicates_same_room_and_inviter(fake_msg_factory, 
 
 @pytest.mark.asyncio
 async def test_room_invite_same_room_from_different_inviter_gets_separate_entry(fake_msg_factory, monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
@@ -393,7 +394,7 @@ async def test_room_invite_same_room_from_different_inviter_gets_separate_entry(
 
 @pytest.mark.asyncio
 async def test_room_invite_invalid_room_jid_is_reported(fake_msg_factory, monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
@@ -424,7 +425,7 @@ async def test_room_invite_service_disabled_consumes_invite_without_admin_spam(f
 
 @pytest.mark.asyncio
 async def test_room_invite_list_supports_all_last_and_paging(monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
@@ -449,8 +450,8 @@ async def test_room_invite_list_supports_all_last_and_paging(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_room_invite_accept_uses_existing_room_add_flow(temp_db_path, monkeypatch):
-    import banbot.rooms.invites as invite_module
-    import banbot.rooms as rooms_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
+    rooms_module = importlib.import_module("banbot.rooms")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     monkeypatch.setattr(rooms_module, "ADMIN_ROOM", "admin@conference.example.org")
@@ -474,7 +475,7 @@ async def test_room_invite_accept_uses_existing_room_add_flow(temp_db_path, monk
 
 @pytest.mark.asyncio
 async def test_room_invite_decline_removes_pending_invite(monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
@@ -491,7 +492,7 @@ async def test_room_invite_decline_removes_pending_invite(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_room_invite_remove_alias_declines_pending_invite(monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
@@ -508,7 +509,7 @@ async def test_room_invite_remove_alias_declines_pending_invite(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mediated_room_invite_is_detected(fake_msg_factory, monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
@@ -538,7 +539,7 @@ async def test_room_invite_command_reports_disabled_service():
 
 @pytest.mark.asyncio
 async def test_room_invite_persists_and_loads_after_restart(temp_db_path, fake_msg_factory, monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
 
@@ -580,7 +581,7 @@ async def test_room_invite_persists_and_loads_after_restart(temp_db_path, fake_m
 
 @pytest.mark.asyncio
 async def test_room_invite_cleanup_clears_db_and_cache(temp_db_path, fake_msg_factory, monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
 
@@ -617,8 +618,8 @@ async def test_room_invite_cleanup_clears_db_and_cache(temp_db_path, fake_msg_fa
 
 @pytest.mark.asyncio
 async def test_room_invite_accept_removes_persisted_invite(temp_db_path, monkeypatch):
-    import banbot.rooms.invites as invite_module
-    import banbot.rooms as rooms_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
+    rooms_module = importlib.import_module("banbot.rooms")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     monkeypatch.setattr(rooms_module, "ADMIN_ROOM", "admin@conference.example.org")
@@ -648,7 +649,7 @@ async def test_room_invite_accept_removes_persisted_invite(temp_db_path, monkeyp
 
 @pytest.mark.asyncio
 async def test_room_invite_decline_removes_persisted_invite(temp_db_path, monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
 
@@ -776,7 +777,7 @@ async def test_room_invite_unknown_action_shows_usage():
 
 @pytest.mark.asyncio
 async def test_room_invite_cleanup_expired_only_removes_old_invites(monkeypatch):
-    import banbot.rooms.invites as invite_module
+    invite_module = importlib.import_module("banbot.rooms.invites")
 
     monkeypatch.setattr(invite_module, "ADMIN_ROOM", "admin@conference.example.org")
     bot = RoomHealthBot()
