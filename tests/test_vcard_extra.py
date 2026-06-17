@@ -88,7 +88,8 @@ def cleared_vcard_config(monkeypatch):
     yield
 
 
-def set_complete_vcard_config(monkeypatch) -> None:
+@pytest.fixture
+def set_complete_vcard_config(monkeypatch):
     """Configure all optional vCard profile fields with representative values."""
     import config
 
@@ -98,12 +99,11 @@ def set_complete_vcard_config(monkeypatch) -> None:
     monkeypatch.setattr(config, "VCARD_ROLE", "moderator", raising=False)
     monkeypatch.setattr(config, "VCARD_URL", "https://envs.net", raising=False)
     monkeypatch.setattr(config, "VCARD_NOTE", "test note", raising=False)
+    yield
 
 
-def test_set_complete_vcard_config_sets_all_fields(monkeypatch):
+def test_set_complete_vcard_config_sets_all_fields(set_complete_vcard_config):
     import config
-
-    set_complete_vcard_config(monkeypatch)
 
     assert config.VCARD_NICKNAME == "BanBot"
     assert config.VCARD_FN == "Ban Management Bot"
@@ -114,7 +114,12 @@ def test_set_complete_vcard_config_sets_all_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_vcard_with_complete_profile_and_avatar(tmp_path, monkeypatch, completed_sleep_mock):
+async def test_update_vcard_with_complete_profile_and_avatar(
+    tmp_path,
+    monkeypatch,
+    completed_sleep_mock,
+    set_complete_vcard_config,
+):
     import config
 
     avatar = tmp_path / "avatar.png"
@@ -122,7 +127,6 @@ async def test_update_vcard_with_complete_profile_and_avatar(tmp_path, monkeypat
     avatar.write_bytes(avatar_data)
 
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
-    set_complete_vcard_config(monkeypatch)
     bot = VCardBot()
     assert await bot.update_vcard() is True
 
