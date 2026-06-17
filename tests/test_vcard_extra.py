@@ -178,7 +178,13 @@ async def test_update_vcard_skips_presence_when_disconnected(
     assert vcard["PHOTO"]["BINVAL"] == avatar_data
     assert bot.xep0084.avatars == [avatar_data]
     assert bot.sent == []
-    assert "Skipping XEP-0153 avatar hash presence" in caplog.text
+
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "banbot.vcard" and record.levelname == "DEBUG"
+    ]
+    assert debug_messages == ["Skipping XEP-0153 avatar hash presence"]
 
 
 @pytest.mark.asyncio
@@ -214,7 +220,13 @@ async def test_update_vcard_continues_when_avatar_publish_fails(
     assert vcard["PHOTO"]["TYPE"] == "image/png"
     assert vcard["PHOTO"]["BINVAL"] == avatar_data
     assert bot.xep0084.avatars == []
-    assert "Failed to update XEP-0084 avatar" in caplog.text
+
+    warning_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "banbot.vcard" and record.levelname == "WARNING"
+    ]
+    assert "Failed to update XEP-0084 avatar: publish failed" in warning_messages
 
 
 @pytest.mark.asyncio
