@@ -60,9 +60,19 @@ def completed_sleep_mock():
     """Return an async no-op replacement for asyncio.sleep used by vCard tests."""
 
     async def _completed_sleep(*args, **kwargs):
-        return None
+        pass
 
     return _completed_sleep
+
+
+@pytest.fixture
+def cleared_vcard_config(monkeypatch):
+    """Clear vCard-related config values for tests that need an empty profile."""
+    import config
+
+    monkeypatch.setattr(config, "AVATAR_PATH", None, raising=False)
+    for attr in ("VCARD_NICKNAME", "VCARD_FN", "VCARD_ORG", "VCARD_ROLE", "VCARD_URL", "VCARD_NOTE"):
+        monkeypatch.setattr(config, attr, "", raising=False)
 
 
 @pytest.mark.asyncio
@@ -102,13 +112,7 @@ async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, mo
 
 
 @pytest.mark.asyncio
-async def test_update_vcard_without_avatar_only_publishes_vcard(monkeypatch):
-    import config
-
-    monkeypatch.setattr(config, "AVATAR_PATH", None, raising=False)
-    for attr in ("VCARD_NICKNAME", "VCARD_FN", "VCARD_ORG", "VCARD_ROLE", "VCARD_URL", "VCARD_NOTE"):
-        monkeypatch.setattr(config, attr, "", raising=False)
-
+async def test_update_vcard_without_avatar_only_publishes_vcard(cleared_vcard_config):
     bot = VCardBot()
     assert await bot.update_vcard() is True
 
@@ -123,6 +127,7 @@ async def test_update_vcard_skips_avatar_hash_presence_without_active_stream(
     monkeypatch,
     caplog,
     completed_sleep_mock,
+    cleared_vcard_config,
 ):
     import config
 
@@ -130,8 +135,6 @@ async def test_update_vcard_skips_avatar_hash_presence_without_active_stream(
     avatar.write_bytes(b"fake-png-data")
 
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
-    for attr in ("VCARD_NICKNAME", "VCARD_FN", "VCARD_ORG", "VCARD_ROLE", "VCARD_URL", "VCARD_NOTE"):
-        monkeypatch.setattr(config, attr, "", raising=False)
     monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
 
     bot = VCardBot(connected=False)
