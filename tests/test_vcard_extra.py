@@ -98,6 +98,19 @@ def set_complete_vcard_config(monkeypatch) -> None:
     monkeypatch.setattr(config, "VCARD_NOTE", "test note", raising=False)
 
 
+def test_set_complete_vcard_config_sets_all_fields(monkeypatch):
+    import config
+
+    set_complete_vcard_config(monkeypatch)
+
+    assert config.VCARD_NICKNAME == "BanBot"
+    assert config.VCARD_FN == "Ban Management Bot"
+    assert config.VCARD_ORG == "envs"
+    assert config.VCARD_ROLE == "moderator"
+    assert config.VCARD_URL == "https://envs.net"
+    assert config.VCARD_NOTE == "test note"
+
+
 @pytest.mark.asyncio
 async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, monkeypatch, completed_sleep_mock):
     import config
@@ -235,6 +248,7 @@ async def test_update_vcard_continues_when_avatar_publish_fails(
 async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
     tmp_path,
     monkeypatch,
+    caplog,
     completed_sleep_mock,
     cleared_vcard_config,
 ):
@@ -256,7 +270,8 @@ async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
 
     monkeypatch.setattr(bot.xep0084, "publish_avatar", publish_avatar_and_disconnect)
 
-    assert await bot.update_vcard() is True
+    with caplog.at_level("DEBUG", logger="banbot.vcard"):
+        assert await bot.update_vcard() is True
 
     assert len(bot.xep0054.published) == 1
     vcard = bot.xep0054.published[0]
@@ -264,3 +279,12 @@ async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
     assert vcard["PHOTO"]["BINVAL"] == avatar_data
     assert bot.xep0084.avatars == [avatar_data]
     assert bot.sent == []
+
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "banbot.vcard" and record.levelname == "DEBUG"
+    ]
+    assert debug_messages == [
+        "Skipping XEP-0153 avatar hash presence because XMPP stream is not connected"
+    ]
