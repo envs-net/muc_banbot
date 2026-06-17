@@ -182,13 +182,14 @@ async def test_update_vcard_skips_presence_when_disconnected(
 
 
 @pytest.mark.asyncio
-async def test_update_vcard_returns_false_when_avatar_publish_fails(
+async def test_update_vcard_continues_when_avatar_publish_fails(
     tmp_path,
     monkeypatch,
+    caplog,
     completed_sleep_mock,
     cleared_vcard_config,
 ):
-    """Verify update_vcard reports failure when avatar publishing raises."""
+    """Verify XEP-0084 avatar publish failures are non-fatal."""
     import config
 
     avatar = tmp_path / "avatar.png"
@@ -205,13 +206,15 @@ async def test_update_vcard_returns_false_when_avatar_publish_fails(
 
     monkeypatch.setattr(bot.xep0084, "publish_avatar", failing_publish_avatar)
 
-    assert await bot.update_vcard() is False
+    with caplog.at_level("WARNING", logger="banbot.vcard"):
+        assert await bot.update_vcard() is True
+
     assert len(bot.xep0054.published) == 1
     vcard = bot.xep0054.published[0]
     assert vcard["PHOTO"]["TYPE"] == "image/png"
     assert vcard["PHOTO"]["BINVAL"] == avatar_data
     assert bot.xep0084.avatars == []
-    assert bot.sent == []
+    assert "Failed to update XEP-0084 avatar" in caplog.text
 
 
 @pytest.mark.asyncio
