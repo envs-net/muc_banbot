@@ -86,6 +86,13 @@ def cleared_vcard_config(monkeypatch):
         monkeypatch.setattr(config, attr, "", raising=False)
 
 
+def set_complete_vcard_config(monkeypatch) -> None:
+    """Configure all optional vCard profile fields with representative values."""
+    import config
+
+    set_complete_vcard_config(monkeypatch)
+
+
 @pytest.mark.asyncio
 async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, monkeypatch, completed_sleep_mock):
     import config
@@ -172,6 +179,39 @@ async def test_update_vcard_skips_presence_when_disconnected(
     assert bot.xep0084.avatars == [avatar_data]
     assert bot.sent == []
     assert "Skipping XEP-0153 avatar hash presence" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_update_vcard_returns_false_when_avatar_publish_fails(
+    tmp_path,
+    monkeypatch,
+    completed_sleep_mock,
+    cleared_vcard_config,
+):
+    """Verify update_vcard reports failure when avatar publishing raises."""
+    import config
+
+    avatar = tmp_path / "avatar.png"
+    avatar_data = b"fake-png-data"
+    avatar.write_bytes(avatar_data)
+
+    monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
+    monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
+
+    bot = VCardBot(connected=True)
+
+    async def failing_publish_avatar(data):
+        raise RuntimeError("publish failed")
+
+    monkeypatch.setattr(bot.xep0084, "publish_avatar", failing_publish_avatar)
+
+    assert await bot.update_vcard() is False
+    assert len(bot.xep0054.published) == 1
+    vcard = bot.xep0054.published[0]
+    assert vcard["PHOTO"]["TYPE"] == "image/png"
+    assert vcard["PHOTO"]["BINVAL"] == avatar_data
+    assert bot.xep0084.avatars == []
+    assert bot.sent == []
 
 
 @pytest.mark.asyncio
