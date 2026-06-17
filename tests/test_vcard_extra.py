@@ -55,6 +55,7 @@ class VCardBot(VCardMixin):
     def is_connected(self):
         return self.connected
 
+
 @pytest.fixture
 def completed_sleep_mock():
     """Return an async no-op replacement for asyncio.sleep used by vCard tests."""
