@@ -74,7 +74,7 @@ def completed_sleep_mock(monkeypatch):
         pass
 
     monkeypatch.setattr("asyncio.sleep", _completed_sleep)
-    yield _completed_sleep
+    yield
 
 
 @pytest.fixture
@@ -225,10 +225,10 @@ async def test_update_vcard_continues_when_avatar_publish_fails(
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
     bot = VCardBot(connected=True)
 
-    async def failing_publish_avatar(data):
+    async def mock_failing_publish_avatar(data):
         raise RuntimeError("publish failed")
 
-    monkeypatch.setattr(bot.xep0084, "publish_avatar", failing_publish_avatar)
+    monkeypatch.setattr(bot.xep0084, "publish_avatar", mock_failing_publish_avatar)
 
     with caplog.at_level("WARNING", logger="banbot.vcard"):
         assert await bot.update_vcard() is True
@@ -265,11 +265,11 @@ async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
     bot = VCardBot(connected=True)
 
-    async def publish_avatar_and_disconnect(data):
+    async def mock_publish_avatar_and_disconnect(data):
         bot.xep0084.avatars.append(data)
         bot.connected = False
 
-    monkeypatch.setattr(bot.xep0084, "publish_avatar", publish_avatar_and_disconnect)
+    monkeypatch.setattr(bot.xep0084, "publish_avatar", mock_publish_avatar_and_disconnect)
 
     with caplog.at_level("DEBUG", logger="banbot.vcard"):
         assert await bot.update_vcard() is True
