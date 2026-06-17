@@ -174,18 +174,35 @@ async def test_update_vcard_skips_presence_when_disconnected(
     assert "Skipping XEP-0153 avatar hash presence" in caplog.text
 
 
-def test_send_avatar_hash_presence_when_disconnected():
-    bot = VCardBot(connected=False)
+@pytest.mark.asyncio
+async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
+    tmp_path,
+    monkeypatch,
+    completed_sleep_mock,
+    cleared_vcard_config,
+):
+    import config
 
-    assert bot._send_avatar_hash_presence("abc123") is False
-    assert bot.sent == []
+    avatar = tmp_path / "avatar.png"
+    avatar_data = b"fake-png-data"
+    avatar.write_bytes(avatar_data)
 
+    monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
+    monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
 
-def test_send_avatar_hash_presence_when_connected():
     bot = VCardBot(connected=True)
 
-    assert bot._send_avatar_hash_presence("abc123") is True
+    async def publish_avatar_and_disconnect(data):
+        bot.xep0084.avatars.append(data)
+        bot.connected = False
 
-    presence_xml = bot.sent[0].xml
-    assert presence_xml.find(".//{vcard-temp:x:update}x/photo").text == "abc123"
+    monkeypatch.setattr(bot.xep0084, "publish_avatar", publish_avatar_and_disconnect)
 
+    assert await bot.update_vcard() is True
+
+    assert len(bot.xep0054.published) == 1
+    vcard = bot.xep0054.published[0]
+    assert vcard["PHOTO"]["TYPE"] == "image/png"
+    assert vcard["PHOTO"]["BINVAL"] == avatar_data
+    assert bot.xep0084.avatars == [avatar_data]
+    assert bot.sent == []
