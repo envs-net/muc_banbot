@@ -67,13 +67,14 @@ class VCardBot(VCardMixin):
 
 
 @pytest.fixture
-def completed_sleep_mock():
-    """Return an async no-op replacement for asyncio.sleep used by vCard tests."""
+def completed_sleep_mock(monkeypatch):
+    """Patch asyncio.sleep with an async no-op replacement for vCard tests."""
 
     async def _completed_sleep(*args, **kwargs):
         pass
 
-    return _completed_sleep
+    monkeypatch.setattr("asyncio.sleep", _completed_sleep)
+    yield _completed_sleep
 
 
 @pytest.fixture
@@ -84,6 +85,7 @@ def cleared_vcard_config(monkeypatch):
     monkeypatch.setattr(config, "AVATAR_PATH", None, raising=False)
     for attr in VCARD_CONFIG_ATTRS:
         monkeypatch.setattr(config, attr, "", raising=False)
+    yield
 
 
 def set_complete_vcard_config(monkeypatch) -> None:
@@ -112,7 +114,7 @@ def test_set_complete_vcard_config_sets_all_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, monkeypatch, completed_sleep_mock):
+async def test_update_vcard_with_complete_profile_and_avatar(tmp_path, monkeypatch, completed_sleep_mock):
     import config
 
     avatar = tmp_path / "avatar.png"
@@ -121,8 +123,6 @@ async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, mo
 
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
     set_complete_vcard_config(monkeypatch)
-    monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
-
     bot = VCardBot()
     assert await bot.update_vcard() is True
 
@@ -137,9 +137,12 @@ async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, mo
     assert vcard["NOTE"] == "test note"
     assert bot.xep0084.avatars == [avatar_data]
 
+    assert len(bot.sent) > 0
     presence_xml = bot.sent[0].xml
     expected_hash = hashlib.sha1(avatar_data).hexdigest()
-    assert presence_xml.find(".//{vcard-temp:x:update}x/photo").text == expected_hash
+    photo_element = presence_xml.find(".//{vcard-temp:x:update}x/photo")
+    assert photo_element is not None
+    assert photo_element.text == expected_hash
 
 
 @pytest.mark.asyncio
@@ -178,8 +181,6 @@ async def test_update_vcard_skips_presence_when_disconnected(
     avatar.write_bytes(avatar_data)
 
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
-    monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
-
     bot = VCardBot(connected=False)
 
     with caplog.at_level("DEBUG", logger="banbot.vcard"):
@@ -218,8 +219,6 @@ async def test_update_vcard_continues_when_avatar_publish_fails(
     avatar.write_bytes(avatar_data)
 
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
-    monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
-
     bot = VCardBot(connected=True)
 
     async def failing_publish_avatar(data):
@@ -260,8 +259,6 @@ async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
     avatar.write_bytes(avatar_data)
 
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
-    monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
-
     bot = VCardBot(connected=True)
 
     async def publish_avatar_and_disconnect(data):
