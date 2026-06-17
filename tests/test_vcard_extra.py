@@ -90,7 +90,12 @@ def set_complete_vcard_config(monkeypatch) -> None:
     """Configure all optional vCard profile fields with representative values."""
     import config
 
-    set_complete_vcard_config(monkeypatch)
+    monkeypatch.setattr(config, "VCARD_NICKNAME", "BanBot", raising=False)
+    monkeypatch.setattr(config, "VCARD_FN", "Ban Management Bot", raising=False)
+    monkeypatch.setattr(config, "VCARD_ORG", "envs", raising=False)
+    monkeypatch.setattr(config, "VCARD_ROLE", "moderator", raising=False)
+    monkeypatch.setattr(config, "VCARD_URL", "https://envs.net", raising=False)
+    monkeypatch.setattr(config, "VCARD_NOTE", "test note", raising=False)
 
 
 @pytest.mark.asyncio
@@ -102,12 +107,7 @@ async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, mo
     avatar.write_bytes(avatar_data)
 
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
-    monkeypatch.setattr(config, "VCARD_NICKNAME", "BanBot", raising=False)
-    monkeypatch.setattr(config, "VCARD_FN", "Ban Management Bot", raising=False)
-    monkeypatch.setattr(config, "VCARD_ORG", "envs", raising=False)
-    monkeypatch.setattr(config, "VCARD_ROLE", "moderator", raising=False)
-    monkeypatch.setattr(config, "VCARD_URL", "https://envs.net", raising=False)
-    monkeypatch.setattr(config, "VCARD_NOTE", "test note", raising=False)
+    set_complete_vcard_config(monkeypatch)
     monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
 
     bot = VCardBot()
