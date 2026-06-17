@@ -9,6 +9,16 @@ import pytest
 from banbot.vcard import VCardMixin
 
 
+VCARD_CONFIG_ATTRS = (
+    "VCARD_NICKNAME",
+    "VCARD_FN",
+    "VCARD_ORG",
+    "VCARD_ROLE",
+    "VCARD_URL",
+    "VCARD_NOTE",
+)
+
+
 class FakeVCard(dict):
     def __init__(self):
         super().__init__()
@@ -72,7 +82,7 @@ def cleared_vcard_config(monkeypatch):
     import config
 
     monkeypatch.setattr(config, "AVATAR_PATH", None, raising=False)
-    for attr in ("VCARD_NICKNAME", "VCARD_FN", "VCARD_ORG", "VCARD_ROLE", "VCARD_URL", "VCARD_NOTE"):
+    for attr in VCARD_CONFIG_ATTRS:
         monkeypatch.setattr(config, attr, "", raising=False)
 
 
@@ -118,8 +128,19 @@ async def test_update_vcard_without_avatar_only_publishes_vcard(cleared_vcard_co
     assert await bot.update_vcard() is True
 
     assert len(bot.xep0054.published) == 1
+    vcard = bot.xep0054.published[0]
+
+    # No avatar configured: keep PHOTO empty and do not publish XEP-0084/avatar-hash presence.
+    assert vcard["PHOTO"] == {}
     assert bot.xep0084.avatars == []
     assert bot.sent == []
+
+    # No profile fields configured: values should remain absent/empty.
+    for field in ("NICKNAME", "FN", "ROLE", "URL", "NOTE"):
+        assert field not in vcard or vcard[field] == ""
+
+    # ORG is preinitialized by FakeVCard and should remain empty.
+    assert vcard["ORG"] == {}
 
 
 @pytest.mark.asyncio
