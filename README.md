@@ -191,6 +191,23 @@ Optional redaction support indexes room-assigned stanza IDs for messages BanBot 
 
 See [docs/commands.md](docs/commands.md) and [docs/configuration.md](docs/configuration.md#redaction-settings).
 
+## Protections
+
+BanBot includes an optional protection system for common MUC spam and abuse patterns. Protections can be listed, enabled, disabled, and tuned at runtime from the admin room:
+
+```text
+!protections list all
+!protection enable flood
+!protections flood config
+!protections flood set max_messages 10
+```
+
+Currently available protections cover flood spam, repeated/similar messages, first-message media spam, excessive mentions, monitored words from new joiners, join waves, trusted reporter workflows, and policy-change notifications.
+
+Use conservative settings first and enable individual protections per need. For active rooms, `notify` or short `tempban` settings are useful while tuning thresholds; stronger actions such as permanent bans should only be enabled after the behavior is verified for your community.
+
+See [docs/protections.md](docs/protections.md) for all protection names, aliases, actions, configuration keys, and operational notes.
+
 ## OMEMO
 
 BanBot supports optional OMEMO replies. OMEMO dependencies are not required for normal plaintext operation. If `OMEMO_ENABLED=True` but the optional Python/system libraries are missing, BanBot starts with OMEMO disabled and logs a clear warning.

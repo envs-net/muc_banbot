@@ -191,6 +191,15 @@ class CommandHelpMixin:
             f"{p}syncadmins - update admin list from the admin room\n"
             f"{p}syncbans - sync bans from all rooms into the database and enforce them\n\n"
 
+            "🛡️ Protections\n"
+            f"{p}protections list [all|page|last] - list available protections with enabled/disabled state\n"
+            f"{p}protection enable/disable <name> - enable or disable a protection\n"
+            f"{p}protections <name> show/config - show protection configuration\n"
+            f"{p}protections <name> set <key> <value> - update protection configuration\n"
+            f"{p}protections <name> reset - reset a protection to defaults\n"
+            f"{p}protections reporters add/remove/list <jid> - manage trusted reporters\n"
+            f"{p}report <nick|jid> [reason] - report abuse as trusted reporter\n\n"
+
             "🔐 OMEMO\n"
             f"{p}omemo status - show OMEMO state\n"
             f"{p}omemo devices - show admin-room recipients and storage hints\n"
@@ -203,15 +212,6 @@ class CommandHelpMixin:
             f"{p}rtbl refresh [service_jid] [node] - refresh RTBL subscriptions now\n"
             f"{p}rtbl publish status - status of your own RTBL feed\n"
             f"{p}rtbl publish sync - publish all current bans to your own feed\n\n"
-
-            "🛡️ Protections\n"
-            f"{p}protections list [all|page|last] - list available protections with enabled/disabled state\n"
-            f"{p}protection enable/disable <name> - enable or disable a protection\n"
-            f"{p}protections <name> show/config - show protection configuration\n"
-            f"{p}protections <name> set <key> <value> - update protection configuration\n"
-            f"{p}protections <name> reset - reset a protection to defaults\n"
-            f"{p}protections reporters add/remove/list <jid> - manage trusted reporters\n"
-            f"{p}report <nick|jid> [reason] - report abuse as trusted reporter\n\n"
 
             "📦 Import / Export\n"
             f"{p}export [list|show|delete|remove|del|rm] [all|page|last] - export/list/show/delete managed CSV ban exports\n"

@@ -35,6 +35,21 @@ Use `!protections <name> reset` to return a protection to its built-in defaults,
 | `TrustedReporters` | disabled | Counts reports from configured trusted JIDs and takes an action at a threshold |
 | `PolicyChangeNotification` | enabled | Announces ban/unban/protection config policy changes in the admin room |
 
+## Recommended starting points
+
+Start with one protection at a time and use conservative actions until the behavior matches your rooms.
+
+| Protection | Suggested first action | Notes |
+| --- | --- | --- |
+| `FloodSpamProtection` | `notify` or short `tempban` | Tune `max_messages` and `window_seconds` from real room traffic before using permanent `ban` in busy rooms. |
+| `SimilarMessageProtection` | short `tempban` | Usually the highest-value spam detector. Keep `min_length` and `min_words` high enough to ignore normal short chatter. |
+| `FirstMessageMediaProtection` | short `tempban` | Useful for media-link spam from throwaway accounts; only acts after BanBot observed the join. |
+| `MentionLimitProtection` | short `tempban` | Use a limit above normal room behavior; it counts known room occupants mentioned by display nick. |
+| `WordListNewJoinerProtection` | short `tempban` | Keep word lists specific to spam phrases; broad words can cause false positives for new users. |
+| `JoinWaveShortCircuitProtection` | `notify` first, then `lockdown` | Verify room-config support and bot rights before enabling lockdown in active rooms. |
+| `TrustedReporters` | `notify` first | Add explicit trusted reporter bare JIDs and raise `threshold` for busier communities. |
+| `PolicyChangeNotification` | enabled | Keep enabled unless admin-room policy notifications are too noisy. |
+
 ## Actions
 
 Message protections support these actions:
@@ -105,6 +120,12 @@ When `redact=True` and `REDACTION_ENABLED=True`, message protections first try t
 !protections reporters set action tempban
 !protections reporters set tempban_seconds 1d
 ```
+
+## Live smoke testing
+
+A destructive live smoke-test helper is available as `tools/live_protection_smoke.py`. It connects real XMPP test accounts to real rooms and exercises the protection flow end-to-end. It is not part of CI and should only be run against dedicated test rooms/accounts with `--destructive`.
+
+See [Testing and CI](testing.md#live-protection-smoke-test) for setup, environment variables, and operational notes.
 
 ## Notes
 

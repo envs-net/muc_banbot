@@ -128,6 +128,46 @@ BANBOT_TEST_EXPECT='BanBot' \
 pytest tests/integration/test_live_muc_command_flow.py -v
 ```
 
+## Live Protection Smoke Test
+
+`tools/live_protection_smoke.py` is an opt-in operator/developer tool for testing the protection system against real XMPP rooms. It is intentionally not part of Drone CI or the normal pytest suite because it connects real accounts, sends real MUC messages, and can trigger bans, tempbans, redactions, protection config changes, and room configuration changes.
+
+Use only dedicated test accounts and dedicated test rooms. The script refuses to run unless `--destructive` is passed.
+
+Recommended setup:
+
+* one admin/test-operator account that is allowed to send commands in the admin room
+* one separate test account that may be banned/tempbanned during the run
+* one admin/control room
+* one protected test room already managed by BanBot
+* protections enabled/configured for the scenarios you want to exercise
+
+Use environment variables for secrets so passwords do not end up in shell history:
+
+```bash
+export BANBOT_SMOKE_ADMIN_JID='admin@example.org'
+export BANBOT_SMOKE_ADMIN_PASSWORD='secret'
+export BANBOT_SMOKE_ADMIN_ROOM='admin@conference.example.org'
+export BANBOT_SMOKE_TEST_JID='smoke-user@example.org'
+export BANBOT_SMOKE_TEST_PASSWORD='secret'
+export BANBOT_SMOKE_PROTECTED_ROOM='test@conference.example.org'
+export BANBOT_SMOKE_DOMAIN='example.org'
+export BANBOT_SMOKE_COMMAND_PREFIX='!'
+
+python tools/live_protection_smoke.py \
+  --destructive \
+  --pause-between-tests 5
+```
+
+The script announces each scenario in the admin room before it starts. It currently exercises policy-change notifications, first-message media, flood spam, mention limits, wordlist-new-joiner behavior, similar-message spam, join waves, and trusted reporters.
+
+Operational notes:
+
+* `SimilarMessageProtection` temporarily disables `FloodSpamProtection` and `JoinWaveShortCircuitProtection` so similar-message detection can win the test race.
+* `JoinWaveShortCircuitProtection` can change room configuration when its action is `lockdown`; the smoke script disables joinwave again during cleanup.
+* Redaction summaries depend on messages being indexed by BanBot after redaction indexing was enabled. Older messages or already-redacted messages may produce a “no redactable indexed stanza IDs” summary.
+* The final output is the admin-room transcript. Review it for expected protection notifications and cleanup messages.
+
 ## Drone CI
 
 Recommended `.drone.yml` pattern:

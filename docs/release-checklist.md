@@ -29,6 +29,12 @@ RUN_XMPP_INTEGRATION=1 pytest -m integration -v
 RUN_OMEMO_INTEGRATION=1 pytest -m omemo -v
 ```
 
+Optional live protection smoke test in dedicated test rooms:
+
+```bash
+python tools/live_protection_smoke.py --destructive --pause-between-tests 5
+```
+
 ## 2. Manual Bot Smoke Test
 
 Start the bot in a test environment:
@@ -44,6 +50,7 @@ Check:
 * `!config` works
 * `!banlist` works
 * `!room list` works
+* Optional: `tools/live_protection_smoke.py --destructive` passes in dedicated test rooms
 * RTBL subscriptions load if enabled
 * OMEMO command/reply behavior works if enabled
 * No unexpected warning spam at INFO level
@@ -72,6 +79,7 @@ Update as needed:
 * `docs/rtbl.md`
 * `docs/rtbl_pubsub-setup.md`
 * `docs/policy.md`
+* `docs/protections.md`
 * `docs/admin-protection.md`
 * `docs/database.md`
 * `docs/testing.md`

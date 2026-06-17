@@ -130,7 +130,11 @@ See [Public Policy / Rules](policy.md).
 | `!protection disable <name>` | Disables a protection |
 | `!protections <name> config` | Shows one protection config |
 | `!protections <name> set <key> <value>` | Updates one protection config value |
+| `!protections <name> reset` | Resets one protection to built-in defaults |
+| `!protections reporters add/remove/list` | Manages trusted reporter bare JIDs |
 | `!report <nick|jid> [reason]` | Trusted reporter command when `TrustedReporters` is enabled |
+
+Aliases shown by `!protections list all` include `flood`, `similar`, `media`, `mentions`, `wordlist`, `joinwave`, `reporters`, and `policy`.
 
 See [Protections](protections.md).
 

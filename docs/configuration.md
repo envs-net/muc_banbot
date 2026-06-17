@@ -146,6 +146,14 @@ Common runtime-reloadable settings include:
 
 Use `!config` in the admin room for the current authoritative runtime-writable list.
 
+## Protection Runtime Configuration
+
+Protection state is runtime-editable through admin-room commands and is persisted in SQLite. Values changed with commands such as `!protection enable flood` or `!protections flood set max_messages 8` override the built-in defaults from `banbot/protections/definitions.py` on the next start.
+
+This is separate from `!config set`: protection tuning is managed with `!protections ...` commands, while general bot runtime settings are managed with `!config ...` commands.
+
+Use `!protections <name> reset` to return one protection to its built-in defaults, including its default enabled/disabled state. See [Protections](protections.md) for all available protection keys and aliases.
+
 ## Connection Settings
 
 ```python
