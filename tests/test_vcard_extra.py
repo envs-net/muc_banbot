@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import hashlib
 
 import pytest
@@ -56,10 +55,18 @@ class VCardBot(VCardMixin):
     def is_connected(self):
         return self.connected
 
+@pytest.fixture
+def completed_sleep_mock():
+    """Return an async no-op replacement for asyncio.sleep used by vCard tests."""
+
+    async def _completed_sleep(*args, **kwargs):
+        return None
+
+    return _completed_sleep
+
 
 @pytest.mark.asyncio
-async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, monkeypatch):
-    vcard_module = importlib.import_module("banbot.vcard")
+async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, monkeypatch, completed_sleep_mock):
     import config
 
     avatar = tmp_path / "avatar.png"
@@ -73,7 +80,7 @@ async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, mo
     monkeypatch.setattr(config, "VCARD_ROLE", "moderator", raising=False)
     monkeypatch.setattr(config, "VCARD_URL", "https://envs.net", raising=False)
     monkeypatch.setattr(config, "VCARD_NOTE", "test note", raising=False)
-    monkeypatch.setattr(vcard_module.asyncio, "sleep", _completed_sleep)
+    monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
 
     bot = VCardBot()
     assert await bot.update_vcard() is True
@@ -115,8 +122,8 @@ async def test_update_vcard_skips_avatar_hash_presence_without_active_stream(
     tmp_path,
     monkeypatch,
     caplog,
+    completed_sleep_mock,
 ):
-    vcard_module = importlib.import_module("banbot.vcard")
     import config
 
     avatar = tmp_path / "avatar.png"
@@ -125,7 +132,7 @@ async def test_update_vcard_skips_avatar_hash_presence_without_active_stream(
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
     for attr in ("VCARD_NICKNAME", "VCARD_FN", "VCARD_ORG", "VCARD_ROLE", "VCARD_URL", "VCARD_NOTE"):
         monkeypatch.setattr(config, attr, "", raising=False)
-    monkeypatch.setattr(vcard_module.asyncio, "sleep", _completed_sleep)
+    monkeypatch.setattr("asyncio.sleep", completed_sleep_mock)
 
     bot = VCardBot(connected=False)
 
@@ -153,6 +160,3 @@ def test_send_avatar_hash_presence_sends_when_stream_is_active():
     presence_xml = bot.sent[0].xml
     assert presence_xml.find(".//{vcard-temp:x:update}x/photo").text == "abc123"
 
-
-async def _completed_sleep(*args, **kwargs):
-    return None
