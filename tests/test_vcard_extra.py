@@ -123,7 +123,7 @@ async def test_update_vcard_without_avatar_only_publishes_vcard(cleared_vcard_co
 
 
 @pytest.mark.asyncio
-async def test_update_vcard_skips_avatar_hash_presence_without_active_stream(
+async def test_update_vcard_skips_presence_when_disconnected(
     tmp_path,
     monkeypatch,
     caplog,
