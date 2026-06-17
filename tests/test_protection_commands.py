@@ -237,6 +237,27 @@ async def test_report_threshold_ignores_duplicate_reporter_and_then_triggers_act
 
 
 @pytest.mark.asyncio
+async def test_report_from_admin_room_can_act_on_jid_target() -> None:
+    bot = DummyProtections()
+    bot.protections["TrustedReporters"].update({
+        "enabled": True,
+        "reporters": ["alice@example.test"],
+        "threshold": 1,
+        "action": "tempban",
+        "tempban_seconds": 60,
+    })
+
+    await bot.cmd_protection_report(ADMIN_ROOM, "Alice", ["reported@example.test", "spam"])
+
+    assert len(bot.bans) == 1
+    target, until, issuer, comment = bot.bans[0]
+    assert target == "reported@example.test"
+    assert until is not None
+    assert issuer == "protection:TrustedReporters"
+    assert comment == "spam"
+
+
+@pytest.mark.asyncio
 async def test_report_does_not_act_on_admin_or_owner_target() -> None:
     bot = DummyProtections()
     bot.protections["TrustedReporters"].update({

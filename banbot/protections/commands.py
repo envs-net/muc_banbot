@@ -76,9 +76,18 @@ class ProtectionCommandsMixin:
                 mtype="groupchat",
             )
             return
+        rooms_to_scan = [room, *sorted(getattr(self, "protected_rooms", set()))]
+
         # _protection_actor_jid is provided by the shared protection/base mixin layer.
         # It resolves the real actor JID for permission checks when nick differs from JID.
         reporter = self._protection_actor_jid(room, nick)
+        if not reporter or "@" not in str(reporter):
+            for current_room in rooms_to_scan:
+                info = self.occupants.get(current_room, {}).get(nick, {})
+                if info.get("jid"):
+                    reporter = info.get("jid")
+                    break
+
         config = self.protection_config(protection)
         reporter_values = [str(item).strip() for item in config.get("reporters", [])]
         reporters = {bare_jid(item) for item in reporter_values if item}
@@ -105,28 +114,57 @@ class ProtectionCommandsMixin:
             return
         target_nick = target
         target_jid = target if "@" in target else None
-        # Prefer current nick casing when a reported nick/JID can be resolved from occupants.
-        for n, info in self.occupants.get(room, {}).items():
-            if "@" in target:
-                if info.get("jid") and bare_jid(info.get("jid")) == bare_jid(target):
+        action_room = room
+
+        # Prefer current nick casing and JID when a reported nick/JID can be
+        # resolved from live occupants. Reports are often sent in the admin room,
+        # so scan protected rooms as well as the reporting room.
+        seen_rooms: set[str] = set()
+        for current_room in rooms_to_scan:
+            if current_room in seen_rooms:
+                continue
+            seen_rooms.add(current_room)
+            for n, info in self.occupants.get(current_room, {}).items():
+                if "@" in target:
+                    if info.get("jid") and bare_jid(info.get("jid")) == bare_jid(target):
+                        target_nick = n
+                        target_jid = info.get("jid")
+                        action_room = current_room
+                        break
+                elif n.lower() == target.lower():
                     target_nick = n
                     target_jid = info.get("jid")
+                    action_room = current_room
                     break
-            elif n.lower() == target.lower():
-                target_nick = n
-                target_jid = info.get("jid")
-                break
-        if self._protection_is_exempt(room, target_nick, target_jid):
+            else:
+                continue
+            break
+
+        protected = False
+        protect_reason = None
+        admin_target_check = getattr(self, "is_protected_admin_target", None)
+        if callable(admin_target_check):
+            protected, protect_reason = await admin_target_check(
+                target,
+                nick=target_nick if target_nick != target else None,
+                jid=target_jid,
+            )
+        elif action_room in getattr(self, "protected_rooms", set()):
+            protected = self._protection_is_exempt(action_room, target_nick, target_jid)
+
+        if protected:
             await self.bot_send_message(
                 mto=room,
-                mbody=f"❌ Target {safe_jid(target)} is exempt from protection actions.",
+                mbody=f"❌ Target {safe_jid(target)} is exempt from protection actions."
+                + (f" ({protect_reason})" if protect_reason else ""),
                 mtype="groupchat",
             )
             self.protection_trusted_reports.pop(key, None)
             return
+
         await self._protection_apply_action(
             protection=protection,
-            room=room,
+            room=action_room,
             nick=target_nick,
             reason=reason,
             action=str(config.get("action", "tempban")),
