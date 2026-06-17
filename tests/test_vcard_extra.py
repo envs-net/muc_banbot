@@ -73,7 +73,7 @@ async def test_update_vcard_publishes_fields_avatar_and_avatar_hash(tmp_path, mo
     monkeypatch.setattr(config, "VCARD_ROLE", "moderator", raising=False)
     monkeypatch.setattr(config, "VCARD_URL", "https://envs.net", raising=False)
     monkeypatch.setattr(config, "VCARD_NOTE", "test note", raising=False)
-    monkeypatch.setattr(vcard_module.asyncio, "sleep", lambda delay: _completed_sleep())
+    monkeypatch.setattr(vcard_module.asyncio, "sleep", _completed_sleep)
 
     bot = VCardBot()
     assert await bot.update_vcard() is True
@@ -125,7 +125,7 @@ async def test_update_vcard_skips_avatar_hash_presence_without_active_stream(
     monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
     for attr in ("VCARD_NICKNAME", "VCARD_FN", "VCARD_ORG", "VCARD_ROLE", "VCARD_URL", "VCARD_NOTE"):
         monkeypatch.setattr(config, attr, "", raising=False)
-    monkeypatch.setattr(vcard_module.asyncio, "sleep", lambda delay: _completed_sleep())
+    monkeypatch.setattr(vcard_module.asyncio, "sleep", _completed_sleep)
 
     bot = VCardBot(connected=False)
 
@@ -154,5 +154,5 @@ def test_send_avatar_hash_presence_sends_when_stream_is_active():
     assert presence_xml.find(".//{vcard-temp:x:update}x/photo").text == "abc123"
 
 
-async def _completed_sleep():
+async def _completed_sleep(*args, **kwargs):
     return None
