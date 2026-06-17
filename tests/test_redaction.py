@@ -93,6 +93,10 @@ TEST_STANZA_2 = "stanza-2"
 TEST_OLD_STANZA = "old-stanza"
 TEST_SERVER_REJECTED_IQ_ERROR = '<iq type="error"><moderate id="{stanza_id}" /></iq>'
 
+@pytest.mark.skipif(
+    not REDACTION_TEST_IMPORTS_OK,
+    reason="Requires successful banbot.redaction imports to validate module constants.",
+)
 def test_redaction_fallback_defaults_match_module_constants() -> None:
     """Ensure fallback constants remain aligned with banbot.redaction values."""
     assert (
@@ -103,7 +107,10 @@ def test_redaction_fallback_defaults_match_module_constants() -> None:
     assert _REDACTION_FALLBACK_DEFAULTS["sid_ns"] == SID_NS
 
 
-@pytest.mark.skipif(False, reason="Run even when module-level skip is set.")
+@pytest.mark.skipif(
+    REDACTION_TEST_IMPORTS_OK,
+    reason="Only relevant when optional redaction imports fail.",
+)
 def test_redaction_fallback_constants_and_helper_when_imports_fail() -> None:
     """Validate fallback constants/helper behavior when optional imports fail."""
     if REDACTION_TEST_IMPORTS_OK:
@@ -489,13 +496,14 @@ async def setup_and_validate_redaction_test_db(
     await bot.setup_db()
 
 
-def test_setup_and_validate_redaction_test_db_rejects_mismatched_db_file(tmp_path, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_setup_and_validate_redaction_test_db_rejects_mismatched_db_file(tmp_path, monkeypatch) -> None:
     import config
 
     monkeypatch.setattr(config, "DB_FILE", str(tmp_path / "configured.db"), raising=False)
 
     with pytest.raises(ValueError, match="temp_db_path must match config.DB_FILE"):
-        asyncio.run(setup_and_validate_redaction_test_db(RedactionBot(), tmp_path / "actual.db"))
+        await setup_and_validate_redaction_test_db(RedactionBot(), tmp_path / "actual.db")
 
 
 @pytest.mark.asyncio

@@ -53,9 +53,14 @@ TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT = {
 }
 
 
-async def noop_sleep(delay: float) -> None:
-    """No-op async sleep used in tests to avoid real waiting."""
-    pass
+@pytest.fixture
+def noop_sleep_fn():
+    """Provide a reusable async no-op sleep callable for monkeypatching."""
+
+    async def _noop_sleep(delay: float) -> None:
+        pass
+
+    return _noop_sleep
 
 
 class FakeMucService:
@@ -137,7 +142,7 @@ class SyncTrackingState:
 
 
 class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
-    def __init__(self, db_path: str | None) -> None:
+    def __init__(self, db_path: str) -> None:
         """Initialize a test bot with fake services and isolated state.
 
         Args:
@@ -257,7 +262,14 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
 
-    async def apply_ban_to_room(self, room, ban_jid, ban_nick, comment, announce_missing_rights=True):
+    async def apply_ban_to_room(
+        self,
+        room: str,
+        ban_jid: str,
+        ban_nick: str | None,
+        comment: str,
+        announce_missing_rights: bool = True,
+    ) -> None:
         """Record a requested room ban operation for test assertions.
 
         This test-double implementation intentionally avoids real MUC actions
@@ -534,9 +546,8 @@ async def test_sync_rooms_and_bans_reports_empty_room_set(temp_db_path, sync_mod
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch, sync_module):
-
-    monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
+async def test_sync_rooms_and_bans_uses_configured_batch_size(temp_db_path, monkeypatch, sync_module, noop_sleep_fn):
+    monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep_fn)
     bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.protected_rooms = {
         "room-a@conference.example.test",
@@ -594,9 +605,8 @@ async def create_and_configure_bot_for_room_sync(
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_module):
-
-    monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
+async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_module, noop_sleep_fn):
+    monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep_fn)
     room = "room@conference.example.test"
     bot = await create_and_configure_bot_for_room_sync(
         temp_db_path, sync_module, room, fail_join=True
@@ -611,9 +621,8 @@ async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_m
 
 
 @pytest.mark.asyncio
-async def test_sync_rooms_sets_join_time_on_success(temp_db_path, monkeypatch, sync_module):
-
-    monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep)
+async def test_sync_rooms_sets_join_time_on_success(temp_db_path, monkeypatch, sync_module, noop_sleep_fn):
+    monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep_fn)
     room = "room-ok@conference.example.test"
     bot = await create_and_configure_bot_for_room_sync(temp_db_path, sync_module, room)
     try:

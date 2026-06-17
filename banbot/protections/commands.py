@@ -32,6 +32,36 @@ from .definitions import (
 log = logging.getLogger(__name__)
 POLICY_CHANGE_NOTIFICATION_PROTECTION = "PolicyChangeNotification"
 
+PROTECTION_INT_VALIDATION_KEYS = {
+    "window_seconds",
+    "max_messages",
+    "max_similar",
+    "min_length",
+    "min_words",
+    "tempban_seconds",
+    "join_grace_seconds",
+    "startup_grace_seconds",
+    "rejoin_grace_seconds",
+    "action_cooldown_seconds",
+    "cooldown_seconds",
+    "max_mentions",
+    "max_joins",
+    "lockdown_seconds",
+    "threshold",
+}
+PROTECTION_BOOL_VALIDATION_KEYS = {
+    "enabled",
+    "redact",
+    "members_only",
+    "moderated",
+    "notify_only",
+    "notify_bans",
+    "notify_unbans",
+    "notify_config",
+    "ignore_member_affiliations",
+}
+PROTECTION_LIST_OF_STR_VALIDATION_KEYS = {"words", "reporters"}
+
 
 class ProtectionCommandsMixin:
     async def cmd_protection_report(self, room: str, nick: str, args: list[str]) -> None:
@@ -383,9 +413,6 @@ class ProtectionCommandsMixin:
         except ValueError:
             log.debug("Protection value is not a duration, falling back: raw=%r", raw_value)
 
-        # Optional extension hook supplied by the config-command mixin:
-        # parse_config_value(text: str) -> Any.  It may return a
-        # parsed/normalized value for custom config value formats.
         parser = getattr(self, "parse_config_value", None)
         if callable(parser):
             try:
@@ -487,24 +514,10 @@ class ProtectionCommandsMixin:
               unspecified.
             - ``words`` and ``reporters`` must be lists of strings.
         """
-        if key in {
-            "window_seconds",
-            "max_messages",
-            "max_similar",
-            "min_length",
-            "min_words",
-            "tempban_seconds",
-            "join_grace_seconds",
-            "startup_grace_seconds",
-            "cooldown_seconds",
-            "max_mentions",
-            "max_joins",
-            "lockdown_seconds",
-            "threshold",
-        }:
+        if key in PROTECTION_INT_VALIDATION_KEYS:
             if not isinstance(value, int) or value < 1:
                 return False, f"{key} must be a positive integer."
-        if key in {"enabled", "redact", "members_only", "moderated", "notify_only", "notify_bans", "notify_unbans", "notify_config"}:
+        if key in PROTECTION_BOOL_VALIDATION_KEYS:
             if not isinstance(value, bool):
                 return False, f"{key} must be True or False."
         if key == "similarity_percent":
@@ -518,7 +531,7 @@ class ProtectionCommandsMixin:
             normalized_value = value.lower() if isinstance(value, str) else str(value).lower()
             if normalized_value not in allowed_actions:
                 return False, f"action must be one of: {', '.join(sorted(allowed_actions))}."
-        if key in {"words", "reporters"}:
+        if key in PROTECTION_LIST_OF_STR_VALIDATION_KEYS:
             if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
                 return False, f"{key} must be a list of strings."
         return True, ""
