@@ -181,6 +181,7 @@ async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
     completed_sleep_mock,
     cleared_vcard_config,
 ):
+    """Verify presence is skipped if connection is lost after avatar publishing."""
     import config
 
     avatar = tmp_path / "avatar.png"
