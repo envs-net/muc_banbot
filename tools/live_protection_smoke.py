@@ -53,6 +53,7 @@ log = logging.getLogger("protection-smoke")
 FLOOD_MESSAGE_COUNT = 6
 SIMILAR_MESSAGE_COUNT = 3
 JOINWAVE_CLIENT_COUNT = 5
+JOIN_NICK_TOKEN_LENGTH = 3
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,9 @@ class SmokeClient(slixmpp.ClientXMPP):
         try:
             await asyncio.wait_for(self.disconnected.wait(), timeout=5)
         except TimeoutError:
-            log.debug("Timed out waiting for %s to disconnect cleanly.", self.boundjid.bare)
+            boundjid = getattr(self, "boundjid", None)
+            jid_for_log = getattr(boundjid, "bare", None) or self.jid
+            log.debug("Timed out waiting for %s to disconnect cleanly.", jid_for_log)
         # Give Slixmpp filter tasks a short chance to settle before the next test.
         await asyncio.sleep(0.3)
 
@@ -274,7 +277,11 @@ async def run_joinwave(admin: SmokeClient, cfg: SmokeConfig) -> None:
     clients: list[SmokeClient] = []
     try:
         for index in range(JOINWAVE_CLIENT_COUNT):
-            client = SmokeClient(cfg.test_jid, cfg.test_password, f"{cfg.join_nick_prefix}{index}-{random_token(3)}")
+            client = SmokeClient(
+                cfg.test_jid,
+                cfg.test_password,
+                f"{cfg.join_nick_prefix}{index}-{random_token(JOIN_NICK_TOKEN_LENGTH)}",
+            )
             clients.append(client)
             await client.start()
             await client.join(cfg.protected_room)
