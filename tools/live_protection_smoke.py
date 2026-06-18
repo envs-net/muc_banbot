@@ -283,7 +283,7 @@ async def run_trusted_reporters(admin: SmokeClient, cfg: SmokeConfig) -> None:
 async def run_smoke(cfg: SmokeConfig) -> None:
     """Run all protection smoke scenarios."""
     if not cfg.destructive:
-        raise SystemExit("Refusing to run without --destructive. Use dedicated test rooms/accounts only.")
+        raise SystemExit("The --destructive flag is required. Use dedicated test rooms/accounts only.")
 
     admin = SmokeClient(cfg.admin_jid, cfg.admin_password, cfg.admin_nick)
     await admin.start()
@@ -329,9 +329,9 @@ def parse_args(argv: list[str]) -> SmokeConfig:
     parser.add_argument("--admin-nick", default=env_default("BANBOT_SMOKE_ADMIN_NICK", "protection-admin-smoke"))
     parser.add_argument("--test-nick", default=env_default("BANBOT_SMOKE_TEST_NICK", "protection-test-smoke"))
     parser.add_argument("--join-nick-prefix", default=env_default("BANBOT_SMOKE_JOIN_NICK_PREFIX", "protection-join-"))
-    parser.add_argument("--pause-between-tests", type=float, default=float(env_default("BANBOT_SMOKE_PAUSE_BETWEEN_TESTS", "5") or 5))
-    parser.add_argument("--command-delay", type=float, default=float(env_default("BANBOT_SMOKE_COMMAND_DELAY", "2") or 2))
-    parser.add_argument("--join-delay", type=float, default=float(env_default("BANBOT_SMOKE_JOIN_DELAY", "1") or 1))
+    parser.add_argument("--pause-between-tests", type=float, default=float(env_default("BANBOT_SMOKE_PAUSE_BETWEEN_TESTS", "5")))
+    parser.add_argument("--command-delay", type=float, default=float(env_default("BANBOT_SMOKE_COMMAND_DELAY", "2")))
+    parser.add_argument("--join-delay", type=float, default=float(env_default("BANBOT_SMOKE_JOIN_DELAY", "1")))
     parser.add_argument("--destructive", action="store_true", help="Required. Confirms that dedicated test accounts/rooms are being used.")
     parser.add_argument("--skip-joinwave", action="store_true", help="Skip the JoinWaveShortCircuitProtection scenario.")
     parser.add_argument("--skip-reporters", action="store_true", help="Skip the TrustedReporters scenario.")
