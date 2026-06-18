@@ -9,7 +9,7 @@ Use only dedicated test accounts and dedicated test rooms.
 
 Default mode is safe: actions are set to notify where possible.
 Use --destructive for real tempban/ban/redaction actions.
-Use --joinwave-lockdown only in a disposable test room.
+Use --skip-joinwave to skip joinwave-related scenarios when needed.
 The script announces every test in the admin room and waits 5s between tests by default.
 
 Requirements:
@@ -49,6 +49,10 @@ except ImportError as exc:  # pragma: no cover - operator convenience path
     ) from exc
 
 log = logging.getLogger("protection-smoke")
+
+FLOOD_MESSAGE_COUNT = 6
+SIMILAR_MESSAGE_COUNT = 3
+JOINWAVE_CLIENT_COUNT = 5
 
 
 @dataclass(frozen=True)
@@ -190,10 +194,14 @@ async def run_first_media(admin: SmokeClient, cfg: SmokeConfig) -> None:
 
 
 async def run_flood(admin: SmokeClient, cfg: SmokeConfig) -> None:
-    await announce(admin, cfg, "FloodSpamProtection — send 6 quick messages")
+    await announce(
+        admin,
+        cfg,
+        f"FloodSpamProtection — send {FLOOD_MESSAGE_COUNT} quick messages",
+    )
 
     async def scenario(client: SmokeClient) -> None:
-        for index in range(6):
+        for index in range(FLOOD_MESSAGE_COUNT):
             await client.groupchat(cfg.protected_room, f"protection smoke flood message {index}")
             await asyncio.sleep(0.25)
 
@@ -239,14 +247,15 @@ async def run_similar(admin: SmokeClient, cfg: SmokeConfig) -> None:
     await announce(
         admin,
         cfg,
-        "SimilarMessageProtection — disables flood and joinwave; sends exactly max_similar messages",
+        "SimilarMessageProtection — disables flood and joinwave; "
+        f"sends {SIMILAR_MESSAGE_COUNT} repeated messages",
     )
     await admin_command(admin, cfg, f"{cfg.command_prefix}protection disable flood")
     await admin_command(admin, cfg, f"{cfg.command_prefix}protection disable joinwave")
 
     async def scenario(client: SmokeClient) -> None:
         message = "this is a repeated protection smoke message with enough words"
-        for _ in range(3):
+        for _ in range(SIMILAR_MESSAGE_COUNT):
             await client.groupchat(cfg.protected_room, message)
             await asyncio.sleep(0.5)
 
@@ -264,7 +273,7 @@ async def run_joinwave(admin: SmokeClient, cfg: SmokeConfig) -> None:
     await admin_command(admin, cfg, f"{cfg.command_prefix}protection enable joinwave")
     clients: list[SmokeClient] = []
     try:
-        for index in range(5):
+        for index in range(JOINWAVE_CLIENT_COUNT):
             client = SmokeClient(cfg.test_jid, cfg.test_password, f"{cfg.join_nick_prefix}{index}-{random_token(3)}")
             clients.append(client)
             await client.start()
