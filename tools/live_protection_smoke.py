@@ -282,9 +282,6 @@ async def run_trusted_reporters(admin: SmokeClient, cfg: SmokeConfig) -> None:
 
 async def run_smoke(cfg: SmokeConfig) -> None:
     """Run all protection smoke scenarios."""
-    if not cfg.destructive:
-        raise SystemExit("The --destructive flag is required. Use dedicated test rooms/accounts only.")
-
     admin = SmokeClient(cfg.admin_jid, cfg.admin_password, cfg.admin_nick)
     await admin.start()
     try:
@@ -315,27 +312,111 @@ async def run_smoke(cfg: SmokeConfig) -> None:
 
 
 def parse_args(argv: list[str]) -> SmokeConfig:
-    parser = argparse.ArgumentParser(
-        description="Run a destructive live smoke test for BanBot protections against dedicated XMPP test rooms.",
+    """Parse command-line arguments and validate smoke-test safety settings."""
+    admin_jid_default = env_default("BANBOT_SMOKE_ADMIN_JID")
+    admin_password_default = env_default("BANBOT_SMOKE_ADMIN_PASSWORD")
+    admin_room_default = env_default("BANBOT_SMOKE_ADMIN_ROOM")
+    protected_room_default = env_default("BANBOT_SMOKE_PROTECTED_ROOM")
+    test_jid_default = env_default("BANBOT_SMOKE_TEST_JID")
+    test_password_default = env_default("BANBOT_SMOKE_TEST_PASSWORD")
+    domain_default = env_default("BANBOT_SMOKE_DOMAIN", "example.org")
+    command_prefix_default = env_default("BANBOT_SMOKE_COMMAND_PREFIX", "!")
+    admin_nick_default = env_default(
+        "BANBOT_SMOKE_ADMIN_NICK",
+        "protection-admin-smoke",
     )
-    parser.add_argument("--admin-jid", default=env_default("BANBOT_SMOKE_ADMIN_JID"), required=not env_default("BANBOT_SMOKE_ADMIN_JID"))
-    parser.add_argument("--admin-password", default=env_default("BANBOT_SMOKE_ADMIN_PASSWORD"), required=not env_default("BANBOT_SMOKE_ADMIN_PASSWORD"))
-    parser.add_argument("--admin-room", default=env_default("BANBOT_SMOKE_ADMIN_ROOM"), required=not env_default("BANBOT_SMOKE_ADMIN_ROOM"))
-    parser.add_argument("--protected-room", default=env_default("BANBOT_SMOKE_PROTECTED_ROOM"), required=not env_default("BANBOT_SMOKE_PROTECTED_ROOM"))
-    parser.add_argument("--test-jid", default=env_default("BANBOT_SMOKE_TEST_JID"), required=not env_default("BANBOT_SMOKE_TEST_JID"))
-    parser.add_argument("--test-password", default=env_default("BANBOT_SMOKE_TEST_PASSWORD"), required=not env_default("BANBOT_SMOKE_TEST_PASSWORD"))
-    parser.add_argument("--domain", default=env_default("BANBOT_SMOKE_DOMAIN", "example.org"))
-    parser.add_argument("--bot-command-prefix", default=env_default("BANBOT_SMOKE_COMMAND_PREFIX", "!"))
-    parser.add_argument("--admin-nick", default=env_default("BANBOT_SMOKE_ADMIN_NICK", "protection-admin-smoke"))
-    parser.add_argument("--test-nick", default=env_default("BANBOT_SMOKE_TEST_NICK", "protection-test-smoke"))
-    parser.add_argument("--join-nick-prefix", default=env_default("BANBOT_SMOKE_JOIN_NICK_PREFIX", "protection-join-"))
-    parser.add_argument("--pause-between-tests", type=float, default=float(env_default("BANBOT_SMOKE_PAUSE_BETWEEN_TESTS", "5")))
-    parser.add_argument("--command-delay", type=float, default=float(env_default("BANBOT_SMOKE_COMMAND_DELAY", "2")))
-    parser.add_argument("--join-delay", type=float, default=float(env_default("BANBOT_SMOKE_JOIN_DELAY", "1")))
-    parser.add_argument("--destructive", action="store_true", help="Required. Confirms that dedicated test accounts/rooms are being used.")
-    parser.add_argument("--skip-joinwave", action="store_true", help="Skip the JoinWaveShortCircuitProtection scenario.")
-    parser.add_argument("--skip-reporters", action="store_true", help="Skip the TrustedReporters scenario.")
+    test_nick_default = env_default(
+        "BANBOT_SMOKE_TEST_NICK",
+        "protection-test-smoke",
+    )
+    join_nick_prefix_default = env_default(
+        "BANBOT_SMOKE_JOIN_NICK_PREFIX",
+        "protection-join-",
+    )
+    pause_between_tests_default = env_default(
+        "BANBOT_SMOKE_PAUSE_BETWEEN_TESTS",
+        "5",
+    )
+    command_delay_default = env_default("BANBOT_SMOKE_COMMAND_DELAY", "2")
+    join_delay_default = env_default("BANBOT_SMOKE_JOIN_DELAY", "1")
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run a destructive live smoke test for BanBot protections against "
+            "dedicated XMPP test rooms."
+        ),
+    )
+    parser.add_argument(
+        "--admin-jid",
+        default=admin_jid_default,
+        required=not admin_jid_default,
+    )
+    parser.add_argument(
+        "--admin-password",
+        default=admin_password_default,
+        required=not admin_password_default,
+    )
+    parser.add_argument(
+        "--admin-room",
+        default=admin_room_default,
+        required=not admin_room_default,
+    )
+    parser.add_argument(
+        "--protected-room",
+        default=protected_room_default,
+        required=not protected_room_default,
+    )
+    parser.add_argument(
+        "--test-jid",
+        default=test_jid_default,
+        required=not test_jid_default,
+    )
+    parser.add_argument(
+        "--test-password",
+        default=test_password_default,
+        required=not test_password_default,
+    )
+    parser.add_argument("--domain", default=domain_default)
+    parser.add_argument("--bot-command-prefix", default=command_prefix_default)
+    parser.add_argument("--admin-nick", default=admin_nick_default)
+    parser.add_argument("--test-nick", default=test_nick_default)
+    parser.add_argument("--join-nick-prefix", default=join_nick_prefix_default)
+    parser.add_argument(
+        "--pause-between-tests",
+        type=float,
+        default=float(pause_between_tests_default),
+    )
+    parser.add_argument(
+        "--command-delay",
+        type=float,
+        default=float(command_delay_default),
+    )
+    parser.add_argument(
+        "--join-delay",
+        type=float,
+        default=float(join_delay_default),
+    )
+    parser.add_argument(
+        "--destructive",
+        action="store_true",
+        help="Required. Confirms that dedicated test accounts/rooms are being used.",
+    )
+    parser.add_argument(
+        "--skip-joinwave",
+        action="store_true",
+        help="Skip the JoinWaveShortCircuitProtection scenario.",
+    )
+    parser.add_argument(
+        "--skip-reporters",
+        action="store_true",
+        help="Skip the TrustedReporters scenario.",
+    )
     args = parser.parse_args(argv)
+
+    if not args.destructive:
+        parser.error(
+            "--destructive is required. Use dedicated test rooms/accounts only."
+        )
 
     return SmokeConfig(
         admin_jid=args.admin_jid,
