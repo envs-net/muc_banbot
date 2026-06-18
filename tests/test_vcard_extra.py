@@ -67,7 +67,7 @@ class VCardBot(VCardMixin):
 
 
 @pytest.fixture
-def completed_sleep_mock(monkeypatch):
+def no_op_sleep_mock(monkeypatch):
     """Patch asyncio.sleep with an async no-op replacement for vCard tests."""
 
     async def _completed_sleep(*args, **kwargs):
@@ -117,7 +117,7 @@ def test_set_complete_vcard_config_sets_all_fields(set_complete_vcard_config):
 async def test_update_vcard_with_complete_profile_and_avatar(
     tmp_path,
     monkeypatch,
-    completed_sleep_mock,
+    no_op_sleep_mock,
     set_complete_vcard_config,
 ):
     import config
@@ -150,7 +150,7 @@ async def test_update_vcard_with_complete_profile_and_avatar(
 
 
 @pytest.mark.asyncio
-async def test_update_vcard_without_avatar_only_publishes_vcard(cleared_vcard_config):
+async def test_update_vcard_without_avatar_publishes_only_vcard(cleared_vcard_config):
     bot = VCardBot()
     assert await bot.update_vcard() is True
 
@@ -175,7 +175,7 @@ async def test_update_vcard_skips_presence_when_disconnected(
     tmp_path,
     monkeypatch,
     caplog,
-    completed_sleep_mock,
+    no_op_sleep_mock,
     cleared_vcard_config,
 ):
     import config
@@ -212,7 +212,7 @@ async def test_update_vcard_continues_when_avatar_publish_fails(
     tmp_path,
     monkeypatch,
     caplog,
-    completed_sleep_mock,
+    no_op_sleep_mock,
     cleared_vcard_config,
 ):
     """Verify XEP-0084 avatar publish failures are non-fatal."""
@@ -252,7 +252,7 @@ async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
     tmp_path,
     monkeypatch,
     caplog,
-    completed_sleep_mock,
+    no_op_sleep_mock,
     cleared_vcard_config,
 ):
     """Verify presence is skipped if connection is lost after avatar publishing."""

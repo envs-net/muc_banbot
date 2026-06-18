@@ -147,6 +147,34 @@ class DirectMessageMixin:
                     await self._cmd_config(reply_to)
                 return True
 
+            if cmd in ("protections", "protection"):
+                allowed_args = args or ["list"]
+                if allowed_args[0].lower() == "list" or all(
+                    self._is_page_or_list_arg(arg) for arg in allowed_args
+                ):
+                    list_args = (
+                        allowed_args
+                        if allowed_args[0].lower() == "list"
+                        else ["list", *allowed_args]
+                    )
+                    if any(not self._is_page_or_list_arg(arg) for arg in list_args[1:]):
+                        await self._send_direct_message(
+                            reply_to,
+                            f"❌ Usage: {p}protections list [all|page|last]",
+                        )
+                        return True
+                    await self.cmd_protections_list(reply_to, list_args[1:])
+                    return True
+
+                await self._send_direct_message(
+                    reply_to,
+                    (
+                        "❌ Direct-message protection commands are read-only. "
+                        f"Allowed: {p}protections list [all|page|last]"
+                    ),
+                )
+                return True
+
             if cmd == "omemo":
                 action = args[0].lower() if args else "status"
                 if action in ("status", "devices", "device", "help", "usage"):
@@ -444,6 +472,7 @@ class DirectMessageMixin:
                     f"{p}help",
                     f"{p}config",
                     f"{p}status",
+                    f"{p}protections list",
                     f"{p}omemo status",
                     f"{p}omemo devices",
                     f"{p}checkupdate",
@@ -474,6 +503,7 @@ class DirectMessageMixin:
                 "🤖 Admin DM support is read-only.\n"
                 f"Allowed: {self.command_prefix}help, "
                 f"{self.command_prefix}config, {self.command_prefix}status, "
+                f"{self.command_prefix}protections list, "
                 f"{self.command_prefix}omemo status, {self.command_prefix}omemo devices, "
                 f"{self.command_prefix}checkupdate, {self.command_prefix}updatecheck, "
                 f"{self.command_prefix}banlist, {self.command_prefix}bansearch, "

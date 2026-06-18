@@ -143,6 +143,10 @@ class DirectBot(DirectMessageMixin):
         self.calls.append(("rtbl", tuple(args), room, actor))
         await self.bot_send_message(mto=room, mbody="rtbl output", mtype="groupchat")
 
+    async def cmd_protections_list(self, room, args):
+        self.calls.append(("protections_list", room, tuple(args)))
+        await self.bot_send_message(mto=room, mbody="protections output", mtype="groupchat")
+
     async def cmd_omemo(self, args, room, actor=None):
         self.calls.append(("omemo", tuple(args), room, actor))
         await self.bot_send_message(mto=room, mbody="omemo output", mtype="groupchat")
@@ -291,6 +295,38 @@ async def test_admin_dm_can_use_omemo_readonly_commands():
         ("omemo", ("help",), "admin@example.org", "admin@example.org"),
     ]
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_protections_list_readonly_command():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!protections list all",
+        )
+    )
+
+    assert bot.calls == [("protections_list", "admin@example.org", ("all",))]
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert bot.sent[-1]["mbody"] == "protections output"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_rejects_mutating_protection_commands():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!protection enable flood",
+        )
+    )
+
+    assert bot.calls == []
+    assert "protection commands are read-only" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["mtype"] == "chat"
 
 
 @pytest.mark.asyncio

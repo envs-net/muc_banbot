@@ -89,15 +89,11 @@ class SmokeClient(slixmpp.ClientXMPP):
         self.disconnected.set()
 
     async def start(self) -> None:
-        connected = self.connect()
-        if isinstance(connected, Awaitable):
-            await connected
+        await maybe_await(self.connect())
         await asyncio.wait_for(self.ready.wait(), timeout=30)
 
     async def join(self, room: str) -> None:
-        result = self.plugin["xep_0045"].join_muc(room, self.nick)
-        if isinstance(result, Awaitable):
-            await result
+        await maybe_await(self.plugin["xep_0045"].join_muc(room, self.nick))
         await asyncio.sleep(1)
 
     def groupchat(self, room: str, body: str) -> None:
@@ -108,7 +104,7 @@ class SmokeClient(slixmpp.ClientXMPP):
         try:
             await asyncio.wait_for(self.disconnected.wait(), timeout=5)
         except TimeoutError:
-            pass
+            log.debug("Timed out waiting for %s to disconnect cleanly.", self.boundjid.bare)
         # Give Slixmpp filter tasks a short chance to settle before the next test.
         await asyncio.sleep(0.3)
 
@@ -204,7 +200,9 @@ async def run_mentions(admin: SmokeClient, cfg: SmokeConfig) -> None:
     await announce(admin, cfg, "MentionLimitProtection — mention two known occupants")
 
     async def scenario(client: SmokeClient) -> None:
-        client.groupchat(cfg.protected_room, f"hi {cfg.admin_nick} {cfg.join_nick_prefix}a {cfg.join_nick_prefix}b")
+        mention_a = f"{cfg.join_nick_prefix}a"
+        mention_b = f"{cfg.join_nick_prefix}b"
+        client.groupchat(cfg.protected_room, f"hi {cfg.admin_nick} {mention_a} {mention_b}")
 
     # Create two occupants so mention matching has known room nicks to count.
     helpers = [
