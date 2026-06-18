@@ -43,7 +43,10 @@ from typing import Any
 try:
     import slixmpp
 except ImportError as exc:  # pragma: no cover - operator convenience path
-    raise SystemExit("slixmpp is required. Install project requirements first.") from exc
+    raise SystemExit(
+        "slixmpp is required. Install it with 'pip install slixmpp' "
+        "(or install your project's requirements file) and retry."
+    ) from exc
 
 log = logging.getLogger("protection-smoke")
 
@@ -96,11 +99,13 @@ class SmokeClient(slixmpp.ClientXMPP):
         await maybe_await(self.plugin["xep_0045"].join_muc(room, self.nick))
         await asyncio.sleep(1)
 
-    def groupchat(self, room: str, body: str) -> None:
-        self.send_message(mto=room, mbody=body, mtype="groupchat")
+    async def groupchat(self, room: str, body: str) -> None:
+        await maybe_await(
+            self.send_message(mto=room, mbody=body, mtype="groupchat")
+        )
 
     async def stop(self) -> None:
-        self.disconnect()
+        await maybe_await(self.disconnect())
         try:
             await asyncio.wait_for(self.disconnected.wait(), timeout=5)
         except TimeoutError:
@@ -131,7 +136,7 @@ def random_token(length: int = 5) -> str:
 async def admin_command(admin: SmokeClient, cfg: SmokeConfig, command: str) -> None:
     """Send an admin-room command and wait briefly for the bot response."""
     log.info("ADMIN -> %s", command)
-    admin.groupchat(cfg.admin_room, command)
+    await admin.groupchat(cfg.admin_room, command)
     await asyncio.sleep(cfg.command_delay)
 
 
@@ -139,7 +144,7 @@ async def announce(admin: SmokeClient, cfg: SmokeConfig, title: str) -> None:
     """Announce the current smoke scenario in the admin room and local log."""
     message = f"🧪 Protection smoke test: {title}"
     log.info(message)
-    admin.groupchat(cfg.admin_room, message)
+    await admin.groupchat(cfg.admin_room, message)
     await asyncio.sleep(1)
 
 
@@ -178,7 +183,7 @@ async def run_first_media(admin: SmokeClient, cfg: SmokeConfig) -> None:
     await announce(admin, cfg, "FirstMessageMediaProtection — first message is a media URL")
 
     async def scenario(client: SmokeClient) -> None:
-        client.groupchat(cfg.protected_room, "https://example.invalid/protection-smoke.jpg")
+        await client.groupchat(cfg.protected_room, "https://example.invalid/protection-smoke.jpg")
 
     await with_test_client(cfg, cfg.test_nick, scenario)
     await admin_command(admin, cfg, f"{cfg.command_prefix}unban {cfg.test_jid}")
@@ -189,7 +194,7 @@ async def run_flood(admin: SmokeClient, cfg: SmokeConfig) -> None:
 
     async def scenario(client: SmokeClient) -> None:
         for index in range(6):
-            client.groupchat(cfg.protected_room, f"protection smoke flood message {index}")
+            await client.groupchat(cfg.protected_room, f"protection smoke flood message {index}")
             await asyncio.sleep(0.25)
 
     await with_test_client(cfg, cfg.test_nick, scenario)
@@ -202,7 +207,7 @@ async def run_mentions(admin: SmokeClient, cfg: SmokeConfig) -> None:
     async def scenario(client: SmokeClient) -> None:
         mention_a = f"{cfg.join_nick_prefix}a"
         mention_b = f"{cfg.join_nick_prefix}b"
-        client.groupchat(cfg.protected_room, f"hi {cfg.admin_nick} {mention_a} {mention_b}")
+        await client.groupchat(cfg.protected_room, f"hi {cfg.admin_nick} {mention_a} {mention_b}")
 
     # Create two occupants so mention matching has known room nicks to count.
     helpers = [
@@ -224,7 +229,7 @@ async def run_wordlist(admin: SmokeClient, cfg: SmokeConfig) -> None:
     await announce(admin, cfg, "WordListNewJoinerProtection — new joiner sends monitored word")
 
     async def scenario(client: SmokeClient) -> None:
-        client.groupchat(cfg.protected_room, "zz-protection-smoke")
+        await client.groupchat(cfg.protected_room, "zz-protection-smoke")
 
     await with_test_client(cfg, cfg.test_nick, scenario)
     await admin_command(admin, cfg, f"{cfg.command_prefix}unban {cfg.test_jid}")
@@ -242,7 +247,7 @@ async def run_similar(admin: SmokeClient, cfg: SmokeConfig) -> None:
     async def scenario(client: SmokeClient) -> None:
         message = "this is a repeated protection smoke message with enough words"
         for _ in range(3):
-            client.groupchat(cfg.protected_room, message)
+            await client.groupchat(cfg.protected_room, message)
             await asyncio.sleep(0.5)
 
     try:
@@ -399,7 +404,11 @@ def parse_args(argv: list[str]) -> SmokeConfig:
     parser.add_argument(
         "--destructive",
         action="store_true",
-        help="Required. Confirms that dedicated test accounts/rooms are being used.",
+        help=(
+            "Mandatory safety acknowledgement. This script refuses to run unless "
+            "--destructive is explicitly provided, confirming dedicated test "
+            "accounts/rooms are being used."
+        ),
     )
     parser.add_argument(
         "--skip-joinwave",
