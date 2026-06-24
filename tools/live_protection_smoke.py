@@ -109,14 +109,18 @@ class SmokeClient(slixmpp.ClientXMPP):
             self.send_message(mto=room, mbody=body, mtype="groupchat")
         )
 
+    def _jid_for_log(self) -> str:
+        """Return the best-effort JID string for log messages."""
+        boundjid = getattr(self, "boundjid", None)
+        bare_jid = getattr(boundjid, "bare", None)
+        return bare_jid or self.jid
+
     async def stop(self) -> None:
         await maybe_await(self.disconnect())
         try:
             await asyncio.wait_for(self.disconnected.wait(), timeout=5)
         except TimeoutError:
-            boundjid = getattr(self, "boundjid", None)
-            jid_for_log = getattr(boundjid, "bare", None) or self.jid
-            log.debug("Timed out waiting for %s to disconnect cleanly.", jid_for_log)
+            log.debug("Timed out waiting for %s to disconnect cleanly.", self._jid_for_log())
         # Give Slixmpp filter tasks a short chance to settle before the next test.
         await asyncio.sleep(0.3)
 
@@ -262,11 +266,14 @@ async def run_similar(admin: SmokeClient, cfg: SmokeConfig) -> None:
             await client.groupchat(cfg.protected_room, message)
             await asyncio.sleep(0.5)
 
+    ban_possible = False
     try:
         await with_test_client(cfg, cfg.test_nick, scenario)
+        ban_possible = True
     finally:
         await admin_command(admin, cfg, f"{cfg.command_prefix}protection enable flood")
-        await admin_command(admin, cfg, f"{cfg.command_prefix}unban {cfg.test_jid}")
+        if ban_possible:
+            await admin_command(admin, cfg, f"{cfg.command_prefix}unban {cfg.test_jid}")
 
 
 async def run_joinwave(admin: SmokeClient, cfg: SmokeConfig) -> None:

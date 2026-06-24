@@ -86,14 +86,14 @@ async def test_ban_all_persists_publishes_and_applies_to_protected_rooms(temp_db
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
     try:
-        await bot.ban_all("User@Example.org/Device", None, issuer="admin@example.test", comment="spam")
+        await bot.ban_all("Other@Example.org", None, issuer="admin@example.test", comment="spam")
 
-        assert "user@example.org" in bot.ban_index_by_jid
+        assert "other@example.org" in bot.ban_cache
         assert bot.applied_bans == [
-            ("room@conference.example.test", "user@example.org", "nick", "spam", "admin@example.test")
+            ("room@conference.example.test", "other@example.org", None, "spam", "admin@example.test")
         ]
-        assert bot.published == [("user@example.org", None, "spam")]
-        assert any("✅ Banned user@example.org" in msg["mbody"] for msg in bot.sent)
+        assert bot.published == [("other@example.org", None, "spam")]
+        assert any("✅ Banned other@example.org" in msg["mbody"] for msg in bot.sent)
     finally:
         await bot.db.close()
 
@@ -108,6 +108,18 @@ async def test_permanent_ban_runs_command_auto_redaction(temp_db_path, monkeypat
         await bot.ban_all("user@example.org", None, issuer="admin@example.test", comment="spam")
 
         assert bot.auto_redactions == [("user@example.org", "spam", "admin@example.test")]
+        assert "user@example.org" in bot.ban_cache
+
+        cursor = await bot.db.execute(
+            "SELECT jid, nick, comment, issuer FROM bans WHERE jid = ?",
+            ("user@example.org",),
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == "user@example.org"
+        assert row[1] == "nick"
+        assert row[2] == "spam"
+        assert row[3] == "admin@example.test"
     finally:
         await bot.db.close()
 
@@ -119,15 +131,23 @@ async def test_tempban_does_not_run_command_auto_redaction(temp_db_path, monkeyp
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
     try:
+        until_ts = int(time.time()) + 86400
         await bot.ban_all(
             "user@example.org",
-            int(time.time()) + 86400,
+            until_ts,
             issuer="admin@example.test",
             comment="spam",
         )
 
         assert bot.auto_redactions == []
         assert bot.retracted == [("user@example.org", None)]
+        async with bot.db.execute(
+            "SELECT until FROM bans WHERE jid = ?",
+            ("user@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == until_ts
     finally:
         await bot.db.close()
 

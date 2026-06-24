@@ -105,11 +105,11 @@ class DirectBot(DirectMessageMixin):
 
     async def _cmd_config(self, room):
         self.calls.append(("config", room))
-        await self.bot_send_message(mto=room, mbody="config output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="config output", mtype="chat")
 
     async def _cmd_status(self, room):
         self.calls.append(("status", room))
-        await self.bot_send_message(mto=room, mbody="status output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="status output", mtype="chat")
 
     async def check_for_updates_once(self, announce=False):
         self.calls.append(("checkupdate", announce))
@@ -117,43 +117,43 @@ class DirectBot(DirectMessageMixin):
 
     async def cmd_banlist(self, room, page=1, show_all=False):
         self.calls.append(("banlist", room, page, show_all))
-        await self.bot_send_message(mto=room, mbody="banlist output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="banlist output", mtype="chat")
 
     async def cmd_banlist_rtbl(self, room, page=1, show_all=False):
         self.calls.append(("banlist_rtbl", room, page, show_all))
-        await self.bot_send_message(mto=room, mbody="rtbl banlist output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="rtbl banlist output", mtype="chat")
 
     async def cmd_bansearch(self, query, page=1, show_all=False):
         self.calls.append(("bansearch", query, page, show_all))
-        await self.bot_send_message(mto=ADMIN_ROOM, mbody="bansearch output", mtype="groupchat")
+        await self.bot_send_message(mto=ADMIN_ROOM, mbody="bansearch output", mtype="chat")
 
     async def cmd_why(self, identifier, room):
         self.calls.append(("why", identifier, room))
-        await self.bot_send_message(mto=room, mbody="why output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="why output", mtype="chat")
 
     async def cmd_room(self, args, room):
         self.calls.append(("room", tuple(args), room))
-        await self.bot_send_message(mto=room, mbody="room output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="room output", mtype="chat")
 
     async def cmd_ignore(self, args, room, actor="unknown", command_name="ignore"):
         self.calls.append(("ignore", tuple(args), room, actor, command_name))
-        await self.bot_send_message(mto=room, mbody="ignore output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="ignore output", mtype="chat")
 
     async def cmd_rtbl(self, args, room, actor="unknown"):
         self.calls.append(("rtbl", tuple(args), room, actor))
-        await self.bot_send_message(mto=room, mbody="rtbl output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="rtbl output", mtype="chat")
 
     async def cmd_protections_list(self, room, args):
         self.calls.append(("protections_list", room, tuple(args)))
-        await self.bot_send_message(mto=room, mbody="protections output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="protections output", mtype="chat")
 
     async def cmd_omemo(self, args, room, actor=None):
         self.calls.append(("omemo", tuple(args), room, actor))
-        await self.bot_send_message(mto=room, mbody="omemo output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="omemo output", mtype="chat")
 
     async def cmd_audit(self, args, room):
         self.calls.append(("audit", tuple(args), room))
-        await self.bot_send_message(mto=room, mbody="audit output", mtype="groupchat")
+        await self.bot_send_message(mto=room, mbody="audit output", mtype="chat")
 
 
 @pytest.mark.asyncio
@@ -502,7 +502,7 @@ async def test_admin_dm_banlist_uses_admin_room_context_for_full_output():
         async def cmd_banlist(self, room, page=1, show_all=False):
             self.calls.append(("banlist", room, page, show_all))
             body = "full admin banlist" if room == ADMIN_ROOM else "temporary bans only"
-            await self.bot_send_message(mto=room, mbody=body, mtype="groupchat")
+            await self.bot_send_message(mto=room, mbody=body, mtype="chat")
 
     bot = BanlistContextBot()
 
@@ -694,7 +694,7 @@ async def test_cmd_ignore_uses_default_actor_and_command_name():
     assert bot.sent[-1] == {
         "mto": "room@conference.example.org",
         "mbody": "ignore output",
-        "mtype": "groupchat",
+        "mtype": "chat",
     }
 
 
