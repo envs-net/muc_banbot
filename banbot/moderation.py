@@ -406,7 +406,17 @@ class ModerationMixin:
                 comment=comment,
             )
 
-        if auto_redact and hasattr(self, "maybe_auto_redact_after_ban") and normalized_jid and target_type == "jid":
+        # Command-level auto-redaction is intentionally limited to permanent
+        # JID bans. Temporary bans expire automatically and should not wipe the
+        # user's indexed message history unless a protection explicitly asks
+        # for redaction through its own `redact` setting.
+        if (
+            auto_redact
+            and ts <= 0
+            and hasattr(self, "maybe_auto_redact_after_ban")
+            and normalized_jid
+            and target_type == "jid"
+        ):
             await self.maybe_auto_redact_after_ban(normalized_jid, comment, actor=issuer)
 
         if not skip_final_message:

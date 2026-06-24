@@ -36,6 +36,7 @@ class FlowBot(ModerationMixin, DatabaseMixin, CacheMixin):
         self.retracted = []
         self.events = []
         self.audit_events = []
+        self.auto_redactions = []
         self.protect_result = (False, None)
 
     def bare_jid(self, jid):
@@ -68,6 +69,9 @@ class FlowBot(ModerationMixin, DatabaseMixin, CacheMixin):
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
 
+    async def maybe_auto_redact_after_ban(self, jid, comment, actor=None):
+        self.auto_redactions.append((jid, comment, actor))
+
 
 async def make_bot():
     bot = FlowBot()
@@ -90,6 +94,40 @@ async def test_ban_all_persists_publishes_and_applies_to_protected_rooms(temp_db
         ]
         assert bot.published == [("user@example.org", None, "spam")]
         assert any("✅ Banned user@example.org" in msg["mbody"] for msg in bot.sent)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_permanent_ban_runs_command_auto_redaction(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        await bot.ban_all("user@example.org", None, issuer="admin@example.test", comment="spam")
+
+        assert bot.auto_redactions == [("user@example.org", "spam", "admin@example.test")]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_tempban_does_not_run_command_auto_redaction(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        await bot.ban_all(
+            "user@example.org",
+            int(time.time()) + 86400,
+            issuer="admin@example.test",
+            comment="spam",
+        )
+
+        assert bot.auto_redactions == []
+        assert bot.retracted == [("user@example.org", None)]
     finally:
         await bot.db.close()
 
