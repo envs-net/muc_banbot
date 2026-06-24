@@ -230,7 +230,7 @@ class DirectMessageMixin:
                                     f"❌ Usage: {p}{cmd} rtbl [all|page|last]",
                                 )
                                 return True
-                    await self.cmd_banlist_rtbl(reply_to, page=page, show_all=show_all)
+                    await self.cmd_banlist_rtbl(ADMIN_ROOM, page=page, show_all=show_all)
                     return True
 
                 page = 1
@@ -246,7 +246,7 @@ class DirectMessageMixin:
                                 f"❌ Usage: {p}{cmd} [all|page|last]",
                             )
                             return True
-                await self.cmd_banlist(reply_to, page=page, show_all=show_all)
+                await self.cmd_banlist(ADMIN_ROOM, page=page, show_all=show_all)
                 return True
 
             if cmd == "room":
@@ -355,7 +355,7 @@ class DirectMessageMixin:
                     )
                     return True
 
-                await self.cmd_why(args[0], reply_to)
+                await self.cmd_why(args[0], ADMIN_ROOM)
                 return True
 
             if cmd == "bansearch":

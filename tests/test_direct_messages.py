@@ -455,7 +455,7 @@ async def test_admin_dm_can_use_why_readonly_command():
         FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!why alice")
     )
 
-    assert bot.calls == [("why", "alice", "admin@example.org")]
+    assert bot.calls == [("why", "alice", ADMIN_ROOM)]
     assert bot.sent[-1]["mto"] == "admin@example.org"
     assert bot.sent[-1]["mtype"] == "chat"
     assert bot.sent[-1]["mbody"] == "why output"
@@ -491,9 +491,33 @@ async def test_admin_dm_can_use_banlist_and_rtbl_banlist():
         )
     )
 
-    assert bot.calls[0] == ("banlist", "admin@example.org", 1, True)
-    assert bot.calls[1] == ("banlist_rtbl", "admin@example.org", LAST_PAGE_MARKER, False)
+    assert bot.calls[0] == ("banlist", ADMIN_ROOM, 1, True)
+    assert bot.calls[1] == ("banlist_rtbl", ADMIN_ROOM, LAST_PAGE_MARKER, False)
     assert all(sent["mtype"] == "chat" for sent in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_banlist_uses_admin_room_context_for_full_output():
+    class BanlistContextBot(DirectBot):
+        async def cmd_banlist(self, room, page=1, show_all=False):
+            self.calls.append(("banlist", room, page, show_all))
+            body = "full admin banlist" if room == ADMIN_ROOM else "temporary bans only"
+            await self.bot_send_message(mto=room, mbody=body, mtype="groupchat")
+
+    bot = BanlistContextBot()
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="laptop",
+            body="!banlist all",
+        )
+    )
+
+    assert bot.calls == [("banlist", ADMIN_ROOM, 1, True)]
+    assert bot.sent[-1]["mto"] == "admin@example.org"
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert bot.sent[-1]["mbody"] == "full admin banlist"
 
 
 @pytest.mark.asyncio
