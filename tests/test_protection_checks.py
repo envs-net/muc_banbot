@@ -55,6 +55,7 @@ class DummyProtections(ProtectionMixin):
         self.sent: list[tuple[str, str, str]] = []
         self.audit: list[tuple[tuple, dict]] = []
         self.bans: list[tuple[str, int | None, str, str | None]] = []
+        self.ban_auto_redact_flags: list[bool] = []
         self.redactions: list[tuple[object, str, str | None]] = []
         self.target_redactions: list[tuple[str, str | None, str | None, bool, str]] = []
         self.protected_rooms = {ROOM}
@@ -96,6 +97,7 @@ class DummyProtections(ProtectionMixin):
 
     async def ban_all(self, target, until, issuer, comment=None, *, auto_redact=True):
         self.bans.append((target, until, issuer, comment))
+        self.ban_auto_redact_flags.append(auto_redact)
 
     async def _protection_redact_message(self, msg, reason: str, actor: str | None) -> None:
         self.redactions.append((msg, reason, actor))
@@ -572,6 +574,7 @@ async def test_tempban_protection_redacts_target_messages_even_when_reason_is_no
     assert handled is True
     assert bot.bans[0][0] == "spam@example.org"
     assert bot.bans[0][2] == "protection:MentionLimitProtection"
+    assert bot.ban_auto_redact_flags == [False]
     assert bot.target_redactions == [
         (
             "spam@example.org",

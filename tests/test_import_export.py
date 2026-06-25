@@ -26,6 +26,7 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
         self.last_database_restore_file = None
         self._pending_database_backup_audit_events = []
         self.sent = []
+        self.imported_auto_redactions = []
         self.command_prefix = "!"
         self.db = None
         self._database_file_operation_lock = asyncio.Lock()
@@ -42,6 +43,9 @@ class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
+
+    async def maybe_auto_redact_after_imported_ban(self, jid, comment, actor=None):
+        self.imported_auto_redactions.append((jid, comment, actor))
 
 
 @pytest.mark.asyncio
@@ -111,6 +115,33 @@ async def test_import_bans_from_csv_creates_backup_and_upserts_rows(temp_db_path
             rows = await cursor.fetchall()
         assert ("domain", "example.org", "*.example.org", None, "imported", "domain spam") in rows
         assert ("jid", "user@example.org", "user@example.org", "nick", "imported", "spam") in rows
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_import_auto_redacts_only_permanent_jid_bans(temp_db_path, tmp_path, monkeypatch):
+    backups_module = importlib.import_module("banbot.backups")
+
+    monkeypatch.setattr(backups_module.config, "DB_BACKUP_DIR", str(tmp_path / "backups"), raising=False)
+    csv_file = tmp_path / "bans.csv"
+    csv_file.write_text(
+        "jid,nick,until,issuer,comment\n"
+        "Permanent@Example.org,,0,imported,spam\n"
+        "Temporary@Example.org,,9999999999,imported,spam\n"
+        "*.Example.org,,0,imported,domain spam\n",
+        encoding="utf-8",
+    )
+
+    bot = ImportBot()
+    await bot.setup_db()
+    try:
+        successful, skipped, errors = await bot.import_bans_from_csv(str(csv_file), actor="admin@example.test")
+
+        assert (successful, skipped, errors) == (3, 0, [])
+        assert bot.imported_auto_redactions == [
+            ("permanent@example.org", "spam", "admin@example.test")
+        ]
     finally:
         await bot.db.close()
 

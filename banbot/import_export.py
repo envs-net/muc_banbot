@@ -447,6 +447,7 @@ class ImportExportMixin:
                 if (
                     target_type == "jid"
                     and normalized_jid
+                    and int(until or 0) <= 0
                     and hasattr(self, "maybe_auto_redact_after_imported_ban")
                 ):
                     await self.maybe_auto_redact_after_imported_ban(
