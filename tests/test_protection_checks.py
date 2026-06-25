@@ -475,6 +475,7 @@ async def test_join_hooks_ignore_initial_room_roster_population(fake_msg_factory
     assert handled is False
     assert bot.bans == []
 
+
 @pytest.mark.asyncio
 async def test_similar_message_triggers_on_repeated_normalized_spam(fake_msg_factory) -> None:
     bot = DummyProtections()
