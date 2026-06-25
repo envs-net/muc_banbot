@@ -424,6 +424,7 @@ async def test_message_protections_stop_after_first_trigger(fake_msg_factory) ->
     assert handled is True
     assert bot.bans == [("spam@example.org", None, "protection:FloodSpamProtection", "spam/flood detected")]
 
+
 @pytest.mark.asyncio
 async def test_join_wave_triggers_at_configured_threshold() -> None:
     bot = DummyProtections()
