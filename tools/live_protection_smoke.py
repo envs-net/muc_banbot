@@ -7,8 +7,8 @@ tempbans/bans, room configuration changes, and admin-room notifications.
 
 Use only dedicated test accounts and dedicated test rooms.
 
-Default mode is safe: actions are set to notify where possible.
-Use --destructive for real tempban/ban/redaction actions.
+This script always requires --destructive as an explicit safety acknowledgement.
+Use only dedicated test accounts and dedicated test rooms.
 Use --skip-joinwave to skip joinwave-related scenarios when needed.
 The script announces every test in the admin room and waits 5s between tests by default.
 

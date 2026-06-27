@@ -46,7 +46,6 @@ PROTECTION_INT_VALIDATION_KEYS = {
     "cooldown_seconds",
     "max_mentions",
     "max_joins",
-    "lockdown_seconds",
     "threshold",
 }
 PROTECTION_BOOL_VALIDATION_KEYS = {

@@ -77,7 +77,6 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
         "startup_grace_seconds": 30,
         "rejoin_grace_seconds": 300,
         "ignore_member_affiliations": True,
-        "lockdown_seconds": 900,
         "members_only": True,
         "moderated": True,
         "reason": "join wave detected",

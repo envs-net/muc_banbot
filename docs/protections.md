@@ -108,7 +108,6 @@ When `redact=True` and `REDACTION_ENABLED=True`, message protections first try t
 !protections joinwave set startup_grace_seconds 30
 !protections joinwave set rejoin_grace_seconds 5m
 !protections joinwave set ignore_member_affiliations true
-!protections joinwave set lockdown_seconds 15m
 ```
 
 ```text

@@ -274,7 +274,7 @@ async def test_wordlist_does_not_trigger_without_observed_join(fake_msg_factory)
 @pytest.mark.asyncio
 async def test_join_wave_locks_room_and_notifies_once_during_lockdown() -> None:
     bot = DummyProtections()
-    bot.protections["JoinWaveShortCircuitProtection"].update({"enabled": True, "max_joins": 1, "window_seconds": 60, "lockdown_seconds": 900})
+    bot.protections["JoinWaveShortCircuitProtection"].update({"enabled": True, "max_joins": 1, "window_seconds": 60})
 
     await bot.protection_on_join(ROOM, "Joiner1", "joiner1@example.org")
     await bot.protection_on_join(ROOM, "Joiner2", "joiner2@example.org")
