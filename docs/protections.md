@@ -7,7 +7,7 @@ Protections are stored in SQLite and can be enabled, disabled, and tuned at runt
 
 | Command | Description |
 | --- | --- |
-| `!protections list [all|page|last]` | Lists all protections with 🟢 enabled / 🔴 disabled state and their short alias |
+| `!protections list [all\|page\|last]` | Lists all protections with 🟢 enabled / 🔴 disabled state and their short alias |
 | `!protection enable <name>` | Enables a protection |
 | `!protection disable <name>` | Disables a protection |
 | `!protections <name> config` / `show` | Shows the current config for one protection |
@@ -15,8 +15,8 @@ Protections are stored in SQLite and can be enabled, disabled, and tuned at runt
 | `!protections <name> reset` | Resets one protection to its built-in defaults |
 | `!protections reporters add <jid>` | Adds a trusted reporter JID |
 | `!protections reporters remove <jid>` | Removes a trusted reporter JID (`delete`, `del`, and `rm` also work) |
-| `!protections reporters list [all|page|last]` | Lists configured trusted reporter JIDs |
-| `!report <nick|jid> [reason]` | Trusted reporter command, only useful when `TrustedReporters` is enabled |
+| `!protections reporters list [all\|page\|last]` | Lists configured trusted reporter JIDs |
+| `!report <nick\|jid> [reason]` | Trusted reporter command, only useful when `TrustedReporters` is enabled |
 
 Common aliases such as `flood`, `similar`, `media`, `mentions`, `wordlist`, `joinwave`, `reporters`, and `policy` can be used instead of the full protection name. The list output shows the main alias in square brackets.
 

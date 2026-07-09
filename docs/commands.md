@@ -52,30 +52,30 @@ Explicit full output remains available regardless of mode:
 
 | Command | Description |
 | --- | --- |
-| `!help [all|page|last]` / `!help <command>` | Shows admin help or focused command help |
+| `!help [all\|page\|last]` / `!help <command>` | Shows admin help or focused command help |
 | `!status` | Shows health, uptime, rooms, bans, DB, RTBL, workers, alerts, and reconnect state |
-| `!config [all|page|last]` | Shows active configuration; secrets are hidden |
-| `!config show [all|page|last]` | Same as `!config`, explicit show form |
+| `!config [all\|page\|last]` | Shows active configuration; secrets are hidden |
+| `!config show [all\|page\|last]` | Same as `!config`, explicit show form |
 | `!config search/find <query>` | Searches config option names and displayed values |
-| `!config diff [all|page|last]` | Shows current values that differ from `config_sample.py` defaults |
+| `!config diff [all\|page\|last]` | Shows current values that differ from `config_sample.py` defaults |
 | `!config set <KEY> <value>` | Updates a runtime-writable config option |
 | `!config unset <KEY>` | Resets a runtime-writable option to the `config_sample.py` default |
 | `!reload` / `!reloadconfig` | Validates and reloads runtime configuration |
 | `!restart confirm` | Exits cleanly so a supervisor can restart the bot |
 | `!checkupdate` / `!updatecheck` | Checks whether a newer release is available |
 | `!whoami` | Shows affiliation, role, and permissions |
-| `!audit [all|page|last|query]` | Shows audit events, optionally filtered |
+| `!audit [all\|page\|last\|query]` | Shows audit events, optionally filtered |
 
 ### Backups / Restore
 
 | Command | Description |
 | --- | --- |
 | `!backup` | Creates a managed full ZIP backup archive |
-| `!backup list [all|page|last]` | Lists managed backup archives |
-| `!backup show <filename|latest>` | Shows archive metadata and contents |
-| `!backup verify <filename|latest>` | Verifies archive structure, manifest, companion files, and SQLite integrity |
-| `!backup delete/remove/del/rm <filename|latest>` | Deletes a managed backup archive |
-| `!restore <filename|latest> confirm` | Restores from a managed backup archive after creating a safety backup |
+| `!backup list [all\|page\|last]` | Lists managed backup archives |
+| `!backup show <filename\|latest>` | Shows archive metadata and contents |
+| `!backup verify <filename\|latest>` | Verifies archive structure, manifest, companion files, and SQLite integrity |
+| `!backup delete/remove/del/rm <filename\|latest>` | Deletes a managed backup archive |
+| `!restore <filename\|latest> confirm` | Restores from a managed backup archive after creating a safety backup |
 
 See [Backups and Restore](backups.md).
 
@@ -84,10 +84,10 @@ See [Backups and Restore](backups.md).
 | Command | Description |
 | --- | --- |
 | `!room` | Shows focused room command usage |
-| `!room list [all|page]` | Lists protected rooms |
+| `!room list [all\|page]` | Lists protected rooms |
 | `!room add <room_jid>` | Adds a protected room and stores it in the database |
 | `!room remove/delete/rm/del <room_jid>` | Removes a protected room and makes the bot leave |
-| `!room invite list [all|page|last]` | Lists pending protected-room invites |
+| `!room invite list [all\|page\|last]` | Lists pending protected-room invites |
 | `!room invite accept <id>` | Accepts a pending invite and adds the room |
 | `!room invite decline/remove/delete/del/rm <id>` | Declines/removes a pending invite |
 | `!room invite cleanup [expired]` | Cleans all pending invites or only expired invites |
@@ -111,9 +111,9 @@ See [Public Policy / Rules](policy.md).
 
 | Command | Description |
 | --- | --- |
-| `!ban <jid|nick|*.domain.tld> [comment]` | Adds a permanent ban |
-| `!tempban <jid|nick> <10m|2h|1d> [comment]` | Adds a temporary ban |
-| `!unban <jid|nick|*.domain.tld>` | Removes a ban |
+| `!ban <jid\|nick\|*.domain.tld> [comment]` | Adds a permanent ban |
+| `!tempban <jid\|nick> <10m\|2h\|1d> [comment]` | Adds a temporary ban |
+| `!unban <jid\|nick\|*.domain.tld>` | Removes a ban |
 | `!redact <jid> [reason]` | Redacts indexed messages from a bare JID in protected rooms |
 | `!redact id <room_jid> <stanza_id> [reason]` | Redacts one specific stanza ID in a protected room |
 | `!redact cleanup` | Deletes old redaction index entries according to retention settings |
@@ -125,14 +125,14 @@ See [Public Policy / Rules](policy.md).
 
 | Command | Description |
 | --- | --- |
-| `!protections list [all|page|last]` | Lists protections with 🟢 enabled / 🔴 disabled state and aliases |
+| `!protections list [all\|page\|last]` | Lists protections with 🟢 enabled / 🔴 disabled state and aliases |
 | `!protection enable <name>` | Enables a protection |
 | `!protection disable <name>` | Disables a protection |
 | `!protections <name> config` | Shows one protection config |
 | `!protections <name> set <key> <value>` | Updates one protection config value |
 | `!protections <name> reset` | Resets one protection to built-in defaults |
 | `!protections reporters add/remove/list` | Manages trusted reporter bare JIDs |
-| `!report <nick|jid> [reason]` | Trusted reporter command when `TrustedReporters` is enabled |
+| `!report <nick\|jid> [reason]` | Trusted reporter command when `TrustedReporters` is enabled |
 
 Aliases shown by `!protections list all` include `flood`, `similar`, `media`, `mentions`, `wordlist`, `joinwave`, `reporters`, and `policy`.
 
@@ -142,26 +142,26 @@ See [Protections](protections.md).
 
 | Command | Description |
 | --- | --- |
-| `!banlist [all|page|last]` | Shows active local bans |
+| `!banlist [all\|page\|last]` | Shows active local bans |
 | `!blacklist ...` | Alias for `!banlist ...` |
-| `!banlist rtbl [all|page|last]` / `!blacklist rtbl [all|page|last]` | Shows raw RTBL hash/domain cache entries |
-| `!bansearch <query> [all|page|last]` | Searches bans by target, issuer, comment, or RTBL reason |
-| `!why <nick|jid>` | Explains why a user is banned |
+| `!banlist rtbl [all\|page\|last]` / `!blacklist rtbl [all\|page\|last]` | Shows raw RTBL hash/domain cache entries |
+| `!bansearch <query> [all\|page\|last]` | Searches bans by target, issuer, comment, or RTBL reason |
+| `!why <nick\|jid>` | Explains why a user is banned |
 
 ### Ignorelist / Whitelist
 
 | Command | Description |
 | --- | --- |
-| `!ignore [list|all|page|last]` | Shows ignored/protected exact JIDs and domains |
-| `!ignore add <jid|domain> [reason]` | Adds a target to the global ignorelist |
-| `!ignore remove/delete/del/rm <jid|domain>` | Removes a target from the global ignorelist |
+| `!ignore [list\|all\|page\|last]` | Shows ignored/protected exact JIDs and domains |
+| `!ignore add <jid\|domain> [reason]` | Adds a target to the global ignorelist |
+| `!ignore remove/delete/del/rm <jid\|domain>` | Removes a target from the global ignorelist |
 | `!whitelist ...` | Alias for `!ignore ...` |
 
 ### RTBL / PubSub
 
 | Command | Description |
 | --- | --- |
-| `!rtbl list [all|page|last]` | Lists RTBL subscriptions |
+| `!rtbl list [all\|page\|last]` | Lists RTBL subscriptions |
 | `!rtbl add <service_jid> <node>` | Adds and fetches an RTBL subscription |
 | `!rtbl delete/remove/del/rm <service_jid> [node]` | Removes one RTBL subscription or all nodes for a service |
 | `!rtbl refresh [service_jid] [node]` | Refreshes all or selected subscriptions |
@@ -186,9 +186,9 @@ See [OMEMO](omemo.md).
 | Command | Description |
 | --- | --- |
 | `!export` | Creates a managed CSV ban export |
-| `!export list [all|page|last]` | Lists managed CSV exports |
-| `!export show <filename|latest>` | Shows export file details |
-| `!export delete/remove/del/rm <filename|latest>` | Deletes a managed CSV export |
+| `!export list [all\|page\|last]` | Lists managed CSV exports |
+| `!export show <filename\|latest>` | Shows export file details |
+| `!export delete/remove/del/rm <filename\|latest>` | Deletes a managed CSV export |
 | `!import <filename> [dryrun]` | Imports a managed CSV export, optionally without changes |
 
 See [Import / Export](import-export.md).
@@ -202,9 +202,9 @@ When `ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS=True`, users in protected rooms can
 | `!help` | Shows public command help |
 | `!whoami` | Shows the sender's visible room role/affiliation information |
 | `!banlist` / `!blacklist` | Shows active local bans |
-| `!why <nick|jid>` | Shows why a target is banned |
+| `!why <nick\|jid>` | Shows why a target is banned |
 | `!rules` / `!policy` | Shows public policy text when configured and enabled |
-| `!report <nick|jid> [reason]` | Reports abuse when `TrustedReporters` is enabled and the sender is trusted |
+| `!report <nick\|jid> [reason]` | Reports abuse when `TrustedReporters` is enabled and the sender is trusted |
 
 Public commands are rate-limited with `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` and `PUBLIC_COMMAND_RATE_LIMIT_MAX`.
 

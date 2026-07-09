@@ -124,11 +124,11 @@ Examples assume the default command prefix `!`.
 
 | Command | Description |
 | --- | --- |
-| `!help [all|page|last]` / `!help <command>` | Show available commands or focused help for every command topic, including subtopics such as `room invite` and `rtbl publish` |
+| `!help [all\|page\|last]` / `!help <command>` | Show available commands or focused help for every command topic, including subtopics such as `room invite` and `rtbl publish` |
 | `!status` | Show bot health, uptime, rooms, bans, RTBL, and DB state |
-| `!config [all|page|last]` / `!config show [all|page|last]` | Show active configuration grouped in `config_sample.py` section order; secrets are hidden |
+| `!config [all\|page\|last]` / `!config show [all\|page\|last]` | Show active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config search/find <query>` | Search config option names and displayed values |
-| `!config diff [all|page|last]` | Show current values that differ from `config_sample.py` defaults |
+| `!config diff [all\|page\|last]` | Show current values that differ from `config_sample.py` defaults |
 | `!config set <KEY> <value>` | Change a runtime-writable configuration value |
 | `!config unset <KEY>` | Reset a runtime-writable configuration value to `config_sample.py` default |
 | `!reload` / `!reloadconfig` | Validate and reload runtime configuration |
@@ -169,7 +169,7 @@ Examples assume the default command prefix `!`.
 | `!omemo status` | Inspect OMEMO readiness and storage state |
 | `!omemo devices` | List visible admin-room recipients and local storage hints |
 | `!omemo reset [confirm]` | Rotate local OMEMO storage after confirmation |
-| `!rtbl list [all|page|last]`, `!rtbl add/delete/remove/refresh` | Manage RTBL subscriptions |
+| `!rtbl list [all\|page\|last]`, `!rtbl add/delete/remove/refresh` | Manage RTBL subscriptions |
 | `!rtbl publish status/sync` | Manage the bot's own RTBL publish feed |
 | `!export [list/show/delete/remove/del/rm]` | Manage CSV ban exports |
 | `!import <file> [dryrun]` | Import bans from CSV with validation and optional dry-run |
