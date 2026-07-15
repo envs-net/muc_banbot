@@ -29,6 +29,7 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
         self.ban_calls = []
         self.ban_notify_policy_flags = []
         self.unban_calls = []
+        self.unban_notify_policy_flags = []
         self.room_calls = []
         self.audit_calls = []
         self.rtbl_calls = []
@@ -68,8 +69,9 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
         self.ban_calls.append((target, until, issuer, comment))
         self.ban_notify_policy_flags.append(notify_policy)
 
-    async def unban_all(self, target, issuer):
+    async def unban_all(self, target, issuer, *, notify_policy=True):
         self.unban_calls.append((target, issuer))
+        self.unban_notify_policy_flags.append(notify_policy)
 
     async def cmd_room(self, args, room):
         self.room_calls.append((list(args), room))
@@ -212,6 +214,7 @@ async def test_admin_unban_command_routes_to_unban_all(fake_msg_factory, monkeyp
     await bot.on_message(admin_msg(fake_msg_factory, "!unban user@example.org"))
 
     assert bot.unban_calls == [("user@example.org", "admin@example.test/resource")]
+    assert bot.unban_notify_policy_flags == [False]
 
 
 @pytest.mark.asyncio

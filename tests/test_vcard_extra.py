@@ -6,6 +6,8 @@ import hashlib
 
 import pytest
 
+pytest.importorskip("slixmpp")
+
 from banbot.vcard import VCardMixin
 
 

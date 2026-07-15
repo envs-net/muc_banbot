@@ -31,7 +31,7 @@ class CommandModerationMixin:
 
         try:
             until = int(time.time()) + parse_duration(args[1])
-        except Exception:
+        except (TypeError, ValueError):
             await self.bot_send_message(
                 mto=room,
                 mbody=f"❌ Invalid duration format ({self.command_prefix}tempban user 10m)",
@@ -53,7 +53,7 @@ class CommandModerationMixin:
             return
 
         actor_jid = self._actor_jid_from_room_nick(room, nick)
-        await self.unban_all(args[0], actor_jid)
+        await self.unban_all(args[0], actor_jid, notify_policy=False)
 
     async def _dispatch_bansearch_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
         if len(args) < 1:

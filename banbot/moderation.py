@@ -595,13 +595,10 @@ class ModerationMixin:
                             log.debug("IqError restoring role for %s in %s: %s", n, room, e)
                             break
 
-            # --- Step 3: Notifications ---
-            if room == ADMIN_ROOM:
-                display_admin = ban_jid or ban_nick or "Unknown"
-                msg_admin = f"♻️ Unbanned {display_admin}"
-                await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
-
-            elif self.allow_user_cmds:
+            # --- Step 3: Optional public notification ---
+            # The admin-room confirmation is emitted once, centrally, by
+            # _unban_all_locked() where actor and expiry context are known.
+            if room != ADMIN_ROOM and self.allow_user_cmds:
                 if not ban_nick:
                     log.debug(
                         "Skipping public unban announcement in %s because no public nick is known",
@@ -616,12 +613,28 @@ class ModerationMixin:
             log.warning("Failed to unban %s in %s: %s", ban_jid or ban_nick, room, e)
 
 
-    async def unban_all(self, identifier: str, issuer: str | None = None) -> None:
+    async def unban_all(
+        self,
+        identifier: str,
+        issuer: str | None = None,
+        *,
+        notify_policy: bool = True,
+    ) -> None:
         """Unban a target while holding the shared ban-state lock."""
         async with ban_state_lock(self):
-            await self._unban_all_locked(identifier, issuer=issuer)
+            await self._unban_all_locked(
+                identifier,
+                issuer=issuer,
+                notify_policy=notify_policy,
+            )
 
-    async def _unban_all_locked(self, identifier: str, issuer: str | None = None) -> None:
+    async def _unban_all_locked(
+        self,
+        identifier: str,
+        issuer: str | None = None,
+        *,
+        notify_policy: bool = True,
+    ) -> None:
         """
         Remove a ban from a user (JID, nick, or domain) and unban in all protected rooms.
         Supports exact wildcard-domain unbans (*.domain.tld).
@@ -743,7 +756,7 @@ class ModerationMixin:
             nick=ban_nick,
             details=unban_details,
         )
-        if hasattr(self, "notify_policy_change"):
+        if notify_policy and hasattr(self, "notify_policy_change"):
             await self.notify_policy_change(
                 event_type,
                 actor=issuer or "system",
