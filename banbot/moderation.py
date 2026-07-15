@@ -728,7 +728,21 @@ class ModerationMixin:
         log.info(msg_admin)
         event_type = "tempban_expired" if issuer == "system" else "unban_applied"
         self.log_event(logging.INFO, event_type, actor=issuer or "system", identifier=identifier, target_type=target_type, target=target, jid=ban_jid, nick=ban_nick)
-        await self.audit_event(event_type, actor=issuer or "system", target_type=target_type, target=target, jid=ban_jid, nick=ban_nick, details=update_details)
+        unban_details = {
+            "identifier": identifier,
+            "previous_until": ban_until,
+            "previous_issuer": ban_issuer or None,
+            "was_tempban": ban_until > 0,
+        }
+        await self.audit_event(
+            event_type,
+            actor=issuer or "system",
+            target_type=target_type,
+            target=target,
+            jid=ban_jid,
+            nick=ban_nick,
+            details=unban_details,
+        )
         if hasattr(self, "notify_policy_change"):
             await self.notify_policy_change(
                 event_type,

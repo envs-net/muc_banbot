@@ -10,7 +10,7 @@ Protections are stored in SQLite and can be enabled, disabled, and tuned at runt
 | `!protections list [all\|page\|last]` | Lists all protections with 🟢 enabled / 🔴 disabled state and their short alias |
 | `!protection enable <name>` | Enables a protection |
 | `!protection disable <name>` | Disables a protection |
-| `!protections <name> config` / `show` | Shows the current config for one protection |
+| `!protections <name> config` | Shows the current config for one protection |
 | `!protections <name> set <key> <value>` | Updates one config value for a protection |
 | `!protections <name> reset` | Resets one protection to its built-in defaults |
 | `!protections reporters add <jid>` | Adds a trusted reporter JID |

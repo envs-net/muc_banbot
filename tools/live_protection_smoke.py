@@ -24,7 +24,7 @@ Example:
       --test-jid spamtest@example.org \
       --test-password 'secret' \
       --domain example.org \
-      --bot-command-prefix .
+      --bot-command-prefix '.'
 """
 
 from __future__ import annotations
@@ -72,6 +72,8 @@ class SmokeConfig:
     pause_between_tests: float
     command_delay: float
     join_delay: float
+    post_scenario_wait: float
+    inter_test_delay: float
     destructive: bool
     skip_joinwave: bool
     skip_reporters: bool
@@ -156,7 +158,7 @@ async def announce(admin: SmokeClient, cfg: SmokeConfig, title: str) -> None:
     message = f"🧪 Protection smoke test: {title}"
     log.info(message)
     await admin.groupchat(cfg.admin_room, message)
-    await asyncio.sleep(1)
+    await asyncio.sleep(cfg.command_delay)
 
 
 async def pause(cfg: SmokeConfig) -> None:
@@ -178,7 +180,7 @@ async def with_test_client(
     try:
         await client.join(cfg.protected_room)
         await scenario(client)
-        await asyncio.sleep(3)
+        await asyncio.sleep(cfg.post_scenario_wait)
     finally:
         await client.stop()
 
@@ -266,14 +268,14 @@ async def run_similar(admin: SmokeClient, cfg: SmokeConfig) -> None:
             await client.groupchat(cfg.protected_room, message)
             await asyncio.sleep(0.5)
 
-    ban_possible = False
     try:
         await with_test_client(cfg, cfg.test_nick, scenario)
-        ban_possible = True
     finally:
         await admin_command(admin, cfg, f"{cfg.command_prefix}protection enable flood")
-        if ban_possible:
-            await admin_command(admin, cfg, f"{cfg.command_prefix}unban {cfg.test_jid}")
+        # Cleanup is intentionally unconditional: unban is safe for this
+        # destructive smoke test and avoids leaving a real ban behind when
+        # the scenario raises after the protection has already acted.
+        await admin_command(admin, cfg, f"{cfg.command_prefix}unban {cfg.test_jid}")
 
 
 async def run_joinwave(admin: SmokeClient, cfg: SmokeConfig) -> None:
@@ -293,7 +295,7 @@ async def run_joinwave(admin: SmokeClient, cfg: SmokeConfig) -> None:
             await client.start()
             await client.join(cfg.protected_room)
             await asyncio.sleep(cfg.join_delay)
-        await asyncio.sleep(5)
+        await asyncio.sleep(cfg.inter_test_delay)
     finally:
         for client in clients:
             await client.stop()
@@ -367,6 +369,8 @@ def parse_args(argv: list[str]) -> SmokeConfig:
     )
     command_delay_default = env_default("BANBOT_SMOKE_COMMAND_DELAY", "2")
     join_delay_default = env_default("BANBOT_SMOKE_JOIN_DELAY", "1")
+    post_scenario_wait_default = env_default("BANBOT_SMOKE_POST_SCENARIO_WAIT", "3")
+    inter_test_delay_default = env_default("BANBOT_SMOKE_INTER_TEST_DELAY", "5")
 
     parser = argparse.ArgumentParser(
         description=(
@@ -425,6 +429,18 @@ def parse_args(argv: list[str]) -> SmokeConfig:
         default=float(join_delay_default),
     )
     parser.add_argument(
+        "--post-scenario-wait",
+        type=float,
+        default=float(post_scenario_wait_default),
+        help="Seconds to wait after a protection scenario before disconnecting its test client.",
+    )
+    parser.add_argument(
+        "--inter-test-delay",
+        type=float,
+        default=float(inter_test_delay_default),
+        help="Seconds to wait after the final JoinWave client has joined.",
+    )
+    parser.add_argument(
         "--destructive",
         action="store_true",
         help=(
@@ -465,6 +481,8 @@ def parse_args(argv: list[str]) -> SmokeConfig:
         pause_between_tests=args.pause_between_tests,
         command_delay=args.command_delay,
         join_delay=args.join_delay,
+        post_scenario_wait=args.post_scenario_wait,
+        inter_test_delay=args.inter_test_delay,
         destructive=args.destructive,
         skip_joinwave=args.skip_joinwave,
         skip_reporters=args.skip_reporters,
