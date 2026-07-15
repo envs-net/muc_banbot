@@ -200,7 +200,7 @@ async def test_admin_tempban_invalid_duration_is_reported(fake_msg_factory, monk
     await bot.on_message(admin_msg(fake_msg_factory, "!tempban user@example.org forever"))
 
     assert bot.ban_calls == []
-    assert "Invalid duration" in bot.sent[-1]["mbody"]
+    assert "Invalid duration format" in bot.sent[-1]["mbody"]
 
 
 @pytest.mark.asyncio
