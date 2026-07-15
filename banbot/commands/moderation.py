@@ -19,7 +19,7 @@ class CommandModerationMixin:
         actor_jid = self._actor_jid_from_room_nick(room, nick)
         comment = " ".join(args[1:]) if len(args) > 1 else None
         async with ban_state_lock(self):
-            await self.ban_all(args[0], None, actor_jid, comment)
+            await self.ban_all(args[0], None, actor_jid, comment, notify_policy=False)
 
     async def _dispatch_tempban_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
         if len(args) < 2:
@@ -43,7 +43,7 @@ class CommandModerationMixin:
         actor_jid = self._actor_jid_from_room_nick(room, nick)
         comment = " ".join(args[2:]) if len(args) > 2 else None
         async with ban_state_lock(self):
-            await self.ban_all(args[0], until, actor_jid, comment)
+            await self.ban_all(args[0], until, actor_jid, comment, notify_policy=False)
 
     async def _dispatch_unban_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
         if len(args) < 1:

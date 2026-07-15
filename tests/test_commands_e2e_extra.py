@@ -27,6 +27,7 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
         self._ban_state_operation_lock = asyncio.Lock()
         self.sent = []
         self.ban_calls = []
+        self.ban_notify_policy_flags = []
         self.unban_calls = []
         self.room_calls = []
         self.audit_calls = []
@@ -63,8 +64,9 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
     async def _decrypt_incoming_omemo_message(self, msg):
         return msg, False
 
-    async def ban_all(self, target, until, issuer, comment=None, *, auto_redact=True):
+    async def ban_all(self, target, until, issuer, comment=None, *, auto_redact=True, notify_policy=True):
         self.ban_calls.append((target, until, issuer, comment))
+        self.ban_notify_policy_flags.append(notify_policy)
 
     async def unban_all(self, target, issuer):
         self.unban_calls.append((target, issuer))
@@ -163,6 +165,7 @@ async def test_admin_ban_command_routes_to_ban_all_with_real_actor(fake_msg_fact
     assert bot.ban_calls == [
         ("User@Example.org", None, "admin@example.test/resource", "repeated spam")
     ]
+    assert bot.ban_notify_policy_flags == [False]
 
 
 @pytest.mark.asyncio
@@ -181,6 +184,7 @@ async def test_admin_tempban_command_parses_duration_and_comment(fake_msg_factor
     assert start + 590 <= until <= start + 610
     assert issuer == "admin@example.test/resource"
     assert comment == "noisy"
+    assert bot.ban_notify_policy_flags == [False]
 
 
 @pytest.mark.asyncio

@@ -161,6 +161,7 @@ class ModerationMixin:
         comment: str | None = None,
         *,
         auto_redact: bool = True,
+        notify_policy: bool = True,
     ) -> None:
         """Ban a target while holding the shared ban-state lock."""
         async with ban_state_lock(self):
@@ -170,6 +171,7 @@ class ModerationMixin:
                 issuer,
                 comment,
                 auto_redact=auto_redact,
+                notify_policy=notify_policy,
             )
 
     async def _ban_all_locked(
@@ -180,6 +182,7 @@ class ModerationMixin:
         comment: str | None = None,
         *,
         auto_redact: bool = True,
+        notify_policy: bool = True,
     ) -> None:
         """
         Bans a user by JID, nick, or domain (*.domain.tld):
@@ -439,7 +442,7 @@ class ModerationMixin:
         self.log_event(logging.INFO, event_type, actor=issuer, identifier=identifier, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment)
         await self.audit_event(event_type, actor=issuer, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment, details=update_details)
 
-        if hasattr(self, "notify_policy_change"):
+        if notify_policy and hasattr(self, "notify_policy_change"):
             await self.notify_policy_change(
                 event_type,
                 actor=issuer,
