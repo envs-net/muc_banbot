@@ -107,6 +107,12 @@ async def test_permanent_ban_runs_command_auto_redaction(temp_db_path, monkeypat
     try:
         await bot.ban_all("user@example.org", None, issuer="admin@example.test", comment="spam")
 
+        # Command-level redaction intentionally runs outside the ban command
+        # path. Wait for the tracked operation before asserting its result.
+        tasks = list(bot.redaction_operation_tasks)
+        if tasks:
+            await asyncio.gather(*tasks)
+
         assert bot.auto_redactions == [("user@example.org", "spam", "admin@example.test")]
         assert "user@example.org" in bot.ban_cache
 
@@ -121,6 +127,49 @@ async def test_permanent_ban_runs_command_auto_redaction(temp_db_path, monkeypat
         assert row[2] == "spam"
         assert row[3] == "admin@example.test"
     finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_permanent_ban_does_not_wait_for_command_auto_redaction(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    release_redaction = asyncio.Event()
+    redaction_started = asyncio.Event()
+
+    async def slow_auto_redaction(jid, comment, actor=None):
+        redaction_started.set()
+        await release_redaction.wait()
+        bot.auto_redactions.append((jid, comment, actor))
+
+    bot.maybe_auto_redact_after_ban = slow_auto_redaction
+    try:
+        await asyncio.wait_for(
+            bot.ban_all(
+                "user@example.org",
+                None,
+                issuer="admin@example.test",
+                comment="spam",
+            ),
+            timeout=1,
+        )
+
+        await asyncio.wait_for(redaction_started.wait(), timeout=1)
+        assert bot.auto_redactions == []
+        assert any("✅ Banned user@example.org" in msg["mbody"] for msg in bot.sent)
+
+        release_redaction.set()
+        tasks = list(bot.redaction_operation_tasks)
+        if tasks:
+            await asyncio.gather(*tasks)
+        assert bot.auto_redactions == [("user@example.org", "spam", "admin@example.test")]
+    finally:
+        release_redaction.set()
+        tasks = list(getattr(bot, "redaction_operation_tasks", set()))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         await bot.db.close()
 
 
