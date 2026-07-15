@@ -131,6 +131,8 @@ class ConfigRuntimeMixin:
         self.auto_redact_on_imported_ban_reason = getattr(config, "AUTO_REDACT_ON_IMPORTED_BAN_REASON", False)
         self.auto_redact_on_manual_muc_ban = getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", True)
         self.redaction_auto_reasons = list(getattr(config, "REDACTION_AUTO_REASONS", []))
+        self.redaction_retract_concurrency = getattr(config, "REDACTION_RETRACT_CONCURRENCY", 10)
+        self.redaction_iq_timeout_seconds = getattr(config, "REDACTION_IQ_TIMEOUT_SECONDS", 5)
 
     def parse_config_value(self, raw: str) -> Any:
         text = raw.strip()

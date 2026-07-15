@@ -21,6 +21,35 @@ log = logging.getLogger(__name__)
 
 
 class ModerationMixin:
+    def _schedule_auto_redaction_after_ban(
+        self,
+        jid: str,
+        comment: str | None,
+        actor: str | None,
+    ) -> None:
+        """Run potentially slow bulk redaction outside the ban command path."""
+        task = asyncio.create_task(
+            self.maybe_auto_redact_after_ban(jid, comment, actor=actor),
+            name=f"auto-redact:{jid}",
+        )
+        tasks = getattr(self, "redaction_operation_tasks", None)
+        if tasks is None:
+            tasks = set()
+            self.redaction_operation_tasks = tasks
+        tasks.add(task)
+
+        def _done(completed: asyncio.Task) -> None:
+            tasks.discard(completed)
+            if completed.cancelled():
+                return
+            try:
+                completed.result()
+            except Exception:
+                log.exception("Automatic redaction failed for %s", jid)
+
+        task.add_done_callback(_done)
+
+
     async def apply_ban_to_room(
         self,
         room: str,
@@ -461,7 +490,7 @@ class ModerationMixin:
             and normalized_jid
             and target_type == "jid"
         ):
-            await self.maybe_auto_redact_after_ban(normalized_jid, comment, actor=issuer)
+            self._schedule_auto_redaction_after_ban(normalized_jid, comment, issuer)
 
         if not skip_final_message:
             display = normalized_jid if normalized_jid else (normalized_nick or "Unknown")

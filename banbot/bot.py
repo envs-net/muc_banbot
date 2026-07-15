@@ -307,7 +307,10 @@ class BanBot(
         self.auto_redact_on_imported_ban_reason: bool = getattr(config, "AUTO_REDACT_ON_IMPORTED_BAN_REASON", False)
         self.auto_redact_on_manual_muc_ban: bool = getattr(config, "AUTO_REDACT_ON_MANUAL_MUC_BAN", True)
         self.redaction_auto_reasons: list[str] = list(getattr(config, "REDACTION_AUTO_REASONS", []))
+        self.redaction_retract_concurrency: int = getattr(config, "REDACTION_RETRACT_CONCURRENCY", 10)
+        self.redaction_iq_timeout_seconds: float = getattr(config, "REDACTION_IQ_TIMEOUT_SECONDS", 5)
         self.redaction_cleanup_task: asyncio.Task | None = None
+        self.redaction_operation_tasks: set[asyncio.Task] = set()
 
         # --- RTBL ---
         self.rtbl_enabled: bool = getattr(config, "RTBL_ENABLED", False)
@@ -382,11 +385,13 @@ class BanBot(
 
     async def stop_background_tasks(self) -> None:
         """Cancel running background tasks before starting new ones."""
+        operation_tasks = list(getattr(self, "redaction_operation_tasks", set()))
         for task in (
             self.unban_task,
             self.health_check_task,
             self.version_check_task,
             self.redaction_cleanup_task,
+            *operation_tasks,
         ):
             if task and not task.done():
                 task.cancel()

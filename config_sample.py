@@ -204,6 +204,13 @@ REDACTION_ENABLED = False
 # How long to keep indexed stanza IDs. 0 = keep indefinitely.
 REDACTION_INDEX_RETENTION_DAYS = 30
 
+# Number of stanza retraction requests sent concurrently. Higher values make
+# bulk redaction faster, but also increase load on the XMPP server.
+REDACTION_RETRACT_CONCURRENCY = 10
+
+# Maximum number of seconds to wait for each XEP-0425 retraction response.
+REDACTION_IQ_TIMEOUT_SECONDS = 5
+
 # Also apply automatic redaction to matching JID bans imported from CSV.
 # Uses REDACTION_AUTO_REASONS. Disabled by default because imported data may
 # originate outside the bot command flow.

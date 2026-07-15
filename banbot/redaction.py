@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from xml.etree import ElementTree as ET
 
@@ -16,7 +17,7 @@ log = logging.getLogger(__name__)
 MODERATE_NS = "urn:xmpp:message-moderate:1"
 RETRACT_NS = "urn:xmpp:message-retract:1"
 SID_NS = "urn:xmpp:sid:0"
-REDACTION_IQ_TIMEOUT_SECONDS = 10
+REDACTION_IQ_TIMEOUT_SECONDS = 5
 REDACTION_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 
 _REDACTION_ALREADY_RETRACTED_CONDITIONS = {
@@ -102,7 +103,15 @@ class RedactionMixin:
 
         for reason in getattr(self, "redaction_auto_reasons", []) or []:
             reason_text = str(reason or "").strip().lower()
-            if reason_text and reason_text in comment_text:
+            if not reason_text:
+                continue
+
+            # Match complete words/phrases rather than arbitrary substrings.
+            # This prevents short reasons such as "troll", "cp" or "spam"
+            # from matching unrelated text like "trollish", "script" or
+            # "spammy" while still allowing phrases inside a longer comment.
+            pattern = rf"(?<!\w){re.escape(reason_text)}(?!\w)"
+            if re.search(pattern, comment_text, flags=re.IGNORECASE):
                 return reason_text
 
         return None
@@ -295,7 +304,12 @@ class RedactionMixin:
 
         iq = self.make_iq_set(ito=room_jid)
         iq.append(moderate)
-        await iq.send(timeout=REDACTION_IQ_TIMEOUT_SECONDS)
+        timeout = float(
+            getattr(self, "redaction_iq_timeout_seconds", REDACTION_IQ_TIMEOUT_SECONDS)
+            or REDACTION_IQ_TIMEOUT_SECONDS
+        )
+        timeout = max(1.0, min(timeout, 30.0))
+        await iq.send(timeout=timeout)
 
 
     async def _redaction_redact_rows(
@@ -316,8 +330,8 @@ class RedactionMixin:
         if not rows:
             return summary
 
-        concurrency = int(getattr(self, "redaction_retract_concurrency", 3) or 3)
-        concurrency = max(1, min(concurrency, 10))
+        concurrency = int(getattr(self, "redaction_retract_concurrency", 10) or 10)
+        concurrency = max(1, min(concurrency, 20))
         semaphore = asyncio.Semaphore(concurrency)
         changed_rows: list[int] = []
         skipped_rows: list[int] = []

@@ -223,6 +223,12 @@ class ConfigValidationMixin:
         redaction_retention = config_value("REDACTION_INDEX_RETENTION_DAYS", 30)
         if not isinstance(redaction_retention, int) or redaction_retention < 0:
             errors.append("REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)")
+        redaction_concurrency = config_value("REDACTION_RETRACT_CONCURRENCY", 10)
+        if not isinstance(redaction_concurrency, int) or isinstance(redaction_concurrency, bool) or not 1 <= redaction_concurrency <= 20:
+            errors.append("REDACTION_RETRACT_CONCURRENCY must be an integer between 1 and 20")
+        redaction_timeout = config_value("REDACTION_IQ_TIMEOUT_SECONDS", 5)
+        if not isinstance(redaction_timeout, (int, float)) or isinstance(redaction_timeout, bool) or not 1 <= redaction_timeout <= 30:
+            errors.append("REDACTION_IQ_TIMEOUT_SECONDS must be a number between 1 and 30")
         if not isinstance(config_value("AUTO_REDACT_ON_IMPORTED_BAN_REASON", False), bool):
             errors.append("AUTO_REDACT_ON_IMPORTED_BAN_REASON must be True or False")
         if not isinstance(config_value("AUTO_REDACT_ON_MANUAL_MUC_BAN", True), bool):

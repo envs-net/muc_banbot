@@ -16,7 +16,7 @@ REDACTION_TEST_IMPORTS_OK = True
 # constants when the real module is available.
 _REDACTION_FALLBACK_DEFAULTS = {
     "cleanup_interval_seconds": 24 * 60 * 60,
-    "iq_timeout_seconds": 10,
+    "iq_timeout_seconds": 5,
     "sid_ns": "urn:xmpp:sid:0",
 }
 
@@ -758,6 +758,17 @@ def test_auto_reason_matching_is_case_insensitive():
 
     assert bot._redaction_auto_reason_matches(TEST_UPPERCASE_MATCHING_REASON) == TEST_REDACTION_REASON
     assert bot._redaction_auto_reason_matches(TEST_NON_MATCHING_REASON) is None
+
+
+def test_auto_reason_matching_requires_word_or_phrase_boundaries():
+    bot = RedactionBot()
+    bot.redaction_auto_reasons = ["troll", "spam", "cp", "open-reg"]
+
+    assert bot._redaction_auto_reason_matches("trollish/annoying behavior") is None
+    assert bot._redaction_auto_reason_matches("spammy account") is None
+    assert bot._redaction_auto_reason_matches("typescript issue") is None
+    assert bot._redaction_auto_reason_matches("repeated troll behavior") == "troll"
+    assert bot._redaction_auto_reason_matches("blocked for open-reg abuse") == "open-reg"
 
 
 @pytest.mark.asyncio

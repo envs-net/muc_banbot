@@ -55,6 +55,8 @@ class ConfigSnapshotMixin:
             "RTBL_REFRESH_INTERVAL": self.rtbl_refresh_interval,
             "REDACTION_ENABLED": self.redaction_enabled,
             "REDACTION_INDEX_RETENTION_DAYS": self.redaction_index_retention_days,
+            "REDACTION_RETRACT_CONCURRENCY": getattr(self, "redaction_retract_concurrency", 10),
+            "REDACTION_IQ_TIMEOUT_SECONDS": getattr(self, "redaction_iq_timeout_seconds", 5),
             "AUTO_REDACT_ON_IMPORTED_BAN_REASON": getattr(self, "auto_redact_on_imported_ban_reason", False),
             "AUTO_REDACT_ON_MANUAL_MUC_BAN": getattr(self, "auto_redact_on_manual_muc_ban", True),
             "REDACTION_AUTO_REASONS": tuple(self.redaction_auto_reasons),
