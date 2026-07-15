@@ -288,21 +288,58 @@ class ModerationMixin:
 
         db_key = f"*.{target}" if target_type == "domain" else target
         skip_final_message = False
+        update_details: dict[str, object] = {"identifier": identifier}
+        db_issuer = issuer
 
         if db_key in self.ban_cache:
             existing_jid, existing_nick, existing_until, existing_issuer, existing_comment = self.ban_cache[db_key]
             existing_is_permanent = existing_until <= 0
             new_is_permanent = ts <= 0
 
+            # Re-running a moderation command without a comment must not erase
+            # the existing reason. A supplied comment is an explicit reason
+            # update, including while changing a tempban duration/type.
+            effective_comment = comment if comment is not None else existing_comment
+            reason_changed = comment is not None and comment != existing_comment
+            update_details.update(
+                {
+                    "old_until": existing_until,
+                    "new_until": ts,
+                    "old_comment": existing_comment,
+                    "new_comment": effective_comment,
+                }
+            )
+            comment = effective_comment
+
             if existing_is_permanent and new_is_permanent:
+                if not reason_changed:
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=f"ℹ️ Ban already exists for {identifier} (permanent)",
+                        mtype="groupchat"
+                    )
+                    self.log_event(logging.INFO, "ban_duplicate_ignored", actor=issuer, identifier=identifier, target_type=target_type, target=target)
+                    await self.audit_event(
+                        "ban_duplicate_ignored",
+                        actor=issuer,
+                        target_type=target_type,
+                        target=target,
+                        jid=normalized_jid,
+                        nick=normalized_nick,
+                        comment=comment,
+                    )
+                    return
+
+                # A reason-only update keeps the original ban issuer and its
+                # permanent status. The current actor is recorded in audit.
+                db_issuer = existing_issuer
+                log.info("🔄 Updating permanent ban reason for %s", identifier)
                 await self.bot_send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"ℹ️ Ban already exists for {identifier} (permanent)",
-                    mtype="groupchat"
+                    mbody=f"🔄 Ban reason updated for {identifier}: {existing_comment or '—'} → {comment or '—'}",
+                    mtype="groupchat",
                 )
-                self.log_event(logging.INFO, "ban_duplicate_ignored", actor=issuer, identifier=identifier, target_type=target_type, target=target)
-                await self.audit_event("ban_duplicate_ignored", actor=issuer, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, comment=comment)
-                return
+                skip_final_message = True
             elif existing_is_permanent and not new_is_permanent:
                 log.info("🔄 Converting permanent ban to tempban for %s", identifier)
                 await self.bot_send_message(
@@ -323,9 +360,13 @@ class ModerationMixin:
                 new_duration = human_time(until - int(time.time()))
                 old_duration = human_time(max(0, existing_until - int(time.time())))
                 log.info("🔄 Updating tempban for %s: %s → %s", identifier, old_duration, new_duration)
+                reason_suffix = " and reason" if reason_changed else ""
                 await self.bot_send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"🔄 Ban updated: {identifier}'s tempban duration changed from {old_duration} to {new_duration}",
+                    mbody=(
+                        f"🔄 Ban updated: {identifier}'s tempban duration changed "
+                        f"from {old_duration} to {new_duration}{reason_suffix}"
+                    ),
                     mtype="groupchat"
                 )
                 skip_final_message = True
@@ -367,7 +408,7 @@ class ModerationMixin:
             return
 
         try:
-            await self.upsert_ban_db(normalized_jid, normalized_nick, ts, issuer, comment)
+            await self.upsert_ban_db(normalized_jid, normalized_nick, ts, db_issuer, comment)
         except Exception as e:
             log.error("Database error when saving ban: %s", e)
             await self.bot_send_message(
@@ -396,7 +437,7 @@ class ModerationMixin:
         log.info("Ban applied: identifier=%s, JID/Nick=%s/%s, until=%s, issuer=%s",
                  identifier, normalized_jid, normalized_nick, ts, issuer)
         self.log_event(logging.INFO, event_type, actor=issuer, identifier=identifier, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment)
-        await self.audit_event(event_type, actor=issuer, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment, details={"identifier": identifier})
+        await self.audit_event(event_type, actor=issuer, target_type=target_type, target=target, jid=normalized_jid, nick=normalized_nick, until=ts, comment=comment, details=update_details)
 
         if hasattr(self, "notify_policy_change"):
             await self.notify_policy_change(
@@ -684,7 +725,7 @@ class ModerationMixin:
         log.info(msg_admin)
         event_type = "tempban_expired" if issuer == "system" else "unban_applied"
         self.log_event(logging.INFO, event_type, actor=issuer or "system", identifier=identifier, target_type=target_type, target=target, jid=ban_jid, nick=ban_nick)
-        await self.audit_event(event_type, actor=issuer or "system", target_type=target_type, target=target, jid=ban_jid, nick=ban_nick, details={"identifier": identifier})
+        await self.audit_event(event_type, actor=issuer or "system", target_type=target_type, target=target, jid=ban_jid, nick=ban_nick, details=update_details)
         if hasattr(self, "notify_policy_change"):
             await self.notify_policy_change(
                 event_type,

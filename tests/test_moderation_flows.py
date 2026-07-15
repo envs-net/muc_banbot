@@ -205,3 +205,75 @@ async def test_tempban_duration_limit_is_enforced(temp_db_path, monkeypatch):
         assert "MAX_TEMPBAN_DAYS" in bot.sent[-1]["mbody"]
     finally:
         await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_repeated_permanent_ban_updates_reason_only(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        await bot.ban_all("user@example.org", None, issuer="first-admin@example.test", comment="old reason")
+        bot.sent.clear()
+        bot.audit_events.clear()
+
+        await bot.ban_all("user@example.org", None, issuer="second-admin@example.test", comment="new reason")
+
+        async with bot.db.execute(
+            "SELECT until, issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("user@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (0, "first-admin@example.test", "new reason")
+        assert any("Ban reason updated" in msg["mbody"] for msg in bot.sent)
+        assert bot.audit_events[-1][0] == "ban_updated"
+        assert bot.audit_events[-1][1]["actor"] == "second-admin@example.test"
+        assert bot.audit_events[-1][1]["details"]["old_comment"] == "old reason"
+        assert bot.audit_events[-1][1]["details"]["new_comment"] == "new reason"
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_permanent_ban_without_reason_remains_duplicate(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        await bot.ban_all("user@example.org", None, issuer="first-admin@example.test", comment="keep me")
+        bot.sent.clear()
+
+        await bot.ban_all("user@example.org", None, issuer="second-admin@example.test")
+
+        async with bot.db.execute(
+            "SELECT issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("user@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == ("first-admin@example.test", "keep me")
+        assert any("Ban already exists" in msg["mbody"] for msg in bot.sent)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_tempban_without_reason_preserves_existing_reason(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        first_until = int(time.time()) + 3600
+        second_until = int(time.time()) + 7200
+        await bot.ban_all("user@example.org", first_until, issuer="first-admin@example.test", comment="keep me")
+        bot.sent.clear()
+
+        await bot.ban_all("user@example.org", second_until, issuer="second-admin@example.test")
+
+        async with bot.db.execute(
+            "SELECT until, issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("user@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (second_until, "second-admin@example.test", "keep me")
+        assert any("tempban duration changed" in msg["mbody"] for msg in bot.sent)
+    finally:
+        await bot.db.close()

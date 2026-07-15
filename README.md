@@ -148,8 +148,8 @@ Examples assume the default command prefix `!`.
 | `!room invite list [all/page/last]` | List pending room invites |
 | `!room invite accept/decline/remove/delete/del/rm <id>` | Accept or decline a pending room invite |
 | `!policy` / `!rules show/set/clear/delete/remove/enable/disable` | Manage public room policy text |
-| `!ban <jid/nick/domain> [comment]` | Ban a JID, nick, or wildcard domain |
-| `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add a temporary ban |
+| `!ban <jid/nick/domain> [comment]` | Add a permanent ban or update an existing ban reason |
+| `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add or update a temporary ban; omitted comments preserve the old reason |
 | `!unban <jid/nick/domain>` | Remove a ban |
 | `!redact <jid> [reason]` / `!redact id ...` / `!redact cleanup` | Redact indexed messages or clean old redaction index entries |
 | `!protections list [all/page/last]` | List protection enabled/disabled state |

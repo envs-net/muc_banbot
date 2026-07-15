@@ -167,8 +167,8 @@ class CommandHelpMixin:
             f"{p}policy / {p}rules show/set/clear/delete/remove/enable/disable/help/usage - manage public rules/policy text\n\n"
 
             "🛡️ Moderation\n"
-            f"{p}ban <jid|nick> [comment] - ban user from all protected rooms\n"
-            f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - temporary ban\n"
+            f"{p}ban <jid|nick> [comment] - ban or update an existing permanent ban reason\n"
+            f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - add/update tempban; omitted reason is preserved\n"
             f"{p}unban <jid|nick> - remove ban\n"
             f"{p}redact <jid> [reason] - redact indexed messages from a JID in protected rooms\n"
             f"{p}redact id <room_jid> <stanza_id> [reason] - redact one known stanza ID\n"

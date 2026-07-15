@@ -111,8 +111,8 @@ See [Public Policy / Rules](policy.md).
 
 | Command | Description |
 | --- | --- |
-| `!ban <jid\|nick\|*.domain.tld> [comment]` | Adds a permanent ban |
-| `!tempban <jid\|nick> <10m\|2h\|1d> [comment]` | Adds a temporary ban |
+| `!ban <jid\|nick\|*.domain.tld> [comment]` | Adds a permanent ban or updates the reason of an existing permanent ban |
+| `!tempban <jid\|nick> <10m\|2h\|1d> [comment]` | Adds or updates a temporary ban; without a comment, the existing reason is preserved |
 | `!unban <jid\|nick\|*.domain.tld>` | Removes a ban |
 | `!redact <jid> [reason]` | Redacts indexed messages from a bare JID in protected rooms |
 | `!redact id <room_jid> <stanza_id> [reason]` | Redacts one specific stanza ID in a protected room |
