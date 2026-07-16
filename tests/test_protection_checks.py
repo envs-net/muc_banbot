@@ -606,3 +606,41 @@ async def test_repeated_punitive_protection_actions_are_suppressed_during_cooldo
     )
 
     assert bot.bans == [("spam@example.org", None, "protection:FloodSpamProtection", "spam/flood detected")]
+
+@pytest.mark.asyncio
+async def test_observe_mode_reports_without_enforcement_or_redaction(monkeypatch):
+    monkeypatch.setattr("banbot.protections.actions.ADMIN_ROOM", ADMIN_ROOM)
+    bot = DummyProtections()
+    config = bot.protection_config("FloodSpamProtection")
+    config.update({"observe": True, "action": "ban", "redact": True})
+
+    await bot._protection_apply_action(
+        protection="FloodSpamProtection",
+        room=ROOM,
+        nick="Spammer",
+        msg=object(),
+        details={"messages": 11},
+    )
+
+    assert bot.bans == []
+    assert bot.redactions == []
+    assert bot.target_redactions == []
+    assert "Would perform: ban" in bot.sent[-1][1]
+    assert "Would redact: yes" in bot.sent[-1][1]
+    assert bot.audit[-1][1]["details"]["observe"] is True
+    assert bot.audit[-1][1]["details"]["would_action"] == "ban"
+
+
+@pytest.mark.asyncio
+async def test_joinwave_observe_mode_does_not_lock_room(monkeypatch):
+    monkeypatch.setattr("banbot.protections.checks.ADMIN_ROOM", ADMIN_ROOM)
+    bot = DummyProtections()
+    config = bot.protection_config("JoinWaveShortCircuitProtection")
+    config.update({"observe": True, "action": "lockdown", "cooldown_seconds": 1})
+
+    await bot._protection_handle_join_wave(ROOM, 9, config)
+
+    assert bot.muc_plugin.room_configs == []
+    assert "Action: observe (would lock down)" in bot.sent[-1][1]
+    assert "Lockdown applied: no" in bot.sent[-1][1]
+    assert bot.audit[-1][1]["details"]["observe"] is True

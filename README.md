@@ -300,3 +300,16 @@ The full documentation is split into focused guides. Start with the [documentati
 * CSV imports create a managed full backup before writing data, but dry-runs do not create backups or change the database.
 * The ignorelist protects exact JIDs from all bans and domains from domain-based/RTBL domain matches.
 * If RTBL publishing is enabled, ensure the configured PubSub nodes are not writable by arbitrary users.
+
+
+## Moderation inspection and editing
+
+- `!baninfo <target>` shows the complete current ban metadata.
+- `!history <target> [all|page|last]` shows the audit-backed moderation history.
+- `!banedit <target> reason <text>` changes a reason.
+- `!banedit <target> duration <duration>` resets a tempban from now.
+- `!banedit <target> extend|reduce <duration>` adjusts a tempban.
+- `!banedit <target> permanent` converts a tempban to a permanent ban.
+- `!banedit <target> temp <duration>` converts or resets a ban to a tempban.
+
+Protection observe mode can be enabled with `!protections <name> observe on`. Matching events are announced and audited, but no kick, ban, redaction, warning, or lockdown is applied. Disable it with `observe off` or `enforce`.

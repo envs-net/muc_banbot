@@ -19,6 +19,7 @@ PROTECTION_ORDER = (
 PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     "FloodSpamProtection": {
         "enabled": False,
+        "observe": False,
         "window_seconds": 60,
         "max_messages": 10,
         "action": "ban",
@@ -29,6 +30,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "SimilarMessageProtection": {
         "enabled": False,
+        "observe": False,
         "window_seconds": 120,
         "max_similar": 3,
         "similarity_percent": 90,
@@ -42,6 +44,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "FirstMessageMediaProtection": {
         "enabled": False,
+        "observe": False,
         "join_grace_seconds": 600,
         "action": "tempban",
         "tempban_seconds": 86400,
@@ -51,6 +54,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "MentionLimitProtection": {
         "enabled": False,
+        "observe": False,
         "max_mentions": 5,
         "action": "tempban",
         "tempban_seconds": 3600,
@@ -60,6 +64,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "WordListNewJoinerProtection": {
         "enabled": False,
+        "observe": False,
         "join_grace_seconds": 900,
         "words": [],
         "action": "tempban",
@@ -70,6 +75,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "JoinWaveShortCircuitProtection": {
         "enabled": False,
+        "observe": False,
         "window_seconds": 60,
         "max_joins": 8,
         "action": "lockdown",
@@ -84,6 +90,7 @@ PROTECTION_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "TrustedReporters": {
         "enabled": False,
+        "observe": False,
         "reporters": [],
         "threshold": 2,
         "window_seconds": 900,

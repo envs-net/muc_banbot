@@ -347,6 +347,20 @@ class DirectMessageMixin:
                 await self.cmd_audit(args, reply_to)
                 return True
 
+            if cmd == "baninfo":
+                if not args:
+                    await self._send_direct_message(reply_to, f"❌ Usage: {p}baninfo <jid|nick|*.domain.tld>")
+                    return True
+                await self.cmd_baninfo(args[0], ADMIN_ROOM)
+                return True
+
+            if cmd == "history":
+                if not args:
+                    await self._send_direct_message(reply_to, f"❌ Usage: {p}history <jid|nick|*.domain.tld> [all|page|last]")
+                    return True
+                await self.cmd_history(args[0], ADMIN_ROOM, args[1:])
+                return True
+
             if cmd == "why":
                 if not args:
                     await self._send_direct_message(
@@ -479,6 +493,8 @@ class DirectMessageMixin:
                     f"{p}updatecheck",
                     f"{p}banlist",
                     f"{p}bansearch",
+                    f"{p}baninfo",
+                    f"{p}history",
                     f"{p}why",
                     f"{p}room list",
                     f"{p}room invite list",
@@ -507,6 +523,7 @@ class DirectMessageMixin:
                 f"{self.command_prefix}omemo status, {self.command_prefix}omemo devices, "
                 f"{self.command_prefix}checkupdate, {self.command_prefix}updatecheck, "
                 f"{self.command_prefix}banlist, {self.command_prefix}bansearch, "
+                f"{self.command_prefix}baninfo, {self.command_prefix}history, "
                 f"{self.command_prefix}why, {self.command_prefix}room list, "
                 f"{self.command_prefix}room invite list, {self.command_prefix}ignore list, "
                 f"{self.command_prefix}whitelist list, {self.command_prefix}rtbl list, "

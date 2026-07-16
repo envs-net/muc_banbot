@@ -14,6 +14,7 @@ class CommandUsageMixin:
             f"  {p}protections <name> config/show\n"
             f"  {p}protections <name> set <key> <value>\n"
             f"  {p}protections <name> reset\n"
+            f"  {p}protections <name> observe <on|off>\n"
             f"  {p}protections reporters add/remove/list <jid>\n\n"
             "Examples:\n"
             f"  {p}protection enable FloodSpamProtection\n"
@@ -195,6 +196,26 @@ class CommandUsageMixin:
         """Return usage text for ban command."""
         p = self.command_prefix
         return f"Usage: {p}ban <jid|nick|*.domain.tld> [comment]"
+
+    def _baninfo_usage_text(self) -> str:
+        p = self.command_prefix
+        return f"Usage: {p}baninfo <jid|nick|*.domain.tld>"
+
+    def _history_usage_text(self) -> str:
+        p = self.command_prefix
+        return f"Usage: {p}history <jid|nick|*.domain.tld> [all|page|last]"
+
+    def _banedit_usage_text(self) -> str:
+        p = self.command_prefix
+        return (
+            "Usage:\n"
+            f"  {p}banedit <target> reason <text>\n"
+            f"  {p}banedit <target> duration <10m|2h|1d>\n"
+            f"  {p}banedit <target> extend <duration>\n"
+            f"  {p}banedit <target> reduce <duration>\n"
+            f"  {p}banedit <target> permanent\n"
+            f"  {p}banedit <target> temp <duration>"
+        )
 
     def _tempban_usage_text(self) -> str:
         """Return usage text for tempban command."""

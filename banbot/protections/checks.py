@@ -106,12 +106,13 @@ class ProtectionChecksMixin:
 
         reason = str(config.get("reason") or "join wave detected")
         action = str(config.get("action") or "lockdown").lower().strip()
-        notify_only = bool(config.get("notify_only", False)) or action == "notify"
+        observe = bool(config.get("observe", False))
+        notify_only = bool(config.get("notify_only", False)) or action == "notify" or observe
         lockdown_applied = False
         if not notify_only:
             lockdown_applied = await self._protection_lockdown_room(room, config, reason)
 
-        action_text = "notify only" if notify_only else "members-only/moderated"
+        action_text = "observe (would lock down)" if observe else ("notify only" if notify_only else "members-only/moderated")
         await self.bot_send_message(
             mto=ADMIN_ROOM,
             mbody=(
@@ -129,9 +130,9 @@ class ProtectionChecksMixin:
             protection,
             room,
             room,
-            "notify" if notify_only else "lockdown",
+            "observe" if observe else ("notify" if notify_only else "lockdown"),
             reason,
-            details={"join_count": join_count},
+            details={"join_count": join_count, "would_action": action if observe else None, "observe": observe},
         )
 
     async def protections_on_message(self, msg, room: str, nick: str, body: str) -> bool:

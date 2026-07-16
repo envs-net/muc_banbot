@@ -55,6 +55,9 @@ class CommandHelpMixin:
             "unban": self._unban_usage_text,
             "banlist": self._banlist_usage_text,
             "bansearch": self._bansearch_usage_text,
+            "baninfo": self._baninfo_usage_text,
+            "history": self._history_usage_text,
+            "banedit": self._banedit_usage_text,
             "why": self._why_usage_text,
             "restart": self._restart_usage_text,
             "reload": self._reload_usage_text,
@@ -170,6 +173,7 @@ class CommandHelpMixin:
             f"{p}ban <jid|nick> [comment] - ban or update an existing permanent ban reason\n"
             f"{p}tempban <jid|nick> <10m|2h|1d> [comment] - add/update tempban; omitted reason is preserved\n"
             f"{p}unban <jid|nick> - remove ban\n"
+            f"{p}banedit <target> <operation> ... - edit reason, duration or ban type\n"
             f"{p}redact <jid> [reason] - redact indexed messages from a JID in protected rooms\n"
             f"{p}redact id <room_jid> <stanza_id> [reason] - redact one known stanza ID\n"
             f"{p}redact cleanup - cleanup old redaction index entries\n\n"
@@ -178,7 +182,9 @@ class CommandHelpMixin:
             f"{p}banlist / {p}blacklist [all|page|last] - show all active bans with remaining time and comments\n"
             f"{p}banlist rtbl / {p}blacklist rtbl [all|page|last] - show RTBL hash and domain entries\n"
             f"{p}bansearch <query> [all|page|last] - search bans by nick, domain, jid or RTBL reason\n"
-            f"{p}why <nick|jid> - show the reason and remaining time for a ban\n\n"
+            f"{p}why <nick|jid> - show the reason and remaining time for a ban\n"
+            f"{p}baninfo <target> - show complete current ban metadata\n"
+            f"{p}history <target> [all|page|last] - show moderation history\n\n"
 
             "✅ Ignorelist / Whitelist\n"
             f"{p}ignore [list|all|page|last] - show global ignorelist (alias: {p}whitelist)\n"
@@ -197,6 +203,7 @@ class CommandHelpMixin:
             f"{p}protections <name> show/config - show protection configuration\n"
             f"{p}protections <name> set <key> <value> - update protection configuration\n"
             f"{p}protections <name> reset - reset a protection to defaults\n"
+            f"{p}protections <name> observe <on|off> - toggle consequence-free observation\n"
             f"{p}protections reporters add/remove/list <jid> - manage trusted reporters\n"
             f"{p}report <nick|jid> [reason] - report abuse as trusted reporter\n\n"
 

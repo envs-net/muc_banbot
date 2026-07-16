@@ -151,11 +151,31 @@ class ProtectionActionsMixin:
         target = jid or normalized_nick
         now = time.time()
         punitive_action = action in {"kick", "tempban", "ban"}
+        observe = bool(config.get("observe", False))
         if punitive_action:
             cooldown_seconds = self._protection_action_cooldown_seconds(config)
             if self._protection_action_on_cooldown(room, target, now):
                 return
             self._protection_set_action_cooldown(room, target, cooldown_seconds, now)
+
+        if observe:
+            await self.bot_send_message(
+                mto=ADMIN_ROOM,
+                mbody=(
+                    f"👁️ {protection} observe match\n"
+                    f"Room: {room}\n"
+                    f"Target: {safe_jid(target)}\n"
+                    f"Would perform: {action}\n"
+                    f"Would redact: {'yes' if redact_enabled else 'no'}\n"
+                    f"Reason: {reason}"
+                ),
+                mtype="groupchat",
+            )
+            await self._audit_protection_event(
+                protection, room, target, "observe", reason,
+                details={"would_action": action, "would_redact": redact_enabled, "observe": True, **(details or {})},
+            )
+            return
 
         if redact_enabled and msg is not None:
             await self._protection_redact_message(msg, reason, actor)

@@ -114,6 +114,11 @@ See [Public Policy / Rules](policy.md).
 | `!ban <jid\|nick\|*.domain.tld> [comment]` | Adds a permanent ban or updates the reason of an existing permanent ban |
 | `!tempban <jid\|nick> <10m\|2h\|1d> [comment]` | Adds or updates a temporary ban; without a comment, the existing reason is preserved |
 | `!unban <jid\|nick\|*.domain.tld>` | Removes a ban |
+| `!banedit <target> reason <text>` | Updates the reason of an existing ban |
+| `!banedit <target> duration <duration>` | Resets a tempban duration from now |
+| `!banedit <target> extend/reduce <duration>` | Extends or shortens an existing tempban |
+| `!banedit <target> permanent` | Converts an existing tempban into a permanent ban |
+| `!banedit <target> temp <duration>` | Converts or resets an existing ban as a tempban |
 | `!redact <jid> [reason]` | Redacts indexed messages from a bare JID in protected rooms |
 | `!redact id <room_jid> <stanza_id> [reason]` | Redacts one specific stanza ID in a protected room |
 | `!redact cleanup` | Deletes old redaction index entries according to retention settings |
@@ -131,6 +136,7 @@ See [Public Policy / Rules](policy.md).
 | `!protections <name> config` | Shows one protection config |
 | `!protections <name> set <key> <value>` | Updates one protection config value |
 | `!protections <name> reset` | Resets one protection to built-in defaults |
+| `!protections <name> observe <on\|off>` | Enables or disables consequence-free observe mode |
 | `!protections reporters add/remove/list` | Manages trusted reporter bare JIDs |
 | `!report <nick\|jid> [reason]` | Trusted reporter command when `TrustedReporters` is enabled |
 
@@ -147,6 +153,8 @@ See [Protections](protections.md).
 | `!banlist rtbl [all\|page\|last]` / `!blacklist rtbl [all\|page\|last]` | Shows raw RTBL hash/domain cache entries |
 | `!bansearch <query> [all\|page\|last]` | Searches bans by target, issuer, comment, or RTBL reason |
 | `!why <nick\|jid>` | Explains why a user is banned |
+| `!baninfo <jid\|nick\|*.domain.tld>` | Shows complete current ban metadata |
+| `!history <jid\|nick\|*.domain.tld> [all\|page\|last]` | Shows paginated moderation history from the audit log |
 
 ### Ignorelist / Whitelist
 
@@ -228,6 +236,8 @@ Allowed read-only DM/MUC-PM commands:
 !banlist [all|page|last]
 !banlist rtbl [all|page|last]
 !bansearch <query> [all|page|last]
+!baninfo <jid|nick|*.domain.tld>
+!history <jid|nick|*.domain.tld> [all|page|last]
 !why <nick|jid>
 !room list [all|page]
 !room invite list [all|page|last]

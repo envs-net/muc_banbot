@@ -57,6 +57,7 @@ PROTECTION_BOOL_VALIDATION_KEYS = {
     "notify_bans",
     "notify_unbans",
     "notify_config",
+    "observe",
     "ignore_member_affiliations",
 }
 PROTECTION_LIST_OF_STR_VALIDATION_KEYS = {"words", "reporters"}
@@ -221,6 +222,19 @@ class ProtectionCommandsMixin:
         if action == "reset":
             await self.cmd_protection_reset(room, name, nick)
             return
+        if action in {"observe", "enforce"}:
+            value = action == "observe"
+            if len(args) >= 3:
+                raw = args[2].lower()
+                if raw in {"on", "true", "yes", "1"}:
+                    value = True
+                elif raw in {"off", "false", "no", "0"}:
+                    value = False
+                else:
+                    await self.bot_send_message(mto=room, mbody=f"❌ Usage: {self.command_prefix}{cmd} <protection> observe <on|off>", mtype="groupchat")
+                    return
+            await self.cmd_protection_set_config(room, name, "observe", "true" if value else "false", nick)
+            return
         if canonical_protection_name(name) == "TrustedReporters" and action in {"add", "remove", "delete", "rm", "del", "list"}:
             await self.cmd_trusted_reporters(room, action, args[2:], nick)
             return
@@ -242,7 +256,8 @@ class ProtectionCommandsMixin:
                 f"  {self.command_prefix}protection enable <name>\n"
                 f"  {self.command_prefix}protection disable <name>\n"
                 f"  {self.command_prefix}protections <name> config\n"
-                f"  {self.command_prefix}protections <name> set <key> <value>"
+                f"  {self.command_prefix}protections <name> set <key> <value>\n"
+                f"  {self.command_prefix}protections <name> observe <on|off>"
             ),
             mtype="groupchat",
         )

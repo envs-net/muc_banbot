@@ -43,6 +43,121 @@ class BanQueryMixin:
         )
 
 
+    async def _find_ban_record(self, identifier: str):
+        """Resolve an active or stored ban by canonical target, JID, nick, or JID localpart."""
+        value = str(identifier or "").strip().lower()
+        if not value:
+            return None
+        if value.startswith("*."):
+            target_type, target = "domain", value[2:].strip(".")
+        elif "@" in value:
+            target_type, target = "jid", self.bare_jid(value)
+        else:
+            target_type, target = "nick", value
+        query = """
+            SELECT id, target_type, target, jid, nick, until, issuer, comment, created_at, updated_at
+            FROM bans WHERE target_type = ? AND target = ?
+        """
+        async with self.db.execute(query, (target_type, target)) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            return row
+        if "@" in value:
+            async with self.db.execute(
+                "SELECT id, target_type, target, jid, nick, until, issuer, comment, created_at, updated_at FROM bans WHERE jid = ?",
+                (self.bare_jid(value),),
+            ) as cursor:
+                return await cursor.fetchone()
+        async with self.db.execute(
+            "SELECT id, target_type, target, jid, nick, until, issuer, comment, created_at, updated_at FROM bans WHERE LOWER(nick) = ?",
+            (value,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            return row
+        async with self.db.execute(
+            "SELECT id, target_type, target, jid, nick, until, issuer, comment, created_at, updated_at FROM bans WHERE target_type = 'jid'"
+        ) as cursor:
+            async for candidate in cursor:
+                jid = candidate[3]
+                if jid and self.bare_jid(jid).split("@", 1)[0].lower() == value:
+                    return candidate
+        return None
+
+    @staticmethod
+    def _format_timestamp(timestamp: int | None) -> str:
+        if not timestamp:
+            return "unknown"
+        return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(int(timestamp)))
+
+    async def cmd_baninfo(self, identifier: str, room: str) -> None:
+        """Show complete metadata for one ban in the admin room."""
+        row = await self._find_ban_record(identifier)
+        if not row:
+            await self.bot_send_message(mto=room, mbody=f"❌ No ban found for {identifier}", mtype="groupchat")
+            return
+        _id, target_type, target, jid, nick, until, issuer, comment, created_at, updated_at = row
+        now = int(time.time())
+        active = self._is_active_ban(int(until or 0), now)
+        kind = "temporary" if int(until or 0) > 0 else "permanent"
+        remaining = human_time(max(0, int(until) - now)) if int(until or 0) > 0 and active else ("permanent" if active else "expired")
+        lines = [
+            f"🔎 Ban info: {target}",
+            f"Status: {'active' if active else 'expired'}",
+            f"Type: {kind}",
+            f"Target type: {target_type}",
+            f"Target: {target}",
+            f"JID: {jid or '-'}",
+            f"Nick: {nick or '-'}",
+            f"Reason: {comment or '-'}",
+            f"Issuer: {issuer or 'unknown'}",
+            f"Created: {self._format_timestamp(created_at)}",
+            f"Updated: {self._format_timestamp(updated_at)}",
+            f"Expires: {self._format_timestamp(until) if int(until or 0) > 0 else 'never'}",
+            f"Remaining: {remaining}",
+            f"RTBL source: {'yes' if str(issuer or '').lower() == 'rtbl' else 'no'}",
+        ]
+        await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
+
+    async def cmd_history(self, identifier: str, room: str, args: list[str] | None = None) -> None:
+        """Show paginated moderation history for a target."""
+        args = args or []
+        row = await self._find_ban_record(identifier)
+        terms = {str(identifier).strip().lower()}
+        if row:
+            terms.update(str(value).lower() for value in (row[2], row[3], row[4]) if value)
+        clauses = []
+        params = []
+        for term in sorted(terms):
+            like = f"%{term}%"
+            clauses.append("(LOWER(COALESCE(target,'')) LIKE ? OR LOWER(COALESCE(jid,'')) LIKE ? OR LOWER(COALESCE(nick,'')) LIKE ? OR LOWER(COALESCE(details,'')) LIKE ?)")
+            params.extend((like, like, like, like))
+        sql = f"""
+            SELECT created_at, event_type, actor, target_type, target, jid, nick, until, comment, details
+            FROM audit_log WHERE {' OR '.join(clauses)} ORDER BY created_at DESC, id DESC
+        """
+        async with self.db.execute(sql, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+        if not rows:
+            await self.bot_send_message(mto=room, mbody=f"ℹ️ No moderation history found for {identifier}", mtype="groupchat")
+            return
+        lines = [self._format_audit_row(entry) for entry in rows]
+        show_all = bool(args and any(str(arg).lower() == "all" for arg in args))
+        if show_all:
+            body = f"📜 History for {identifier} ({len(lines)} events):\n" + "\n".join(lines)
+        else:
+            page = -1 if args and str(args[0]).lower() == "last" else 1
+            if args and str(args[0]).isdigit():
+                page = max(1, int(args[0]))
+            per_page = get_list_page_size(self)
+            page = resolve_page(page, len(lines), per_page)
+            page_lines, current, total, count = paginate_lines(lines, page, per_page)
+            body = f"📜 History for {identifier} ({count}) - Page {current}/{total}:\n" + "\n".join(page_lines)
+            if current < total:
+                body += f"\n\nUse {self.command_prefix}history {identifier} {current + 1} for the next page."
+        await self.bot_send_message(mto=room, mbody=body, mtype="groupchat")
+
+
     async def cmd_bansearch(self, query: str, page: int = 1, show_all: bool = False) -> None:
         """
         Searches bans by JID, nick, domain, issuer, or comment/reason.

@@ -89,6 +89,75 @@ class CommandModerationMixin:
         query = " ".join(query_args)
         await self.cmd_bansearch(query, page=page, show_all=show_all)
 
+
+    async def _dispatch_baninfo_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
+        if not args:
+            await self.bot_send_message(mto=room, mbody=f"❌ Usage: {self.command_prefix}baninfo <jid|nick|*.domain.tld>", mtype="groupchat")
+            return
+        await self.cmd_baninfo(args[0], room)
+
+    async def _dispatch_history_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
+        if not args:
+            await self.bot_send_message(mto=room, mbody=f"❌ Usage: {self.command_prefix}history <jid|nick|*.domain.tld> [all|page|last]", mtype="groupchat")
+            return
+        await self.cmd_history(args[0], room, args[1:])
+
+    async def _dispatch_banedit_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
+        usage = (
+            f"Usage:\n"
+            f"  {self.command_prefix}banedit <target> reason <text>\n"
+            f"  {self.command_prefix}banedit <target> duration <10m|2h|1d>\n"
+            f"  {self.command_prefix}banedit <target> extend <10m|2h|1d>\n"
+            f"  {self.command_prefix}banedit <target> reduce <10m|2h|1d>\n"
+            f"  {self.command_prefix}banedit <target> permanent\n"
+            f"  {self.command_prefix}banedit <target> temp <10m|2h|1d>"
+        )
+        if len(args) < 2:
+            await self.bot_send_message(mto=room, mbody=f"❌ {usage}", mtype="groupchat")
+            return
+        target, operation = args[0], args[1].lower()
+        row = await self._find_ban_record(target)
+        if not row:
+            await self.bot_send_message(mto=room, mbody=f"❌ No ban found for {target}", mtype="groupchat")
+            return
+        actor = self._actor_jid_from_room_nick(room, nick)
+        until = int(row[5] or 0)
+        comment = row[7]
+        if operation == "reason":
+            if len(args) < 3 or not " ".join(args[2:]).strip():
+                await self.bot_send_message(mto=room, mbody=f"❌ Usage: {self.command_prefix}banedit <target> reason <text>", mtype="groupchat")
+                return
+            await self.ban_all(target, until if until > 0 else None, actor, " ".join(args[2:]).strip(), notify_policy=False)
+            return
+        if operation == "permanent":
+            await self.ban_all(target, None, actor, comment, notify_policy=False)
+            return
+        if operation in {"duration", "temp", "extend", "reduce"}:
+            if len(args) < 3:
+                await self.bot_send_message(mto=room, mbody=f"❌ {usage}", mtype="groupchat")
+                return
+            try:
+                seconds = parse_duration(args[2])
+            except (TypeError, ValueError):
+                await self.bot_send_message(mto=room, mbody="❌ Invalid duration format", mtype="groupchat")
+                return
+            now = int(time.time())
+            if operation in {"duration", "temp"}:
+                new_until = now + seconds
+            elif operation == "extend":
+                new_until = max(now, until) + seconds
+            else:
+                if until <= 0:
+                    await self.bot_send_message(mto=room, mbody="❌ A permanent ban cannot be reduced. Convert it to a tempban first.", mtype="groupchat")
+                    return
+                new_until = until - seconds
+                if new_until <= now:
+                    await self.bot_send_message(mto=room, mbody="❌ Reduction would expire the ban immediately. Use unban instead.", mtype="groupchat")
+                    return
+            await self.ban_all(target, new_until, actor, comment, notify_policy=False)
+            return
+        await self.bot_send_message(mto=room, mbody=f"❌ Unknown banedit operation: {operation}\n{usage}", mtype="groupchat")
+
     async def _dispatch_redact_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
         actor_jid = self._actor_jid_from_room_nick(room, nick)
         await self.cmd_redact(args, room, actor=actor_jid)

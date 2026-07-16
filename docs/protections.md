@@ -133,3 +133,8 @@ See [Testing and CI](testing.md#live-protection-smoke-test) for setup, environme
 `FirstMessageMediaProtection` and `WordListNewJoinerProtection` only act on users whose join was observed by the running bot. This avoids false positives after a bot restart where existing occupants would otherwise look like new users.
 
 `JoinWaveShortCircuitProtection` uses the MUC service's room configuration support. The bot must have sufficient room admin/owner rights, and the server must support changing the relevant MUC config fields. The protection ignores the initial room roster for `startup_grace_seconds` after the bot joins a room, so existing occupants are not treated as a join wave after restarts. It also remembers occupants that were present before a reconnect for `rejoin_grace_seconds`, so a server restart where the same users rejoin does not look like a raid. By default, occupants with `member`, `admin`, or `owner` affiliation are not counted for join-wave detection (`ignore_member_affiliations=true`). It also has a short `cooldown_seconds` period after each trigger to avoid repeated notifications during the same wave.
+
+
+## Observe mode
+
+Use `!protections <name> observe on` to evaluate a protection without consequences. The bot records and announces what the configured action would have been, while suppressing kicks, bans, tempbans, redactions, warnings, and room lockdowns. Use `observe off` (or `enforce`) to return to enforcement mode.
