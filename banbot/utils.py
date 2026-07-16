@@ -46,6 +46,16 @@ def bare_jid(jid: str | None) -> str | None:
     return jid.split("/")[0].lower() if jid else None
 
 
+def normalize_actor(actor: str | None) -> str | None:
+    """Remove an XMPP resource from actor JIDs while preserving symbolic actors."""
+    if not actor:
+        return actor
+    value = str(actor).strip()
+    if "@" in value:
+        return bare_jid(value)
+    return value
+
+
 def safe_jid(text) -> str:
     """Make JIDs less likely to be auto-linked or pinged in chat clients."""
     return str(text).replace("@", "@\u200b")

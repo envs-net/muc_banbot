@@ -344,7 +344,7 @@ class MucMixin:
         if hasattr(self, "_sync_outcast_is_expired_tempban"):
             try:
                 if await self._sync_outcast_is_expired_tempban(jid_bare, now):
-                    await self.unban_all(jid_bare, issuer="system")
+                    await self.unban_all(jid_bare, issuer="system", notify_policy=False)
                     return
             except Exception as exc:
                 log.debug("Could not check expired tempban state for manual MUC ban %s: %s", jid_bare, exc)

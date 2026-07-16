@@ -190,7 +190,7 @@ class MucBotFixture(CacheMixin, DatabaseMixin, MucMixin):
     ) -> None:
         self.manual_redactions.append((jid, comment, actor))
 
-    async def unban_all(self, jid: str, issuer: str = "system") -> None:
+    async def unban_all(self, jid: str, issuer: str = "system", *, notify_policy: bool = True) -> None:
         self.unbans.append((jid, issuer))
 
 

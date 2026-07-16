@@ -4,7 +4,7 @@ import time
 
 from config import ADMIN_ROOM
 
-from .utils import get_list_page_size, human_time, paginate_lines, resolve_page
+from .utils import get_list_page_size, human_time, normalize_actor, paginate_lines, resolve_page
 
 
 class BanQueryMixin:
@@ -19,7 +19,7 @@ class BanQueryMixin:
     @staticmethod
     def _format_issuer_for_room(issuer: str | None, room: str) -> str:
         """Show full issuer in the admin room, but anonymize admins in protected rooms."""
-        issuer_display = issuer or "unknown"
+        issuer_display = normalize_actor(issuer) or "unknown"
         if room != ADMIN_ROOM and issuer_display.lower() != "rtbl":
             return "admin"
         return issuer_display
@@ -110,7 +110,7 @@ class BanQueryMixin:
             f"JID: {jid or '-'}",
             f"Nick: {nick or '-'}",
             f"Reason: {comment or '-'}",
-            f"Issuer: {issuer or 'unknown'}",
+            f"Issuer: {normalize_actor(issuer) or 'unknown'}",
             f"Created: {self._format_timestamp(created_at)}",
             f"Updated: {self._format_timestamp(updated_at)}",
             f"Expires: {self._format_timestamp(until) if int(until or 0) > 0 else 'never'}",

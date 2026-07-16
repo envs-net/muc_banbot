@@ -441,3 +441,35 @@ async def test_config_output_includes_omemo_and_rtbl_publish_details():
     assert "Service:     pubsub.example.org" in body
     assert "JID node:    muc_bans_sha256" in body
     assert "Domain node: muc_bans_domains" in body
+
+@pytest.mark.asyncio
+async def test_banlist_and_baninfo_hide_issuer_resource(temp_db_path):
+    bot = AuditStatusQueryBot()
+    await bot.setup_db()
+    try:
+        await bot.db.execute(
+            """
+            INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment)
+            VALUES ('jid', ?, ?, ?, 0, ?, ?)
+            """,
+            (
+                "user@example.org",
+                "user@example.org",
+                "User",
+                "admin@example.org/gajim.A0Q0E069",
+                "spam",
+            ),
+        )
+        await bot.db.commit()
+
+        await bot.cmd_banlist("admin@conference.example.org", show_all=True)
+        body = last_body(bot)
+        assert "by admin@example.org" in body
+        assert "gajim.A0Q0E069" not in body
+
+        await bot.cmd_baninfo("user@example.org", "admin@conference.example.org")
+        body = last_body(bot)
+        assert "Issuer: admin@example.org" in body
+        assert "gajim.A0Q0E069" not in body
+    finally:
+        await bot.db.close()

@@ -326,3 +326,49 @@ async def test_repeated_tempban_without_reason_preserves_existing_reason(temp_db
         assert any("tempban duration changed" in msg["mbody"] for msg in bot.sent)
     finally:
         await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_ban_all_strips_admin_resource_from_storage_and_confirmation(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        await bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="admin@example.test/gajim.A0Q0E069",
+            comment="spam",
+        )
+
+        async with bot.db.execute(
+            "SELECT issuer FROM bans WHERE jid = ?", ("user@example.org",)
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == ("admin@example.test",)
+        assert any("by admin@example.test" in msg["mbody"] for msg in bot.sent)
+        assert all("gajim.A0Q0E069" not in msg["mbody"] for msg in bot.sent)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_unban_worker_suppresses_policy_notice_for_expired_tempban(temp_db_path):
+    bot = await make_bot()
+    try:
+        await bot.upsert_ban_db(
+            "expired@example.org", "Expired", int(time.time()) - 1,
+            "admin@example.test", "spam"
+        )
+        calls = []
+
+        async def capture_unban(identifier, issuer=None, *, notify_policy=True):
+            calls.append((identifier, issuer, notify_policy))
+            raise asyncio.CancelledError
+
+        bot.unban_all = capture_unban
+        with pytest.raises(asyncio.CancelledError):
+            await bot.unban_worker()
+
+        assert calls == [("expired@example.org", "system", False)]
+    finally:
+        await bot.db.close()

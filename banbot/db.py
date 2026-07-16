@@ -6,7 +6,7 @@ import time
 import aiosqlite
 from config import DB_FILE
 
-from .utils import normalize_ban_target
+from .utils import normalize_actor, normalize_ban_target
 
 log = logging.getLogger(__name__)
 
@@ -327,6 +327,7 @@ class DatabaseMixin:
     ) -> None:
         """Insert or update a ban using the normalized target_type/target key."""
         target_type, target, normalized_jid, normalized_nick = normalize_ban_target(jid, nick)
+        issuer = normalize_actor(issuer)
         if target_type == "domain" and normalized_jid is None:
             normalized_jid = f"*.{target}"
 
@@ -421,6 +422,7 @@ class DatabaseMixin:
                 or normalized_target != target
                 or normalized_jid != jid
                 or normalized_nick != nick
+                or normalize_actor(issuer) != issuer
             ):
                 changed = True
 
@@ -431,7 +433,7 @@ class DatabaseMixin:
                 "jid": normalized_jid,
                 "nick": normalized_nick,
                 "until": int(until or 0),
-                "issuer": issuer,
+                "issuer": normalize_actor(issuer),
                 "comment": comment,
                 "created_at": int(created_at or time.time()),
                 "updated_at": int(updated_at or time.time()),

@@ -483,7 +483,7 @@ class SyncMixin:
                         jid_bare,
                         room,
                     )
-                    await self.unban_all(jid_bare, issuer="system")
+                    await self.unban_all(jid_bare, issuer="system", notify_policy=False)
                     continue
 
                 comment_value = room_reason or "Recovered from room"
@@ -685,7 +685,7 @@ class SyncMixin:
                         jid_bare,
                         room,
                     )
-                    await self.unban_all(jid_bare, issuer="system")
+                    await self.unban_all(jid_bare, issuer="system", notify_policy=False)
                     continue
 
                 comment = room_reason or "Recovered from room"

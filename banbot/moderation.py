@@ -13,6 +13,7 @@ from .utils import (
     human_time,
     looks_like_domain,
     normalize_ban_target,
+    normalize_actor,
     validate_domain_ban,
     validate_jid_format,
 )
@@ -167,7 +168,8 @@ class ModerationMixin:
         # --- Step 4: Notifications ---
         if room == ADMIN_ROOM:
             display = self.bare_jid(ban_jid) if ban_jid else (ban_nick or "Unknown")
-            msg_admin = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + f" by {issuer}"
+            issuer_display = normalize_actor(issuer) or "unknown"
+            msg_admin = f"✅ Banned {display}" + (f" ({comment})" if comment else "") + f" by {issuer_display}"
             await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
         elif room in self.protected_rooms:
             if self.allow_user_cmds and self.show_ban_in_muc:
@@ -193,6 +195,7 @@ class ModerationMixin:
         notify_policy: bool = True,
     ) -> None:
         """Ban a target while holding the shared ban-state lock."""
+        issuer = normalize_actor(issuer) or "unknown"
         async with ban_state_lock(self):
             await self._ban_all_locked(
                 identifier,
@@ -495,7 +498,8 @@ class ModerationMixin:
         if not skip_final_message:
             display = normalized_jid if normalized_jid else (normalized_nick or "Unknown")
             time_info = f" ({human_time(ts - int(time.time()))})" if ts > 0 else ""
-            msg_admin = f"✅ Banned {display}{time_info}" + (f" ({comment})" if comment else "") + f" by {issuer}"
+            issuer_display = normalize_actor(issuer) or "unknown"
+            msg_admin = f"✅ Banned {display}{time_info}" + (f" ({comment})" if comment else "") + f" by {issuer_display}"
             await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
 
         for room in self.protected_rooms:
@@ -537,7 +541,7 @@ class ModerationMixin:
                     identifier = f"*.{target}" if target_type == "domain" else (self.bare_jid(ban_jid) if ban_jid else ban_nick)
                     log.info("⏳ Temporary ban expired: %s, auto-unbanning...", identifier)
                     expired.append(identifier)
-                    await self.unban_all(identifier, issuer="system")
+                    await self.unban_all(identifier, issuer="system", notify_policy=False)
 
                 if expired:
                     await self.load_bans_from_db()
@@ -650,6 +654,7 @@ class ModerationMixin:
         notify_policy: bool = True,
     ) -> None:
         """Unban a target while holding the shared ban-state lock."""
+        issuer = normalize_actor(issuer)
         async with ban_state_lock(self):
             await self._unban_all_locked(
                 identifier,

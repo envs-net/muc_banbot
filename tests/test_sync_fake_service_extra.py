@@ -279,7 +279,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         """
         self.applied.append((room, ban_jid, ban_nick, comment, announce_missing_rights))
 
-    async def unban_all(self, target, issuer="system"):
+    async def unban_all(self, target, issuer="system", *, notify_policy=True):
         self.unbanned.append((target, issuer))
         await self.delete_ban_db(target)
         await self.load_bans_from_db()
