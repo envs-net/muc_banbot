@@ -67,6 +67,19 @@ async def test_protections_list_shows_enabled_disabled_icons() -> None:
 
 
 @pytest.mark.asyncio
+async def test_protections_list_shows_observe_mode() -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update({"enabled": True, "observe": True})
+    bot.protections["SimilarMessageProtection"].update({"enabled": False, "observe": True})
+
+    await bot.cmd_protections_list("admin@conference.example.org", ["all"])
+
+    body = bot.sent[-1][1]
+    assert "👁️ (enabled, observe) FloodSpamProtection [flood]" in body
+    assert "🔴 (disabled, observe) SimilarMessageProtection [similar]" in body
+
+
+@pytest.mark.asyncio
 async def test_protection_enable_and_config_set() -> None:
     bot = DummyProtections()
 

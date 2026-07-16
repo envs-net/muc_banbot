@@ -282,8 +282,15 @@ class ProtectionCommandsMixin:
         lines = []
         for name in PROTECTION_ORDER:
             config = self.protection_config(name)
-            icon = "🟢" if config.get("enabled") else "🔴"
-            state = "enabled" if config.get("enabled") else "disabled"
+            enabled = bool(config.get("enabled"))
+            observe = bool(config.get("observe", False))
+            if enabled and observe:
+                icon = "👁️"
+            else:
+                icon = "🟢" if enabled else "🔴"
+            state = "enabled" if enabled else "disabled"
+            if observe:
+                state += ", observe"
             alias = PROTECTION_DISPLAY_ALIASES.get(name, name)
             lines.append(f"{icon} ({state}) {name} [{alias}]")
         if show_all:

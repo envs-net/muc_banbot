@@ -7,7 +7,7 @@ Protections are stored in SQLite and can be enabled, disabled, and tuned at runt
 
 | Command | Description |
 | --- | --- |
-| `!protections list [all\|page\|last]` | Lists all protections with 🟢 enabled / 🔴 disabled state and their short alias |
+| `!protections list [all\|page\|last]` | Lists all protections with 🟢 enabled / 🔴 disabled / 👁️ observe state and their short alias |
 | `!protection enable <name>` | Enables a protection |
 | `!protection disable <name>` | Disables a protection |
 | `!protections <name> config` | Shows the current config for one protection |

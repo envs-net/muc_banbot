@@ -152,7 +152,7 @@ Examples assume the default command prefix `!`.
 | `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add or update a temporary ban; omitted comments preserve the old reason |
 | `!unban <jid/nick/domain>` | Remove a ban |
 | `!redact <jid> [reason]` / `!redact id ...` / `!redact cleanup` | Redact indexed messages or clean old redaction index entries |
-| `!protections list [all/page/last]` | List protection enabled/disabled state |
+| `!protections list [all/page/last]` | List protection enabled/disabled and observe state |
 | `!protection enable/disable <name>` | Toggle a protection |
 | `!protections <name> config/set` | Show or edit one protection config |
 | `!report <nick/jid> [reason]` | Trusted reporter command when enabled |
