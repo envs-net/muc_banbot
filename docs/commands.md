@@ -119,6 +119,7 @@ See [Public Policy / Rules](policy.md).
 | `!banedit <target> extend/reduce <duration>` | Extends or shortens an existing tempban |
 | `!banedit <target> permanent` | Converts an existing tempban into a permanent ban |
 | `!banedit <target> temp <duration>` | Converts or resets an existing ban as a tempban |
+| `!banedit <nick> jid <user@domain.tld>` | Converts a nick-only ban into a JID ban |
 | `!redact <jid> [reason]` | Redacts indexed messages from a bare JID in protected rooms |
 | `!redact id <room_jid> <stanza_id> [reason]` | Redacts one specific stanza ID in a protected room |
 | `!redact cleanup` | Deletes old redaction index entries according to retention settings |

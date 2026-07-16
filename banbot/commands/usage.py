@@ -214,7 +214,8 @@ class CommandUsageMixin:
             f"  {p}banedit <target> extend <duration>\n"
             f"  {p}banedit <target> reduce <duration>\n"
             f"  {p}banedit <target> permanent\n"
-            f"  {p}banedit <target> temp <duration>"
+            f"  {p}banedit <target> temp <duration>\n"
+            f"  {p}banedit <nick> jid <user@domain.tld>"
         )
 
     def _tempban_usage_text(self) -> str:

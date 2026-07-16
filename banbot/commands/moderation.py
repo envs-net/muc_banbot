@@ -3,7 +3,7 @@
 import time
 
 from ..locks import ban_state_lock
-from ..utils import parse_duration, wants_all_pages, without_all_pages_arg
+from ..utils import parse_duration, validate_jid_format, wants_all_pages, without_all_pages_arg
 
 
 class CommandModerationMixin:
@@ -110,7 +110,8 @@ class CommandModerationMixin:
             f"  {self.command_prefix}banedit <target> extend <10m|2h|1d>\n"
             f"  {self.command_prefix}banedit <target> reduce <10m|2h|1d>\n"
             f"  {self.command_prefix}banedit <target> permanent\n"
-            f"  {self.command_prefix}banedit <target> temp <10m|2h|1d>"
+            f"  {self.command_prefix}banedit <target> temp <10m|2h|1d>\n"
+            f"  {self.command_prefix}banedit <nick> jid <user@domain.tld>"
         )
         if len(args) < 2:
             await self.bot_send_message(mto=room, mbody=f"❌ {usage}", mtype="groupchat")
@@ -123,6 +124,47 @@ class CommandModerationMixin:
         actor = self._actor_jid_from_room_nick(room, nick)
         until = int(row[5] or 0)
         comment = row[7]
+        if operation == "jid":
+            if len(args) != 3:
+                await self.bot_send_message(mto=room, mbody=f"❌ Usage: {self.command_prefix}banedit <nick> jid <user@domain.tld>", mtype="groupchat")
+                return
+            if row[1] != "nick":
+                await self.bot_send_message(mto=room, mbody="❌ Only a nick ban can be converted to a JID ban.", mtype="groupchat")
+                return
+            new_jid = self.bare_jid(args[2].strip().lower())
+            if not validate_jid_format(new_jid):
+                await self.bot_send_message(mto=room, mbody=f"❌ Invalid JID format: {args[2]}", mtype="groupchat")
+                return
+            protected, reason = await self.is_protected_admin_target(new_jid, nick=row[4], jid=new_jid)
+            if protected:
+                await self.bot_send_message(mto=room, mbody=f"❌ Refusing conversion: {reason}", mtype="groupchat")
+                return
+            if self.is_ignored_target(new_jid):
+                await self.bot_send_message(mto=room, mbody=f"⛔ Refusing conversion: {new_jid} is on the ignorelist.", mtype="groupchat")
+                return
+            async with self.db.execute("SELECT 1 FROM bans WHERE target_type = 'jid' AND target = ?", (new_jid,)) as cursor:
+                if await cursor.fetchone():
+                    await self.bot_send_message(mto=room, mbody=f"❌ A JID ban already exists for {new_jid}", mtype="groupchat")
+                    return
+            old_target = row[2]
+            async with ban_state_lock(self):
+                await self.db.execute(
+                    "UPDATE bans SET target_type = 'jid', target = ?, jid = ?, updated_at = strftime('%s','now') WHERE id = ?",
+                    (new_jid, new_jid, row[0]),
+                )
+                await self.db.commit()
+                self._remove_ban_from_cache(old_target, ban_nick=row[4])
+                self._cache_ban(new_jid, row[4], until, row[6], comment)
+                for protected_room in self.protected_rooms:
+                    await self.apply_ban_to_room(protected_room, new_jid, row[4], comment, issuer=actor)
+                if until <= 0:
+                    await self.rtbl_publish_ban(jid=new_jid, domain=None, comment=comment)
+            details = {"old_target_type": "nick", "old_target": old_target, "new_target_type": "jid", "new_target": new_jid}
+            self.log_event(20, "ban_target_converted", actor=actor, target_type="jid", target=new_jid, jid=new_jid, nick=row[4], until=until, comment=comment, details=details)
+            await self.audit_event("ban_target_converted", actor=actor, target_type="jid", target=new_jid, jid=new_jid, nick=row[4], until=until, comment=comment, details=details)
+            kind = "tempban" if until > 0 else "permanent ban"
+            await self.bot_send_message(mto=room, mbody=f"🔄 Converted nick ban {old_target} to JID ban {new_jid} ({kind}) by {actor}", mtype="groupchat")
+            return
         if operation == "reason":
             if len(args) < 3 or not " ".join(args[2:]).strip():
                 await self.bot_send_message(mto=room, mbody=f"❌ Usage: {self.command_prefix}banedit <target> reason <text>", mtype="groupchat")

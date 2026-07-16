@@ -311,5 +311,6 @@ The full documentation is split into focused guides. Start with the [documentati
 - `!banedit <target> extend|reduce <duration>` adjusts a tempban.
 - `!banedit <target> permanent` converts a tempban to a permanent ban.
 - `!banedit <target> temp <duration>` converts or resets a ban to a tempban.
+- `!banedit <nick> jid <user@domain.tld>` converts a nick-only ban into a JID ban.
 
 Protection observe mode can be enabled with `!protections <name> observe on`. Matching events are announced and audited, but no kick, ban, redaction, warning, or lockdown is applied. Disable it with `observe off` or `enforce`.
