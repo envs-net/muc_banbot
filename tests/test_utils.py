@@ -6,6 +6,7 @@ from banbot.utils import (
     get_list_page_size,
     human_time,
     looks_like_domain,
+    normalize_actor,
     normalize_ban_target,
     paginate_lines,
     parse_duration,
@@ -44,6 +45,29 @@ def test_bare_and_safe_jid():
     assert bare_jid("User@Example.org/Resource") == "user@example.org"
     assert bare_jid(None) is None
     assert safe_jid("user@example.org") == "user@\u200bexample.org"
+
+
+@pytest.mark.parametrize(
+    ("actor", "expected"),
+    [
+        (None, None),
+        ("", ""),
+        ("   ", ""),
+        ("  system  ", "system"),
+        ("  User@Example.org/Gajim.Resource  ", "user@example.org"),
+        ("manual_muc_ban", "manual_muc_ban"),
+    ],
+)
+def test_normalize_actor_handles_empty_symbolic_and_jid_values(actor, expected):
+    assert normalize_actor(actor) == expected
+
+
+def test_normalize_actor_stringifies_non_string_values():
+    class ActorValue:
+        def __str__(self):
+            return "  Admin@Example.org/Resource  "
+
+    assert normalize_actor(ActorValue()) == "admin@example.org"
 
 
 @pytest.mark.parametrize(
