@@ -292,7 +292,21 @@ class ProtectionCommandsMixin:
             if observe:
                 state += ", observe"
             alias = PROTECTION_DISPLAY_ALIASES.get(name, name)
-            capability = "observe" if "observe" in PROTECTION_DEFAULTS[name] else "notify-only"
+            defaults = PROTECTION_DEFAULTS[name]
+            if "observe" in defaults:
+                capability = "observe"
+            elif "action" not in defaults:
+                capability = "notify-only"
+            else:
+                allowed_actions = PROTECTION_ACTIONS_BY_PROTECTION.get(
+                    name,
+                    PROTECTION_ALLOWED_ACTIONS,
+                )
+                non_enforcing_actions = {"none", "notify", "warn"}
+                has_enforcing_actions = any(
+                    action not in non_enforcing_actions for action in allowed_actions
+                )
+                capability = "enforcing" if has_enforcing_actions else "notify-only"
             lines.append(f"{icon} ({state}) {name} [{alias}] [{capability}]")
         if show_all:
             body = "🛡️ Protections:\n" + "\n".join(lines)
@@ -523,13 +537,14 @@ class ProtectionCommandsMixin:
                 mtype="groupchat",
             )
             return
-        if key == "enabled":
-            value = self._parse_protection_value(raw_value)
-            if not isinstance(value, bool):
-                await self.bot_send_message(mto=room, mbody="❌ enabled must be True or False.", mtype="groupchat")
-                return
-        else:
-            value = self._parse_protection_value(raw_value)
+        value = self._parse_protection_value(raw_value)
+        if key == "enabled" and not isinstance(value, bool):
+            await self.bot_send_message(
+                mto=room,
+                mbody="❌ enabled must be True or False.",
+                mtype="groupchat",
+            )
+            return
         ok, error_text = self._validate_protection_config_value(key, value, protection=name)
         if not ok:
             await self.bot_send_message(mto=room, mbody=f"❌ {error_text}", mtype="groupchat")

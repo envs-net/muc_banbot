@@ -77,7 +77,9 @@ async def test_dispatch_without_args_lists_protections() -> None:
 
     await bot._dispatch_protections_command(ADMIN_ROOM, "Admin", [], "protections")
 
-    assert "🛡️ Protections (8) - Page 1/4:" in last_body(bot)
+    total = len(bot.protections)
+    total_pages = (total + bot.list_page_size - 1) // bot.list_page_size
+    assert f"🛡️ Protections ({total}) - Page 1/{total_pages}:" in last_body(bot)
     assert "FloodSpamProtection [flood]" in last_body(bot)
     assert "SimilarMessageProtection [similar]" in last_body(bot)
 
@@ -89,7 +91,9 @@ async def test_list_supports_last_page_and_alias_display() -> None:
     await bot.cmd_protections_list(ADMIN_ROOM, ["last"])
 
     body = last_body(bot)
-    assert "Page 4/4" in body
+    total = len(bot.protections)
+    last_page = (total + bot.list_page_size - 1) // bot.list_page_size
+    assert f"Page {last_page}/{last_page}" in body
     assert "PolicyChangeNotification [policy]" in body
 
 
@@ -260,11 +264,15 @@ async def test_report_threshold_ignores_duplicate_reporter_and_then_triggers_act
 
     before = int(time.time())
     await bot.cmd_protection_report(ROOM, "Bob", ["Spammer", "spam"])
+    after = int(time.time())
 
     assert len(bot.bans) == 1
     target, until, issuer, comment = bot.bans[0]
     assert target == "spam@example.test"
-    assert until is not None and until >= before
+    assert until is not None
+    assert until >= before
+    tempban_seconds = int(bot.protections["TrustedReporters"]["tempban_seconds"])
+    assert until <= after + tempban_seconds + 2
     assert issuer == "protection:TrustedReporters"
     assert comment == "spam"
     assert (ROOM, "spammer") not in bot.protection_trusted_reports
