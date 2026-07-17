@@ -292,7 +292,8 @@ class ProtectionCommandsMixin:
             if observe:
                 state += ", observe"
             alias = PROTECTION_DISPLAY_ALIASES.get(name, name)
-            lines.append(f"{icon} ({state}) {name} [{alias}]")
+            capability = "observe" if "observe" in PROTECTION_DEFAULTS[name] else "notify-only"
+            lines.append(f"{icon} ({state}) {name} [{alias}] [{capability}]")
         if show_all:
             body = "🛡️ Protections:\n" + "\n".join(lines)
         else:
@@ -508,6 +509,13 @@ class ProtectionCommandsMixin:
             return
         config = self.protection_config(name)
         key = key.strip().lower()
+        if key == "observe" and "observe" not in PROTECTION_DEFAULTS[name]:
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"❌ Protection '{name}' does not support observe mode.",
+                mtype="groupchat",
+            )
+            return
         if key not in config:
             await self.bot_send_message(
                 mto=room,

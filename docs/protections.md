@@ -137,4 +137,4 @@ See [Testing and CI](testing.md#live-protection-smoke-test) for setup, environme
 
 ## Observe mode
 
-Use `!protections <name> observe on` to evaluate a protection without consequences. The bot records and announces what the configured action would have been, while suppressing kicks, bans, tempbans, redactions, warnings, and room lockdowns. Use `observe off` (or `enforce`) to return to enforcement mode.
+Use `!protections <name> observe on` to evaluate a protection without consequences. The bot records and announces what the configured action would have been, while suppressing kicks, bans, tempbans, redactions, warnings, and room lockdowns. Use `observe off` (or `enforce`) to return to enforcement mode. The protection list labels action-capable entries with `[observe]`. `PolicyChangeNotification` is labeled `[notify-only]` because it only emits notifications and therefore does not support observe mode; attempts to set `observe` for it are rejected.

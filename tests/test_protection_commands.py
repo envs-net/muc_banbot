@@ -122,6 +122,40 @@ async def test_shorthand_show_set_and_reset_use_same_alias_resolver() -> None:
 
 
 @pytest.mark.asyncio
+async def test_policy_protection_rejects_observe_mode_without_config_change() -> None:
+    bot = DummyProtections()
+    before = dict(bot.protections["PolicyChangeNotification"])
+
+    await bot._dispatch_protections_command(
+        ADMIN_ROOM,
+        "Admin",
+        ["policy", "observe", "on"],
+        "protections",
+    )
+
+    assert last_body(bot) == "❌ Protection 'PolicyChangeNotification' does not support observe mode."
+    assert bot.protections["PolicyChangeNotification"] == before
+    assert bot.persisted == []
+    assert bot.audit == []
+
+
+@pytest.mark.asyncio
+async def test_policy_protection_rejects_observe_via_set_command() -> None:
+    bot = DummyProtections()
+
+    await bot._dispatch_protections_command(
+        ADMIN_ROOM,
+        "Admin",
+        ["policy", "set", "observe", "true"],
+        "protections",
+    )
+
+    assert last_body(bot) == "❌ Protection 'PolicyChangeNotification' does not support observe mode."
+    assert "observe" not in bot.protections["PolicyChangeNotification"]
+    assert bot.persisted == []
+
+
+@pytest.mark.asyncio
 async def test_set_rejects_unknown_keys_invalid_actions_and_bad_bool_values() -> None:
     bot = DummyProtections()
 

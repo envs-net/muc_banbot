@@ -313,4 +313,4 @@ The full documentation is split into focused guides. Start with the [documentati
 - `!banedit <target> temp <duration>` converts or resets a ban to a tempban.
 - `!banedit <nick> jid <user@domain.tld>` converts a nick-only ban into a JID ban.
 
-Protection observe mode can be enabled with `!protections <name> observe on`. Matching events are announced and audited, but no kick, ban, redaction, warning, or lockdown is applied. Disable it with `observe off` or `enforce`.
+Protection observe mode can be enabled with `!protections <name> observe on`. Matching events are announced and audited, but no kick, ban, redaction, warning, or lockdown is applied. Disable it with `observe off` or `enforce`. `!protections list` marks action-capable protections with `[observe]` and the notification-only `PolicyChangeNotification` with `[notify-only]`; attempting to enable observe mode for a notification-only protection is rejected.

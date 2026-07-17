@@ -75,8 +75,9 @@ async def test_protections_list_shows_observe_mode() -> None:
     await bot.cmd_protections_list("admin@conference.example.org", ["all"])
 
     body = bot.sent[-1][1]
-    assert "👁️ (enabled, observe) FloodSpamProtection [flood]" in body
-    assert "🔴 (disabled, observe) SimilarMessageProtection [similar]" in body
+    assert "👁️ (enabled, observe) FloodSpamProtection [flood] [observe]" in body
+    assert "🔴 (disabled, observe) SimilarMessageProtection [similar] [observe]" in body
+    assert "PolicyChangeNotification [policy] [notify-only]" in body
 
 
 @pytest.mark.asyncio

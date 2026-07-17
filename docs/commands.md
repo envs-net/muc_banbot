@@ -131,13 +131,13 @@ See [Public Policy / Rules](policy.md).
 
 | Command | Description |
 | --- | --- |
-| `!protections list [all\|page\|last]` | Lists protections with 🟢 enabled / 🔴 disabled / 👁️ observe state and aliases |
+| `!protections list [all\|page\|last]` | Lists protections with 🟢 enabled / 🔴 disabled / 👁️ observe state, aliases, and `[observe]` / `[notify-only]` capability labels |
 | `!protection enable <name>` | Enables a protection |
 | `!protection disable <name>` | Disables a protection |
 | `!protections <name> config` | Shows one protection config |
 | `!protections <name> set <key> <value>` | Updates one protection config value |
 | `!protections <name> reset` | Resets one protection to built-in defaults |
-| `!protections <name> observe <on\|off>` | Enables or disables consequence-free observe mode |
+| `!protections <name> observe <on\|off>` | Enables or disables consequence-free observe mode for action-capable protections |
 | `!protections reporters add/remove/list` | Manages trusted reporter bare JIDs |
 | `!report <nick\|jid> [reason]` | Trusted reporter command when `TrustedReporters` is enabled |
 
