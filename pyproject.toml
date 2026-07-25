@@ -25,3 +25,10 @@ pytest_add_cli_args = [
     "-m",
     "not integration",
 ]
+
+# Logging text is operational telemetry rather than functional behavior.
+# Excluding logger calls keeps mutation results focused on state changes,
+# return values, persistence, messages, and moderation actions.
+do_not_mutate_patterns = [
+    "log\\.\\w+",
+]

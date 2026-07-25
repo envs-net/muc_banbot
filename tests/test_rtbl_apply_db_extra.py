@@ -69,14 +69,61 @@ class RtblDbBot(RtblApplyMixin, DatabaseMixin, CacheMixin):
         await self.delete_ban_db(target)
         await self.load_bans_from_db()
 
-    async def bot_send_message(self, **kwargs):
-        self.sent.append(kwargs)
+    async def bot_send_message(self, *, mto, mbody, mtype):
+        self.sent.append({"mto": mto, "mbody": mbody, "mtype": mtype})
 
-    def log_event(self, level, event, **fields):
-        self.events.append((level, event, fields))
+    def log_event(
+        self,
+        level,
+        event,
+        *,
+        actor,
+        identifier,
+        target_type,
+        target,
+        jid,
+        nick,
+        comment,
+    ):
+        self.events.append(
+            (
+                level,
+                event,
+                {
+                    "actor": actor,
+                    "identifier": identifier,
+                    "target_type": target_type,
+                    "target": target,
+                    "jid": jid,
+                    "nick": nick,
+                    "comment": comment,
+                },
+            )
+        )
 
-    async def audit_event(self, event_type, **kwargs):
-        self.audit_events.append((event_type, kwargs))
+    async def audit_event(
+        self,
+        event_type,
+        *,
+        actor,
+        target_type,
+        target,
+        jid,
+        nick,
+        comment,
+        details=None,
+    ):
+        payload = {
+            "actor": actor,
+            "target_type": target_type,
+            "target": target,
+            "jid": jid,
+            "nick": nick,
+            "comment": comment,
+        }
+        if details is not None:
+            payload["details"] = details
+        self.audit_events.append((event_type, payload))
 
 
 async def make_bot():

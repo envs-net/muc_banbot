@@ -147,15 +147,18 @@ def test_paginate_lines_and_resolve_page_edge_cases():
     assert resolve_page(-1, 21, per_page=10) == 3
 
 
-def test_parse_duration_error_messages_are_specific():
-    with pytest.raises(ValueError, match="Invalid duration format"):
-        parse_duration("10w")
-    with pytest.raises(ValueError, match="Invalid duration number"):
-        parse_duration("xm")
-    with pytest.raises(ValueError, match="greater than zero"):
-        parse_duration("0m")
-    with pytest.raises(ValueError, match="greater than zero"):
-        parse_duration("-5m")
+def test_parse_duration_error_messages_are_exact():
+    cases = [
+        ("10w", "Invalid duration format (use 10s, 10m, 2h, 1d)"),
+        ("xm", "Invalid duration number"),
+        ("0m", "Duration must be greater than zero"),
+        ("-5m", "Duration must be greater than zero"),
+    ]
+
+    for value, expected in cases:
+        with pytest.raises(ValueError) as exc_info:
+            parse_duration(value)
+        assert exc_info.value.args == (expected,)
 
 
 @pytest.mark.parametrize(

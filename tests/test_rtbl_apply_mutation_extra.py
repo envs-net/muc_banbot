@@ -417,17 +417,64 @@ class LockedRtblMutationBot(RtblApplyMixin):
             return True, f"{candidate} protected"
         return False, None
 
-    async def bot_send_message(self, **kwargs):
-        self.sent.append(kwargs)
+    async def bot_send_message(self, *, mto, mbody, mtype):
+        self.sent.append({"mto": mto, "mbody": mbody, "mtype": mtype})
 
-    async def upsert_ban_db(self, jid, nick, until, issuer, comment):
+    async def upsert_ban_db(self, *, jid, nick, until, issuer, comment):
         self.upserts.append((jid, nick, until, issuer, comment))
 
-    def log_event(self, level, event, **fields):
-        self.events.append((level, event, fields))
+    def log_event(
+        self,
+        level,
+        event,
+        *,
+        actor,
+        identifier,
+        target_type,
+        target,
+        jid,
+        nick,
+        comment,
+    ):
+        self.events.append(
+            (
+                level,
+                event,
+                {
+                    "actor": actor,
+                    "identifier": identifier,
+                    "target_type": target_type,
+                    "target": target,
+                    "jid": jid,
+                    "nick": nick,
+                    "comment": comment,
+                },
+            )
+        )
 
-    async def audit_event(self, event_type, **kwargs):
-        self.audit_events.append((event_type, kwargs))
+    async def audit_event(
+        self,
+        event_type,
+        *,
+        actor,
+        target_type,
+        target,
+        jid,
+        nick,
+        comment,
+        details=None,
+    ):
+        payload = {
+            "actor": actor,
+            "target_type": target_type,
+            "target": target,
+            "jid": jid,
+            "nick": nick,
+            "comment": comment,
+        }
+        if details is not None:
+            payload["details"] = details
+        self.audit_events.append((event_type, payload))
 
     async def apply_ban_to_room(self, room, ban_jid, ban_nick, comment, issuer=None):
         if ban_jid in self.fail_apply_for:
@@ -557,6 +604,15 @@ async def test_domain_locked_matches_unique_bare_jids_removes_legacy_domain_and_
 
     await bot._rtbl_apply_ban_domain_locked("bad.example", "wave")
 
+    import logging
+
+    comment = "RTBL domain ban: *.bad.example — wave"
+    expected_targets = [
+        ("spam@bad.example", "Spam"),
+        ("sub@sub.bad.example", "Sub"),
+        ("second@bad.example", "Second"),
+    ]
+
     assert bot.removed_domains == ["bad.example"]
     assert bot.db.execute_calls == [
         (
@@ -564,23 +620,62 @@ async def test_domain_locked_matches_unique_bare_jids_removes_legacy_domain_and_
             ("bad.example",),
         )
     ]
-    assert sorted(bot.upserts) == sorted(
-        [
-            ("spam@bad.example", "Spam", 0, "rtbl", "RTBL domain ban: *.bad.example — wave"),
-            ("sub@sub.bad.example", "Sub", 0, "rtbl", "RTBL domain ban: *.bad.example — wave"),
-            ("second@bad.example", "Second", 0, "rtbl", "RTBL domain ban: *.bad.example — wave"),
-        ]
-    )
-    assert bot.db.commit_count == 1
-    assert "Domain ban *.bad.example" in bot.sent[0]["mbody"]
-    assert "Also matched: 2 more occupant" in bot.sent[0]["mbody"]
-    assert [event for event, _payload in bot.audit_events] == [
-        "rtbl_ban_applied",
-        "rtbl_ban_applied",
-        "rtbl_ban_applied",
+    assert bot.upserts == [
+        (bare, matched_nick, 0, "rtbl", comment)
+        for bare, matched_nick in expected_targets
     ]
-    assert all(payload["details"] == {"source_type": "domain", "source": "*.bad.example"} for _event, payload in bot.audit_events)
-    assert len(bot.applied) == 6
+    assert bot.db.commit_count == 1
+    assert bot.sent == [
+        {
+            "mto": "admin@conference.example.test",
+            "mbody": (
+                "🛡️ RTBL: Domain ban *.bad.example\n"
+                "   Matched: Spam (spam@bad.example)\n"
+                "   Also matched: 2 more occupant(s)\n"
+                "   Reason: wave"
+            ),
+            "mtype": "groupchat",
+        }
+    ]
+    assert bot.events == [
+        (
+            logging.INFO,
+            "rtbl_ban_applied",
+            {
+                "actor": "rtbl",
+                "identifier": "*.bad.example",
+                "target_type": "jid",
+                "target": bare,
+                "jid": bare,
+                "nick": matched_nick,
+                "comment": comment,
+            },
+        )
+        for bare, matched_nick in expected_targets
+    ]
+    assert bot.audit_events == [
+        (
+            "rtbl_ban_applied",
+            {
+                "actor": "rtbl",
+                "target_type": "jid",
+                "target": bare,
+                "jid": bare,
+                "nick": matched_nick,
+                "comment": comment,
+                "details": {
+                    "source_type": "domain",
+                    "source": "*.bad.example",
+                },
+            },
+        )
+        for bare, matched_nick in expected_targets
+    ]
+    assert bot.applied == [
+        (room, bare, matched_nick, comment, "rtbl")
+        for bare, matched_nick in expected_targets
+        for room in bot.protected_rooms
+    ]
 
 
 @pytest.mark.asyncio
@@ -619,8 +714,19 @@ async def test_domain_locked_only_protected_matches_announces_preview_and_skips_
     assert bot.db.execute_calls == []
     assert bot.db.commit_count == 0
     assert bot.applied == []
-    assert "only protected admin/owner matches found" in bot.sent[0]["mbody"]
-    assert "+2 more" in bot.sent[0]["mbody"]
+    assert bot.sent == [
+        {
+            "mto": "admin@conference.example.test",
+            "mbody": (
+                "⚠️ RTBL: Ignored domain ban *.bad.example — "
+                "only protected admin/owner matches found: "
+                "Admin0 (admin0@bad.example), Admin1 (admin1@bad.example), "
+                "Admin2 (admin2@bad.example), Admin3 (admin3@bad.example), "
+                "Admin4 (admin4@bad.example), … +2 more"
+            ),
+            "mtype": "groupchat",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -822,3 +928,144 @@ async def test_domain_locked_apply_failure_is_logged_per_room_without_rollback(m
     assert bot.audit_events[0][0] == "rtbl_ban_applied"
     assert bot.applied == []
     assert caplog.text.count("Failed to apply domain-derived JID ban") == 2
+
+
+class RtblLockProbe(RtblApplyMixin):
+    """Strict probe for the public lock-owning RTBL wrapper methods."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def _rtbl_apply_ban_jid_locked(self, jid, nick, reason):
+        from banbot.locks import get_ban_state_lock
+
+        self.calls.append(
+            ("jid", get_ban_state_lock(self).locked(), jid, nick, reason)
+        )
+
+    async def _rtbl_apply_ban_domain_locked(self, domain, reason, nick=None, jid=None):
+        from banbot.locks import get_ban_state_lock
+
+        self.calls.append(
+            ("domain", get_ban_state_lock(self).locked(), domain, reason, nick, jid)
+        )
+
+    async def _rtbl_cleanup_stale_persisted_bans_locked(self, issuer="rtbl_cleanup"):
+        from banbot.locks import get_ban_state_lock
+
+        self.calls.append(
+            ("cleanup", get_ban_state_lock(self).locked(), issuer)
+        )
+        return 7
+
+
+@pytest.mark.asyncio
+async def test_rtbl_lock_wrappers_hold_lock_and_forward_exact_arguments():
+    bot = RtblLockProbe()
+
+    await bot._rtbl_apply_ban_jid("User@Example.test", "Nick", "reason")
+    await bot._rtbl_apply_ban_domain(
+        "*.Example.test", "domain reason", nick="DomainNick", jid="user@example.test"
+    )
+    removed = await bot._rtbl_cleanup_stale_persisted_bans("custom-cleanup")
+
+    assert removed == 7
+    assert bot.calls == [
+        ("jid", True, "User@Example.test", "Nick", "reason"),
+        (
+            "domain",
+            True,
+            "*.Example.test",
+            "domain reason",
+            "DomainNick",
+            "user@example.test",
+        ),
+        ("cleanup", True, "custom-cleanup"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_jid_locked_reason_path_records_complete_contract(monkeypatch):
+    import config
+    import logging
+
+    monkeypatch.setattr(config, "ADMIN_ROOM", "admin@conference.example.test", raising=False)
+    bot = LockedRtblMutationBot()
+    bot.protected_rooms = [
+        "room@conference.example.test",
+        "second@conference.example.test",
+    ]
+
+    await bot._rtbl_apply_ban_jid_locked("bad@example.test", "Bad", "listed spam")
+
+    assert bot.upserts == [
+        ("bad@example.test", "Bad", 0, "rtbl", "RTBL: listed spam")
+    ]
+    assert bot.db.commit_count == 1
+    assert bot.sent == [
+        {
+            "mto": "admin@conference.example.test",
+            "mbody": "🛡️ RTBL: Banning bad@example.test — listed spam",
+            "mtype": "groupchat",
+        }
+    ]
+    assert bot.events == [
+        (
+            logging.INFO,
+            "rtbl_ban_applied",
+            {
+                "actor": "rtbl",
+                "identifier": "bad@example.test",
+                "target_type": "jid",
+                "target": "bad@example.test",
+                "jid": "bad@example.test",
+                "nick": "Bad",
+                "comment": "RTBL: listed spam",
+            },
+        )
+    ]
+    assert bot.audit_events == [
+        (
+            "rtbl_ban_applied",
+            {
+                "actor": "rtbl",
+                "target_type": "jid",
+                "target": "bad@example.test",
+                "jid": "bad@example.test",
+                "nick": "Bad",
+                "comment": "RTBL: listed spam",
+            },
+        )
+    ]
+    assert bot.applied == [
+        (
+            "room@conference.example.test",
+            "bad@example.test",
+            "Bad",
+            "RTBL: listed spam",
+            "rtbl",
+        ),
+        (
+            "second@conference.example.test",
+            "bad@example.test",
+            "Bad",
+            "RTBL: listed spam",
+            "rtbl",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_full_scan_logs_exact_source_and_match_counts(caplog):
+    bot = RtblMutationBot()
+    bot.rtbl_hash_cache[_rtbl_hash_jid("hash@example.test")] = "hash reason"
+    bot.rtbl_domain_cache["spam.example"] = "domain reason"
+
+    with caplog.at_level("INFO", logger="banbot.rtbl.apply"):
+        result = await bot._rtbl_check_all_occupants_against_caches("startup fetch")
+
+    assert result == (1, 3)
+    assert caplog.messages == [
+        "RTBL: Current occupant scan after startup fetch matched 1 JID(s), "
+        "3 domain occupant(s) across 1 domain(s)"
+    ]
