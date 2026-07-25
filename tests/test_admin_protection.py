@@ -4,6 +4,8 @@ import pytest
 pytest.importorskip("slixmpp")
 
 from banbot.admin import AdminMixin
+from banbot.muc import MucMixin
+from banbot.occupants import BotOccupantMixin
 from banbot.utils import bare_jid
 
 
@@ -47,10 +49,14 @@ class AdminBot(AdminMixin):
         self.sent.append(kwargs)
 
 
-def test_is_admin_or_owner_uses_live_occupant_cache(monkeypatch):
-    admin_module = importlib.import_module("banbot.admin")
+def test_admin_and_muc_mixins_share_one_bot_occupant_lookup():
+    assert "_bot_occupant_entry" not in AdminMixin.__dict__
+    assert "_bot_occupant_entry" not in MucMixin.__dict__
+    assert AdminMixin._bot_occupant_entry is BotOccupantMixin._bot_occupant_entry
+    assert MucMixin._bot_occupant_entry is BotOccupantMixin._bot_occupant_entry
 
-    monkeypatch.setattr(admin_module, "NICK", "BanBot")
+
+def test_is_admin_or_owner_uses_live_occupant_cache():
     bot = AdminBot()
 
     assert bot.is_admin_or_owner("room@conference.example.test", nick="AdminNick")
@@ -58,10 +64,7 @@ def test_is_admin_or_owner_uses_live_occupant_cache(monkeypatch):
     assert not bot.is_admin_or_owner("room@conference.example.test", nick="Regular")
 
 
-def test_is_bot_admin_or_owner_falls_back_to_bound_jid_when_nick_changes(monkeypatch):
-    admin_module = importlib.import_module("banbot.admin")
-
-    monkeypatch.setattr(admin_module, "NICK", "BanBot")
+def test_is_bot_admin_or_owner_falls_back_to_bound_jid_when_nick_changes():
     bot = AdminBot()
     bot.occupants["room@conference.example.test"] = {
         "BanBot-alt": {

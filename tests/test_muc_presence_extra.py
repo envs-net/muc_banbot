@@ -438,31 +438,38 @@ async def test_ensure_muc_joined_consumes_waiter_and_accepts_alternate_self_nick
     bot = MucBotFixture()
     bot.boundjid = SimpleNamespace(bare="bot@example.test")
     bot.room_bot_nicks = {}
-    join_tasks = []
 
     class JoinPlugin:
-        def join_muc(self, room, nick):
-            async def join_waiter():
-                await asyncio.sleep(0)
-                bot.occupants.setdefault(room, {})["BanBot-alt"] = {
-                    "jid": "bot@example.test/new-resource",
-                    "affiliation": ADMIN_AFFILIATION,
-                    "role": MODERATOR_ROLE,
-                }
-                await asyncio.Event().wait()
+        def __init__(self):
+            self.wait_calls = []
+            self.legacy_calls = []
 
-            task = asyncio.create_task(join_waiter())
-            join_tasks.append(task)
-            return task
+        async def join_muc_wait(self, room, nick, **kwargs):
+            self.wait_calls.append((room, nick, kwargs))
+            await asyncio.sleep(0)
+            bot.occupants.setdefault(room, {})["BanBot-alt"] = {
+                "jid": "bot@example.test/new-resource",
+                "affiliation": ADMIN_AFFILIATION,
+                "role": MODERATOR_ROLE,
+            }
+            await asyncio.Event().wait()
+
+        def join_muc(self, room, nick):
+            self.legacy_calls.append((room, nick))
+            raise AssertionError("legacy join_muc() must not be used when join_muc_wait() exists")
 
         def leave_muc(self, room, nick):
             return None
 
-    bot.plugin = {"xep_0045": JoinPlugin()}
+    join_plugin = JoinPlugin()
+    bot.plugin = {"xep_0045": join_plugin}
 
     assert await bot.ensure_muc_joined(ROOM_JID, timeout=1, retries=1) is True
     assert bot._bot_occupant_entry(ROOM_JID)[0] == "BanBot-alt"
-    assert join_tasks[0].cancelled() is True
+    assert join_plugin.legacy_calls == []
+    assert join_plugin.wait_calls == [
+        (ROOM_JID, BOT_NICK, {"maxstanzas": 0, "timeout": 1.0})
+    ]
 
 
 @pytest.mark.asyncio
@@ -627,6 +634,9 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
     bot.occupants = {"room": {USER_NICK: {}}}
     bot.bot_admin_state = {"room": True}
     bot.room_join_time = {"room": 123.0}
+    join_event = asyncio.Event()
+    join_event.set()
+    bot.room_join_events = {"room": join_event}
 
     async def fake_reconnect():
         pass
@@ -638,6 +648,7 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
     assert bot.occupants == {}
     assert bot.bot_admin_state == {}
     assert bot.room_join_time == {}
+    assert bot.room_join_events == {}
     assert bot.reconnect_task is not None
     done, pending = await asyncio.wait({bot.reconnect_task}, timeout=1)
     assert pending == set()

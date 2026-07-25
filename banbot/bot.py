@@ -250,6 +250,7 @@ class BanBot(
         self.admin_affiliation_query_forbidden_rooms: set[str] = set()
         self.occupants: dict[str, dict] = {}
         self.room_bot_nicks: dict[str, str] = {}
+        self.room_join_events: dict[str, asyncio.Event] = {}
         self.protected_rooms: set[str] = set()
         self.registered_rooms: set[str] = set()
         self.init_room_invite_state()

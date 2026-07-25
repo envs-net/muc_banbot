@@ -7,12 +7,14 @@ import time
 from config import ADMIN_ROOM, NICK
 
 from .locks import ban_state_lock
+from .muc_join import start_muc_join_task
+from .occupants import BotOccupantMixin
 from .utils import domain_matches
 
 log = logging.getLogger(__name__)
 
 
-class MucMixin:
+class MucMixin(BotOccupantMixin):
     def _get_reconnect_success_event(self) -> asyncio.Event:
         """Return the event used to signal that session_start completed after reconnect."""
         event = getattr(self, "reconnect_success_event", None)
@@ -22,33 +24,79 @@ class MucMixin:
         return event
 
 
-    def _bot_occupant_entry(self, room: str) -> tuple[str | None, dict | None]:
-        """Return the bot's occupant entry for standalone MucMixin users/tests."""
-        occupants = self.occupants.get(room, {})
-        room_bot_nicks = getattr(self, "room_bot_nicks", {})
-        actual_nick = room_bot_nicks.get(room)
-        if actual_nick and actual_nick in occupants:
-            return actual_nick, occupants[actual_nick]
+    def _get_muc_join_event(self, room: str) -> asyncio.Event:
+        """Return the self-presence event for one room."""
+        events = getattr(self, "room_join_events", None)
+        if events is None:
+            events = {}
+            self.room_join_events = events
+        event = events.get(room)
+        if event is None:
+            event = asyncio.Event()
+            events[room] = event
+        return event
 
-        boundjid = getattr(self, "boundjid", None)
-        if boundjid is not None:
-            bot_bare = self.bare_jid(str(boundjid.bare))
-            for nick, info in occupants.items():
-                occupant_jid = info.get("jid")
-                if occupant_jid and self.bare_jid(str(occupant_jid)) == bot_bare:
-                    return nick, info
 
-        # Compatibility fallback for standalone mixin users that do not track
-        # self-presence. Production BanBot always has ``room_bot_nicks``; there
-        # an exact nick alone is not proof of identity because it may be a stale
-        # occupant from the previous connection.
-        if not hasattr(self, "room_bot_nicks"):
-            configured_nick = str(NICK).lower()
-            for nick, info in occupants.items():
-                if str(nick).lower() == configured_nick:
-                    return nick, info
+    def _start_muc_join_task(
+        self,
+        room: str,
+        nick: str,
+        timeout: float,
+    ) -> tuple[asyncio.Future | asyncio.Task | None, str]:
+        """Start the best available Slixmpp MUC join API as a tracked task."""
+        return start_muc_join_task(
+            self.plugin["xep_0045"],
+            room,
+            nick,
+            timeout=timeout,
+        )
 
-        return None, None
+
+    async def _wait_for_muc_self_presence(
+        self,
+        room: str,
+        event: asyncio.Event,
+        timeout: float,
+    ) -> bool:
+        """Wait for tracked self-presence while retaining cache compatibility."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(float(timeout), 0.0)
+
+        while True:
+            if self._bot_occupant_entry(room)[1] is not None:
+                event.set()
+                return True
+            if event.is_set():
+                return self._bot_occupant_entry(room)[1] is not None
+
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+
+            try:
+                await asyncio.wait_for(event.wait(), timeout=min(0.1, remaining))
+            except asyncio.TimeoutError:
+                continue
+
+
+    async def _settle_muc_join_task(
+        self,
+        task: asyncio.Future | asyncio.Task | None,
+        *,
+        cancel: bool,
+    ) -> Exception | None:
+        """Cancel/consume a join task so no delayed exception is orphaned."""
+        if task is None:
+            return None
+        if cancel and not task.done():
+            task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            return None
+        except Exception as exc:
+            return exc
+        return None
 
 
     async def ensure_muc_joined(
@@ -60,21 +108,19 @@ class MucMixin:
         retries: int = 2,
         force: bool = False,
     ) -> bool:
-        """Join a room and explicitly consume Slixmpp's join future.
+        """Join a room and confirm the bot's actual self-presence.
 
-        ``XEP_0045.join_muc()`` returns a Future.  Ignoring that Future leaves
-        delayed join timeouts as ``Task exception was never retrieved`` and a
-        transient failed join remains broken until the process is restarted.
-        We only need the bot's self-presence, so the legacy Future is cancelled
-        once that presence is visible instead of waiting for room subject/history.
+        Prefer Slixmpp's non-deprecated ``join_muc_wait()`` API, but do not
+        treat reception of a room subject as a requirement for a successful
+        BanBot join. Once the bot's own MUC presence is tracked, the remaining
+        Slixmpp waiter is cancelled and consumed. Failed waiters are consumed as
+        well, preventing ``Task exception was never retrieved`` errors.
         """
         if not force and self._bot_occupant_entry(room)[1] is not None:
             return True
 
         attempts = max(1, int(retries))
-        interval = 0.25
-        checks = max(1, int(float(timeout) / interval))
-        last_error: BaseException | None = None
+        last_error: Exception | None = None
 
         for attempt in range(1, attempts + 1):
             if force or attempt > 1:
@@ -90,77 +136,87 @@ class MucMixin:
 
             self.occupants.pop(room, None)
             getattr(self, "room_bot_nicks", {}).pop(room, None)
+            join_event = self._get_muc_join_event(room)
+            join_event.clear()
             self.room_join_time[room] = time.time()
             join_task: asyncio.Future | asyncio.Task | None = None
+            presence_task: asyncio.Task | None = None
             last_error = None
+            api_name = "unknown"
 
             try:
-                join_result = self.plugin["xep_0045"].join_muc(room, nick)
-                if asyncio.isfuture(join_result):
-                    join_task = join_result
-                elif hasattr(join_result, "__await__"):
-                    join_task = asyncio.create_task(join_result)
-            except Exception as exc:
-                last_error = exc
+                join_task, api_name = self._start_muc_join_task(room, nick, timeout)
+                presence_task = asyncio.create_task(
+                    self._wait_for_muc_self_presence(room, join_event, timeout)
+                )
 
-            joined = False
-            if last_error is None:
-                for _ in range(checks):
-                    if self._bot_occupant_entry(room)[1] is not None:
-                        joined = True
-                        break
-
-                    if join_task is not None and join_task.done():
+                if join_task is None:
+                    joined = await presence_task
+                else:
+                    done, _pending = await asyncio.wait(
+                        {join_task, presence_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if presence_task in done:
+                        joined = presence_task.result()
+                    else:
                         try:
                             join_task.result()
                         except asyncio.CancelledError as exc:
                             last_error = exc
-                            break
-                        except BaseException as exc:
+                            joined = False
+                        except Exception as exc:
                             last_error = exc
-                            break
-                        # A successful Slixmpp join Future and our async
-                        # got_online handler may complete in adjacent loop turns.
-                        # Keep checking briefly for the populated occupant cache.
+                            joined = self._bot_occupant_entry(room)[1] is not None
+                        else:
+                            # A successful full waiter already observed our
+                            # presence. Allow the BanBot handler/cache to finish.
+                            joined = await presence_task
 
-                    await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                if presence_task is not None and not presence_task.done():
+                    presence_task.cancel()
+                await self._settle_muc_join_task(join_task, cancel=True)
+                raise
+            except Exception as exc:
+                last_error = exc
+                joined = False
+
+            if presence_task is not None and not presence_task.done():
+                presence_task.cancel()
+                try:
+                    await presence_task
+                except asyncio.CancelledError:
+                    pass
 
             if joined:
-                if join_task is not None and not join_task.done():
-                    join_task.cancel()
-                if join_task is not None:
-                    try:
-                        await join_task
-                    except asyncio.CancelledError:
-                        pass
-                    except BaseException as exc:
-                        # The self-presence is authoritative. Some MUC services do
-                        # not send a subject stanza, which can make Slixmpp's full
-                        # join waiter fail even though the room join succeeded.
-                        log.debug("MUC join waiter ended after self-presence for %s: %s", room, exc)
+                waiter_error = await self._settle_muc_join_task(join_task, cancel=True)
+                if waiter_error is not None:
+                    # Self-presence is authoritative. A waiter can still fail
+                    # while waiting for a subject after a successful join.
+                    log.debug(
+                        "%s ended after self-presence for %s: %s",
+                        api_name,
+                        room,
+                        waiter_error,
+                    )
 
                 actual_nick, _info = self._bot_occupant_entry(room)
                 log.info("✅ Joined MUC %s as %s", room, actual_nick or nick)
                 return True
 
-            if join_task is not None and not join_task.done():
-                join_task.cancel()
-            if join_task is not None:
-                try:
-                    await join_task
-                except asyncio.CancelledError:
-                    pass
-                except BaseException as exc:
-                    last_error = last_error or exc
-
+            waiter_error = await self._settle_muc_join_task(join_task, cancel=True)
+            if last_error is None:
+                last_error = waiter_error
             if last_error is None:
                 last_error = asyncio.TimeoutError(
                     f"No self-presence received within {float(timeout):g}s"
                 )
 
             log.warning(
-                "⚠️ MUC join failed for %s (attempt %d/%d): %s",
+                "⚠️ MUC join failed for %s via %s (attempt %d/%d): %s",
                 room,
+                api_name,
                 attempt,
                 attempts,
                 last_error,
@@ -169,6 +225,7 @@ class MucMixin:
                 await asyncio.sleep(min(2.0 * attempt, 5.0))
 
         self.room_join_time.pop(room, None)
+        getattr(self, "room_join_events", {}).pop(room, None)
         return False
 
 
@@ -203,6 +260,7 @@ class MucMixin:
         self.bot_admin_state.clear()
         self.room_join_time.clear()
         getattr(self, "room_bot_nicks", {}).clear()
+        getattr(self, "room_join_events", {}).clear()
         log.info("🧹 Cleaned up occupants dictionary and states")
 
         self.reconnect_task = asyncio.create_task(self._delayed_reconnect())
@@ -306,6 +364,7 @@ class MucMixin:
             if not hasattr(self, "room_bot_nicks"):
                 self.room_bot_nicks = {}
             self.room_bot_nicks[room] = nick
+            self._get_muc_join_event(room).set()
 
         # --- Skip admins/owners ---
         if self.is_admin_or_owner(room, nick=nick, jid=jid_str):
@@ -533,6 +592,9 @@ class MucMixin:
             if getattr(self, "room_bot_nicks", {}).get(room) == nick:
                 self.room_bot_nicks.pop(room, None)
                 self.bot_admin_state.pop(room, None)
+                join_event = getattr(self, "room_join_events", {}).get(room)
+                if join_event is not None:
+                    join_event.clear()
 
             if "301" in self._muc_presence_status_codes(presence):
                 await self._handle_manual_muc_ban_presence(
@@ -594,6 +656,7 @@ class MucMixin:
             "affiliation": affiliation or "none",
             "jid": jid_str,
         }
+        self._get_muc_join_event(room).set()
 
         # Ignore briefly after join/reconnect to let occupant state stabilize.
         grace_seconds = 5

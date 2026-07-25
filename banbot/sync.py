@@ -9,6 +9,7 @@ from config import ADMIN_ROOM, NICK
 log = logging.getLogger(__name__)
 
 from .locks import ban_state_lock
+from .muc_join import await_muc_join_compat
 
 
 class SyncMixin:
@@ -31,13 +32,22 @@ class SyncMixin:
             if force:
                 self.plugin["xep_0045"].leave_muc(room, NICK)
                 await asyncio.sleep(0.5)
-            self.plugin["xep_0045"].join_muc(room, NICK)
+        except Exception as exc:
+            log.debug("Could not clear previous MUC join state for %s: %s", room, exc)
+
+        joined, api_name, error = await await_muc_join_compat(
+            self.plugin["xep_0045"],
+            room,
+            NICK,
+            timeout=20,
+        )
+        if joined:
             self.room_join_time[room] = time.time()
             return True
-        except Exception as exc:
-            self.room_join_time.pop(room, None)
-            log.warning("⚠️ Failed to rejoin room %s: %s", room, exc)
-            return False
+
+        self.room_join_time.pop(room, None)
+        log.warning("⚠️ Failed to rejoin room %s via %s: %s", room, api_name, error)
+        return False
 
 
     async def sync_rooms_and_bans(self) -> None:

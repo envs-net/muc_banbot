@@ -10,6 +10,7 @@ import sys
 from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
 
+from ..muc_join import await_muc_join_compat
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
@@ -177,9 +178,20 @@ class ProtectedRoomMixin:
                     else:
                         # RoomMixin is also used by lightweight tests/tools
                         # without MucMixin. Production BanBot always uses the
-                        # tracked join helper above.
-                        self.plugin["xep_0045"].join_muc(target, _nick())
-                        joined = True
+                        # tracked self-presence helper above.
+                        joined, api_name, join_error = await await_muc_join_compat(
+                            self.plugin["xep_0045"],
+                            target,
+                            _nick(),
+                            timeout=20,
+                        )
+                        if not joined:
+                            log.warning(
+                                "⚠️ Failed to join newly protected room %s via %s: %s",
+                                target,
+                                api_name,
+                                join_error,
+                            )
 
                     if not joined:
                         await self.bot_send_message(
@@ -234,3 +246,5 @@ class ProtectedRoomMixin:
                     log.warning("⚠️ Failed to leave room %s: %s", target, e)
                 self.occupants.pop(target, None)
                 getattr(self, "room_bot_nicks", {}).pop(target, None)
+                getattr(self, "room_join_events", {}).pop(target, None)
+                getattr(self, "room_join_time", {}).pop(target, None)

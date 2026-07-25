@@ -3,15 +3,16 @@
 import asyncio
 import logging
 
-from config import ADMIN_ROOM, NICK
+from config import ADMIN_ROOM
 from slixmpp.exceptions import IqError, IqTimeout
 
+from .occupants import BotOccupantMixin
 from .utils import domain_matches
 
 log = logging.getLogger(__name__)
 
 
-class AdminMixin:
+class AdminMixin(BotOccupantMixin):
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
         """Check if a user is admin or owner in a room using the live occupant cache."""
         occ = self.occupants.get(room, {})
@@ -21,43 +22,6 @@ class AdminMixin:
             if jid and info.get("jid") and self.bare_jid(info["jid"]) == self.bare_jid(jid):
                 return info.get("affiliation") in ("owner", "admin")
         return False
-
-
-    def _bot_occupant_entry(self, room: str) -> tuple[str | None, dict | None]:
-        """Return the bot's live occupant entry without relying on one exact nick.
-
-        A MUC service may temporarily keep an old occupant after a connection or
-        IP change, or assign a different nick to the new self-presence.  The bot
-        therefore tracks the actual self-presence nick and falls back to its
-        bound bare JID before treating the configured nick as missing.
-        """
-        occupants = self.occupants.get(room, {})
-        actual_nick = getattr(self, "room_bot_nicks", {}).get(room)
-
-        if actual_nick:
-            info = occupants.get(actual_nick)
-            if info is not None:
-                return actual_nick, info
-
-        boundjid = getattr(self, "boundjid", None)
-        if boundjid is not None:
-            bot_bare = self.bare_jid(str(boundjid.bare))
-            for nick, info in occupants.items():
-                occupant_jid = info.get("jid")
-                if occupant_jid and self.bare_jid(str(occupant_jid)) == bot_bare:
-                    return nick, info
-
-        # Compatibility fallback for standalone mixin users that do not track
-        # self-presence. Production BanBot always has ``room_bot_nicks``; there
-        # an exact nick alone is not proof of identity because it may be a stale
-        # occupant from the previous connection.
-        if not hasattr(self, "room_bot_nicks"):
-            configured_nick = str(NICK).lower()
-            for nick, info in occupants.items():
-                if str(nick).lower() == configured_nick:
-                    return nick, info
-
-        return None, None
 
 
     def is_bot_admin_or_owner(self, room: str, *, log_missing: bool = True) -> bool:
