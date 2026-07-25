@@ -354,6 +354,7 @@ User=adminbot
 Group=adminbot
 WorkingDirectory=/srv/adminbot/muc_banbot
 Environment=PYTHONUNBUFFERED=1
+Environment=MUC_BANBOT_CONFIG=/srv/adminbot/muc_banbot/config.py
 ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
 Restart=always
 RestartSec=5
@@ -368,6 +369,11 @@ ReadWritePaths=/srv/adminbot/muc_banbot
 [Install]
 WantedBy=multi-user.target
 ```
+
+The console command loads `config.py` from `MUC_BANBOT_CONFIG` when the
+variable is set. Without it, BanBot checks the current working directory and
+the editable source checkout. Using an absolute path in systemd avoids relying
+on Python's console-script import path.
 
 Copy and reload the service after changes:
 

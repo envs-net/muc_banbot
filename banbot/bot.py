@@ -7,17 +7,13 @@ import inspect
 from datetime import datetime
 
 import sys
-import builtins
 
-# Allow config.py to use lowercase boolean aliases like in YAML/JSON/TOML.
-builtins.true = True
-builtins.false = False
+from .config_loader import format_config_import_error, load_config_module
 
 try:
-    import config
+    config = load_config_module()
 except Exception as exc:
-    from . import config as banbot_config
-    sys.stderr.write("Failed to load config.py\n" + banbot_config.format_config_import_error(exc) + "\n")
+    sys.stderr.write("Failed to load config.py\n" + format_config_import_error(exc) + "\n")
     raise SystemExit(1) from None
 
 import aiosqlite

@@ -74,6 +74,10 @@ The legacy `python muc_banbot.py` launcher remains supported. Installing the
 project creates the preferred `muc_banbot` command inside the virtual
 environment.
 
+The command looks for `config.py` in the current working directory and editable
+source checkout. Service installations can set `MUC_BANBOT_CONFIG` to an
+absolute config path.
+
 For a systemd service example, see [docs/configuration.md](docs/configuration.md#systemd-service).
 
 `main` is the development branch. For production deployments, use the latest tagged release shown on GitHub/Gitea.

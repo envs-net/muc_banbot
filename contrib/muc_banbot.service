@@ -10,6 +10,7 @@ User=adminbot
 Group=adminbot
 WorkingDirectory=/srv/adminbot/muc_banbot
 Environment=PYTHONUNBUFFERED=1
+Environment=MUC_BANBOT_CONFIG=/srv/adminbot/muc_banbot/config.py
 ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
 Restart=always
 RestartSec=5
