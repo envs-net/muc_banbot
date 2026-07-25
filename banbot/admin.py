@@ -23,13 +23,50 @@ class AdminMixin:
         return False
 
 
-    def is_bot_admin_or_owner(self, room: str) -> bool:
+    def _bot_occupant_entry(self, room: str) -> tuple[str | None, dict | None]:
+        """Return the bot's live occupant entry without relying on one exact nick.
+
+        A MUC service may temporarily keep an old occupant after a connection or
+        IP change, or assign a different nick to the new self-presence.  The bot
+        therefore tracks the actual self-presence nick and falls back to its
+        bound bare JID before treating the configured nick as missing.
+        """
+        occupants = self.occupants.get(room, {})
+        actual_nick = getattr(self, "room_bot_nicks", {}).get(room)
+
+        if actual_nick:
+            info = occupants.get(actual_nick)
+            if info is not None:
+                return actual_nick, info
+
+        boundjid = getattr(self, "boundjid", None)
+        if boundjid is not None:
+            bot_bare = self.bare_jid(str(boundjid.bare))
+            for nick, info in occupants.items():
+                occupant_jid = info.get("jid")
+                if occupant_jid and self.bare_jid(str(occupant_jid)) == bot_bare:
+                    return nick, info
+
+        # Compatibility fallback for standalone mixin users that do not track
+        # self-presence. Production BanBot always has ``room_bot_nicks``; there
+        # an exact nick alone is not proof of identity because it may be a stale
+        # occupant from the previous connection.
+        if not hasattr(self, "room_bot_nicks"):
+            configured_nick = str(NICK).lower()
+            for nick, info in occupants.items():
+                if str(nick).lower() == configured_nick:
+                    return nick, info
+
+        return None, None
+
+
+    def is_bot_admin_or_owner(self, room: str, *, log_missing: bool = True) -> bool:
         """Check if the bot itself is admin or owner in a given room."""
-        occ = self.occupants.get(room, {})
-        bot_info = occ.get(NICK)
+        _nick, bot_info = self._bot_occupant_entry(room)
 
         if not bot_info:
-            log.warning("⚠️ Bot nick not found in occupants for room %s", room)
+            if log_missing:
+                log.warning("⚠️ Bot self-presence not found in occupants for room %s", room)
             return False
 
         return bot_info.get("affiliation") in ("owner", "admin")
@@ -134,48 +171,55 @@ class AdminMixin:
 
 
     async def check_bot_admin_rights(self) -> None:
-        """
-        Check all protected rooms after startup and report where the bot lacks
-        admin/owner rights.
-        """
-        missing = []
+        """Check protected-room join state and admin/owner affiliation."""
+        not_joined: list[str] = []
+        missing_rights: list[str] = []
 
         for room in self.protected_rooms:
-            # Wait until bot appears in occupants
-            for _ in range(10):  # max 10 seconds per room
-                occ = self.occupants.get(room, {})
-                if NICK in occ:
+            # Startup joins are awaited already; this short grace period only
+            # covers async event-handler scheduling on slower runtimes.
+            for _ in range(3):
+                if self._bot_occupant_entry(room)[1] is not None:
                     break
                 await asyncio.sleep(1)
 
-            # --- Initialize admin state after join (ONLY ONCE) ---
-            try:
-                self.bot_admin_state[room] = self.is_bot_admin_or_owner(room)
-                if not self.bot_admin_state[room]:
-                    missing.append(room)
-            except Exception as e:
-                log.warning("Error checking admin rights in %s: %s", room, e)
-                missing.append(room)
+            if self._bot_occupant_entry(room)[1] is None:
+                self.bot_admin_state.pop(room, None)
+                not_joined.append(room)
+                continue
 
-        if missing:
-            msg = (
-                "⚠️ Bot is missing admin/owner rights in the following rooms:\n"
-                + "\n".join(missing)
-            )
+            try:
+                self.bot_admin_state[room] = self.is_bot_admin_or_owner(room, log_missing=False)
+                if not self.bot_admin_state[room]:
+                    missing_rights.append(room)
+            except Exception as exc:
+                log.warning("Error checking admin rights in %s: %s", room, exc)
+                missing_rights.append(room)
+
+        if not_joined or missing_rights:
+            sections = ["⚠️ Bot room access check failed:"]
+            if not_joined:
+                sections.append("Not joined:\n" + "\n".join(not_joined))
+            if missing_rights:
+                sections.append("Joined without admin/owner rights:\n" + "\n".join(missing_rights))
+            message = "\n\n".join(sections)
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
-                mbody=msg,
-                mtype="groupchat"
+                mbody=message,
+                mtype="groupchat",
             )
-            log.warning("Bot missing admin rights in rooms: %s", missing)
-        else:
-            msg = "✅ Bot has admin/owner rights in all protected rooms."
-            await self.bot_send_message(
-                mto=ADMIN_ROOM,
-                mbody=msg,
-                mtype="groupchat"
-            )
-            log.info("Bot has admin rights in all protected rooms.")
+            if not_joined:
+                log.warning("Bot not joined in rooms: %s", not_joined)
+            if missing_rights:
+                log.warning("Bot missing admin rights in rooms: %s", missing_rights)
+            return
+
+        await self.bot_send_message(
+            mto=ADMIN_ROOM,
+            mbody="✅ Bot has admin/owner rights in all protected rooms.",
+            mtype="groupchat",
+        )
+        log.info("Bot has admin rights in all protected rooms.")
 
 
     async def _cmd_whoami(self, room: str, nick: str) -> None:

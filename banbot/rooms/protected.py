@@ -171,40 +171,49 @@ class ProtectedRoomMixin:
                         self.add_event_handler(f"muc::{target}::got_offline", self.muc_offline)
                         self.registered_rooms.add(target)
 
-                    self.plugin["xep_0045"].join_muc(target, _nick())
+                    ensure_joined = getattr(self, "ensure_muc_joined", None)
+                    if ensure_joined is not None:
+                        joined = await ensure_joined(target, timeout=20, retries=2)
+                    else:
+                        # RoomMixin is also used by lightweight tests/tools
+                        # without MucMixin. Production BanBot always uses the
+                        # tracked join helper above.
+                        self.plugin["xep_0045"].join_muc(target, _nick())
+                        joined = True
 
-                    # --- Ensure the bot itself is online ---
-                    async def wait_for_bot_online():
-                        for _ in range(10):
-                            occ = self.occupants.get(target, {})
-                            if _nick() in occ:
-                                break
-                            await asyncio.sleep(1)
+                    if not joined:
+                        await self.bot_send_message(
+                            mto=room,
+                            mbody=(
+                                f"⚠️ Room was saved, but the bot could not join {target}. "
+                                "The health check will retry automatically."
+                            ),
+                            mtype="groupchat",
+                        )
+                        return
 
-                        # Sync regular bans
-                        await self.sync_bans_to_rooms_for_single_room(target)
+                    # Sync regular bans
+                    await self.sync_bans_to_rooms_for_single_room(target)
 
-                        # Scan current occupants against RTBL
-                        if getattr(self, "rtbl_enabled", False):
-                            occ = self.occupants.get(target, {})
-                            for occ_nick, info in list(occ.items()):
-                                jid = info.get("jid")
-                                if jid:
-                                    await self.check_jid_against_rtbl(jid, occ_nick)
+                    # Scan current occupants against RTBL
+                    if getattr(self, "rtbl_enabled", False):
+                        occ = self.occupants.get(target, {})
+                        for occ_nick, info in list(occ.items()):
+                            jid = info.get("jid")
+                            if jid:
+                                await self.check_jid_against_rtbl(jid, occ_nick)
 
-                        # Apply existing bans to other rooms
-                        other_rooms = self.protected_rooms - {target}
-                        if other_rooms:
-                            log.info("🔄 Applying existing bans to other rooms due to new room addition")
-                            await self.bot_send_message(
-                                mto=_admin_room(),
-                                mbody=f"🔄 Applying existing bans to other rooms due to new room addition",
-                                mtype="groupchat"
-                            )
-                            for room in other_rooms:
-                                await self.sync_bans_to_rooms_for_single_room(room)
-
-                    await wait_for_bot_online()
+                    # Apply existing bans to other rooms
+                    other_rooms = self.protected_rooms - {target}
+                    if other_rooms:
+                        log.info("🔄 Applying existing bans to other rooms due to new room addition")
+                        await self.bot_send_message(
+                            mto=_admin_room(),
+                            mbody="🔄 Applying existing bans to other rooms due to new room addition",
+                            mtype="groupchat"
+                        )
+                        for other_room in other_rooms:
+                            await self.sync_bans_to_rooms_for_single_room(other_room)
                 else:
                     await self.bot_send_message(mto=room, mbody=f"⚠️ Room already in protected list: {target}", mtype="groupchat")
 
@@ -216,6 +225,12 @@ class ProtectedRoomMixin:
 
                 # --- Bot leaves the room immediately ---
                 try:
-                    self.plugin["xep_0045"].leave_muc(target, _nick())
+                    actual_nick = _nick()
+                    bot_entry = getattr(self, "_bot_occupant_entry", None)
+                    if bot_entry is not None:
+                        actual_nick = bot_entry(target)[0] or actual_nick
+                    self.plugin["xep_0045"].leave_muc(target, actual_nick)
                 except Exception as e:
                     log.warning("⚠️ Failed to leave room %s: %s", target, e)
+                self.occupants.pop(target, None)
+                getattr(self, "room_bot_nicks", {}).pop(target, None)

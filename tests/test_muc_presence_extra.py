@@ -434,6 +434,123 @@ async def test_muc_offline_recovers_manual_ban_reason_from_xml(temp_db_path):
 
 
 @pytest.mark.asyncio
+async def test_ensure_muc_joined_consumes_waiter_and_accepts_alternate_self_nick():
+    bot = MucBotFixture()
+    bot.boundjid = SimpleNamespace(bare="bot@example.test")
+    bot.room_bot_nicks = {}
+    join_tasks = []
+
+    class JoinPlugin:
+        def join_muc(self, room, nick):
+            async def join_waiter():
+                await asyncio.sleep(0)
+                bot.occupants.setdefault(room, {})["BanBot-alt"] = {
+                    "jid": "bot@example.test/new-resource",
+                    "affiliation": ADMIN_AFFILIATION,
+                    "role": MODERATOR_ROLE,
+                }
+                await asyncio.Event().wait()
+
+            task = asyncio.create_task(join_waiter())
+            join_tasks.append(task)
+            return task
+
+        def leave_muc(self, room, nick):
+            return None
+
+    bot.plugin = {"xep_0045": JoinPlugin()}
+
+    assert await bot.ensure_muc_joined(ROOM_JID, timeout=1, retries=1) is True
+    assert bot._bot_occupant_entry(ROOM_JID)[0] == "BanBot-alt"
+    assert join_tasks[0].cancelled() is True
+
+
+@pytest.mark.asyncio
+async def test_ensure_muc_joined_ignores_stale_configured_nick_with_other_jid():
+    bot = MucBotFixture()
+    bot.boundjid = SimpleNamespace(bare="bot@example.test")
+    bot.room_bot_nicks = {}
+
+    class JoinPlugin:
+        def join_muc(self, room, nick):
+            async def join_waiter():
+                bot.occupants.setdefault(room, {})[BOT_NICK] = {
+                    "jid": "old-session@example.test/resource",
+                    "affiliation": ADMIN_AFFILIATION,
+                    "role": MODERATOR_ROLE,
+                }
+                await asyncio.sleep(0.1)
+                bot.occupants[room]["BanBot-alt"] = {
+                    "jid": "bot@example.test/new-resource",
+                    "affiliation": ADMIN_AFFILIATION,
+                    "role": MODERATOR_ROLE,
+                }
+                await asyncio.Event().wait()
+
+            return asyncio.create_task(join_waiter())
+
+        def leave_muc(self, room, nick):
+            return None
+
+    bot.plugin = {"xep_0045": JoinPlugin()}
+
+    assert await bot.ensure_muc_joined(ROOM_JID, timeout=1, retries=1) is True
+    assert bot._bot_occupant_entry(ROOM_JID)[0] == "BanBot-alt"
+
+
+@pytest.mark.asyncio
+async def test_ensure_muc_joined_retries_failed_join_future():
+    bot = MucBotFixture()
+    bot.boundjid = SimpleNamespace(bare="bot@example.test")
+    bot.room_bot_nicks = {}
+    calls = {"count": 0}
+
+    class JoinPlugin:
+        def join_muc(self, room, nick):
+            calls["count"] += 1
+
+            async def fail_join():
+                await asyncio.sleep(0)
+                raise asyncio.TimeoutError("server did not answer")
+
+            return asyncio.create_task(fail_join())
+
+        def leave_muc(self, room, nick):
+            return None
+
+    bot.plugin = {"xep_0045": JoinPlugin()}
+
+    assert await bot.ensure_muc_joined(ROOM_JID, timeout=0.25, retries=2) is False
+    assert calls["count"] == 2
+    assert ROOM_JID not in bot.room_join_time
+
+
+@pytest.mark.asyncio
+async def test_on_muc_presence_tracks_server_changed_self_nick(monkeypatch):
+    monkeypatch.setattr(muc_module, "NICK", BOT_NICK)
+
+    bot = MucBotFixture()
+    bot.boundjid = SimpleNamespace(bare="bot@example.test")
+    bot.room_bot_nicks = {}
+    bot.room_join_time[ROOM_JID] = time.time() - 10
+    bot.bot_admin_state[ROOM_JID] = False
+
+    await bot.on_muc_presence(
+        FakePresence(
+            room=ROOM_JID,
+            nick="BanBot-alt",
+            jid=BOT_JID_RESOURCE,
+            affiliation=ADMIN_AFFILIATION,
+            role=MODERATOR_ROLE,
+            status_codes={"110", "210"},
+        )
+    )
+
+    assert bot.room_bot_nicks[ROOM_JID] == "BanBot-alt"
+    assert bot.bot_admin_state[ROOM_JID] is True
+
+
+@pytest.mark.asyncio
 async def test_on_muc_presence_warns_when_bot_loses_admin(monkeypatch):
     monkeypatch.setattr(muc_module, "ADMIN_ROOM", ADMIN_ROOM_JID)
     monkeypatch.setattr(muc_module, "NICK", BOT_NICK)

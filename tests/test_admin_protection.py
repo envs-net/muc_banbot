@@ -58,6 +58,21 @@ def test_is_admin_or_owner_uses_live_occupant_cache(monkeypatch):
     assert not bot.is_admin_or_owner("room@conference.example.test", nick="Regular")
 
 
+def test_is_bot_admin_or_owner_falls_back_to_bound_jid_when_nick_changes(monkeypatch):
+    admin_module = importlib.import_module("banbot.admin")
+
+    monkeypatch.setattr(admin_module, "NICK", "BanBot")
+    bot = AdminBot()
+    bot.occupants["room@conference.example.test"] = {
+        "BanBot-alt": {
+            "jid": "bot@example.test/new-resource",
+            "affiliation": "admin",
+        }
+    }
+
+    assert bot.is_bot_admin_or_owner("room@conference.example.test") is True
+
+
 def test_is_authorized_requires_admin_room_and_admin_affiliation(monkeypatch, fake_msg_factory):
     admin_module = importlib.import_module("banbot.admin")
 

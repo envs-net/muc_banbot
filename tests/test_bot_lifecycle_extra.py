@@ -50,6 +50,24 @@ class FakeMucPlugin:
         self.joined.append((room, nick))
 
 
+def _install_successful_join_stub(bot):
+    """Make startup join tests deterministic without a live MUC service."""
+
+    async def ensure_muc_joined(room, **_kwargs):
+        bot.plugin["xep_0045"].join_muc(room, bot_module.NICK)
+        bot.occupants[room] = {
+            bot_module.NICK: {
+                "jid": str(bot.boundjid.bare),
+                "affiliation": "owner",
+                "role": "moderator",
+            }
+        }
+        bot.room_bot_nicks[room] = bot_module.NICK
+        return True
+
+    bot.ensure_muc_joined = ensure_muc_joined
+
+
 class FakeTask:
     """Cancellable awaitable test double used to verify task shutdown behavior."""
 
@@ -175,6 +193,7 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
     bot.protected_rooms = {"room1@conference.example.org", "room2@conference.example.org"}
     bot.registered_rooms = set()
     bot.plugin = {"xep_0045": FakeMucPlugin()}
+    _install_successful_join_stub(bot)
     bot.sent = []
     bot.version_check_enabled = True
     bot.version_check_url = "https://github.com/envs-net/muc_banbot/releases/latest"
@@ -229,7 +248,7 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
     assert "setup_db" in calls
     assert "load_bans_from_db" in calls
     assert "setup_ignorelist" in calls
-    assert "wait_for_occupants:20" in calls
+    assert "wait_for_occupants:6" in calls
     assert "sync_admins:False" in calls
     assert "setup_rtbl_publish" in calls
     assert "update_vcard" in calls
@@ -261,6 +280,7 @@ async def test_start_runs_redaction_cleanup_and_worker_when_enabled(monkeypatch)
     bot.protected_rooms = set()
     bot.registered_rooms = set()
     bot.plugin = {"xep_0045": FakeMucPlugin()}
+    _install_successful_join_stub(bot)
     bot.sent = []
     bot.version_check_enabled = False
     bot.version_check_url = None
@@ -328,6 +348,7 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     bot.protected_rooms = set()
     bot.registered_rooms = set()
     bot.plugin = {"xep_0045": FakeMucPlugin()}
+    _install_successful_join_stub(bot)
     bot.sent = []
     bot.version_check_enabled = False
     bot.version_check_url = None

@@ -249,6 +249,7 @@ class BanBot(
         # In those rooms, admin protection falls back to the live occupant cache.
         self.admin_affiliation_query_forbidden_rooms: set[str] = set()
         self.occupants: dict[str, dict] = {}
+        self.room_bot_nicks: dict[str, str] = {}
         self.protected_rooms: set[str] = set()
         self.registered_rooms: set[str] = set()
         self.init_room_invite_state()
@@ -441,26 +442,29 @@ class BanBot(
         # --- Record server connection time ---
         self.server_connect_time = time.time()
 
-        # --- Join admin room ---
-        self.plugin["xep_0045"].join_muc(ADMIN_ROOM, NICK)
-        self.room_join_time[ADMIN_ROOM] = time.time()
-
-        if ADMIN_ROOM not in self.registered_rooms:
-            self.add_event_handler(f"muc::{ADMIN_ROOM}::got_online", self.muc_online)
-            self.add_event_handler(f"muc::{ADMIN_ROOM}::got_offline", self.muc_offline)
-            self.registered_rooms.add(ADMIN_ROOM)
-
-        # --- Join protected rooms ---
-        for room in self.protected_rooms:
-            self.plugin["xep_0045"].join_muc(room, NICK)
-            self.room_join_time[room] = time.time()
+        # Register room handlers before sending join presence.  Awaited joins can
+        # otherwise receive self-presence before the BanBot handlers exist.
+        managed_rooms = [ADMIN_ROOM, *sorted(self.protected_rooms - {ADMIN_ROOM})]
+        for room in managed_rooms:
             if room not in self.registered_rooms:
                 self.add_event_handler(f"muc::{room}::got_online", self.muc_online)
                 self.add_event_handler(f"muc::{room}::got_offline", self.muc_offline)
                 self.registered_rooms.add(room)
 
-        # --- Wait for occupants to populate ---
-        await self.wait_for_occupants(timeout=20)
+        # Explicitly await/consume all Slixmpp join Futures.  Rooms are joined in
+        # parallel so one slow remote MUC does not block all other rooms.
+        join_results = await asyncio.gather(
+            *(
+                self.ensure_muc_joined(room, timeout=20, retries=2)
+                for room in managed_rooms
+            )
+        )
+        failed_joins = [room for room, joined in zip(managed_rooms, join_results) if not joined]
+        if failed_joins:
+            log.warning("MUC joins failed for: %s", ", ".join(failed_joins))
+
+        # --- Wait briefly for remaining occupant presences to populate ---
+        await self.wait_for_occupants(timeout=6)
 
         # --- Check admin rights in all protected rooms ---
         await self.check_bot_admin_rights()

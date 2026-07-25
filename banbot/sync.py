@@ -12,6 +12,34 @@ from .locks import ban_state_lock
 
 
 class SyncMixin:
+    def _sync_bot_is_admin_or_owner(self, room: str) -> bool:
+        """Return cached bot rights without emitting one warning per poll."""
+        bot_entry = getattr(self, "_bot_occupant_entry", None)
+        if bot_entry is not None:
+            _nick, info = bot_entry(room)
+            return bool(info and info.get("affiliation") in ("owner", "admin"))
+        return bool(self.is_bot_admin_or_owner(room))
+
+
+    async def _sync_ensure_muc_joined(self, room: str, *, force: bool = False) -> bool:
+        """Use the tracked MUC join helper with a lightweight mixin fallback."""
+        ensure_joined = getattr(self, "ensure_muc_joined", None)
+        if ensure_joined is not None:
+            return await ensure_joined(room, timeout=20, retries=2, force=force)
+
+        try:
+            if force:
+                self.plugin["xep_0045"].leave_muc(room, NICK)
+                await asyncio.sleep(0.5)
+            self.plugin["xep_0045"].join_muc(room, NICK)
+            self.room_join_time[room] = time.time()
+            return True
+        except Exception as exc:
+            self.room_join_time.pop(room, None)
+            log.warning("⚠️ Failed to rejoin room %s: %s", room, exc)
+            return False
+
+
     async def sync_rooms_and_bans(self) -> None:
         """Run full room/ban sync while holding the shared ban-state lock."""
         async with ban_state_lock(self):
@@ -54,29 +82,23 @@ class SyncMixin:
             active_room_bans: list[tuple[str | None, str | None, str | None]],
         ) -> None:
             # --- Leave and rejoin room to refresh presence ---
-            try:
-                self.plugin["xep_0045"].leave_muc(room, NICK)
-                await asyncio.sleep(0.5)  # short delay
-                self.plugin["xep_0045"].join_muc(room, NICK)
-                self.room_join_time[room] = time.time()
-            except Exception as e:
-                log.warning("⚠️ Failed to rejoin room %s: %s", room, e)
-
-            self.bot_admin_state[room] = self.is_bot_admin_or_owner(room)
-
-            # --- Wait until bot is recognized in occupants ---
-            for _ in range(10):
-                occ = self.occupants.get(room, {})
-                if NICK in occ:
-                    break
-                await asyncio.sleep(1)
-
-            # --- Check bot admin/owner rights ---
-            if not self.is_bot_admin_or_owner(room):
-                log.warning("⛔ Skipping %s — bot is not admin/owner", room)
+            joined = await self._sync_ensure_muc_joined(room, force=True)
+            if not joined:
+                log.warning("⛔ Skipping %s — bot could not join the room", room)
                 await self.bot_send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"⛔ Skipping {room} — bot has no admin/owner rights",
+                    mbody=f"⛔ Skipping {room} — bot could not join the room",
+                    mtype="groupchat",
+                )
+                return
+
+            # --- Check bot admin/owner rights ---
+            self.bot_admin_state[room] = self._sync_bot_is_admin_or_owner(room)
+            if not self.bot_admin_state[room]:
+                log.warning("⛔ Skipping %s — bot is joined but not admin/owner", room)
+                await self.bot_send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=f"⛔ Skipping {room} — bot is joined but has no admin/owner rights",
                     mtype="groupchat"
                 )
                 return
@@ -409,12 +431,12 @@ class SyncMixin:
         deadline = time.time() + timeout
 
         while time.time() < deadline:
-            if self.is_bot_admin_or_owner(room):
+            if self._sync_bot_is_admin_or_owner(room):
                 return True
 
             await asyncio.sleep(interval)
 
-        return self.is_bot_admin_or_owner(room)
+        return self._sync_bot_is_admin_or_owner(room)
 
 
     async def sync_bans_to_rooms_for_single_room(self, room: str) -> None:

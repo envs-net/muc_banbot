@@ -97,21 +97,39 @@ class HealthCheckMixin:
                         details={"error": str(e)},
                     )
 
-                for room in self.protected_rooms:
+                for room in self.protected_rooms | {ADMIN_ROOM}:
                     try:
                         # Check if bot is still in room
                         occ = self.occupants.get(room, {})
-                        bot_in_room = any(nick.lower() == NICK.lower() for nick in occ.keys())
+                        bot_entry = getattr(self, "_bot_occupant_entry", None)
+                        if bot_entry is not None:
+                            bot_in_room = bot_entry(room)[1] is not None
+                        else:
+                            bot_in_room = any(nick.lower() == NICK.lower() for nick in occ.keys())
                         if not bot_in_room:
-                            log.warning("⚠️ Health check: Bot not found in occupants for room %s", room)
-                            await self._health_send_alert(
-                                f"health_not_in_room:{room}",
-                                "Health check warning",
-                                f"Bot not in room {room}",
-                                enabled=getattr(self, "alert_on_health_check_failure", True),
-                                details={"room": room, "reason": "bot_not_in_occupants"},
-                            )
-                            continue
+                            log.warning("⚠️ Health check: Bot not found in occupants for room %s; attempting rejoin", room)
+                            rejoined = False
+                            ensure_joined = getattr(self, "ensure_muc_joined", None)
+                            if ensure_joined is not None:
+                                rejoined = await ensure_joined(
+                                    room,
+                                    timeout=20,
+                                    retries=2,
+                                    force=True,
+                                )
+
+                            if not rejoined:
+                                await self._health_send_alert(
+                                    f"health_not_in_room:{room}",
+                                    "Health check warning",
+                                    f"Bot not in room {room}; automatic rejoin failed",
+                                    enabled=getattr(self, "alert_on_health_check_failure", True),
+                                    details={"room": room, "reason": "automatic_rejoin_failed"},
+                                )
+                                continue
+
+                            log.info("✅ Health check rejoined %s", room)
+                            self._health_record_success(f"health_not_in_room:{room}")
 
                         # Check admin rights
                         if not self.is_bot_admin_or_owner(room):

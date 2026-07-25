@@ -616,7 +616,7 @@ async def test_sync_rooms_no_join_time_on_fail(temp_db_path, monkeypatch, sync_m
         await bot.sync_rooms_and_bans()
 
         assert room not in bot.room_join_time
-        assert bot.bot_admin_state[room] is True
+        assert room not in bot.bot_admin_state
     finally:
         await bot.db.close()
 
