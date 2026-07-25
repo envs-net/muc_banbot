@@ -356,3 +356,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now muc_banbot
 sudo systemctl status muc_banbot
 ```
+
+
+## Startup version notifications
+
+When `ANNOUNCE_STARTUP` is enabled, BanBot records the last successfully started version and announces a completed version upgrade in the admin room after restart. The first startup with this feature only initializes the version baseline.

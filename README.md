@@ -125,7 +125,7 @@ Examples assume the default command prefix `!`.
 | Command | Description |
 | --- | --- |
 | `!help [all\|page\|last]` / `!help <command>` | Show available commands or focused help for every command topic, including subtopics such as `room invite` and `rtbl publish` |
-| `!status` | Show bot health, uptime, rooms, bans, RTBL, and DB state |
+| `!status` | Show bot health, uptime, rooms, bans, RTBL, DB state, and protection status |
 | `!config [all\|page\|last]` / `!config show [all\|page\|last]` | Show active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config search/find <query>` | Search config option names and displayed values |
 | `!config diff [all\|page\|last]` | Show current values that differ from `config_sample.py` defaults |
@@ -144,7 +144,7 @@ Examples assume the default command prefix `!`.
 | `!restore <file/latest> confirm` | Restore a managed full backup archive |
 | `!room add <room>` | Add a protected room |
 | `!room remove/delete/del/rm <room>` | Remove a protected room |
-| `!room list [all/page]` | List protected rooms |
+| `!room list [all/page]` | List protected rooms with join state and bot affiliation |
 | `!room invite list [all/page/last]` | List pending room invites |
 | `!room invite accept/decline/remove/delete/del/rm <id>` | Accept or decline a pending room invite |
 | `!policy` / `!rules show/set/clear/delete/remove/enable/disable` | Manage public room policy text |

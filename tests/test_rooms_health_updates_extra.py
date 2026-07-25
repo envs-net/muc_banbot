@@ -844,3 +844,73 @@ async def test_room_invite_rm_alias_declines_pending_invite():
 
     assert bot.pending_room_invites == {}
     assert "Declined protected-room invite #1" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_list_shows_join_state_and_bot_affiliation():
+    bot = RoomHealthBot()
+    room = "room@conference.example.test"
+    bot.occupants = {
+        room: {
+            "BanBot": {
+                "jid": "bot@example.org",
+                "affiliation": "owner",
+            }
+        }
+    }
+
+    await bot.cmd_room(["list", "all"], "admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+
+    assert f"🟢 {room} | joined | bot affiliation: owner" in body
+
+    bot.occupants[room] = {}
+    await bot.cmd_room(["list", "all"], "admin@conference.example.org")
+    assert f"🔴 {room} | not joined | bot affiliation: unknown" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_startup_version_notice_is_persisted_and_announced_after_upgrade(
+    temp_db_path, monkeypatch
+):
+    updates_module = importlib.import_module("banbot.updates")
+    bot = RoomHealthBot()
+    bot.announce_startup = True
+    await bot.setup_db()
+    try:
+        # First successful start initializes the baseline without claiming an update.
+        await bot.prepare_startup_version_notice(reconnecting=False)
+        assert await bot.finalize_startup_version_notice(reconnecting=False) is False
+        assert bot.sent == []
+
+        await bot.db.execute(
+            "UPDATE bot_metadata SET value = ? WHERE key = ?",
+            ("2.5.9", "last_successful_start_version"),
+        )
+        await bot.db.commit()
+        monkeypatch.setattr(updates_module, "__version__", "2.6.1")
+
+        assert await bot.prepare_startup_version_notice(reconnecting=False) == "2.5.9"
+        assert await bot.finalize_startup_version_notice(reconnecting=False) is True
+        assert "BanBot updated successfully: 2.5.9 → 2.6.1" in bot.sent[-1]["mbody"]
+
+        async with bot.db.execute(
+            "SELECT value FROM bot_metadata WHERE key = ?",
+            ("last_successful_start_version",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == ("2.6.1",)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_startup_version_notice_skips_reconnects(temp_db_path):
+    bot = RoomHealthBot()
+    await bot.setup_db()
+    try:
+        assert await bot.prepare_startup_version_notice(reconnecting=True) is None
+        assert await bot.finalize_startup_version_notice(reconnecting=True) is False
+        assert bot.sent == []
+    finally:
+        await bot.db.close()

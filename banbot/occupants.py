@@ -45,3 +45,20 @@ class BotOccupantMixin:
                     return nick, info
 
         return None, None
+
+
+def bot_room_status_line(bot, room: str) -> str:
+    """Return one room-list line with join state and bot affiliation."""
+    _nick, info = BotOccupantMixin._bot_occupant_entry(bot, room)
+    if info is None:
+        return f"🔴 {room} | not joined | bot affiliation: unknown"
+
+    affiliation = str(info.get("affiliation") or "none").lower()
+    if affiliation in {"owner", "admin"}:
+        icon = "🟢"
+        rights = affiliation
+    else:
+        icon = "🟠"
+        rights = f"{affiliation} (no admin rights)"
+
+    return f"{icon} {room} | joined | bot affiliation: {rights}"

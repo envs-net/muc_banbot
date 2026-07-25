@@ -50,6 +50,15 @@ Removing a room deletes it from the protected room list and makes the bot leave 
 !room list all
 ```
 
+Each room line includes the live join state and the bot affiliation, for example:
+
+```text
+🟢 room@conference.example.org | joined | bot affiliation: owner
+🟢 another@conference.example.org | joined | bot affiliation: admin
+🟠 limited@conference.example.org | joined | bot affiliation: member (no admin rights)
+🔴 offline@conference.example.org | not joined | bot affiliation: unknown
+```
+
 Room list output uses `LIST_PAGE_SIZE` unless `all` is used.
 
 ## Room Invites

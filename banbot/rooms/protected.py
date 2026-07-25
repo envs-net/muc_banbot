@@ -11,6 +11,7 @@ from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
 
 from ..muc_join import await_muc_join_compat
+from ..occupants import bot_room_status_line
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
@@ -124,17 +125,20 @@ class ProtectedRoomMixin:
 
             if self.protected_rooms:
                 rooms = sorted(self.protected_rooms)
+                room_lines = [bot_room_status_line(self, room_jid) for room_jid in rooms]
                 if show_all:
-                    page_lines = rooms
-                    total_items = len(rooms)
+                    page_lines = room_lines
+                    total_items = len(room_lines)
                     text = (
                         f"🔒 Protected Rooms ({total_items}) - All:\n"
                         + "\n".join(page_lines)
                     )
                 else:
                     per_page = get_list_page_size(self)
-                    page = resolve_page(page, len(rooms), per_page)
-                    page_lines, current_page, total_pages, total_items = paginate_lines(rooms, page, per_page=per_page)
+                    page = resolve_page(page, len(room_lines), per_page)
+                    page_lines, current_page, total_pages, total_items = paginate_lines(
+                        room_lines, page, per_page=per_page
+                    )
 
                     text = (
                         f"🔒 Protected Rooms ({total_items}) - Page {current_page}/{total_pages}:\n"

@@ -195,6 +195,14 @@ class DatabaseMixin:
             )
         """)
 
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS bot_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+            )
+        """)
+
         await self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bans_target ON bans(target_type, target)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_jid ON bans(jid)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_bans_nick ON bans(LOWER(nick))")

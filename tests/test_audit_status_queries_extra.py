@@ -221,6 +221,9 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
         assert "Bot Version" in body
         assert "RTBL Entries" in body
         assert "Protected Rooms" in body
+        assert "🛡️ Protections:" in body
+        assert "FloodSpamProtection [flood]" in body
+        assert "PolicyChangeNotification [policy]" in body
         assert "admin@example.org" in body
         assert "admin@example.org/resource" not in body
     finally:

@@ -302,6 +302,7 @@ class BanBot(
         self.version_check_url: str | None = None
         self.last_version_check_result: str | None = None
         self.last_update_notified_version: str | None = None
+        self.previous_startup_version: str | None = None
 
         # --- Redaction ---
         self.redaction_enabled: bool = getattr(config, "REDACTION_ENABLED", False)
@@ -415,7 +416,10 @@ class BanBot(
         """
         await self.stop_background_tasks()
 
+        was_reconnecting = bool(self.reconnecting)
+
         await self.setup_db()
+        await self.prepare_startup_version_notice(reconnecting=was_reconnecting)
         if self.redaction_enabled and hasattr(self, "run_redaction_cleanup_automatic"):
             await self.run_redaction_cleanup_automatic(actor="system")
         await self.load_pending_room_invites()
@@ -423,8 +427,6 @@ class BanBot(
         await self.cleanup_old_audit_logs()
         await self.setup_ignorelist()
         await self.load_protections()
-
-        was_reconnecting = bool(self.reconnecting)
 
         if not was_reconnecting:
             # First connection only
@@ -528,6 +530,8 @@ class BanBot(
                 mbody=f"✅ Bot has {action} and synced all bans. ({timestamp})",
                 mtype="groupchat"
             )
+
+        await self.finalize_startup_version_notice(reconnecting=was_reconnecting)
 
         log.info("✅ Bot started, all rooms joined and bans applied")
 

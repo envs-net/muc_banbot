@@ -9,6 +9,8 @@ import psutil
 import config
 
 from ._version import __version__
+from .protections.definitions import PROTECTION_DEFAULTS, PROTECTION_ORDER
+from .protections.presentation import protection_status_line
 from .utils import human_time
 
 log = logging.getLogger(__name__)
@@ -325,5 +327,16 @@ class StatusMixin:
                 )
         else:
             status_lines.append("\n⚠️ No protected rooms configured.")
+
+        # protection runtime state
+        protection_configs = getattr(self, "protections", {}) or {}
+        protection_lines = [
+            protection_status_line(
+                name,
+                protection_configs.get(name, PROTECTION_DEFAULTS[name]),
+            )
+            for name in PROTECTION_ORDER
+        ]
+        status_lines.append("\n🛡️ Protections:\n" + "\n".join(protection_lines))
 
         await self.bot_send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
