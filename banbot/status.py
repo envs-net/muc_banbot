@@ -9,6 +9,7 @@ import psutil
 import config
 
 from ._version import __version__
+from .occupants import bot_room_status_line
 from .protections.definitions import PROTECTION_DEFAULTS, PROTECTION_ORDER
 from .protections.presentation import protection_status_line
 from .utils import human_time
@@ -313,10 +314,14 @@ class StatusMixin:
         if protected_rooms:
             preview_count = 10
             preview_rooms = protected_rooms[:preview_count]
+            preview_lines = [
+                bot_room_status_line(self, room_name)
+                for room_name in preview_rooms
+            ]
 
             status_lines.append(
-                f"\n🔒 Protected Rooms ({len(protected_rooms)}):\n" +
-                "\n".join(preview_rooms)
+                f"\n🔒 Protected Rooms ({len(protected_rooms)}):\n"
+                + "\n".join(preview_lines)
             )
 
             remaining = len(protected_rooms) - len(preview_rooms)
