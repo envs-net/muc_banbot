@@ -40,7 +40,7 @@ python tools/live_protection_smoke.py --destructive --pause-between-tests 5
 Start the bot in a test environment:
 
 ```bash
-python muc_banbot.py
+muc_banbot
 ```
 
 Check:

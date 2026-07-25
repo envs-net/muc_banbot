@@ -57,17 +57,22 @@ echo "Using muc_banbot release $LATEST_TAG"
 
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+pip install -e .
 
 # Optional: install OMEMO support after installing system libraries.
 # Raspbian example: sudo apt install libsodium-dev libxeddsa-dev
-# Then: pip install -r requirements-omemo.txt
+# Then: pip install -e ".[omemo]"
 
 cp config_sample.py config.py
 $EDITOR config.py
 
-python muc_banbot.py
+muc_banbot
 ```
+
+The legacy `python muc_banbot.py` launcher remains supported. Installing the
+project creates the preferred `muc_banbot` command inside the virtual
+environment.
 
 For a systemd service example, see [docs/configuration.md](docs/configuration.md#systemd-service).
 
@@ -85,10 +90,10 @@ LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
 git checkout "$LATEST_TAG"
 
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 
 # Optional, only when OMEMO support is used:
-# pip install -r requirements-omemo.txt
+# pip install -e ".[omemo]"
 
 systemctl --user restart muc_banbot
 # or, for a system-wide service:

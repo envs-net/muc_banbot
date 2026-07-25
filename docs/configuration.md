@@ -329,29 +329,50 @@ AVATAR_PATH = "data/avatar.png"
 
 ## Systemd Service
 
-Example system service:
+Install the project in its virtual environment so the `muc_banbot` console
+command is available:
+
+```bash
+cd /srv/adminbot/muc_banbot
+source venv/bin/activate
+pip install -e .
+```
+
+An example system service is provided as
+[`contrib/muc_banbot.service`](../contrib/muc_banbot.service):
 
 ```ini
 [Unit]
 Description=BanBot XMPP moderation bot
+Documentation=https://github.com/envs-net/muc_banbot
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=adminbot
+Group=adminbot
 WorkingDirectory=/srv/adminbot/muc_banbot
-ExecStart=/srv/adminbot/muc_banbot/venv/bin/python /srv/adminbot/muc_banbot/muc_banbot.py
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
 Restart=always
 RestartSec=5
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/adminbot/muc_banbot
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Reload after changes:
+Copy and reload the service after changes:
 
 ```bash
+sudo cp contrib/muc_banbot.service /etc/systemd/system/muc_banbot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now muc_banbot
 sudo systemctl status muc_banbot
