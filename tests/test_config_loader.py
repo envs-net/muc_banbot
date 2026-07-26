@@ -73,7 +73,7 @@ def test_load_config_module_removes_partial_module_after_failure(
     assert "config" not in sys.modules
 
 
-def test_missing_config_error_mentions_service_environment(
+def test_missing_config_error_mentions_optional_environment_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -85,8 +85,8 @@ def test_missing_config_error_mentions_service_environment(
         load_config_module()
 
     message = format_config_import_error(exc_info.value)
-    assert "config.py is missing or its path is not configured" in message
-    assert "MUC_BANBOT_CONFIG=/absolute/path/to/config.py" in message
+    assert "config.py is missing from the working directory or source checkout" in message
+    assert "Optional override: MUC_BANBOT_CONFIG=/absolute/path/to/config.py" in message
 
 
 def test_explicit_environment_path_does_not_fall_back_to_cwd(

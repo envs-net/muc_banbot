@@ -354,9 +354,8 @@ User=adminbot
 Group=adminbot
 WorkingDirectory=/srv/adminbot/muc_banbot
 Environment=PYTHONUNBUFFERED=1
-Environment=MUC_BANBOT_CONFIG=/srv/adminbot/muc_banbot/config.py
 ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
-Restart=always
+Restart=on-failure
 RestartSec=5
 UMask=0077
 
@@ -370,10 +369,14 @@ ReadWritePaths=/srv/adminbot/muc_banbot
 WantedBy=multi-user.target
 ```
 
-The console command loads `config.py` from `MUC_BANBOT_CONFIG` when the
-variable is set. Without it, BanBot checks the current working directory and
-the editable source checkout. Using an absolute path in systemd avoids relying
-on Python's console-script import path.
+The console command checks the current working directory and the editable
+source checkout for `config.py`. Because the service sets `WorkingDirectory`,
+no config environment variable is required. `MUC_BANBOT_CONFIG` remains
+available as an optional override for custom layouts.
+
+`Restart=on-failure` restarts the bot after startup failures, unexpected event
+loop termination, or the dedicated `!restart confirm` exit code. A normal
+`systemctl stop` remains stopped.
 
 Copy and reload the service after changes:
 

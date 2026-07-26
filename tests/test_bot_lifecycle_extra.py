@@ -463,7 +463,7 @@ def test_connect_xmpp_keeps_older_connect_signatures_compatible(monkeypatch):
     assert xmpp.called is True
 
 
-def test_main_logs_validation_and_returns_when_connect_fails(monkeypatch):
+def test_main_exits_when_connect_fails(monkeypatch):
     class FakeLoop:
         def run_forever(self):  # pragma: no cover - should not be reached
             raise AssertionError("run_forever should not be called")
@@ -490,7 +490,10 @@ def test_main_logs_validation_and_returns_when_connect_fails(monkeypatch):
     monkeypatch.setattr(bot_module, "BanBot", FakeBanBot)
     monkeypatch.setattr(bot_module, "get_config_resource", lambda: "tests")
 
-    assert bot_module.main() is None
+    with pytest.raises(SystemExit) as excinfo:
+        bot_module.main()
+
+    assert excinfo.value.code == 1
 
 
 def test_main_exits_when_bot_initialization_fails(monkeypatch):
@@ -499,6 +502,34 @@ def test_main_exits_when_bot_initialization_fails(monkeypatch):
             raise RuntimeError("config exploded")
 
     monkeypatch.setattr(bot_module, "BanBot", FailingBanBot)
+    monkeypatch.setattr(bot_module, "get_config_resource", lambda: "tests")
+
+    with pytest.raises(SystemExit) as excinfo:
+        bot_module.main()
+
+    assert excinfo.value.code == 1
+
+
+def test_main_exits_when_event_loop_stops_unexpectedly(monkeypatch):
+    class FakeLoop:
+        def run_forever(self):
+            return None
+
+    class FakeBanBot:
+        def __init__(self, jid, password, resource):
+            self.loop = FakeLoop()
+            self.db = None
+
+        def _validate_config(self):
+            return [], []
+
+        def _format_config_validation(self, errors, warnings):
+            return "✅ Config validation passed"
+
+        def connect(self):
+            return True
+
+    monkeypatch.setattr(bot_module, "BanBot", FakeBanBot)
     monkeypatch.setattr(bot_module, "get_config_resource", lambda: "tests")
 
     with pytest.raises(SystemExit) as excinfo:

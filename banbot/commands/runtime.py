@@ -9,6 +9,8 @@ from .context import commands_module_attr
 
 log = logging.getLogger(__name__)
 
+SUPERVISOR_RESTART_EXIT_CODE = 75
+
 
 class CommandRuntimeMixin:
     async def _dispatch_runtime_admin_command(
@@ -137,4 +139,4 @@ class CommandRuntimeMixin:
             log.warning("Restart: failed to disconnect cleanly: %s", exc)
 
         log.info("Restart: exiting process now")
-        os_module._exit(0)
+        os_module._exit(SUPERVISOR_RESTART_EXIT_CODE)

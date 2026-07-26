@@ -123,12 +123,12 @@ def format_config_import_error(exc: BaseException) -> str:
         lines.append("This bot also accepts lowercase true/false.")
 
     if isinstance(exc, ModuleNotFoundError) and getattr(exc, "name", None) == "config":
-        lines.append("Hint: config.py is missing or its path is not configured.")
+        lines.append("Hint: config.py is missing from the working directory or source checkout.")
         lines.append("Create it from the sample config first:")
         lines.append("  cp config_sample.py config.py")
         lines.append("Then edit config.py and start the bot again.")
         lines.append(
-            f"For service installs, set {CONFIG_ENV_VAR}=/absolute/path/to/config.py."
+            f"Optional override: {CONFIG_ENV_VAR}=/absolute/path/to/config.py."
         )
 
     return "\n".join(lines)

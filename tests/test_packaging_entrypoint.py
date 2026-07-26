@@ -38,11 +38,8 @@ def test_systemd_service_uses_installed_console_command() -> None:
     )
 
     assert "WorkingDirectory=/srv/adminbot/muc_banbot" in service
-    assert (
-        "Environment=MUC_BANBOT_CONFIG=/srv/adminbot/muc_banbot/config.py"
-        in service
-    )
+    assert "Environment=MUC_BANBOT_CONFIG=" not in service
     assert "ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot" in service
-    assert "Restart=always" in service
+    assert "Restart=on-failure" in service
     assert "ExecStart=" in service
     assert "muc_banbot.py" not in service

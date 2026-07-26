@@ -550,14 +550,22 @@ def main() -> None:
         log.error("Startup config validation failed: %s", e)
         raise SystemExit(1)
 
-    if connect_xmpp(xmpp):
-        log.info("Connected successfully. Starting event loop...")
-        try:
-            xmpp.loop.run_forever()
-        except KeyboardInterrupt:
-            log.info("Bot stopped manually.")
-            if xmpp.db:
-                xmpp.loop.run_until_complete(xmpp.db.close())
-            xmpp.disconnect()
-    else:
+    if not connect_xmpp(xmpp):
         log.error("Unable to connect to XMPP server.")
+        raise SystemExit(1)
+
+    log.info("Connected successfully. Starting event loop...")
+    try:
+        xmpp.loop.run_forever()
+    except KeyboardInterrupt:
+        log.info("Bot stopped manually.")
+        if xmpp.db:
+            xmpp.loop.run_until_complete(xmpp.db.close())
+        xmpp.disconnect()
+        return
+
+    # A normal service stop terminates the process with SIGTERM before this
+    # point. If the event loop returns by itself, treat that as an unexpected
+    # runtime failure so Restart=on-failure can recover the service.
+    log.error("XMPP event loop stopped unexpectedly.")
+    raise SystemExit(1)

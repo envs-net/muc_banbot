@@ -75,8 +75,10 @@ project creates the preferred `muc_banbot` command inside the virtual
 environment.
 
 The command looks for `config.py` in the current working directory and editable
-source checkout. Service installations can set `MUC_BANBOT_CONFIG` to an
-absolute config path.
+source checkout. The provided systemd unit sets the project directory as its
+working directory, so no additional config environment variable is required.
+`MUC_BANBOT_CONFIG` remains available only as an optional override for custom
+layouts.
 
 For a systemd service example, see [docs/configuration.md](docs/configuration.md#systemd-service).
 

@@ -354,7 +354,7 @@ async def test_admin_restart_confirm_flushes_stops_disconnects_and_exits(fake_ms
     with pytest.raises(SystemExit) as excinfo:
         await asyncio.wait_for(restart_task, timeout=1)
 
-    assert excinfo.value.code == 0
+    assert excinfo.value.code == 75
     assert bot.flushed_redaction is True
     assert bot.stopped_background_tasks is True
     assert bot.disconnect_calls == [False]
