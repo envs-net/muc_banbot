@@ -114,6 +114,8 @@ class ConfigRuntimeMixin:
         self.alert_dedup_window = getattr(config, "ALERT_DEDUP_WINDOW", 300)
 
         self.health_check_interval = getattr(config, "HEALTH_CHECK_INTERVAL", 300)
+        self.muc_join_timeout_seconds = getattr(config, "MUC_JOIN_TIMEOUT_SECONDS", 20)
+        self.muc_join_retries = getattr(config, "MUC_JOIN_RETRIES", 2)
         self.unban_check_interval = getattr(config, "UNBAN_CHECK_INTERVAL", 60)
         self.max_tempban_days = getattr(config, "MAX_TEMPBAN_DAYS", 30)
         self.public_command_rate_limit_window = getattr(config, "PUBLIC_COMMAND_RATE_LIMIT_WINDOW", 10)

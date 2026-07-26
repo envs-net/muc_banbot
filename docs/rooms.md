@@ -10,6 +10,7 @@ Protected rooms are rooms where BanBot enforces local bans, temporary bans, RTBL
 !room
 !room list [all|page]
 !room add <room_jid>
+!room rejoin <room_jid|all>
 !room remove/delete/rm/del <room_jid>
 !room invite list [all|page|last]
 !room invite accept <id>
@@ -60,6 +61,21 @@ Each room line includes the live join state and the bot affiliation, for example
 ```
 
 Room list output uses `LIST_PAGE_SIZE` unless `all` is used.
+
+### Rejoin Rooms
+
+```text
+!room rejoin room@conference.example.org
+!room rejoin all
+```
+
+This retries the selected protected-room join without restarting BanBot. The
+command reports whether the bot joined and whether it has admin/owner rights.
+For successful administrative joins, active bans are synchronized to the room.
+
+Join behavior is controlled by `MUC_JOIN_TIMEOUT_SECONDS` and
+`MUC_JOIN_RETRIES`. The periodic health check also retries missing joins
+automatically after `HEALTH_CHECK_INTERVAL`.
 
 ## Room Invites
 

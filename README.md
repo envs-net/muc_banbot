@@ -156,6 +156,7 @@ Examples assume the default command prefix `!`.
 | `!room add <room>` | Add a protected room |
 | `!room remove/delete/del/rm <room>` | Remove a protected room |
 | `!room list [all/page]` | List protected rooms with join state and bot affiliation |
+| `!room rejoin <room/all>` | Retry joining one or all protected rooms |
 | `!room invite list [all/page/last]` | List pending room invites |
 | `!room invite accept/decline/remove/delete/del/rm <id>` | Accept or decline a pending room invite |
 | `!policy` / `!rules show/set/clear/delete/remove/enable/disable` | Manage public room policy text |

@@ -26,7 +26,7 @@ class SyncMixin:
         """Use the tracked MUC join helper with a lightweight mixin fallback."""
         ensure_joined = getattr(self, "ensure_muc_joined", None)
         if ensure_joined is not None:
-            return await ensure_joined(room, timeout=20, retries=2, force=force)
+            return await ensure_joined(room, force=force)
 
         try:
             if force:
@@ -39,7 +39,7 @@ class SyncMixin:
             self.plugin["xep_0045"],
             room,
             NICK,
-            timeout=20,
+            timeout=float(getattr(self, "muc_join_timeout_seconds", 20)),
         )
         if joined:
             self.room_join_time[room] = time.time()
@@ -671,13 +671,29 @@ class SyncMixin:
                     mtype="groupchat"
                 )
 
-            # Skip room if bot not admin/owner
-            if not await self._wait_for_bot_admin_rights(room, timeout=2.0):
-                log.warning("⛔ Skipping %s — bot not admin/owner", room)
+            # Distinguish a missing room join from insufficient affiliation.
+            bot_entry = getattr(self, "_bot_occupant_entry", None)
+            bot_in_room = (
+                bot_entry(room)[1] is not None
+                if bot_entry is not None
+                else bool(self.occupants.get(room))
+            )
+            if not bot_in_room:
+                log.warning("⛔ Skipping %s — bot is not joined", room)
                 if announce_progress:
                     await self.bot_send_message(
                         mto=ADMIN_ROOM,
-                        mbody=f"⛔ Skipping {room} — bot has no admin/owner rights",
+                        mbody=f"⛔ Skipping {room} — bot is not joined",
+                        mtype="groupchat",
+                    )
+                continue
+
+            if not await self._wait_for_bot_admin_rights(room, timeout=2.0):
+                log.warning("⛔ Skipping %s — bot is joined but not admin/owner", room)
+                if announce_progress:
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=f"⛔ Skipping {room} — bot is joined but has no admin/owner rights",
                         mtype="groupchat"
                     )
                 continue

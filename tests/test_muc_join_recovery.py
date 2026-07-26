@@ -173,3 +173,29 @@ async def test_failed_wait_join_is_retried_and_consumed_without_orphaned_task():
     assert ROOM_JID not in bot.room_join_time
     assert ROOM_JID not in bot.room_join_events
     assert orphaned_errors == []
+
+@pytest.mark.asyncio
+async def test_join_uses_runtime_timeout_and_retry_settings():
+    bot = HealthRejoinBot()
+    plugin = FailingJoinPlugin()
+    plugin.kwargs = []
+
+    async def failing_join(room, nick, **kwargs):
+        plugin.calls += 1
+        plugin.kwargs.append(kwargs)
+        raise asyncio.TimeoutError()
+
+    plugin.join_muc_wait = failing_join
+    bot.plugin = {"xep_0045": plugin}
+    bot.muc_join_timeout_seconds = 37
+    bot.muc_join_retries = 3
+
+    joined = await bot.ensure_muc_joined(ROOM_JID)
+
+    assert joined is False
+    assert plugin.calls == 3
+    assert plugin.kwargs == [
+        {"maxstanzas": 0, "timeout": 37.0},
+        {"maxstanzas": 0, "timeout": 37.0},
+        {"maxstanzas": 0, "timeout": 37.0},
+    ]

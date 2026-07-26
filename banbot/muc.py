@@ -104,8 +104,8 @@ class MucMixin(BotOccupantMixin):
         room: str,
         *,
         nick: str = NICK,
-        timeout: float = 20.0,
-        retries: int = 2,
+        timeout: float | None = None,
+        retries: int | None = None,
         force: bool = False,
     ) -> bool:
         """Join a room and confirm the bot's actual self-presence.
@@ -119,7 +119,16 @@ class MucMixin(BotOccupantMixin):
         if not force and self._bot_occupant_entry(room)[1] is not None:
             return True
 
-        attempts = max(1, int(retries))
+        if timeout is None:
+            timeout = float(getattr(self, "muc_join_timeout_seconds", 20))
+        else:
+            timeout = float(timeout)
+        if retries is None:
+            retries = int(getattr(self, "muc_join_retries", 2))
+        else:
+            retries = int(retries)
+
+        attempts = max(1, retries)
         last_error: Exception | None = None
 
         for attempt in range(1, attempts + 1):
@@ -219,7 +228,7 @@ class MucMixin(BotOccupantMixin):
                 api_name,
                 attempt,
                 attempts,
-                last_error,
+                str(last_error).strip() or type(last_error).__name__,
             )
             if attempt < attempts:
                 await asyncio.sleep(min(2.0 * attempt, 5.0))

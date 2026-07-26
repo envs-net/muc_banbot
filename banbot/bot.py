@@ -454,7 +454,7 @@ class BanBot(
         # parallel so one slow remote MUC does not block all other rooms.
         join_results = await asyncio.gather(
             *(
-                self.ensure_muc_joined(room, timeout=20, retries=2)
+                self.ensure_muc_joined(room)
                 for room in managed_rooms
             )
         )

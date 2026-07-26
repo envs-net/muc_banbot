@@ -39,6 +39,8 @@ class ConfigSnapshotMixin:
             "ALERT_ON_RTBL_REFRESH_FAILURES": getattr(self, "alert_on_rtbl_refresh_failures", 3),
             "ALERT_DEDUP_WINDOW": getattr(self, "alert_dedup_window", 300),
             "HEALTH_CHECK_INTERVAL": self.health_check_interval,
+            "MUC_JOIN_TIMEOUT_SECONDS": getattr(self, "muc_join_timeout_seconds", 20),
+            "MUC_JOIN_RETRIES": getattr(self, "muc_join_retries", 2),
             "UNBAN_CHECK_INTERVAL": self.unban_check_interval,
             "MAX_TEMPBAN_DAYS": self.max_tempban_days,
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": self.public_command_rate_limit_window,

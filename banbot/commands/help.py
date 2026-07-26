@@ -164,6 +164,7 @@ class CommandHelpMixin:
             "🏠 Rooms / Policy\n"
             f"{p}room add/remove/delete/del/rm - manage protected rooms\n"
             f"{p}room list [all|page|last] - list protected rooms\n"
+            f"{p}room rejoin <room|all> - retry selected protected-room joins\n"
             f"{p}room invite list [all|page|last] - list pending room invites\n"
             f"{p}room invite accept/decline/remove/delete/del/rm <id> - accept or remove a room invite\n"
             f"{p}room invite cleanup [expired] - cleanup pending or expired room invites\n"

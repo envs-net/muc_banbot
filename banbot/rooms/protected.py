@@ -11,7 +11,7 @@ from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
 
 from ..muc_join import await_muc_join_compat
-from ..occupants import bot_room_status_line
+from ..occupants import BotOccupantMixin, bot_room_status_line
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class ProtectedRoomMixin:
     async def cmd_room(self, args: list[str], room: str) -> None:
         """
         Manage protected rooms.
-        Commands: list, add <room>, remove <room>, invite ...
+        Commands: list, add <room>, remove <room>, rejoin <room|all>, invite ...
 
         The `add` command now validates:
         - JID format (name@domain.tld)
@@ -106,6 +106,84 @@ class ProtectedRoomMixin:
 
         if action == "invite":
             await self.cmd_room_invite(args[1:], room)
+            return
+
+        if action == "rejoin":
+            if len(args) < 2:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {self.command_prefix}room rejoin <room_jid|all>",
+                    mtype="groupchat",
+                )
+                return
+
+            requested = args[1].lower()
+            if requested == "all":
+                targets = sorted(self.protected_rooms)
+            elif requested in self.protected_rooms:
+                targets = [requested]
+            else:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Room is not protected: {requested}",
+                    mtype="groupchat",
+                )
+                return
+
+            if not targets:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody="⚠️ No protected rooms configured.",
+                    mtype="groupchat",
+                )
+                return
+
+            ensure_joined = getattr(self, "ensure_muc_joined", None)
+            if ensure_joined is None:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody="❌ MUC rejoin support is unavailable.",
+                    mtype="groupchat",
+                )
+                return
+
+            timeout = int(getattr(self, "muc_join_timeout_seconds", 20))
+            retries = int(getattr(self, "muc_join_retries", 2))
+            await self.bot_send_message(
+                mto=room,
+                mbody=(
+                    f"🔄 Rejoining {len(targets)} protected room(s) "
+                    f"with {retries} attempt(s) and a {timeout}s timeout..."
+                ),
+                mtype="groupchat",
+            )
+
+            admin_state = getattr(self, "bot_admin_state", None)
+            if admin_state is None:
+                admin_state = {}
+                self.bot_admin_state = admin_state
+
+            results: list[str] = []
+            for target in targets:
+                joined = await ensure_joined(target, force=True)
+                if not joined:
+                    admin_state.pop(target, None)
+                    results.append(f"🔴 {target} | join failed")
+                    continue
+
+                _nick, info = BotOccupantMixin._bot_occupant_entry(self, target)
+                is_admin = bool(info and info.get("affiliation") in ("owner", "admin"))
+                admin_state[target] = is_admin
+
+                if is_admin:
+                    await self.sync_bans_to_rooms_for_single_room(target)
+                results.append(bot_room_status_line(self, target))
+
+            await self.bot_send_message(
+                mto=room,
+                mbody="🔄 Room rejoin result:\n" + "\n".join(results),
+                mtype="groupchat",
+            )
             return
 
         if action == "list":
@@ -178,7 +256,7 @@ class ProtectedRoomMixin:
 
                     ensure_joined = getattr(self, "ensure_muc_joined", None)
                     if ensure_joined is not None:
-                        joined = await ensure_joined(target, timeout=20, retries=2)
+                        joined = await ensure_joined(target)
                     else:
                         # RoomMixin is also used by lightweight tests/tools
                         # without MucMixin. Production BanBot always uses the
@@ -187,7 +265,7 @@ class ProtectedRoomMixin:
                             self.plugin["xep_0045"],
                             target,
                             _nick(),
-                            timeout=20,
+                            timeout=float(getattr(self, "muc_join_timeout_seconds", 20)),
                         )
                         if not joined:
                             log.warning(

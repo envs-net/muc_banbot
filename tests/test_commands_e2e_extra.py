@@ -645,6 +645,7 @@ async def test_admin_help_room_shows_focused_room_usage(fake_msg_factory, monkey
     body = bot.sent[-1]["mbody"]
     assert "Usage:" in body
     assert "!room list [all|page]" in body
+    assert "!room rejoin <room_jid|all>" in body
     assert "!room invite accept <id>" in body
     assert bot.room_calls == []
 

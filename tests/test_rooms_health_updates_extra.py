@@ -914,3 +914,57 @@ async def test_startup_version_notice_skips_reconnects(temp_db_path):
         assert bot.sent == []
     finally:
         await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_room_rejoin_retries_one_room_and_syncs_bans():
+    bot = RoomHealthBot()
+    target = "room@conference.example.test"
+    bot.bot_admin_state = {}
+    bot.room_bot_nicks = {target: "BanBot"}
+    bot.occupants = {
+        target: {
+            "BanBot": {
+                "jid": "bot@example.org/resource",
+                "affiliation": "admin",
+                "role": "moderator",
+            }
+        }
+    }
+    bot.muc_join_timeout_seconds = 45
+    bot.muc_join_retries = 3
+    calls = []
+
+    async def ensure_joined(room, *, force=False, **kwargs):
+        calls.append((room, force, kwargs))
+        return True
+
+    bot.ensure_muc_joined = ensure_joined
+
+    await bot.cmd_room(["rejoin", target], "admin@conference.example.org")
+
+    assert calls == [(target, True, {})]
+    assert bot.bot_admin_state[target] is True
+    assert bot.synced_room == target
+    assert "3 attempt(s) and a 45s timeout" in bot.sent[-2]["mbody"]
+    assert f"🟢 {target} | joined | bot affiliation: admin" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_room_rejoin_reports_failed_and_unprotected_rooms():
+    bot = RoomHealthBot()
+    target = "room@conference.example.test"
+    bot.bot_admin_state = {target: True}
+
+    async def ensure_joined(room, *, force=False, **kwargs):
+        assert room == target
+        assert force is True
+        return False
+
+    bot.ensure_muc_joined = ensure_joined
+
+    await bot.cmd_room(["rejoin", target], "admin@conference.example.org")
+    assert target not in bot.bot_admin_state
+    assert f"🔴 {target} | join failed" in bot.sent[-1]["mbody"]
+
+    await bot.cmd_room(["rejoin", "other@conference.example.test"], "admin@conference.example.org")
+    assert bot.sent[-1]["mbody"] == "❌ Room is not protected: other@conference.example.test"

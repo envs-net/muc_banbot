@@ -57,12 +57,7 @@ class HealthCheckMixin:
             rejoined = False
             ensure_joined = getattr(self, "ensure_muc_joined", None)
             if ensure_joined is not None:
-                rejoined = await ensure_joined(
-                    room,
-                    timeout=20,
-                    retries=2,
-                    force=True,
-                )
+                rejoined = await ensure_joined(room, force=True)
 
             if not rejoined:
                 await self._health_send_alert(

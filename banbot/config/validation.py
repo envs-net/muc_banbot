@@ -82,6 +82,8 @@ class ConfigValidationMixin:
         int_ranges = {
             "AUDIT_LOG_RETENTION_DAYS": (1, 365),
             "HEALTH_CHECK_INTERVAL": (60, 86400),
+            "MUC_JOIN_TIMEOUT_SECONDS": (5, 300),
+            "MUC_JOIN_RETRIES": (1, 10),
             "UNBAN_CHECK_INTERVAL": (10, 86400),
             "MAX_TEMPBAN_DAYS": (1, 365),
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": (1, 3600),
@@ -100,6 +102,8 @@ class ConfigValidationMixin:
         int_defaults = {
             "AUDIT_LOG_RETENTION_DAYS": 365,
             "HEALTH_CHECK_INTERVAL": 300,
+            "MUC_JOIN_TIMEOUT_SECONDS": 20,
+            "MUC_JOIN_RETRIES": 2,
             "UNBAN_CHECK_INTERVAL": 60,
             "MAX_TEMPBAN_DAYS": 30,
             "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 10,

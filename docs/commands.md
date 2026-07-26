@@ -85,6 +85,7 @@ See [Backups and Restore](backups.md).
 | --- | --- |
 | `!room` | Shows focused room command usage |
 | `!room list [all\|page]` | Lists protected rooms with joined/not-joined state and the bot affiliation |
+| `!room rejoin <room_jid\|all>` | Retries joining one or all protected rooms |
 | `!room add <room_jid>` | Adds a protected room and stores it in the database |
 | `!room remove/delete/rm/del <room_jid>` | Removes a protected room and makes the bot leave |
 | `!room invite list [all\|page\|last]` | Lists pending protected-room invites |

@@ -55,6 +55,7 @@ class CommandUsageMixin:
             "Usage:\n"
             f"  {p}room list [all|page]\n"
             f"  {p}room add <room_jid>\n"
+            f"  {p}room rejoin <room_jid|all>\n"
             f"  {p}room remove/delete/rm/del <room_jid>\n"
             f"  {p}room invite list [all|page|last]\n"
             f"  {p}room invite accept <id>\n"

@@ -116,6 +116,8 @@ def test_startup_config_snapshot_includes_rtbl_and_omemo(monkeypatch):
 def test_runtime_config_snapshot_includes_sync_batch_list_page_size_and_output_modes():
     bot = ConfigBot()
     bot.sync_batch_size = 7
+    bot.muc_join_timeout_seconds = 45
+    bot.muc_join_retries = 4
     bot.list_page_size = 13
     bot.config_output_mode = "paginate"
     bot.help_output_mode = "paginate"
@@ -123,6 +125,8 @@ def test_runtime_config_snapshot_includes_sync_batch_list_page_size_and_output_m
     snapshot = bot._runtime_config_snapshot()
 
     assert snapshot["SYNC_BATCH_SIZE"] == 7
+    assert snapshot["MUC_JOIN_TIMEOUT_SECONDS"] == 45
+    assert snapshot["MUC_JOIN_RETRIES"] == 4
     assert snapshot["LIST_PAGE_SIZE"] == 13
     assert snapshot["CONFIG_OUTPUT_MODE"] == "paginate"
     assert snapshot["HELP_OUTPUT_MODE"] == "paginate"

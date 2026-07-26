@@ -69,6 +69,8 @@ async def test_config_show_groups_keys_and_hides_secrets():
     assert "LIST_PAGE_SIZE" in bot_settings
     assert "MUC_WRITE_SEMAPHORE" in performance
     assert "SYNC_BATCH_SIZE" in performance
+    assert "MUC_JOIN_TIMEOUT_SECONDS" in bot_settings
+    assert "MUC_JOIN_RETRIES" in bot_settings
 
     # Removed legacy summary lines should not make the output noisy again.
     assert "🪪 JID:" not in body

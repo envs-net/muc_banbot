@@ -160,7 +160,15 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
 
         self._test_db_path = str(db_path)
         self.protected_rooms = {"room@conference.example.test"}
-        self.occupants = {}
+        self.occupants = {
+            "room@conference.example.test": {
+                "BanBot": {
+                    "jid": "bot@example.test/resource",
+                    "affiliation": "admin",
+                    "role": "moderator",
+                }
+            }
+        }
         self.plugin = {"xep_0045": FakeMucService()}
         self.ban_cache = {}
         self.ban_index_by_jid = {}
@@ -630,5 +638,23 @@ async def test_sync_rooms_sets_join_time_on_success(temp_db_path, monkeypatch, s
         await bot.sync_rooms_and_bans()
 
         assert room in bot.room_join_time
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_bans_to_rooms_distinguishes_missing_join_from_missing_rights(temp_db_path):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    bot.occupants = {}
+    try:
+        await bot.upsert_ban_db("new@example.test", None, 0, "tester", "new")
+        await bot.sync_bans_to_rooms(startup=True, announce_progress=True)
+
+        assert bot.applied == []
+        assert any(
+            msg["mbody"] == "⛔ Skipping room@conference.example.test — bot is not joined"
+            for msg in bot.sent
+        )
+        assert not any("has no admin/owner rights" in msg["mbody"] for msg in bot.sent)
     finally:
         await bot.db.close()

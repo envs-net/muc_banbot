@@ -126,6 +126,8 @@ Common runtime-reloadable settings include:
 * `ROOM_INVITES_ENABLED`
 * `ROOM_INVITE_MAX_AGE_DAYS`
 * `HEALTH_CHECK_INTERVAL`
+* `MUC_JOIN_TIMEOUT_SECONDS`
+* `MUC_JOIN_RETRIES`
 * `UNBAN_CHECK_INTERVAL`
 * `MAX_TEMPBAN_DAYS`
 * `PUBLIC_COMMAND_RATE_LIMIT_WINDOW`
@@ -201,11 +203,17 @@ ALLOW_ADMIN_COMMANDS_IN_DMS = True
 ROOM_INVITES_ENABLED = False
 ROOM_INVITE_MAX_AGE_DAYS = 30
 HEALTH_CHECK_INTERVAL = 300
+MUC_JOIN_TIMEOUT_SECONDS = 20
+MUC_JOIN_RETRIES = 2
 UNBAN_CHECK_INTERVAL = 60
 MAX_TEMPBAN_DAYS = 30
 PUBLIC_COMMAND_RATE_LIMIT_WINDOW = 10
 PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 ```
+
+`MUC_JOIN_TIMEOUT_SECONDS` controls how long each MUC join attempt waits for
+the bot's own presence. `MUC_JOIN_RETRIES` controls the number of attempts per
+startup, health-check, sync, room-add, or manual room-rejoin cycle.
 
 Room invite details are documented in [Rooms and Invites](rooms.md).
 

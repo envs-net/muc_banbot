@@ -21,6 +21,8 @@ class ConfigValidationBot(ConfigMixin):
         self.allow_admin_commands_in_dms = True
         self.room_invites_enabled = False
         self.health_check_interval = 300
+        self.muc_join_timeout_seconds = 20
+        self.muc_join_retries = 2
         self.unban_check_interval = 60
         self.max_tempban_days = 30
         self.public_command_rate_limit_window = 30
@@ -57,6 +59,8 @@ def set_valid_config(monkeypatch):
         "SHOW_BAN_IN_MUC": False,
         "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": True,
         "HEALTH_CHECK_INTERVAL": 300,
+        "MUC_JOIN_TIMEOUT_SECONDS": 20,
+        "MUC_JOIN_RETRIES": 2,
         "ALLOW_ADMIN_COMMANDS_IN_DMS": True,
         "ROOM_INVITES_ENABLED": False,
         "ROOM_INVITE_MAX_AGE_DAYS": 30,
@@ -122,6 +126,8 @@ def test_validate_config_reports_multiple_errors_and_placeholder_credentials(mon
     monkeypatch.setattr(config, "COMMAND_PREFIX", "! bad", raising=False)
     monkeypatch.setattr(config, "LOG_LEVEL", "VERBOSE", raising=False)
     monkeypatch.setattr(config, "HEALTH_CHECK_INTERVAL", 1, raising=False)
+    monkeypatch.setattr(config, "MUC_JOIN_TIMEOUT_SECONDS", 2, raising=False)
+    monkeypatch.setattr(config, "MUC_JOIN_RETRIES", 0, raising=False)
     bot = ConfigValidationBot()
 
     errors, warnings = bot._validate_config()
@@ -131,6 +137,8 @@ def test_validate_config_reports_multiple_errors_and_placeholder_credentials(mon
     assert "COMMAND_PREFIX must not contain whitespace" in errors
     assert "LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL" in errors
     assert any("HEALTH_CHECK_INTERVAL" in error for error in errors)
+    assert any("MUC_JOIN_TIMEOUT_SECONDS" in error for error in errors)
+    assert any("MUC_JOIN_RETRIES" in error for error in errors)
     assert "PASSWORD still looks like a placeholder" in errors
 
 
