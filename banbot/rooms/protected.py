@@ -171,7 +171,7 @@ class ProtectedRoomMixin:
                     results.append(f"🔴 {target} | join failed")
                     continue
 
-                _nick, info = BotOccupantMixin._bot_occupant_entry(self, target)
+                _bot_nick, info = BotOccupantMixin._bot_occupant_entry(self, target)
                 is_admin = bool(info and info.get("affiliation") in ("owner", "admin"))
                 admin_state[target] = is_admin
 
