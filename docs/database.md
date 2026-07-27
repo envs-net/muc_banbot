@@ -104,6 +104,16 @@ Protection defaults live in code. This table stores only the current enabled sta
 | `text` | TEXT | Policy text |
 | `updated_at` | INTEGER | Last update timestamp |
 
+### `bot_metadata`
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `key` | TEXT | Metadata key |
+| `value` | TEXT | Stored metadata value |
+| `updated_at` | INTEGER | Last update timestamp |
+
+The table currently stores the last successfully started BanBot version. It allows completed upgrades to be announced only after startup, room joins, and synchronization have finished successfully.
+
 ## RTBL Tables
 
 ### `rtbl_subscriptions`

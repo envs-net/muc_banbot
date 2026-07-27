@@ -285,6 +285,7 @@ See [docs/testing.md](docs/testing.md) for the full testing workflow and [tests/
 
 The full documentation is split into focused guides. Start with the [documentation index](docs/README.md), or jump directly to a topic:
 
+* [Architecture](docs/architecture.md)
 * [Configuration](docs/configuration.md)
 * [Commands](docs/commands.md)
 * [Backups and Restore](docs/backups.md)

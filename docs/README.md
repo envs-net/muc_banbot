@@ -35,6 +35,7 @@ New operators should read:
 
 ## Development and Release
 
+* [Architecture](architecture.md) - runtime composition, startup, MUC joins, command routing, moderation, protections, RTBL, persistence, locks, and extension guidance
 * [Testing and CI](testing.md) - pytest, coverage, Drone CI, Hypothesis, mutmut, and opt-in live integration tests
 * [Release Checklist](release-checklist.md) - pre-release checks, smoke tests, docs review, CI, tagging, and release notes
 
@@ -42,6 +43,7 @@ New operators should read:
 
 | Topic | Primary doc |
 | --- | --- |
+| Runtime architecture and code ownership | [Architecture](architecture.md) |
 | Runtime config and `!config` | [Configuration](configuration.md) |
 | Long output paging | [Configuration](configuration.md#output-modes-and-paging), [Commands](commands.md#paging-and-long-output) |
 | ZIP backups and restore | [Backups and Restore](backups.md) |

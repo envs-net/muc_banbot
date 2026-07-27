@@ -70,6 +70,7 @@ Update as needed:
 
 * `README.md`
 * `docs/README.md`
+* `docs/architecture.md` when runtime ownership, startup flow, persistence, or subsystem boundaries changed
 * `docs/configuration.md`
 * `docs/commands.md`
 * `docs/backups.md`
