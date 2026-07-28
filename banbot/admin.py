@@ -87,8 +87,10 @@ class AdminMixin(BotOccupantMixin):
             if "forbidden" in str(e):
                 self.admin_affiliation_query_forbidden_rooms.add(room)
                 log.warning(
-                    "Server forbids owner/admin affiliation queries for %s; "
-                    "admin protection falls back to live occupant cache for this room.",
+                    "Full owner/admin affiliation lists are unavailable for %s; "
+                    "using the live occupant cache for admin protection. "
+                    "This is expected when BanBot is room admin rather than owner; "
+                    "offline admins cannot be detected for this room.",
                     room,
                 )
             else:

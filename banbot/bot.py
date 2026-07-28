@@ -310,6 +310,7 @@ class BanBot(
         self.redaction_iq_timeout_seconds: float = getattr(config, "REDACTION_IQ_TIMEOUT_SECONDS", 5)
         self.redaction_cleanup_task: asyncio.Task | None = None
         self.redaction_operation_tasks: set[asyncio.Task] = set()
+        self._redaction_confirmation_waiters: dict[tuple[str, str], set[asyncio.Event]] = {}
 
         # --- RTBL ---
         self.rtbl_enabled: bool = getattr(config, "RTBL_ENABLED", False)
@@ -368,7 +369,10 @@ class BanBot(
         self.add_event_handler("groupchat_invite", self.on_room_invite)
         self.add_event_handler("groupchat_direct_invite", self.on_room_invite)
 
-        # Normal direct and groupchat handling.
+        # Normal direct and groupchat handling. Moderation announcements can
+        # confirm a successful retraction even when an IQ result is delayed or
+        # missing, so inspect all message stanzas before normal command routing.
+        self.add_event_handler("message", self.on_redaction_confirmation_message)
         self.add_event_handler("message", self.on_direct_message)
         self.add_event_handler("groupchat_message", self.on_message)
         self.add_event_handler("groupchat_presence", self.on_muc_presence)

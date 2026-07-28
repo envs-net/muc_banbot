@@ -130,3 +130,34 @@ async def test_protected_admin_target_detects_domain_ban_covering_admin(monkeypa
 
     assert protected is True
     assert "domain ban" in reason
+
+
+@pytest.mark.asyncio
+async def test_forbidden_affiliation_query_logs_expected_admin_fallback(monkeypatch, caplog):
+    admin_module = importlib.import_module("banbot.admin")
+
+    class FakeIqError(Exception):
+        pass
+
+    class ForbiddenMucPlugin:
+        def __init__(self):
+            self.calls = 0
+
+        async def get_users_by_affiliation(self, room, affiliation):
+            self.calls += 1
+            raise FakeIqError("forbidden")
+
+    monkeypatch.setattr(admin_module, "IqError", FakeIqError)
+    bot = AdminBot()
+    plugin = ForbiddenMucPlugin()
+    bot.plugin["xep_0045"] = plugin
+    room = "room@conference.example.test"
+
+    with caplog.at_level("WARNING", logger="banbot.admin"):
+        assert await bot.get_room_admin_owner_jids(room) == set()
+        assert await bot.get_room_admin_owner_jids(room) == set()
+
+    assert plugin.calls == 1
+    assert "expected when BanBot is room admin rather than owner" in caplog.text
+    assert "offline admins cannot be detected" in caplog.text
+    assert "Server forbids" not in caplog.text

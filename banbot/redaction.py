@@ -16,6 +16,9 @@ log = logging.getLogger(__name__)
 
 MODERATE_NS = "urn:xmpp:message-moderate:1"
 RETRACT_NS = "urn:xmpp:message-retract:1"
+FASTEN_NS = "urn:xmpp:fasten:0"
+LEGACY_MODERATE_NS = "urn:xmpp:message-moderate:0"
+LEGACY_RETRACT_NS = "urn:xmpp:message-retract:0"
 SID_NS = "urn:xmpp:sid:0"
 REDACTION_IQ_TIMEOUT_SECONDS = 5
 REDACTION_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
@@ -37,6 +40,12 @@ _REDACTION_ALREADY_RETRACTED_TEXT = (
 
 def _redaction_exception_summary(exc: Exception) -> str:
     """Return a compact, admin-safe redaction error summary."""
+    if (
+        isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+        or exc.__class__.__name__ == "IqTimeout"
+    ):
+        return "redaction request timed out"
+
     text = str(exc).strip()
     if not text:
         return exc.__class__.__name__
@@ -294,8 +303,54 @@ class RedactionMixin:
         )
 
 
+    @staticmethod
+    def _redaction_confirmation_ids(msg) -> set[str]:
+        """Extract moderated stanza IDs from a live XEP-0425 announcement."""
+        xml = getattr(msg, "xml", None)
+        if xml is None:
+            return set()
+
+        stanza_ids: set[str] = set()
+        for retract in xml.iter(f"{{{RETRACT_NS}}}retract"):
+            stanza_id = retract.attrib.get("id")
+            if stanza_id and retract.find(f"{{{MODERATE_NS}}}moderated") is not None:
+                stanza_ids.add(stanza_id)
+
+        for apply_to in xml.iter(f"{{{FASTEN_NS}}}apply-to"):
+            stanza_id = apply_to.attrib.get("id")
+            moderated = apply_to.find(f"{{{LEGACY_MODERATE_NS}}}moderated")
+            if (
+                stanza_id
+                and moderated is not None
+                and moderated.find(f"{{{LEGACY_RETRACT_NS}}}retract") is not None
+            ):
+                stanza_ids.add(stanza_id)
+
+        return stanza_ids
+
+
+    async def on_redaction_confirmation_message(self, msg) -> None:
+        """Confirm pending retractions from the MUC moderation broadcast."""
+        stanza_ids = self._redaction_confirmation_ids(msg)
+        if not stanza_ids:
+            return
+
+        try:
+            sender = msg["from"]
+            room_jid = str(getattr(sender, "bare", None) or bare_jid(str(sender))).lower()
+        except Exception as exc:
+            log.debug("Could not resolve room for redaction confirmation: %s", exc)
+            return
+
+        waiters = getattr(self, "_redaction_confirmation_waiters", {})
+        for stanza_id in stanza_ids:
+            key = (room_jid, stanza_id)
+            for event in tuple(waiters.get(key, ())):
+                event.set()
+
+
     async def _redaction_send_retract(self, room_jid: str, stanza_id: str, reason: str | None) -> None:
-        """Send a XEP-0425 moderated message retraction IQ for one stanza-id."""
+        """Send a retraction IQ and accept the live moderation broadcast as confirmation."""
         moderate = ET.Element(f"{{{MODERATE_NS}}}moderate", {"id": stanza_id})
         ET.SubElement(moderate, f"{{{RETRACT_NS}}}retract")
         if reason:
@@ -309,7 +364,55 @@ class RedactionMixin:
             or REDACTION_IQ_TIMEOUT_SECONDS
         )
         timeout = max(1.0, min(timeout, 30.0))
-        await iq.send(timeout=timeout)
+
+        key = (str(room_jid).lower(), stanza_id)
+        waiters = getattr(self, "_redaction_confirmation_waiters", None)
+        if waiters is None:
+            waiters = {}
+            self._redaction_confirmation_waiters = waiters
+        confirmation = asyncio.Event()
+        waiters.setdefault(key, set()).add(confirmation)
+
+        send_task = asyncio.create_task(iq.send(timeout=timeout))
+        confirmation_task = asyncio.create_task(confirmation.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {send_task, confirmation_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if confirmation_task in done and confirmation.is_set():
+                log.debug(
+                    "Redaction confirmed by moderation broadcast for stanza %s in %s",
+                    stanza_id,
+                    room_jid,
+                )
+                return
+
+            try:
+                await send_task
+            except Exception as send_exc:
+                try:
+                    await asyncio.wait_for(confirmation.wait(), timeout=min(2.0, timeout))
+                except asyncio.TimeoutError:
+                    raise send_exc
+                log.info(
+                    "Redaction IQ did not complete cleanly, but the moderation broadcast "
+                    "confirmed stanza %s in %s",
+                    stanza_id,
+                    room_jid,
+                )
+        finally:
+            registered = waiters.get(key)
+            if registered is not None:
+                registered.discard(confirmation)
+                if not registered:
+                    waiters.pop(key, None)
+
+            for task in (send_task, confirmation_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(send_task, confirmation_task, return_exceptions=True)
 
 
     async def _redaction_redact_rows(
@@ -505,6 +608,15 @@ class RedactionMixin:
                         "Note: The server rejected all redaction requests.",
                         "This usually means the messages are no longer redactable",
                         "or the bot lacks moderation permissions for those stanza IDs.",
+                    ]
+                )
+            elif set(failure_reasons) == {"redaction request timed out"}:
+                lines.extend(
+                    [
+                        "",
+                        "Note: The bot received neither an IQ result nor a live moderation",
+                        "confirmation before the timeout. Check the room history because",
+                        "the server may still have applied the retraction.",
                     ]
                 )
 

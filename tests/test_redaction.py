@@ -23,10 +23,16 @@ _REDACTION_FALLBACK_DEFAULTS = {
 try:
     from banbot.db import DatabaseMixin
     from banbot.redaction import (
+        FASTEN_NS,
+        LEGACY_MODERATE_NS,
+        LEGACY_RETRACT_NS,
+        MODERATE_NS,
         REDACTION_CLEANUP_INTERVAL_SECONDS,
         REDACTION_IQ_TIMEOUT_SECONDS,
+        RETRACT_NS,
         RedactionMixin,
         SID_NS,
+        _redaction_exception_summary,
     )
     from banbot.utils import bare_jid as normalize_bare_jid
 except ImportError:
@@ -107,6 +113,10 @@ def test_redaction_fallback_defaults_match_module_constants() -> None:
     assert _REDACTION_FALLBACK_DEFAULTS["sid_ns"] == SID_NS
 
 
+def test_redaction_timeout_summary_is_not_reported_as_server_rejection() -> None:
+    assert _redaction_exception_summary(asyncio.TimeoutError()) == "redaction request timed out"
+
+
 @pytest.mark.skipif(
     REDACTION_TEST_IMPORTS_OK,
     reason="Only relevant when optional redaction imports fail.",
@@ -177,6 +187,24 @@ class FakeMessage:
 
     def __getitem__(self, key):
         return self._data[key]
+
+
+def fake_moderation_confirmation(
+    room: str,
+    stanza_id: str,
+    *,
+    legacy: bool = False,
+) -> FakeMessage:
+    """Build a live XEP-0425 moderation announcement for one stanza ID."""
+    msg = FakeMessage(room, "", body="")
+    if legacy:
+        apply_to = ET.SubElement(msg.xml, f"{{{FASTEN_NS}}}apply-to", {"id": stanza_id})
+        moderated = ET.SubElement(apply_to, f"{{{LEGACY_MODERATE_NS}}}moderated")
+        ET.SubElement(moderated, f"{{{LEGACY_RETRACT_NS}}}retract")
+    else:
+        retract = ET.SubElement(msg.xml, f"{{{RETRACT_NS}}}retract", {"id": stanza_id})
+        ET.SubElement(retract, f"{{{MODERATE_NS}}}moderated")
+    return msg
 
 
 class FakeOutgoingIq:
@@ -471,6 +499,67 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
 
     async def audit_event(self, event_type: str, **kwargs):
         self.audit_events.append((event_type, kwargs))
+
+
+def test_redaction_confirmation_ids_support_current_and_legacy_xep_formats() -> None:
+    current = fake_moderation_confirmation(TEST_ROOM_JID, TEST_STANZA_1)
+    legacy = fake_moderation_confirmation(TEST_ROOM_JID, TEST_STANZA_2, legacy=True)
+
+    assert RedactionMixin._redaction_confirmation_ids(current) == {TEST_STANZA_1}
+    assert RedactionMixin._redaction_confirmation_ids(legacy) == {TEST_STANZA_2}
+
+
+@pytest.mark.asyncio
+async def test_redact_rows_accepts_live_confirmation_when_iq_reports_failure(
+    temp_db_path,
+) -> None:
+    bot = RedactionBot()
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
+    try:
+        await bot._redaction_index_message(
+            FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
+        )
+        await bot.flush_redaction_index()
+        bot.fail_stanza_ids = {TEST_STANZA_1}
+        bot.fail_stanza_errors = {
+            TEST_STANZA_1: TEST_SERVER_REJECTED_IQ_ERROR.format(stanza_id=TEST_STANZA_1)
+        }
+
+        redaction_task = asyncio.create_task(
+            bot.redact_jid_messages(
+                TEST_SENDER_JID,
+                reason=TEST_REDACTION_REASON,
+                actor=TEST_ACTOR_JID,
+                announce=False,
+            )
+        )
+
+        key = (TEST_ROOM_JID.lower(), TEST_STANZA_1)
+        for _ in range(100):
+            if key in getattr(bot, "_redaction_confirmation_waiters", {}):
+                break
+            await asyncio.sleep(0.001)
+        else:
+            raise AssertionError("redaction confirmation waiter was not registered")
+
+        await bot.on_redaction_confirmation_message(
+            fake_moderation_confirmation(TEST_ROOM_JID, TEST_STANZA_1)
+        )
+        summary = await redaction_task
+
+        assert summary["redacted"] == 1
+        assert summary["failed"] == 0
+        assert summary["skipped"] == 0
+        assert bot._redaction_confirmation_waiters == {}
+
+        cursor = await bot.db.execute(
+            "SELECT redacted_at FROM redaction_index WHERE stanza_id = ?",
+            (TEST_STANZA_1,),
+        )
+        row = await cursor.fetchone()
+        assert row is not None and row[0] is not None
+    finally:
+        await bot.db.close()
 
 
 async def setup_and_validate_redaction_test_db(
