@@ -319,6 +319,96 @@ async def test_permanent_ban_does_not_wait_for_command_auto_redaction(temp_db_pa
 
 
 @pytest.mark.asyncio
+async def test_matching_auto_redaction_announces_background_start_before_worker(
+    temp_db_path,
+    monkeypatch,
+):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(
+        moderation_module,
+        "ADMIN_ROOM",
+        "admin@conference.example.test",
+    )
+    bot = await make_bot()
+    order: list[str] = []
+    original_send = bot.bot_send_message
+
+    async def observe_send(**kwargs):
+        if kwargs.get("mbody", "").startswith("🧹 Auto-redaction started"):
+            order.append("announcement")
+        await original_send(**kwargs)
+
+    async def observe_redaction(jid, comment, actor=None):
+        order.append("worker")
+        bot.auto_redactions.append((jid, comment, actor))
+
+    bot.bot_send_message = observe_send
+    bot._redaction_auto_reason_matches = lambda comment: "spam"
+    bot.maybe_auto_redact_after_ban = observe_redaction
+    try:
+        await bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="admin@example.test",
+            comment="spam",
+        )
+
+        tasks = list(bot.redaction_operation_tasks)
+        if tasks:
+            await asyncio.gather(*tasks)
+
+        bodies = [message["mbody"] for message in bot.sent]
+        assert bodies.index(
+            "✅ Banned user@example.org (spam) by admin@example.test"
+        ) < bodies.index(
+            "🧹 Auto-redaction started in the background for "
+            "user@example.org. Results will follow."
+        )
+        assert order == ["announcement", "worker"]
+        assert bot.auto_redactions == [
+            ("user@example.org", "spam", "admin@example.test")
+        ]
+    finally:
+        tasks = list(getattr(bot, "redaction_operation_tasks", set()))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_unmatched_ban_reason_does_not_announce_or_schedule_auto_redaction(
+    temp_db_path,
+    monkeypatch,
+):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(
+        moderation_module,
+        "ADMIN_ROOM",
+        "admin@conference.example.test",
+    )
+    bot = await make_bot()
+    bot._redaction_auto_reason_matches = lambda comment: None
+    try:
+        await bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="admin@example.test",
+            comment="policy violation",
+        )
+
+        assert bot.auto_redactions == []
+        assert not getattr(bot, "redaction_operation_tasks", set())
+        assert not any(
+            "Auto-redaction started" in message["mbody"]
+            for message in bot.sent
+        )
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_tempban_does_not_run_command_auto_redaction(temp_db_path, monkeypatch):
     moderation_module = importlib.import_module("banbot.moderation")
 

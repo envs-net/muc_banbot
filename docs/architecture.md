@@ -197,6 +197,7 @@ ban_state_lock
    ├── write audit event
    ├── acknowledge the committed ban in the admin room
    ├── apply room affiliations through XEP-0045 in parallel
+   ├── announce matching auto-redaction background work
    ├── start matching auto-redaction as a tracked background task
    └── publish/retract own RTBL items when enabled
 ```

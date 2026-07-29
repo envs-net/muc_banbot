@@ -22,6 +22,38 @@ log = logging.getLogger(__name__)
 
 
 class ModerationMixin:
+    def _auto_redaction_matches_ban_reason(self, comment: str | None) -> bool:
+        """Return whether a command ban will actually start auto-redaction.
+
+        Production BanBot provides the shared reason matcher through
+        RedactionMixin. Lightweight mixin users without that helper retain the
+        previous behavior and may decide inside maybe_auto_redact_after_ban().
+        """
+        matcher = getattr(self, "_redaction_auto_reason_matches", None)
+        if not callable(matcher):
+            return True
+        return bool(matcher(comment))
+
+    async def _announce_auto_redaction_started(self, jid: str) -> None:
+        """Tell administrators that slow redaction work is now backgrounded.
+
+        A notification failure must never prevent the actual cleanup task.
+        """
+        try:
+            await self.bot_send_message(
+                mto=ADMIN_ROOM,
+                mbody=(
+                    f"🧹 Auto-redaction started in the background for {jid}. "
+                    "Results will follow."
+                ),
+                mtype="groupchat",
+            )
+        except Exception:
+            log.exception(
+                "Could not announce automatic redaction start for %s",
+                jid,
+            )
+
     def _schedule_auto_redaction_after_ban(
         self,
         jid: str,
@@ -558,7 +590,9 @@ class ModerationMixin:
             and hasattr(self, "maybe_auto_redact_after_ban")
             and normalized_jid
             and target_type == "jid"
+            and self._auto_redaction_matches_ban_reason(comment)
         ):
+            await self._announce_auto_redaction_started(normalized_jid)
             self._schedule_auto_redaction_after_ban(normalized_jid, comment, issuer)
 
         # Mirror the already committed ban into the optional outbound RTBL.
