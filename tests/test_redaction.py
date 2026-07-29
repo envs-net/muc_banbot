@@ -541,6 +541,21 @@ def test_redaction_confirmation_ids_support_current_and_legacy_xep_formats() -> 
     assert RedactionMixin._redaction_confirmation_ids(mixed) == {"mixed-stanza"}
 
 
+@pytest.mark.asyncio
+async def test_raw_bodyless_moderation_handler_sets_pending_confirmation() -> None:
+    bot = RedactionBot()
+    confirmation = asyncio.Event()
+    key = (TEST_ROOM_JID.lower(), TEST_STANZA_1)
+    bot._redaction_confirmation_waiters = {key: {confirmation}}
+    message = fake_moderation_confirmation(TEST_ROOM_JID, TEST_STANZA_1)
+
+    assert message["body"] == ""
+
+    bot._handle_redaction_confirmation_stanza(message)
+
+    assert confirmation.is_set() is True
+
+
 def test_redaction_confirmation_ids_support_tombstone_and_moderate_layouts() -> None:
     tombstone = FakeMessage(TEST_ROOM_JID, "", body="")
     retracted = ET.SubElement(

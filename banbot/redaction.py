@@ -359,24 +359,46 @@ class RedactionMixin:
         return stanza_ids
 
 
-    async def on_redaction_confirmation_message(self, msg) -> None:
-        """Confirm pending retractions from the MUC moderation broadcast."""
+    def _redaction_confirm_from_message(self, msg) -> int:
+        """Set pending confirmation events found in an incoming message stanza."""
         stanza_ids = self._redaction_confirmation_ids(msg)
         if not stanza_ids:
-            return
+            return 0
 
         try:
             sender = msg["from"]
-            room_jid = str(getattr(sender, "bare", None) or bare_jid(str(sender))).lower()
+            room_jid = str(
+                getattr(sender, "bare", None) or bare_jid(str(sender))
+            ).lower()
         except Exception as exc:
             log.debug("Could not resolve room for redaction confirmation: %s", exc)
-            return
+            return 0
 
+        confirmed = 0
         waiters = getattr(self, "_redaction_confirmation_waiters", {})
         for stanza_id in stanza_ids:
             key = (room_jid, stanza_id)
             for event in tuple(waiters.get(key, ())):
                 event.set()
+                confirmed += 1
+
+        if confirmed:
+            log.debug(
+                "Matched %d pending redaction confirmation(s) from %s",
+                confirmed,
+                room_jid,
+            )
+        return confirmed
+
+
+    def _handle_redaction_confirmation_stanza(self, msg) -> None:
+        """Raw Slixmpp stream callback for bodyless moderation messages."""
+        self._redaction_confirm_from_message(msg)
+
+
+    async def on_redaction_confirmation_message(self, msg) -> None:
+        """Compatibility event callback used by tests and embedding users."""
+        self._redaction_confirm_from_message(msg)
 
 
     async def _redaction_send_retract(self, room_jid: str, stanza_id: str, reason: str | None) -> None:

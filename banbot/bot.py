@@ -18,6 +18,8 @@ except Exception as exc:
 
 import aiosqlite
 from slixmpp import ClientXMPP
+from slixmpp.xmlstream.handler import Callback
+from slixmpp.xmlstream.matcher import MatchXPath
 
 JID = config.JID
 PASSWORD = config.PASSWORD
@@ -369,13 +371,15 @@ class BanBot(
         self.add_event_handler("groupchat_invite", self.on_room_invite)
         self.add_event_handler("groupchat_direct_invite", self.on_room_invite)
 
-        # Normal direct and groupchat handling. Moderation announcements can
-        # confirm a successful retraction even when an IQ result is delayed or
-        # missing, so inspect all message stanzas before normal command routing.
-        self.add_event_handler("message", self.on_redaction_confirmation_message)
-        self.add_event_handler(
-            "groupchat_message",
-            self.on_redaction_confirmation_message,
+        # Slixmpp's built-in ``message`` event only matches stanzas containing
+        # a <body/> element. XEP-0425 moderation announcements are bodyless, so
+        # register a raw stream handler that sees every incoming <message/>.
+        self.register_handler(
+            Callback(
+                "BanBot Redaction Confirmations",
+                MatchXPath(f"{{{self.default_ns}}}message"),
+                self._handle_redaction_confirmation_stanza,
+            )
         )
         self.add_event_handler("message", self.on_direct_message)
         self.add_event_handler("groupchat_message", self.on_message)
