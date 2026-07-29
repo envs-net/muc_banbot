@@ -51,6 +51,59 @@ class ModerationMixin:
         task.add_done_callback(_done)
 
 
+    async def _apply_ban_to_protected_rooms(
+        self,
+        *,
+        identifier: str,
+        is_domain: bool,
+        target: str,
+        normalized_jid: str | None,
+        normalized_nick: str | None,
+        comment: str | None,
+        issuer: str,
+    ) -> None:
+        """Apply one committed ban to all protected rooms concurrently."""
+
+        async def apply_to_room(room: str) -> None:
+            try:
+                if is_domain:
+                    for nick, info in list(self.occupants.get(room, {}).items()):
+                        jid_in_room = info.get("jid")
+                        bare_in_room = self.bare_jid(jid_in_room) if jid_in_room else None
+                        domain_in_room = (
+                            bare_in_room.split("@", 1)[1].lower()
+                            if bare_in_room and "@" in bare_in_room
+                            else None
+                        )
+                        if domain_matches(domain_in_room, target):
+                            await self.apply_ban_to_room(
+                                room,
+                                bare_in_room,
+                                nick,
+                                comment,
+                                issuer,
+                            )
+                else:
+                    await self.apply_ban_to_room(
+                        room,
+                        normalized_jid,
+                        normalized_nick,
+                        comment,
+                        issuer,
+                    )
+            except Exception as exc:
+                log.warning(
+                    "Failed to ban/kick %s in %s: %s",
+                    identifier,
+                    room,
+                    exc,
+                )
+
+        await asyncio.gather(
+            *(apply_to_room(room) for room in sorted(self.protected_rooms))
+        )
+
+
     async def apply_ban_to_room(
         self,
         room: str,
@@ -453,21 +506,6 @@ class ModerationMixin:
             )
             return
 
-        # --- RTBL Publish: Update your own outbound ban feed ---
-        # Publish only permanent JID/domain bans. Nick-only bans and tempbans
-        # are not suitable for RTBL. If an existing permanent ban is converted
-        # to a tempban, retract it from the publish feed.
-        if target_type == "jid" and normalized_jid and not normalized_jid.startswith("*."):
-            if ts <= 0:
-                await self.rtbl_publish_ban(jid=normalized_jid, domain=None, comment=comment)
-            else:
-                await self.rtbl_retract_ban(jid=normalized_jid, domain=None)
-        elif target_type == "domain" and target:
-            if ts <= 0:
-                await self.rtbl_publish_ban(jid=None, domain=target, comment=comment)
-            else:
-                await self.rtbl_retract_ban(jid=None, domain=target)
-
         event_type = "ban_updated" if skip_final_message else "ban_applied"
         log.info("Ban applied: identifier=%s, JID/Nick=%s/%s, until=%s, issuer=%s",
                  identifier, normalized_jid, normalized_nick, ts, issuer)
@@ -482,10 +520,38 @@ class ModerationMixin:
                 comment=comment,
             )
 
+        # The local ban is committed at this point. Acknowledge it before any
+        # potentially slow room, RTBL, or redaction network operations.
+        if not skip_final_message:
+            display = normalized_jid if normalized_jid else (normalized_nick or "Unknown")
+            time_info = f" ({human_time(ts - int(time.time()))})" if ts > 0 else ""
+            issuer_display = normalize_actor(issuer) or "unknown"
+            msg_admin = (
+                f"✅ Banned {display}{time_info}"
+                + (f" ({comment})" if comment else "")
+                + f" by {issuer_display}"
+            )
+            await self.bot_send_message(
+                mto=ADMIN_ROOM,
+                mbody=msg_admin,
+                mtype="groupchat",
+            )
+
+        # Prioritize the actual room ban over cleanup and publication work.
+        # The semaphore inside apply_ban_to_room still limits XMPP writes.
+        await self._apply_ban_to_protected_rooms(
+            identifier=identifier,
+            is_domain=is_domain,
+            target=target,
+            normalized_jid=normalized_jid,
+            normalized_nick=normalized_nick,
+            comment=comment,
+            issuer=issuer,
+        )
+
         # Command-level auto-redaction is intentionally limited to permanent
-        # JID bans. Temporary bans expire automatically and should not wipe the
-        # user's indexed message history unless a protection explicitly asks
-        # for redaction through its own `redact` setting.
+        # JID bans. It is scheduled only after room enforcement, so bulk IQ/MAM
+        # traffic cannot delay the ban acknowledgement or the outcast writes.
         if (
             auto_redact
             and ts <= 0
@@ -495,26 +561,27 @@ class ModerationMixin:
         ):
             self._schedule_auto_redaction_after_ban(normalized_jid, comment, issuer)
 
-        if not skip_final_message:
-            display = normalized_jid if normalized_jid else (normalized_nick or "Unknown")
-            time_info = f" ({human_time(ts - int(time.time()))})" if ts > 0 else ""
-            issuer_display = normalize_actor(issuer) or "unknown"
-            msg_admin = f"✅ Banned {display}{time_info}" + (f" ({comment})" if comment else "") + f" by {issuer_display}"
-            await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg_admin, mtype="groupchat")
-
-        for room in self.protected_rooms:
-            try:
-                if is_domain:
-                    for n, info in list(self.occupants.get(room, {}).items()):
-                        jid_in_room = info.get("jid")
-                        bare_in_room = self.bare_jid(jid_in_room) if jid_in_room else None
-                        domain_in_room = bare_in_room.split("@", 1)[1].lower() if bare_in_room and "@" in bare_in_room else None
-                        if domain_matches(domain_in_room, target):
-                            await self.apply_ban_to_room(room, bare_in_room, n, comment, issuer)
-                else:
-                    await self.apply_ban_to_room(room, normalized_jid, normalized_nick, comment, issuer)
-            except (IqError, IqTimeout) as e:
-                log.warning("Failed to ban/kick %s in %s: %s", identifier, room, e)
+        # Mirror the already committed ban into the optional outbound RTBL.
+        # This happens after acknowledgement and room enforcement, so PubSub
+        # delays do not affect the visible moderation response.
+        if target_type == "jid" and normalized_jid and not normalized_jid.startswith("*."):
+            if ts <= 0:
+                await self.rtbl_publish_ban(
+                    jid=normalized_jid,
+                    domain=None,
+                    comment=comment,
+                )
+            else:
+                await self.rtbl_retract_ban(jid=normalized_jid, domain=None)
+        elif target_type == "domain" and target:
+            if ts <= 0:
+                await self.rtbl_publish_ban(
+                    jid=None,
+                    domain=target,
+                    comment=comment,
+                )
+            else:
+                await self.rtbl_retract_ban(jid=None, domain=target)
 
 
     async def unban_worker(self) -> None:

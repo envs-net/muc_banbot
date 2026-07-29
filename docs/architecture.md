@@ -193,13 +193,15 @@ ban request
    ▼
 ban_state_lock
    │
-   ├── persist/update bans table
-   ├── update in-memory ban indexes
-   ├── apply room affiliations through XEP-0045
+   ├── persist/update bans table and in-memory indexes
    ├── write audit event
-   ├── notify admin/protected rooms as configured
+   ├── acknowledge the committed ban in the admin room
+   ├── apply room affiliations through XEP-0045 in parallel
+   ├── start matching auto-redaction as a tracked background task
    └── publish/retract own RTBL items when enabled
 ```
+
+The administrator acknowledgement is sent as soon as the local ban is safely committed. Potentially slow room, PubSub, and bulk-redaction network operations are not allowed to delay that acknowledgement. Room enforcement has priority over auto-redaction traffic, and per-room writes remain bounded by the shared MUC write semaphore.
 
 `banbot.moderation` owns applying and removing bans in rooms and the tempban expiry worker. `banbot.sync` reconciles persisted bans with room affiliation state after startup, reconnects, manual syncs, and room recovery. `banbot.ban_queries` serves list, search, history, details, and edit operations.
 

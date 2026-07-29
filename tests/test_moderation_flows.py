@@ -131,6 +131,151 @@ async def test_permanent_ban_runs_command_auto_redaction(temp_db_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_ban_ack_precedes_room_enforcement_and_auto_redaction(
+    temp_db_path,
+    monkeypatch,
+):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    room_started = asyncio.Event()
+    release_room = asyncio.Event()
+    redaction_started = asyncio.Event()
+
+    async def slow_apply_ban_to_room(*args, **kwargs):
+        room_started.set()
+        await release_room.wait()
+
+    async def observe_redaction(jid, comment, actor=None):
+        redaction_started.set()
+        bot.auto_redactions.append((jid, comment, actor))
+
+    bot.apply_ban_to_room = slow_apply_ban_to_room
+    bot.maybe_auto_redact_after_ban = observe_redaction
+    ban_task = asyncio.create_task(
+        bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="admin@example.test",
+            comment="spam",
+        )
+    )
+    try:
+        await asyncio.wait_for(room_started.wait(), timeout=1)
+
+        assert any("✅ Banned user@example.org" in msg["mbody"] for msg in bot.sent)
+        assert redaction_started.is_set() is False
+
+        release_room.set()
+        await asyncio.wait_for(ban_task, timeout=1)
+        await asyncio.wait_for(redaction_started.wait(), timeout=1)
+    finally:
+        release_room.set()
+        await asyncio.gather(ban_task, return_exceptions=True)
+        tasks = list(getattr(bot, "redaction_operation_tasks", set()))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_ban_applies_to_protected_rooms_concurrently(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    bot.protected_rooms = {
+        "one@conference.example.test",
+        "two@conference.example.test",
+    }
+    started: set[str] = set()
+    both_started = asyncio.Event()
+    release_rooms = asyncio.Event()
+
+    async def slow_apply_ban_to_room(room, *args, **kwargs):
+        started.add(room)
+        if len(started) == 2:
+            both_started.set()
+        await release_rooms.wait()
+
+    bot.apply_ban_to_room = slow_apply_ban_to_room
+    ban_task = asyncio.create_task(
+        bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="admin@example.test",
+            comment="spam",
+            auto_redact=False,
+        )
+    )
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        assert started == bot.protected_rooms
+        assert any("✅ Banned user@example.org" in msg["mbody"] for msg in bot.sent)
+    finally:
+        release_rooms.set()
+        await asyncio.gather(ban_task, return_exceptions=True)
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_slow_rtbl_publish_does_not_delay_ack_or_redaction_start(
+    temp_db_path,
+    monkeypatch,
+):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    rtbl_started = asyncio.Event()
+    release_rtbl = asyncio.Event()
+    redaction_started = asyncio.Event()
+
+    async def slow_publish(jid=None, domain=None, comment=None):
+        rtbl_started.set()
+        await release_rtbl.wait()
+        bot.published.append((jid, domain, comment))
+
+    async def observe_redaction(jid, comment, actor=None):
+        redaction_started.set()
+        bot.auto_redactions.append((jid, comment, actor))
+
+    bot.rtbl_publish_ban = slow_publish
+    bot.maybe_auto_redact_after_ban = observe_redaction
+    ban_task = asyncio.create_task(
+        bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="admin@example.test",
+            comment="spam",
+        )
+    )
+    try:
+        await asyncio.wait_for(rtbl_started.wait(), timeout=1)
+        await asyncio.wait_for(redaction_started.wait(), timeout=1)
+
+        assert any("✅ Banned user@example.org" in msg["mbody"] for msg in bot.sent)
+        assert bot.applied_bans == [
+            (
+                "room@conference.example.test",
+                "user@example.org",
+                "nick",
+                "spam",
+                "admin@example.test",
+            )
+        ]
+        assert ban_task.done() is False
+    finally:
+        release_rtbl.set()
+        await asyncio.gather(ban_task, return_exceptions=True)
+        tasks = list(getattr(bot, "redaction_operation_tasks", set()))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_permanent_ban_does_not_wait_for_command_auto_redaction(temp_db_path, monkeypatch):
     moderation_module = importlib.import_module("banbot.moderation")
 
