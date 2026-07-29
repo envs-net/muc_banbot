@@ -100,6 +100,20 @@ def _redaction_error_is_already_retracted(exc: Exception) -> bool:
     return any(token in text for token in _REDACTION_ALREADY_RETRACTED_TEXT)
 
 
+def _redaction_error_is_unconfirmed(exc: Exception) -> bool:
+    """Return True when no definitive server confirmation arrived."""
+    return (
+        isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+        or exc.__class__.__name__ == "IqTimeout"
+    )
+
+
+def _xml_local_name(tag: object) -> str:
+    """Return an XML element local name without depending on one namespace."""
+    text = str(tag or "")
+    return text.rsplit("}", 1)[-1] if "}" in text else text
+
+
 class RedactionMixin:
     def _redaction_auto_reason_matches(self, comment: str | None) -> str | None:
         """Return the matching auto-redaction reason, if any."""
@@ -305,25 +319,41 @@ class RedactionMixin:
 
     @staticmethod
     def _redaction_confirmation_ids(msg) -> set[str]:
-        """Extract moderated stanza IDs from a live XEP-0425 announcement."""
+        """Extract target stanza IDs from XEP-0425 moderation announcements.
+
+        Prosody supports both XEP-0425 v0.2.1 and v0.3.0 and deployed
+        module versions may emit mixed namespace layouts. Match the protocol
+        structure by local element names while still requiring a moderation
+        marker and a retraction marker beneath the element carrying the ID.
+        """
         xml = getattr(msg, "xml", None)
         if xml is None:
             return set()
 
         stanza_ids: set[str] = set()
-        for retract in xml.iter(f"{{{RETRACT_NS}}}retract"):
-            stanza_id = retract.attrib.get("id")
-            if stanza_id and retract.find(f"{{{MODERATE_NS}}}moderated") is not None:
-                stanza_ids.add(stanza_id)
+        for element in xml.iter():
+            local_name = _xml_local_name(element.tag)
+            stanza_id = element.attrib.get("id")
+            if not stanza_id or local_name not in {
+                "apply-to",
+                "moderate",
+                "retract",
+                "retracted",
+            }:
+                continue
 
-        for apply_to in xml.iter(f"{{{FASTEN_NS}}}apply-to"):
-            stanza_id = apply_to.attrib.get("id")
-            moderated = apply_to.find(f"{{{LEGACY_MODERATE_NS}}}moderated")
-            if (
-                stanza_id
-                and moderated is not None
-                and moderated.find(f"{{{LEGACY_RETRACT_NS}}}retract") is not None
-            ):
+            descendant_names = {
+                _xml_local_name(descendant.tag)
+                for descendant in element.iter()
+                if descendant is not element
+            }
+            has_moderation = "moderated" in descendant_names or local_name == "moderate"
+            has_retraction = (
+                local_name in {"retract", "retracted"}
+                or "retract" in descendant_names
+                or "retracted" in descendant_names
+            )
+            if has_moderation and has_retraction:
                 stanza_ids.add(stanza_id)
 
         return stanza_ids
@@ -435,6 +465,7 @@ class RedactionMixin:
         summary: dict[str, object] = {
             "found": len(rows),
             "redacted": 0,
+            "unconfirmed": 0,
             "failed": 0,
             "skipped": 0,
             "failure_reasons": {},
@@ -461,6 +492,15 @@ class RedactionMixin:
                             room_jid,
                         )
                         return "skipped", row_id
+
+                    if _redaction_error_is_unconfirmed(exc):
+                        log.warning(
+                            "Redaction confirmation timed out for stanza %s in %s; "
+                            "the server may still have applied it",
+                            stanza_id,
+                            room_jid,
+                        )
+                        return "unconfirmed", row_id
 
                     error_summary = _redaction_exception_summary(exc)
                     log.warning(
@@ -499,6 +539,8 @@ class RedactionMixin:
             elif status == "skipped" and isinstance(row_value, int):
                 summary["skipped"] += 1
                 skipped_rows.append(row_value)
+            elif status == "unconfirmed":
+                summary["unconfirmed"] += 1
             else:
                 summary["failed"] += 1
                 if isinstance(row_value, str):
@@ -593,19 +635,32 @@ class RedactionMixin:
             f"Reason: {reason or 'not specified'}",
             f"Messages found: {summary.get('found', 0)}",
             f"Redacted: {summary.get('redacted', 0)}",
+            f"Unconfirmed: {summary.get('unconfirmed', 0)}",
             f"Failed: {summary.get('failed', 0)}",
             f"Skipped: {summary.get('skipped', 0)}",
         ]
 
         found = int(summary.get("found", 0) or 0)
         redacted = int(summary.get("redacted", 0) or 0)
+        unconfirmed = int(summary.get("unconfirmed", 0) or 0)
         failed = int(summary.get("failed", 0) or 0)
         skipped = int(summary.get("skipped", 0) or 0)
         failure_reasons = summary.get("failure_reasons", {})
+        if unconfirmed > 0:
+            lines.extend(
+                [
+                    "",
+                    "Note: These requests were sent, but BanBot received no IQ result",
+                    "or matching live moderation confirmation. They are not counted as",
+                    "failed because the server may still have applied the retractions.",
+                ]
+            )
+
         if (
             found > 0
             and failed == found
             and redacted == 0
+            and unconfirmed == 0
             and skipped == 0
             and isinstance(failure_reasons, dict)
             and failure_reasons
@@ -617,15 +672,6 @@ class RedactionMixin:
                         "Note: The server rejected all redaction requests.",
                         "This usually means the messages are no longer redactable",
                         "or the bot lacks moderation permissions for those stanza IDs.",
-                    ]
-                )
-            elif set(failure_reasons) == {"redaction request timed out"}:
-                lines.extend(
-                    [
-                        "",
-                        "Note: The bot received neither an IQ result nor a live moderation",
-                        "confirmation before the timeout. Check the room history because",
-                        "the server may still have applied the retraction.",
                     ]
                 )
 
@@ -663,6 +709,7 @@ class RedactionMixin:
             details={
                 "found": summary.get("found", 0),
                 "redacted": summary.get("redacted", 0),
+                "unconfirmed": summary.get("unconfirmed", 0),
                 "failed": summary.get("failed", 0),
                 "skipped": summary.get("skipped", 0),
                 "indexed_total": summary.get("indexed_total", 0),
@@ -689,7 +736,13 @@ class RedactionMixin:
         actor: str | None = None,
     ) -> dict[str, int]:
         """Redact exactly one stanza-id in one room."""
-        summary = {"found": 1, "redacted": 0, "failed": 0, "skipped": 0}
+        summary = {
+            "found": 1,
+            "redacted": 0,
+            "unconfirmed": 0,
+            "failed": 0,
+            "skipped": 0,
+        }
         try:
             await self._redaction_send_retract(room_jid, stanza_id, reason)
         except Exception as exc:
@@ -709,6 +762,14 @@ class RedactionMixin:
                     (int(time.time()), actor, reason, room_jid, stanza_id),
                 )
                 await self.db.commit()
+            elif _redaction_error_is_unconfirmed(exc):
+                summary["unconfirmed"] = 1
+                log.warning(
+                    "Redaction confirmation timed out for stanza %s in %s; "
+                    "the server may still have applied it",
+                    stanza_id,
+                    room_jid,
+                )
             else:
                 summary["failed"] = 1
                 error_summary = _redaction_exception_summary(exc)
@@ -745,6 +806,7 @@ class RedactionMixin:
                 "room_jid": room_jid,
                 "stanza_id": stanza_id,
                 "redacted": summary.get("redacted", 0),
+                "unconfirmed": summary.get("unconfirmed", 0),
                 "failed": summary.get("failed", 0),
                 "skipped": summary.get("skipped", 0),
             },
@@ -758,6 +820,7 @@ class RedactionMixin:
                 f"Stanza ID: {stanza_id}\n"
                 f"Reason: {reason or 'not specified'}\n"
                 f"Redacted: {summary['redacted']}\n"
+                f"Unconfirmed: {summary['unconfirmed']}\n"
                 f"Failed: {summary['failed']}\n"
                 f"Skipped: {summary['skipped']}"
             ),

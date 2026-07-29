@@ -373,6 +373,10 @@ class BanBot(
         # confirm a successful retraction even when an IQ result is delayed or
         # missing, so inspect all message stanzas before normal command routing.
         self.add_event_handler("message", self.on_redaction_confirmation_message)
+        self.add_event_handler(
+            "groupchat_message",
+            self.on_redaction_confirmation_message,
+        )
         self.add_event_handler("message", self.on_direct_message)
         self.add_event_handler("groupchat_message", self.on_message)
         self.add_event_handler("groupchat_presence", self.on_muc_presence)

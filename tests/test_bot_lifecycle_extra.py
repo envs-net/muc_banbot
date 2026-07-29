@@ -155,7 +155,8 @@ def test_banbot_init_sets_runtime_state_and_registers_plugins(monkeypatch):
         "xep_0249",
     ]
     assert "session_start" in bot.registered_events
-    assert "groupchat_message" in bot.registered_events
+    assert bot.registered_events.count("message") == 3
+    assert bot.registered_events.count("groupchat_message") == 2
     assert "groupchat_presence" in bot.registered_events
     assert "disconnected" in bot.registered_events
     assert "connection_failed" in bot.registered_events

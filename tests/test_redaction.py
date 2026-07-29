@@ -207,6 +207,15 @@ def fake_moderation_confirmation(
     return msg
 
 
+def fake_mixed_prosody_confirmation(room: str, stanza_id: str) -> FakeMessage:
+    """Build a mixed-version moderation broadcast seen in deployed modules."""
+    msg = FakeMessage(room, "", body="")
+    apply_to = ET.SubElement(msg.xml, f"{{{FASTEN_NS}}}apply-to", {"id": stanza_id})
+    retract = ET.SubElement(apply_to, f"{{{RETRACT_NS}}}retract")
+    ET.SubElement(retract, f"{{{MODERATE_NS}}}moderated")
+    return msg
+
+
 class FakeOutgoingIq:
     """Mock outgoing XMPP IQ stanza used by redaction tests.
 
@@ -525,9 +534,32 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
 def test_redaction_confirmation_ids_support_current_and_legacy_xep_formats() -> None:
     current = fake_moderation_confirmation(TEST_ROOM_JID, TEST_STANZA_1)
     legacy = fake_moderation_confirmation(TEST_ROOM_JID, TEST_STANZA_2, legacy=True)
+    mixed = fake_mixed_prosody_confirmation(TEST_ROOM_JID, "mixed-stanza")
 
     assert RedactionMixin._redaction_confirmation_ids(current) == {TEST_STANZA_1}
     assert RedactionMixin._redaction_confirmation_ids(legacy) == {TEST_STANZA_2}
+    assert RedactionMixin._redaction_confirmation_ids(mixed) == {"mixed-stanza"}
+
+
+def test_redaction_confirmation_ids_support_tombstone_and_moderate_layouts() -> None:
+    tombstone = FakeMessage(TEST_ROOM_JID, "", body="")
+    retracted = ET.SubElement(
+        tombstone.xml,
+        f"{{{RETRACT_NS}}}retracted",
+        {"id": TEST_STANZA_1},
+    )
+    ET.SubElement(retracted, f"{{{MODERATE_NS}}}moderated")
+
+    echoed = FakeMessage(TEST_ROOM_JID, "", body="")
+    moderate = ET.SubElement(
+        echoed.xml,
+        f"{{{MODERATE_NS}}}moderate",
+        {"id": TEST_STANZA_2},
+    )
+    ET.SubElement(moderate, f"{{{RETRACT_NS}}}retract")
+
+    assert RedactionMixin._redaction_confirmation_ids(tombstone) == {TEST_STANZA_1}
+    assert RedactionMixin._redaction_confirmation_ids(echoed) == {TEST_STANZA_2}
 
 
 @pytest.mark.asyncio
@@ -984,6 +1016,47 @@ async def test_redact_rows_uses_bounded_concurrency_and_batch_marks_rows(temp_db
         assert bot.redaction_inflight_tracker["max"] == 2
 
         assert await redacted_index_count(bot) == 8
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_redact_rows_counts_timeouts_as_unconfirmed_not_failed(temp_db_path):
+    bot = RedactionBot()
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
+    try:
+        await bot._redaction_index_message(
+            FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
+        )
+
+        async def timeout_retract(_room, _stanza_id, _reason):
+            raise asyncio.TimeoutError()
+
+        bot._redaction_send_retract = timeout_retract
+        summary = await bot.redact_jid_messages(
+            TEST_SENDER_JID,
+            reason=TEST_REDACTION_REASON,
+            actor=TEST_ACTOR_JID,
+            announce=False,
+        )
+
+        assert summary["found"] == 1
+        assert summary["redacted"] == 0
+        assert summary["unconfirmed"] == 1
+        assert summary["failed"] == 0
+        assert summary["skipped"] == 0
+        assert await redacted_index_count(bot) == 0
+        assert bot.alerts == []
+
+        message = bot._redaction_summary_text(
+            "Auto-redaction completed after ban",
+            TEST_SENDER_JID,
+            TEST_REDACTION_REASON,
+            summary,
+        )
+        assert "Unconfirmed: 1" in message
+        assert "Failed: 0" in message
+        assert "They are not counted as" in message
     finally:
         await bot.db.close()
 
