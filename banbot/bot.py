@@ -352,6 +352,7 @@ class BanBot(
         self.register_plugin('xep_0084')  # Modern Avatar
         self.register_plugin('xep_0153')  # vCard Avatar compatibility
         self.register_plugin("xep_0249")  # Direct MUC invites
+        self.register_plugin("xep_0313")  # Message Archive Management
 
         # --- Optional OMEMO support ---
         self.configure_omemo()

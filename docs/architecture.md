@@ -337,7 +337,7 @@ Incoming encrypted commands are decrypted before protection/command processing. 
 ## Logging, Audit, and Redaction
 
 - `banbot.audit` writes operational audit records on a best-effort basis.
-- `banbot.redaction` indexes eligible stanza IDs and performs explicit or automatic message redaction.
+- `banbot.redaction` indexes eligible stanza IDs, performs explicit or automatic message redaction, and verifies otherwise unconfirmed moderation requests against room MAM tombstones.
 - `banbot.alerts` sends deduplicated operational alerts for selected failures and recoveries.
 - `banbot.updates` checks remote versions and stores the last successfully started version for update announcements.
 

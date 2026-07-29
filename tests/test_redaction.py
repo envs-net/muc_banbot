@@ -26,12 +26,14 @@ try:
         FASTEN_NS,
         LEGACY_MODERATE_NS,
         LEGACY_RETRACT_NS,
+        MAM_NS,
         MODERATE_NS,
         REDACTION_CLEANUP_INTERVAL_SECONDS,
         REDACTION_IQ_TIMEOUT_SECONDS,
         RETRACT_NS,
         RedactionMixin,
         SID_NS,
+        XDATA_NS,
         _redaction_exception_summary,
     )
     from banbot.utils import bare_jid as normalize_bare_jid
@@ -213,6 +215,35 @@ def fake_mixed_prosody_confirmation(room: str, stanza_id: str) -> FakeMessage:
     apply_to = ET.SubElement(msg.xml, f"{{{FASTEN_NS}}}apply-to", {"id": stanza_id})
     retract = ET.SubElement(apply_to, f"{{{RETRACT_NS}}}retract")
     ET.SubElement(retract, f"{{{MODERATE_NS}}}moderated")
+    return msg
+
+
+def fake_mam_tombstone(
+    room: str,
+    stanza_id: str,
+    *,
+    result_id: str | None = None,
+) -> FakeMessage:
+    """Build one archived XEP-0425 tombstone inside a MAM result."""
+    msg = FakeMessage(room, "", body="")
+    result = ET.SubElement(
+        msg.xml,
+        f"{{{MAM_NS}}}result",
+        {"id": result_id or stanza_id, "queryid": "mam-query"},
+    )
+    forwarded = ET.SubElement(result, "{urn:xmpp:forward:0}forwarded")
+    archived = ET.SubElement(forwarded, "{jabber:client}message")
+    ET.SubElement(
+        archived,
+        f"{{{SID_NS}}}stanza-id",
+        {"by": room, "id": stanza_id},
+    )
+    retracted = ET.SubElement(
+        archived,
+        f"{{{RETRACT_NS}}}retracted",
+        {"id": stanza_id},
+    )
+    ET.SubElement(retracted, f"{{{MODERATE_NS}}}moderated")
     return msg
 
 
@@ -539,6 +570,92 @@ def test_redaction_confirmation_ids_support_current_and_legacy_xep_formats() -> 
     assert RedactionMixin._redaction_confirmation_ids(current) == {TEST_STANZA_1}
     assert RedactionMixin._redaction_confirmation_ids(legacy) == {TEST_STANZA_2}
     assert RedactionMixin._redaction_confirmation_ids(mixed) == {"mixed-stanza"}
+
+
+def test_mam_ids_query_builds_extended_archive_filter() -> None:
+    query = RedactionMixin._redaction_build_mam_ids_query(
+        "query-1",
+        [TEST_STANZA_1, TEST_STANZA_2],
+    )
+
+    assert query.tag == f"{{{MAM_NS}}}query"
+    assert query.attrib == {"queryid": "query-1"}
+    form = query.find(f"{{{XDATA_NS}}}x")
+    assert form is not None and form.attrib["type"] == "submit"
+
+    fields = {
+        field.attrib["var"]: [
+            value.text for value in field.findall(f"{{{XDATA_NS}}}value")
+        ]
+        for field in form.findall(f"{{{XDATA_NS}}}field")
+    }
+    assert fields == {
+        "FORM_TYPE": [MAM_NS],
+        "ids": [TEST_STANZA_1, TEST_STANZA_2],
+    }
+
+
+def test_mam_tombstone_parser_accepts_result_and_stanza_ids() -> None:
+    tombstone = fake_mam_tombstone(
+        TEST_ROOM_JID,
+        TEST_STANZA_1,
+        result_id="different-result-id",
+    )
+
+    assert RedactionMixin._redaction_mam_tombstone_ids(
+        [tombstone],
+        {TEST_STANZA_1, TEST_STANZA_2},
+    ) == {TEST_STANZA_1}
+
+
+def test_mam_tombstone_parser_rejects_unmodified_archive_messages() -> None:
+    message = FakeMessage(TEST_ROOM_JID, "", body="")
+    result = ET.SubElement(
+        message.xml,
+        f"{{{MAM_NS}}}result",
+        {"id": TEST_STANZA_1},
+    )
+    forwarded = ET.SubElement(result, "{urn:xmpp:forward:0}forwarded")
+    ET.SubElement(forwarded, "{jabber:client}message")
+
+    assert RedactionMixin._redaction_mam_tombstone_ids(
+        [message],
+        {TEST_STANZA_1},
+    ) == set()
+
+
+@pytest.mark.asyncio
+async def test_mam_verification_falls_back_to_indexed_time_window() -> None:
+    bot = RedactionBot()
+    timestamp = int(time.time())
+    exact_queries = []
+    window_queries = []
+
+    async def no_exact_match(room_jid, stanza_ids):
+        exact_queries.append((room_jid, list(stanza_ids)))
+        return [], RuntimeError("extended ids unsupported")
+
+    async def matching_window(room_jid, start_ts, end_ts):
+        window_queries.append((room_jid, start_ts, end_ts))
+        return [fake_mam_tombstone(room_jid, TEST_STANZA_1)]
+
+    bot._redaction_query_mam_ids = no_exact_match
+    bot._redaction_query_mam_window = matching_window
+
+    confirmed = await bot._redaction_verify_mam_room(
+        TEST_ROOM_JID,
+        {TEST_STANZA_1: timestamp},
+    )
+
+    assert confirmed == {TEST_STANZA_1}
+    assert exact_queries == [(TEST_ROOM_JID, [TEST_STANZA_1])]
+    assert window_queries == [
+        (
+            TEST_ROOM_JID,
+            timestamp - 5,
+            timestamp + 5,
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -1095,6 +1212,57 @@ async def test_redact_rows_counts_timeouts_as_unconfirmed_not_failed(temp_db_pat
         assert "Unconfirmed: 1" in message
         assert "Failed: 0" in message
         assert "They are not counted as" in message
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_redact_rows_marks_mam_verified_timeouts_as_redacted(temp_db_path):
+    bot = RedactionBot()
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
+    try:
+        await bot._redaction_index_message(
+            FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
+        )
+
+        async def timeout_retract(_room, _stanza_id, _reason):
+            raise asyncio.TimeoutError()
+
+        verified_targets = []
+
+        async def verify_mam(targets):
+            verified_targets.extend(targets)
+            return {(TEST_ROOM_JID.lower(), TEST_STANZA_1)}
+
+        bot._redaction_send_retract = timeout_retract
+        bot._redaction_verify_mam_tombstones = verify_mam
+
+        summary = await bot.redact_jid_messages(
+            TEST_SENDER_JID,
+            reason=TEST_REDACTION_REASON,
+            actor=TEST_ACTOR_JID,
+            announce=False,
+        )
+
+        assert summary["found"] == 1
+        assert summary["redacted"] == 1
+        assert summary["verified_via_mam"] == 1
+        assert summary["unconfirmed"] == 0
+        assert summary["failed"] == 0
+        assert await redacted_index_count(bot) == 1
+        assert len(verified_targets) == 1
+        assert verified_targets[0][:2] == (TEST_ROOM_JID, TEST_STANZA_1)
+        assert isinstance(verified_targets[0][2], int)
+
+        message = bot._redaction_summary_text(
+            "Auto-redaction completed after ban",
+            TEST_SENDER_JID,
+            TEST_REDACTION_REASON,
+            summary,
+        )
+        assert "Redacted: 1" in message
+        assert "Verified via MAM: 1" in message
+        assert "Unconfirmed: 0" in message
     finally:
         await bot.db.close()
 

@@ -166,6 +166,9 @@ Check:
 * The room sends XEP-0359 stanza IDs for MUC messages
 * The bot can resolve the occupant's real bare JID in the room
 * The bot has moderation rights required for message retraction
+* The room exposes a MAM archive when the server does not return direct moderation confirmations
+
+If the summary reports `Unconfirmed`, the moderation request was sent but neither a direct confirmation nor a verifiable MAM tombstone was available. Check the room history and confirm that XEP-0313 MUC archiving is enabled on the server.
 
 BanBot stores message metadata only, not message bodies. Old messages that were never indexed cannot be redacted by JID, but a specific known stanza ID can still be targeted with `!redact id <room_jid> <stanza_id> [reason]`.
 

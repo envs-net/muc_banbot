@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from xml.etree import ElementTree as ET
 
 from config import ADMIN_ROOM
@@ -20,7 +21,12 @@ FASTEN_NS = "urn:xmpp:fasten:0"
 LEGACY_MODERATE_NS = "urn:xmpp:message-moderate:0"
 LEGACY_RETRACT_NS = "urn:xmpp:message-retract:0"
 SID_NS = "urn:xmpp:sid:0"
+MAM_NS = "urn:xmpp:mam:2"
+XDATA_NS = "jabber:x:data"
 REDACTION_IQ_TIMEOUT_SECONDS = 5
+REDACTION_MAM_VERIFY_BATCH_SIZE = 20
+REDACTION_MAM_VERIFY_WINDOW_SECONDS = 5
+REDACTION_MAM_VERIFY_MAX_MESSAGES = 2000
 REDACTION_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 
 _REDACTION_ALREADY_RETRACTED_CONDITIONS = {
@@ -112,6 +118,14 @@ def _xml_local_name(tag: object) -> str:
     """Return an XML element local name without depending on one namespace."""
     text = str(tag or "")
     return text.rsplit("}", 1)[-1] if "}" in text else text
+
+
+def _xml_namespace(tag: object) -> str:
+    """Return an XML element namespace or an empty string."""
+    text = str(tag or "")
+    if text.startswith("{") and "}" in text:
+        return text[1:].split("}", 1)[0]
+    return ""
 
 
 class RedactionMixin:
@@ -255,7 +269,10 @@ class RedactionMixin:
             await self._redaction_maybe_commit_index(force=True)
 
 
-    async def _redaction_fetch_targets_for_jid(self, jid: str) -> list[tuple[int, str, str]]:
+    async def _redaction_fetch_targets_for_jid(
+        self,
+        jid: str,
+    ) -> list[tuple[int, str, str, int]]:
         """Return non-redacted indexed message rows for a bare JID in protected rooms."""
         protected_rooms = sorted(getattr(self, "protected_rooms", set()))
         if not protected_rooms:
@@ -263,7 +280,7 @@ class RedactionMixin:
 
         placeholders = ",".join("?" for _ in protected_rooms)
         query = f"""
-            SELECT id, room_jid, stanza_id
+            SELECT id, room_jid, stanza_id, created_at
             FROM redaction_index
             WHERE sender_jid = ?
               AND redacted_at IS NULL
@@ -421,7 +438,278 @@ class RedactionMixin:
         self._redaction_confirm_from_message(msg)
 
 
-    async def _redaction_send_retract(self, room_jid: str, stanza_id: str, reason: str | None) -> None:
+    @staticmethod
+    def _redaction_build_mam_ids_query(
+        query_id: str,
+        stanza_ids: list[str],
+    ) -> ET.Element:
+        """Build an XEP-0313 extended query for specific archive IDs."""
+        query = ET.Element(f"{{{MAM_NS}}}query", {"queryid": query_id})
+        form = ET.SubElement(query, f"{{{XDATA_NS}}}x", {"type": "submit"})
+
+        form_type = ET.SubElement(
+            form,
+            f"{{{XDATA_NS}}}field",
+            {"var": "FORM_TYPE", "type": "hidden"},
+        )
+        ET.SubElement(form_type, f"{{{XDATA_NS}}}value").text = MAM_NS
+
+        ids_field = ET.SubElement(
+            form,
+            f"{{{XDATA_NS}}}field",
+            {"var": "ids", "type": "list-multi"},
+        )
+        for stanza_id in stanza_ids:
+            ET.SubElement(ids_field, f"{{{XDATA_NS}}}value").text = stanza_id
+        return query
+
+    @staticmethod
+    def _redaction_mam_tombstone_ids(
+        messages,
+        requested_ids: set[str],
+    ) -> set[str]:
+        """Return requested archive IDs whose MAM result contains a tombstone."""
+        confirmed: set[str] = set()
+        for message in messages or ():
+            xml = getattr(message, "xml", None)
+            if xml is None:
+                continue
+
+            for result in xml.iter():
+                if (
+                    _xml_local_name(result.tag) != "result"
+                    or _xml_namespace(result.tag) != MAM_NS
+                ):
+                    continue
+
+                candidate_ids = {str(result.attrib.get("id") or "")}
+                candidate_ids.update(
+                    str(element.attrib.get("id") or "")
+                    for element in result.iter()
+                    if _xml_local_name(element.tag) == "stanza-id"
+                )
+                candidate_ids.discard("")
+                matching_ids = candidate_ids & requested_ids
+                if not matching_ids:
+                    continue
+
+                descendant_names = {
+                    _xml_local_name(element.tag)
+                    for element in result.iter()
+                    if element is not result
+                }
+                if "moderated" in descendant_names and (
+                    "retracted" in descendant_names
+                    or "retract" in descendant_names
+                ):
+                    confirmed.update(matching_ids)
+        return confirmed
+
+    def _redaction_plugin(self, name: str):
+        """Return one registered Slixmpp plugin without assuming mapping type."""
+        plugins = getattr(self, "plugin", None)
+        if plugins is None:
+            return None
+        try:
+            return plugins[name]
+        except (AttributeError, KeyError, TypeError):
+            return None
+
+    def _redaction_mam_timeout(self) -> float:
+        """Return a bounded timeout for archive verification queries."""
+        timeout = float(
+            getattr(self, "redaction_iq_timeout_seconds", REDACTION_IQ_TIMEOUT_SECONDS)
+            or REDACTION_IQ_TIMEOUT_SECONDS
+        )
+        return max(2.0, min(timeout * 3.0, 30.0))
+
+    async def _redaction_query_mam_ids(
+        self,
+        room_jid: str,
+        stanza_ids: list[str],
+    ) -> tuple[list, Exception | None]:
+        """Query one MUC archive for specific IDs using Slixmpp's MAM stanza model."""
+        mam = self._redaction_plugin("xep_0313")
+        if mam is None or not hasattr(mam, "_pre_mam_retrieve"):
+            return [], RuntimeError("XEP-0313 plugin is unavailable")
+
+        try:
+            from slixmpp.xmlstream.handler import Collector
+            from slixmpp.xmlstream.matcher import MatchXMLMask
+        except ImportError as exc:
+            return [], exc
+
+        try:
+            iq, stanza_mask = mam._pre_mam_retrieve(
+                room_jid,
+                None,
+                None,
+                None,
+                None,
+            )
+            iq["mam"]["ids"] = list(stanza_ids)
+            query_id = str(iq["id"])
+            stanza_mask["mam_result"]["queryid"] = query_id
+            collector = Collector(
+                f"BanBot_Redaction_MAM_{query_id}",
+                MatchXMLMask(str(stanza_mask)),
+            )
+            self.register_handler(collector)
+        except Exception as exc:
+            log.debug("Could not prepare MAM ID verification for %s: %s", room_jid, exc)
+            return [], exc
+
+        send_error: Exception | None = None
+        try:
+            await iq.send(timeout=self._redaction_mam_timeout())
+        except Exception as exc:
+            send_error = exc
+        finally:
+            messages = list(collector.stop() or ())
+
+        return messages, send_error
+
+    async def _redaction_query_mam_window(
+        self,
+        room_jid: str,
+        start_ts: int,
+        end_ts: int,
+    ) -> list:
+        """Retrieve a bounded MAM time window as fallback for non-extended servers."""
+        mam = self._redaction_plugin("xep_0313")
+        if mam is None or not hasattr(mam, "iterate"):
+            return []
+
+        start = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+        end = datetime.fromtimestamp(end_ts, tz=timezone.utc)
+
+        async def collect() -> list:
+            messages = []
+            async for message in mam.iterate(
+                jid=room_jid,
+                start=start,
+                end=end,
+                rsm={"max": 50},
+                total=REDACTION_MAM_VERIFY_MAX_MESSAGES,
+            ):
+                messages.append(message)
+            return messages
+
+        try:
+            return await asyncio.wait_for(
+                collect(),
+                timeout=max(self._redaction_mam_timeout(), 10.0),
+            )
+        except Exception as exc:
+            log.debug(
+                "MAM time-window verification failed for %s (%s to %s): %s",
+                room_jid,
+                start.isoformat(),
+                end.isoformat(),
+                _redaction_exception_summary(exc),
+            )
+            return []
+
+    async def _redaction_verify_mam_room(
+        self,
+        room_jid: str,
+        entries: dict[str, int | None],
+    ) -> set[str]:
+        """Verify one room through exact-ID queries and narrow time windows."""
+        requested_ids = set(entries)
+        if not requested_ids:
+            return set()
+
+        confirmed: set[str] = set()
+        ordered_ids = list(entries)
+        for start in range(0, len(ordered_ids), REDACTION_MAM_VERIFY_BATCH_SIZE):
+            batch = ordered_ids[start : start + REDACTION_MAM_VERIFY_BATCH_SIZE]
+            messages, error = await self._redaction_query_mam_ids(room_jid, batch)
+            confirmed.update(
+                self._redaction_mam_tombstone_ids(messages, set(batch))
+            )
+            if error is not None:
+                log.debug(
+                    "Exact MAM redaction verification was unavailable for %s "
+                    "(%d ID(s)): %s",
+                    room_jid,
+                    len(batch),
+                    _redaction_exception_summary(error),
+                )
+
+        unresolved = requested_ids - confirmed
+        timestamped = sorted(
+            (int(entries[stanza_id]), stanza_id)
+            for stanza_id in unresolved
+            if entries[stanza_id]
+        )
+        if not timestamped:
+            return confirmed
+
+        # Group nearby indexed messages into small archive windows. The local
+        # created_at value is recorded when the live stanza is indexed and is
+        # therefore a reliable fallback boundary for normal online operation.
+        clusters: list[list[tuple[int, str]]] = []
+        for item in timestamped:
+            if (
+                not clusters
+                or item[0] - clusters[-1][-1][0]
+                > REDACTION_MAM_VERIFY_WINDOW_SECONDS * 2
+            ):
+                clusters.append([item])
+            else:
+                clusters[-1].append(item)
+
+        for cluster in clusters:
+            cluster_ids = {stanza_id for _timestamp, stanza_id in cluster}
+            start_ts = cluster[0][0] - REDACTION_MAM_VERIFY_WINDOW_SECONDS
+            end_ts = cluster[-1][0] + REDACTION_MAM_VERIFY_WINDOW_SECONDS
+            messages = await self._redaction_query_mam_window(
+                room_jid,
+                start_ts,
+                end_ts,
+            )
+            confirmed.update(
+                self._redaction_mam_tombstone_ids(messages, cluster_ids)
+            )
+
+        return confirmed
+
+    async def _redaction_verify_mam_tombstones(
+        self,
+        targets: list[tuple[str, str] | tuple[str, str, int | None]],
+    ) -> set[tuple[str, str]]:
+        """Verify unconfirmed retractions against MUC MAM tombstones."""
+        by_room: dict[str, dict[str, int | None]] = {}
+        for target in targets:
+            room_jid, stanza_id = target[0], target[1]
+            created_at = target[2] if len(target) > 2 else None
+            room_key = str(room_jid).lower()
+            by_room.setdefault(room_key, {}).setdefault(stanza_id, created_at)
+
+        async def verify_room(
+            room_jid: str,
+            entries: dict[str, int | None],
+        ) -> set[tuple[str, str]]:
+            ids = await self._redaction_verify_mam_room(room_jid, entries)
+            return {(room_jid, stanza_id) for stanza_id in ids}
+
+        if not by_room:
+            return set()
+        room_results = await asyncio.gather(
+            *(verify_room(room, entries) for room, entries in by_room.items())
+        )
+        confirmed: set[tuple[str, str]] = set()
+        for result in room_results:
+            confirmed.update(result)
+        return confirmed
+
+    async def _redaction_send_retract(
+        self,
+        room_jid: str,
+        stanza_id: str,
+        reason: str | None,
+    ) -> None:
         """Send a retraction IQ and accept the live moderation broadcast as confirmation."""
         moderate = ET.Element(f"{{{MODERATE_NS}}}moderate", {"id": stanza_id})
         ET.SubElement(moderate, f"{{{RETRACT_NS}}}retract")
@@ -498,7 +786,7 @@ class RedactionMixin:
 
     async def _redaction_redact_rows(
         self,
-        rows: list[tuple[int, str, str]],
+        rows: list[tuple[int, str, str, int]],
         reason: str | None,
         actor: str | None,
         alert_on_failure: bool = True,
@@ -511,6 +799,7 @@ class RedactionMixin:
             "failed": 0,
             "skipped": 0,
             "failure_reasons": {},
+            "verified_via_mam": 0,
         }
         if not rows:
             return summary
@@ -521,8 +810,10 @@ class RedactionMixin:
         changed_rows: list[int] = []
         skipped_rows: list[int] = []
 
-        async def redact_one(row: tuple[int, str, str]) -> tuple[str, int | None]:
-            row_id, room_jid, stanza_id = row
+        async def redact_one(
+            row: tuple[int, str, str, int],
+        ) -> tuple[str, int | str | None]:
+            row_id, room_jid, stanza_id, _created_at = row
             async with semaphore:
                 try:
                     await self._redaction_send_retract(room_jid, stanza_id, reason)
@@ -536,12 +827,6 @@ class RedactionMixin:
                         return "skipped", row_id
 
                     if _redaction_error_is_unconfirmed(exc):
-                        log.warning(
-                            "Redaction confirmation timed out for stanza %s in %s; "
-                            "the server may still have applied it",
-                            stanza_id,
-                            room_jid,
-                        )
                         return "unconfirmed", row_id
 
                     error_summary = _redaction_exception_summary(exc)
@@ -551,7 +836,12 @@ class RedactionMixin:
                         room_jid,
                         error_summary,
                     )
-                    log.debug("Raw redaction failure for stanza %s in %s", stanza_id, room_jid, exc_info=exc)
+                    log.debug(
+                        "Raw redaction failure for stanza %s in %s",
+                        stanza_id,
+                        room_jid,
+                        exc_info=exc,
+                    )
                     if alert_on_failure and hasattr(self, "send_operational_alert"):
                         await self.send_operational_alert(
                             f"redaction_failed:{room_jid}",
@@ -574,7 +864,8 @@ class RedactionMixin:
             failure_reasons = {}
             summary["failure_reasons"] = failure_reasons
 
-        for status, row_value in results:
+        unconfirmed_rows: list[tuple[int, str, str, int]] = []
+        for row, (status, row_value) in zip(rows, results):
             if status == "redacted" and isinstance(row_value, int):
                 summary["redacted"] += 1
                 changed_rows.append(row_value)
@@ -582,11 +873,42 @@ class RedactionMixin:
                 summary["skipped"] += 1
                 skipped_rows.append(row_value)
             elif status == "unconfirmed":
-                summary["unconfirmed"] += 1
+                unconfirmed_rows.append(row)
             else:
                 summary["failed"] += 1
                 if isinstance(row_value, str):
                     failure_reasons[row_value] = failure_reasons.get(row_value, 0) + 1
+
+        mam_confirmed = await self._redaction_verify_mam_tombstones(
+            [
+                (room_jid, stanza_id, created_at)
+                for _row_id, room_jid, stanza_id, created_at in unconfirmed_rows
+            ]
+        )
+        unresolved_by_room: dict[str, int] = {}
+        for row_id, room_jid, stanza_id, _created_at in unconfirmed_rows:
+            key = (str(room_jid).lower(), stanza_id)
+            if key in mam_confirmed:
+                summary["redacted"] += 1
+                summary["verified_via_mam"] += 1
+                changed_rows.append(row_id)
+                continue
+
+            summary["unconfirmed"] += 1
+            unresolved_by_room[room_jid] = unresolved_by_room.get(room_jid, 0) + 1
+
+        for room_jid, count in sorted(unresolved_by_room.items()):
+            log.warning(
+                "Redaction confirmation remained unavailable for %d stanza(s) in %s; "
+                "the server may still have applied them",
+                count,
+                room_jid,
+            )
+        if mam_confirmed:
+            log.info(
+                "Verified %d applied redaction(s) through MAM tombstones",
+                len(mam_confirmed),
+            )
 
         rows_to_mark = changed_rows + skipped_rows
         if rows_to_mark:
@@ -677,10 +999,17 @@ class RedactionMixin:
             f"Reason: {reason or 'not specified'}",
             f"Messages found: {summary.get('found', 0)}",
             f"Redacted: {summary.get('redacted', 0)}",
-            f"Unconfirmed: {summary.get('unconfirmed', 0)}",
-            f"Failed: {summary.get('failed', 0)}",
-            f"Skipped: {summary.get('skipped', 0)}",
         ]
+        verified_via_mam = int(summary.get("verified_via_mam", 0) or 0)
+        if verified_via_mam:
+            lines.append(f"Verified via MAM: {verified_via_mam}")
+        lines.extend(
+            [
+                f"Unconfirmed: {summary.get('unconfirmed', 0)}",
+                f"Failed: {summary.get('failed', 0)}",
+                f"Skipped: {summary.get('skipped', 0)}",
+            ]
+        )
 
         found = int(summary.get("found", 0) or 0)
         redacted = int(summary.get("redacted", 0) or 0)
@@ -692,9 +1021,10 @@ class RedactionMixin:
             lines.extend(
                 [
                     "",
-                    "Note: These requests were sent, but BanBot received no IQ result",
-                    "or matching live moderation confirmation. They are not counted as",
-                    "failed because the server may still have applied the retractions.",
+                    "Note: These requests were sent, but BanBot received no IQ result,",
+                    "matching live moderation confirmation, or verifiable MAM tombstone.",
+                    "They are not counted as failed because the server may still have",
+                    "applied the retractions.",
                 ]
             )
 
@@ -751,6 +1081,7 @@ class RedactionMixin:
             details={
                 "found": summary.get("found", 0),
                 "redacted": summary.get("redacted", 0),
+                "verified_via_mam": summary.get("verified_via_mam", 0),
                 "unconfirmed": summary.get("unconfirmed", 0),
                 "failed": summary.get("failed", 0),
                 "skipped": summary.get("skipped", 0),
@@ -784,6 +1115,7 @@ class RedactionMixin:
             "unconfirmed": 0,
             "failed": 0,
             "skipped": 0,
+            "verified_via_mam": 0,
         }
         try:
             await self._redaction_send_retract(room_jid, stanza_id, reason)
@@ -805,18 +1137,44 @@ class RedactionMixin:
                 )
                 await self.db.commit()
             elif _redaction_error_is_unconfirmed(exc):
-                summary["unconfirmed"] = 1
-                log.warning(
-                    "Redaction confirmation timed out for stanza %s in %s; "
-                    "the server may still have applied it",
-                    stanza_id,
-                    room_jid,
+                mam_confirmed = await self._redaction_verify_mam_tombstones(
+                    [(room_jid, stanza_id)]
                 )
+                if (str(room_jid).lower(), stanza_id) in mam_confirmed:
+                    await self.db.execute(
+                        """
+                        UPDATE redaction_index
+                        SET redacted_at = ?, redacted_by = ?, redact_reason = ?
+                        WHERE room_jid = ? AND stanza_id = ? AND redacted_at IS NULL
+                        """,
+                        (int(time.time()), actor, reason, room_jid, stanza_id),
+                    )
+                    await self.db.commit()
+                    summary["redacted"] = 1
+                    summary["verified_via_mam"] = 1
+                    log.info(
+                        "Verified applied redaction through MAM for stanza %s in %s",
+                        stanza_id,
+                        room_jid,
+                    )
+                else:
+                    summary["unconfirmed"] = 1
+                    log.warning(
+                        "Redaction confirmation remained unavailable for stanza %s in %s; "
+                        "the server may still have applied it",
+                        stanza_id,
+                        room_jid,
+                    )
             else:
                 summary["failed"] = 1
                 error_summary = _redaction_exception_summary(exc)
                 log.warning("Redaction failed for stanza %s in %s: %s", stanza_id, room_jid, error_summary)
-                log.debug("Raw redaction failure for stanza %s in %s", stanza_id, room_jid, exc_info=exc)
+                log.debug(
+                    "Raw redaction failure for stanza %s in %s",
+                    stanza_id,
+                    room_jid,
+                    exc_info=exc,
+                )
                 if hasattr(self, "send_operational_alert"):
                     await self.send_operational_alert(
                         f"redaction_failed:{room_jid}",
@@ -848,6 +1206,7 @@ class RedactionMixin:
                 "room_jid": room_jid,
                 "stanza_id": stanza_id,
                 "redacted": summary.get("redacted", 0),
+                "verified_via_mam": summary.get("verified_via_mam", 0),
                 "unconfirmed": summary.get("unconfirmed", 0),
                 "failed": summary.get("failed", 0),
                 "skipped": summary.get("skipped", 0),
@@ -862,7 +1221,12 @@ class RedactionMixin:
                 f"Stanza ID: {stanza_id}\n"
                 f"Reason: {reason or 'not specified'}\n"
                 f"Redacted: {summary['redacted']}\n"
-                f"Unconfirmed: {summary['unconfirmed']}\n"
+                + (
+                    f"Verified via MAM: {summary['verified_via_mam']}\n"
+                    if summary.get("verified_via_mam")
+                    else ""
+                )
+                + f"Unconfirmed: {summary['unconfirmed']}\n"
                 f"Failed: {summary['failed']}\n"
                 f"Skipped: {summary['skipped']}"
             ),

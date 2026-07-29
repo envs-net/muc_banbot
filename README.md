@@ -200,6 +200,7 @@ When `ROOM_INVITES_ENABLED=True`, BanBot can receive MUC invites for potential p
 ## Message Redaction
 
 Optional redaction support indexes room-assigned stanza IDs for messages BanBot sees in protected rooms. Message bodies are not stored. Admins can redact all known messages from a bare JID with `!redact <jid> [reason]` or target a specific stanza ID with `!redact id <room_jid> <stanza_id> [reason]`.
+If a server applies a moderation request without returning a usable IQ result or live confirmation, BanBot verifies the resulting moderation tombstone through the room's MAM archive before counting the request as successful. Servers without verifiable MAM results remain reported as `Unconfirmed` rather than failed.
 
 See [docs/commands.md](docs/commands.md) and [docs/configuration.md](docs/configuration.md#redaction-settings).
 

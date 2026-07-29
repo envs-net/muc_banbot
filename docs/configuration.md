@@ -307,6 +307,7 @@ REDACTION_AUTO_REASONS = [
 ```
 
 Redaction indexes room-assigned stanza IDs, not message bodies.
+After a confirmation timeout, BanBot can query the room's XEP-0313 archive for the affected stanza IDs. Confirmed moderation tombstones are counted as redacted; unavailable or unverifiable archive results remain `Unconfirmed`.
 
 `REDACTION_AUTO_REASONS` is used for automatic redaction decisions.
 Normal bot-command bans can trigger auto-redaction when their comment matches.
