@@ -19,3 +19,7 @@ coverage.xml
 mutants/
 
 *.log
+
+.codeql/
+.codeql-db
+codeql-quality.*

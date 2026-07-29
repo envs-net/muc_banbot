@@ -373,11 +373,17 @@ class RedactionMixin:
         confirmation = asyncio.Event()
         waiters.setdefault(key, set()).add(confirmation)
 
-        send_task = asyncio.create_task(iq.send(timeout=timeout))
         confirmation_task = asyncio.create_task(confirmation.wait())
+        send_future = None
         try:
+            # Slixmpp's Iq.send() returns an asyncio Future, while lightweight
+            # test doubles and older integrations may return a coroutine.
+            # ensure_future() accepts both and lets the cleanup path consume
+            # later IQ errors instead of leaking "Future exception was never
+            # retrieved" warnings.
+            send_future = asyncio.ensure_future(iq.send(timeout=timeout))
             done, _pending = await asyncio.wait(
-                {send_task, confirmation_task},
+                {send_future, confirmation_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
@@ -390,7 +396,7 @@ class RedactionMixin:
                 return
 
             try:
-                await send_task
+                await send_future
             except Exception as send_exc:
                 try:
                     await asyncio.wait_for(confirmation.wait(), timeout=min(2.0, timeout))
@@ -409,10 +415,13 @@ class RedactionMixin:
                 if not registered:
                     waiters.pop(key, None)
 
-            for task in (send_task, confirmation_task):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(send_task, confirmation_task, return_exceptions=True)
+            pending = [confirmation_task]
+            if send_future is not None:
+                pending.append(send_future)
+            for future in pending:
+                if not future.done():
+                    future.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
 
     async def _redaction_redact_rows(

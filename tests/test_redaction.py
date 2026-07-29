@@ -266,6 +266,16 @@ class FakeOutgoingIq:
                 self.inflight_tracker["current"] -= 1
 
 
+class FutureReturningOutgoingIq(FakeOutgoingIq):
+    """Mirror Slixmpp by returning a Future directly from ``send()``."""
+
+    def send(self, timeout=None):
+        async def run_send():
+            return await super(FutureReturningOutgoingIq, self).send(timeout=timeout)
+
+        return asyncio.ensure_future(run_send())
+
+
 def _build_iq_with_normalized_to(
     sent,
     *,
@@ -465,6 +475,7 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             "sent": [],
             "redaction_stanzas": [],
             "_test_iq_send_delay": 0.0,
+            "_test_iq_returns_future": False,
             "fail_stanza_ids": set(),
             "fail_stanza_errors": {},
             "redaction_inflight_tracker": {"current": 0, "max": 0},
@@ -484,13 +495,23 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
         self.sent.append(kwargs)
 
     def make_iq_set(self, **kwargs):
-        return _build_iq_with_normalized_to(
+        iq = _build_iq_with_normalized_to(
             self.redaction_stanzas,
             delay=self._test_iq_send_delay,
             inflight_tracker=self.redaction_inflight_tracker,
             fail_stanza_ids=self.fail_stanza_ids,
             fail_stanza_errors=self.fail_stanza_errors,
             **kwargs,
+        )
+        if not self._test_iq_returns_future:
+            return iq
+        return FutureReturningOutgoingIq(
+            self.redaction_stanzas,
+            iq_kwargs=iq.kwargs,
+            delay=self._test_iq_send_delay,
+            fail_stanza_ids=self.fail_stanza_ids,
+            fail_stanza_errors=self.fail_stanza_errors,
+            inflight_tracker=self.redaction_inflight_tracker,
         )
 
     async def send_operational_alert(self, key, title, message, enabled=True, details=None):
@@ -507,6 +528,83 @@ def test_redaction_confirmation_ids_support_current_and_legacy_xep_formats() -> 
 
     assert RedactionMixin._redaction_confirmation_ids(current) == {TEST_STANZA_1}
     assert RedactionMixin._redaction_confirmation_ids(legacy) == {TEST_STANZA_2}
+
+
+@pytest.mark.asyncio
+async def test_redaction_accepts_future_returned_by_slixmpp_iq_send(temp_db_path) -> None:
+    bot = RedactionBot()
+    bot._test_iq_returns_future = True
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
+    try:
+        await bot._redaction_index_message(
+            FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
+        )
+        await bot.flush_redaction_index()
+
+        summary = await bot.redact_jid_messages(
+            TEST_SENDER_JID,
+            reason=TEST_REDACTION_REASON,
+            actor=TEST_ACTOR_JID,
+            announce=False,
+        )
+
+        assert summary["redacted"] == 1
+        assert summary["failed"] == 0
+        assert bot._redaction_confirmation_waiters == {}
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_future_iq_failure_is_consumed_when_broadcast_confirms_redaction(
+    temp_db_path,
+) -> None:
+    bot = RedactionBot()
+    bot._test_iq_returns_future = True
+    bot._test_iq_send_delay = TEST_IQ_SEND_DELAY_SECONDS
+    bot.fail_stanza_ids = {TEST_STANZA_1}
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
+    try:
+        await bot._redaction_index_message(
+            FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
+        )
+        await bot.flush_redaction_index()
+
+        loop_errors = []
+        loop = asyncio.get_running_loop()
+        previous_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+        try:
+            redaction_task = asyncio.create_task(
+                bot.redact_jid_messages(
+                    TEST_SENDER_JID,
+                    reason=TEST_REDACTION_REASON,
+                    actor=TEST_ACTOR_JID,
+                    announce=False,
+                )
+            )
+            key = (TEST_ROOM_JID.lower(), TEST_STANZA_1)
+            for _ in range(100):
+                if key in getattr(bot, "_redaction_confirmation_waiters", {}):
+                    break
+                await asyncio.sleep(0.001)
+            else:
+                raise AssertionError("redaction confirmation waiter was not registered")
+
+            await bot.on_redaction_confirmation_message(
+                fake_moderation_confirmation(TEST_ROOM_JID, TEST_STANZA_1)
+            )
+            summary = await redaction_task
+            await asyncio.sleep(TEST_IQ_SEND_DELAY_SECONDS * 2)
+        finally:
+            loop.set_exception_handler(previous_handler)
+
+        assert summary["redacted"] == 1
+        assert summary["failed"] == 0
+        assert loop_errors == []
+        assert bot._redaction_confirmation_waiters == {}
+    finally:
+        await bot.db.close()
 
 
 @pytest.mark.asyncio
