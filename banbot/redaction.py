@@ -391,8 +391,28 @@ class RedactionMixin:
         return confirmed
 
 
+    def _redaction_incoming_filter(self, stanza):
+        """Inspect every incoming message stanza for moderation confirmation.
+
+        Slixmpp incoming filters run before stream and custom event handlers,
+        so this also sees bodyless Prosody XEP-0425 broadcasts that may not
+        trigger the normal ``message`` event or a namespace-specific matcher.
+        The original stanza is always returned unchanged.
+        """
+        try:
+            xml = getattr(stanza, "xml", None)
+            if xml is not None and _xml_local_name(xml.tag) == "message":
+                self._redaction_confirm_from_message(stanza)
+        except Exception as exc:
+            log.debug(
+                "Could not inspect incoming stanza for redaction confirmation: %s",
+                exc,
+            )
+        return stanza
+
+
     def _handle_redaction_confirmation_stanza(self, msg) -> None:
-        """Raw Slixmpp stream callback for bodyless moderation messages."""
+        """Compatibility callback for older embedding and test integrations."""
         self._redaction_confirm_from_message(msg)
 
 

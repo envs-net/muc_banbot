@@ -556,6 +556,29 @@ async def test_raw_bodyless_moderation_handler_sets_pending_confirmation() -> No
     assert confirmation.is_set() is True
 
 
+def test_incoming_filter_confirms_bodyless_message_and_preserves_stanza() -> None:
+    bot = RedactionBot()
+    confirmation = asyncio.Event()
+    key = (TEST_ROOM_JID.lower(), TEST_STANZA_1)
+    bot._redaction_confirmation_waiters = {key: {confirmation}}
+    message = fake_moderation_confirmation(TEST_ROOM_JID, TEST_STANZA_1)
+
+    returned = bot._redaction_incoming_filter(message)
+
+    assert returned is message
+    assert confirmation.is_set() is True
+
+
+def test_incoming_filter_ignores_non_message_stanza() -> None:
+    bot = RedactionBot()
+    stanza = FakeMessage(TEST_ROOM_JID, "", body="")
+    stanza.xml.tag = "{jabber:client}presence"
+
+    returned = bot._redaction_incoming_filter(stanza)
+
+    assert returned is stanza
+
+
 def test_redaction_confirmation_ids_support_tombstone_and_moderate_layouts() -> None:
     tombstone = FakeMessage(TEST_ROOM_JID, "", body="")
     retracted = ET.SubElement(
