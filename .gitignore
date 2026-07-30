@@ -22,4 +22,4 @@ mutants/
 
 .codeql/
 .codeql-db
-codeql-quality.*
+/codeql-quality.*
