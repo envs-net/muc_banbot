@@ -73,8 +73,10 @@ async def await_muc_join_compat(
         try:
             await task
         except asyncio.CancelledError:
+            # Expected after cancelling the join waiter above; drain its result.
             pass
         except Exception:
+            # Preserve the original join error and suppress cleanup-only failures.
             pass
         return False, api_name, exc
 

@@ -13,8 +13,8 @@ from typing import Any
 
 import config
 
+from ..config_loader import format_config_import_error
 from ..locks import database_file_lock
-from .imports import format_config_import_error
 
 log = logging.getLogger(__name__)
 

@@ -196,6 +196,7 @@ class MucMixin(BotOccupantMixin):
                 try:
                     await presence_task
                 except asyncio.CancelledError:
+                    # Expected after explicitly cancelling the presence waiter.
                     pass
 
             if joined:

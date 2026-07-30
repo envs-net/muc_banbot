@@ -6,7 +6,6 @@ import logging
 
 import config
 
-from ..config_loader import format_config_import_error
 
 log = logging.getLogger(__name__)
 
