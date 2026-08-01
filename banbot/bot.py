@@ -493,8 +493,8 @@ class BanBot(
         # --- Start unban worker ---
         self.unban_task = asyncio.create_task(self.unban_worker())
 
-        # --- Start health check worker ---
-        self.health_check_task = asyncio.create_task(self.health_check_worker())
+        # The health worker is started after reconnect state is cleared below,
+        # allowing its immediate first cycle to retry any failed room joins.
 
         # --- Start redaction cleanup worker ---
         if self.redaction_enabled and hasattr(self, "redaction_cleanup_worker"):
@@ -514,6 +514,11 @@ class BanBot(
 
         self.reconnecting = False
 
+        # --- Start health check worker ---
+        # Its first cycle runs immediately and retries rooms whose startup join
+        # did not produce confirmed self-presence.
+        self.health_check_task = asyncio.create_task(self.health_check_worker())
+
         if was_reconnecting:
             await self.send_operational_alert(
                 "reconnect_success",
@@ -522,19 +527,40 @@ class BanBot(
                 enabled=getattr(self, "alert_on_reconnect", True),
             )
 
-        # Send lifecycle notification if enabled
+        missing_rooms = sorted(
+            room
+            for room in managed_rooms
+            if self._bot_occupant_entry(room)[1] is None
+        )
+
+        # Send lifecycle notification if enabled. Do not claim that every room
+        # joined when automatic recovery is still working on failed joins.
         if self.announce_startup:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             action = "reconnected" if was_reconnecting else "restarted"
+            if missing_rooms:
+                lifecycle_body = (
+                    f"⚠️ Bot has {action}; automatic rejoin is active for "
+                    f"{len(missing_rooms)} room(s): {', '.join(missing_rooms)}. "
+                    f"({timestamp})"
+                )
+            else:
+                lifecycle_body = f"✅ Bot has {action} and synced all bans. ({timestamp})"
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
-                mbody=f"✅ Bot has {action} and synced all bans. ({timestamp})",
+                mbody=lifecycle_body,
                 mtype="groupchat"
             )
 
         await self.finalize_startup_version_notice(reconnecting=was_reconnecting)
 
-        log.info("✅ Bot started, all rooms joined and bans applied")
+        if missing_rooms:
+            log.warning(
+                "Bot started; automatic rejoin pending for: %s",
+                ", ".join(missing_rooms),
+            )
+        else:
+            log.info("✅ Bot started, all rooms joined and bans applied")
 
 
 def main() -> None:

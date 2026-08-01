@@ -213,7 +213,9 @@ PUBLIC_COMMAND_RATE_LIMIT_MAX = 3
 
 `MUC_JOIN_TIMEOUT_SECONDS` controls how long each MUC join attempt waits for
 the bot's own presence. `MUC_JOIN_RETRIES` controls the number of attempts per
-startup, health-check, sync, room-add, or manual room-rejoin cycle.
+startup, health-check, sync, room-add, or manual room-rejoin cycle. The health
+worker performs its first check immediately after startup/reconnect and then
+uses `HEALTH_CHECK_INTERVAL` for later checks.
 
 Room invite details are documented in [Rooms and Invites](rooms.md).
 

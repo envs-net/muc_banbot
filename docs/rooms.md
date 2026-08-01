@@ -74,8 +74,10 @@ command reports whether the bot joined and whether it has admin/owner rights.
 For successful administrative joins, active bans are synchronized to the room.
 
 Join behavior is controlled by `MUC_JOIN_TIMEOUT_SECONDS` and
-`MUC_JOIN_RETRIES`. The periodic health check also retries missing joins
-automatically after `HEALTH_CHECK_INTERVAL`.
+`MUC_JOIN_RETRIES`. The health worker runs once immediately after startup or a
+reconnect and then every `HEALTH_CHECK_INTERVAL`. Missing rooms are rejoined
+automatically; successful administrative rejoins also resynchronize active bans
+to that room.
 
 ## Room Invites
 

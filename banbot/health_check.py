@@ -11,6 +11,17 @@ log = logging.getLogger(__name__)
 
 
 class HealthCheckMixin:
+    def _health_bot_occupant_entry(self, room: str) -> tuple[str | None, dict | None]:
+        """Return the bot's live room entry for full and lightweight mixin users."""
+        bot_entry = getattr(self, "_bot_occupant_entry", None)
+        if bot_entry is not None:
+            return bot_entry(room)
+
+        for nick, info in self.occupants.get(room, {}).items():
+            if str(nick).lower() == str(NICK).lower():
+                return nick, info
+        return None, None
+
     async def _health_send_alert(self, key: str, title: str, message: str, *, enabled: bool = True, details: dict | None = None) -> bool:
         """Send an operational alert when AlertMixin is available, otherwise fall back to ADMIN_ROOM."""
         if not enabled:
@@ -45,12 +56,8 @@ class HealthCheckMixin:
 
     async def _health_check_room(self, room: str) -> None:
         """Check one room and perform a controlled automatic rejoin if needed."""
-        occ = self.occupants.get(room, {})
-        bot_entry = getattr(self, "_bot_occupant_entry", None)
-        if bot_entry is not None:
-            bot_in_room = bot_entry(room)[1] is not None
-        else:
-            bot_in_room = any(nick.lower() == NICK.lower() for nick in occ.keys())
+        _bot_nick, bot_info = self._health_bot_occupant_entry(room)
+        bot_in_room = bot_info is not None
 
         if not bot_in_room:
             log.warning("⚠️ Health check: Bot not found in occupants for room %s; attempting rejoin", room)
@@ -69,8 +76,39 @@ class HealthCheckMixin:
                 )
                 return
 
-            log.info("✅ Health check rejoined %s", room)
+            _bot_nick, bot_info = self._health_bot_occupant_entry(room)
+            is_admin = bool(bot_info and bot_info.get("affiliation") in ("owner", "admin"))
+            admin_state = getattr(self, "bot_admin_state", None)
+            if admin_state is None:
+                admin_state = {}
+                self.bot_admin_state = admin_state
+            admin_state[room] = is_admin
+
+            bans_synced = False
+            sync_room_bans = getattr(self, "sync_bans_to_rooms_for_single_room", None)
+            if is_admin and sync_room_bans is not None:
+                await sync_room_bans(room)
+                bans_synced = True
+
+            log.info(
+                "✅ Health check rejoined %s%s",
+                room,
+                " and resynced active bans" if bans_synced else "",
+            )
             self._health_record_success(f"health_not_in_room:{room}")
+            try:
+                await self.bot_send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=(
+                        f"✅ Automatic room rejoin succeeded for {room}."
+                        + (" Active bans were resynced." if bans_synced else "")
+                    ),
+                    mtype="groupchat",
+                )
+            except Exception as exc:
+                # Recovery itself succeeded; a notification transport failure
+                # must not turn the room health result back into a failure.
+                log.warning("Could not announce automatic rejoin for %s: %s", room, exc)
 
         if not self.is_bot_admin_or_owner(room):
             log.warning("⚠️ Health check: Bot lost admin rights in %s", room)
@@ -152,8 +190,12 @@ class HealthCheckMixin:
         """
         while True:
             try:
-                await asyncio.sleep(self.health_check_interval)
+                # Run once immediately after startup/reconnect so rooms whose
+                # initial join timed out are retried without waiting for the
+                # first full health-check interval. Later cycles keep using the
+                # configured interval.
                 await self._run_health_check_cycle()
+                await asyncio.sleep(self.health_check_interval)
 
             except asyncio.CancelledError:
                 log.info("health_check_worker cancelled")

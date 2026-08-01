@@ -76,7 +76,9 @@ ROOM_INVITES_ENABLED = False
 # Set to 0 to keep pending invites indefinitely until accepted/declined/cleanup.
 ROOM_INVITE_MAX_AGE_DAYS = 30
 
-HEALTH_CHECK_INTERVAL = 300  # Interval (seconds) for health checks of bot rights in rooms. Minimum: 60. Default: 300
+# Interval for recurring room join/admin checks. The first check runs immediately
+# after startup/reconnect; missing rooms are rejoined automatically.
+HEALTH_CHECK_INTERVAL = 300  # Minimum: 60. Default: 300
 
 # Timeout and retry count for each MUC join/rejoin operation. These values can
 # be changed at runtime with !config set or by editing config.py + !reloadconfig.
