@@ -84,7 +84,7 @@ HEALTH_CHECK_INTERVAL = 300  # Minimum: 60. Default: 300
 # Timeout and retry count for each MUC join/rejoin operation. These values can
 # be changed at runtime with !config set or by editing config.py + !reloadconfig.
 MUC_JOIN_TIMEOUT_SECONDS = 20  # 5-300 seconds per attempt. Default: 20
-MUC_JOIN_RETRIES = 2  # 1-10 attempts per join cycle. Default: 2
+MUC_JOIN_RETRIES = 2  # 1-10 attempts for startup/explicit joins; health recovery uses one. Default: 2
 
 UNBAN_CHECK_INTERVAL = 60  # Interval (seconds) for checking expired temporary bans. Lower = faster unbans but more DB queries. Default: 60
 MAX_TEMPBAN_DAYS = 30  # Maximum temporary ban duration in days (1-365). Default: 30

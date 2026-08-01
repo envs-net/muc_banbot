@@ -18,15 +18,23 @@ class RecoveryBot(HealthCheckMixin):
         self.bot_admin_state = {}
         self.sent: list[dict] = []
         self.synced: list[str] = []
+        self.join_calls: list[dict[str, object]] = []
         self.alert_on_health_check_failure = True
         self.alert_on_admin_rights_lost = True
 
     async def bot_send_message(self, **kwargs) -> None:
         self.sent.append(kwargs)
 
-    async def ensure_muc_joined(self, room: str, *, force: bool = False) -> bool:
+    async def ensure_muc_joined(
+        self,
+        room: str,
+        *,
+        force: bool = False,
+        retries: int | None = None,
+    ) -> bool:
         assert room == ROOM
         assert force is True
+        self.join_calls.append({"room": room, "force": force, "retries": retries})
         self.occupants[room] = {
             "BanBot": {
                 "jid": "bot@example.org",
@@ -53,6 +61,7 @@ async def test_health_rejoin_resyncs_bans_and_announces_recovery() -> None:
     await bot._health_check_room(ROOM)
 
     assert bot.bot_admin_state[ROOM] is True
+    assert bot.join_calls == [{"room": ROOM, "force": True, "retries": 1}]
     assert bot.synced == [ROOM]
     assert bot.sent[-1]["mbody"] == (
         f"✅ Automatic room rejoin succeeded for {ROOM}. Active bans were resynced."

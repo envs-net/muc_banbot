@@ -73,12 +73,13 @@ This retries the selected protected-room join without restarting BanBot. The
 command reports whether the bot joined and whether it has admin/owner rights.
 For successful administrative joins, active bans are synchronized to the room.
 
-Join behavior is controlled by `MUC_JOIN_TIMEOUT_SECONDS` and
-`MUC_JOIN_RETRIES`. The health worker runs once immediately after startup or a
-reconnect. Missing rooms are retried after 60, 120, 240, and then every 300
-seconds until recovery. Once every room is joined again, checks return to
-`HEALTH_CHECK_INTERVAL`. Successful administrative rejoins also resynchronize
-active bans to that room.
+Startup, room-add, sync, and manual rejoin behavior is controlled by
+`MUC_JOIN_TIMEOUT_SECONDS` and `MUC_JOIN_RETRIES`. The health worker runs once
+immediately after startup or a reconnect, but performs exactly one tracked join
+attempt per recovery cycle. Missing rooms are retried after 60, 120, 240, and
+then every 300 seconds until recovery. Once every room is joined again, checks
+return to `HEALTH_CHECK_INTERVAL`. Successful administrative rejoins also
+resynchronize active bans to that room.
 
 ## Room Invites
 

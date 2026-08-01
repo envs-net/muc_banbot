@@ -66,7 +66,10 @@ class HealthCheckMixin:
             rejoined = False
             ensure_joined = getattr(self, "ensure_muc_joined", None)
             if ensure_joined is not None:
-                rejoined = await ensure_joined(room, force=True)
+                # Health recovery already has its own bounded retry schedule.
+                # Use one tracked join attempt per cycle so MUC_JOIN_RETRIES does
+                # not multiply every 60/120/240/300-second recovery step.
+                rejoined = await ensure_joined(room, force=True, retries=1)
 
             if not rejoined:
                 await self._health_send_alert(
