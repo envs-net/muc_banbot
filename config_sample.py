@@ -76,8 +76,9 @@ ROOM_INVITES_ENABLED = False
 # Set to 0 to keep pending invites indefinitely until accepted/declined/cleanup.
 ROOM_INVITE_MAX_AGE_DAYS = 30
 
-# Interval for recurring room join/admin checks. The first check runs immediately
-# after startup/reconnect; missing rooms are rejoined automatically.
+# Interval for normal recurring room join/admin checks. The first check runs
+# immediately after startup/reconnect. Missing rooms retry after 60/120/240/300
+# seconds and then every 300 seconds until recovery.
 HEALTH_CHECK_INTERVAL = 300  # Minimum: 60. Default: 300
 
 # Timeout and retry count for each MUC join/rejoin operation. These values can

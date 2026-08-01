@@ -9,6 +9,8 @@ from .locks import is_maintenance_mode
 
 log = logging.getLogger(__name__)
 
+ROOM_REJOIN_RETRY_DELAYS = (60, 120, 240, 300)
+
 
 class HealthCheckMixin:
     def _health_bot_occupant_entry(self, room: str) -> tuple[str | None, dict | None]:
@@ -54,8 +56,8 @@ class HealthCheckMixin:
         if hasattr(self, "record_alert_success"):
             self.record_alert_success(key)
 
-    async def _health_check_room(self, room: str) -> None:
-        """Check one room and perform a controlled automatic rejoin if needed."""
+    async def _health_check_room(self, room: str) -> bool:
+        """Check one room and return whether the bot is joined after recovery."""
         _bot_nick, bot_info = self._health_bot_occupant_entry(room)
         bot_in_room = bot_info is not None
 
@@ -74,7 +76,7 @@ class HealthCheckMixin:
                     enabled=getattr(self, "alert_on_health_check_failure", True),
                     details={"room": room, "reason": "automatic_rejoin_failed"},
                 )
-                return
+                return False
 
             _bot_nick, bot_info = self._health_bot_occupant_entry(room)
             is_admin = bool(bot_info and bot_info.get("affiliation") in ("owner", "admin"))
@@ -120,20 +122,22 @@ class HealthCheckMixin:
                 details={"room": room},
             )
 
-    async def _run_health_check_cycle(self) -> None:
-        """Run one complete, independently testable health-check cycle."""
+        return True
+
+    async def _run_health_check_cycle(self) -> bool | None:
+        """Run one cycle and report whether every configured room is joined."""
         if is_maintenance_mode(self):
             log.debug("Health check skipped while maintenance operation is active")
-            return
+            return None
 
         if getattr(self, "reconnecting", False):
             log.debug("Health check skipped while reconnecting")
-            return
+            return None
 
         reconnect_task = getattr(self, "reconnect_task", None)
         if reconnect_task and not reconnect_task.done():
             log.debug("Health check skipped while reconnect task is active")
-            return
+            return None
 
         # Keep audit retention active during long-running bot sessions,
         # but do not run the cleanup more than once per day.
@@ -166,10 +170,12 @@ class HealthCheckMixin:
                 details={"error": str(e)},
             )
 
+        all_rooms_joined = True
         for room in self.protected_rooms | {ADMIN_ROOM}:
             try:
-                await self._health_check_room(room)
+                room_joined = await self._health_check_room(room)
             except Exception as e:
+                all_rooms_joined = False
                 log.warning("Health check error for %s: %s", room, e)
                 await self._health_record_failure(
                     f"health_check_error:{room}",
@@ -180,7 +186,17 @@ class HealthCheckMixin:
                     details={"room": room, "error": str(e)},
                 )
             else:
+                if not room_joined:
+                    all_rooms_joined = False
                 self._health_record_success(f"health_check_error:{room}")
+
+        return all_rooms_joined
+
+    @staticmethod
+    def _health_rejoin_retry_delay(consecutive_failures: int) -> int:
+        """Return the bounded retry delay for consecutive missing-room cycles."""
+        index = min(max(consecutive_failures, 1) - 1, len(ROOM_REJOIN_RETRY_DELAYS) - 1)
+        return ROOM_REJOIN_RETRY_DELAYS[index]
 
     async def health_check_worker(self) -> None:
         """
@@ -188,14 +204,29 @@ class HealthCheckMixin:
         Verifies bot is still in rooms and has admin rights.
         Uses self.health_check_interval (reloadable via !reloadconfig).
         """
+        consecutive_rejoin_failures = 0
+
         while True:
             try:
                 # Run once immediately after startup/reconnect so rooms whose
                 # initial join timed out are retried without waiting for the
-                # first full health-check interval. Later cycles keep using the
-                # configured interval.
-                await self._run_health_check_cycle()
-                await asyncio.sleep(self.health_check_interval)
+                # first full health-check interval. Missing rooms then use a
+                # bounded 60/120/240/300-second retry schedule until recovery.
+                all_rooms_joined = await self._run_health_check_cycle()
+                if all_rooms_joined is False:
+                    consecutive_rejoin_failures += 1
+                    delay = self._health_rejoin_retry_delay(consecutive_rejoin_failures)
+                    log.warning(
+                        "Room health recovery remains pending; retrying in %s seconds",
+                        delay,
+                    )
+                else:
+                    if all_rooms_joined is True and consecutive_rejoin_failures:
+                        log.info("All configured rooms are joined again; resuming normal health interval")
+                    consecutive_rejoin_failures = 0
+                    delay = self.health_check_interval
+
+                await asyncio.sleep(delay)
 
             except asyncio.CancelledError:
                 log.info("health_check_worker cancelled")

@@ -128,7 +128,7 @@ The bot identifies its active room session using, in order:
 2. the authenticated bare JID in the occupant cache
 3. a configured-nick fallback only for lightweight standalone mixin users
 
-`!room rejoin <room|all>`, startup joins, `!sync`, and health-check recovery all use the same tracked join path and the configured `MUC_JOIN_TIMEOUT_SECONDS` / `MUC_JOIN_RETRIES` values. The health worker runs an immediate first cycle after startup/reconnect, then repeats at `HEALTH_CHECK_INTERVAL`; successful administrative recovery also reapplies active bans to the room.
+`!room rejoin <room|all>`, startup joins, `!sync`, and health-check recovery all use the same tracked join path and the configured `MUC_JOIN_TIMEOUT_SECONDS` / `MUC_JOIN_RETRIES` values. The health worker runs an immediate first cycle after startup/reconnect. Missing rooms use a bounded 60/120/240/300-second retry schedule, remaining at 300 seconds until recovery; afterward the worker returns to `HEALTH_CHECK_INTERVAL`. Successful administrative recovery also reapplies active bans to the room.
 
 ## Message and Command Flow
 

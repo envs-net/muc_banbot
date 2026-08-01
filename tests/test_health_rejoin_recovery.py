@@ -79,3 +79,50 @@ async def test_health_worker_runs_first_cycle_before_initial_sleep(monkeypatch) 
         await bot.health_check_worker()
 
     assert calls == ["cycle", "sleep:300"]
+
+@pytest.mark.asyncio
+async def test_health_worker_uses_bounded_rejoin_backoff_until_recovery(monkeypatch) -> None:
+    bot = RecoveryBot()
+    bot.health_check_interval = 300
+    cycle_results = iter([False, False, False, False, False, True])
+    delays: list[float] = []
+
+    async def cycle() -> bool:
+        return next(cycle_results)
+
+    async def stop_after_recovery_sleep(delay: float) -> None:
+        delays.append(delay)
+        if len(delays) == 6:
+            raise asyncio.CancelledError()
+
+    bot._run_health_check_cycle = cycle
+    monkeypatch.setattr("banbot.health_check.asyncio.sleep", stop_after_recovery_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot.health_check_worker()
+
+    assert delays == [60, 120, 240, 300, 300, 300]
+
+
+@pytest.mark.asyncio
+async def test_health_worker_restarts_backoff_for_a_new_missing_room(monkeypatch) -> None:
+    bot = RecoveryBot()
+    bot.health_check_interval = 600
+    cycle_results = iter([False, False, True, False])
+    delays: list[float] = []
+
+    async def cycle() -> bool:
+        return next(cycle_results)
+
+    async def stop_after_last_sleep(delay: float) -> None:
+        delays.append(delay)
+        if len(delays) == 4:
+            raise asyncio.CancelledError()
+
+    bot._run_health_check_cycle = cycle
+    monkeypatch.setattr("banbot.health_check.asyncio.sleep", stop_after_last_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot.health_check_worker()
+
+    assert delays == [60, 120, 600, 60]
