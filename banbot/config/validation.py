@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import pathlib
 
 import config
@@ -200,6 +201,24 @@ class ConfigValidationMixin:
             errors.append("VERSION_CHECK_URL must not be empty when VERSION_CHECK_ENABLED=True")
         if version_url and not version_url.startswith(("http://", "https://")):
             errors.append("VERSION_CHECK_URL must start with http:// or https://")
+
+        config_path_value = getattr(config, "__file__", None)
+        if config_path_value:
+            config_path = pathlib.Path(str(config_path_value))
+            try:
+                config_stat = config_path.stat()
+            except OSError as exc:
+                warnings.append(f"Could not inspect config.py permissions: {exc}")
+            else:
+                config_mode = config_stat.st_mode & 0o777
+                if config_mode & 0o077:
+                    warnings.append(
+                        f"config.py permissions are too open ({config_mode:04o}); expected 0600 because it contains credentials"
+                    )
+                if hasattr(os, "geteuid") and config_stat.st_uid != os.geteuid():
+                    warnings.append(
+                        "config.py is not owned by the running service user; runtime !config edits may fail"
+                    )
 
         avatar_path = config_value("AVATAR_PATH", None)
         if avatar_path and not pathlib.Path(str(avatar_path)).exists():

@@ -29,6 +29,80 @@ OMEMO_STORAGE_FILE = "/var/lib/muc_banbot/omemo.json"
 The packaged/default `avatar.png` may remain in the read-only checkout because
 it only needs to be read.
 
+## Hardened paths and permissions
+
+A hardened deployment is intentionally stricter than the historical source-tree
+layout. The following mutable settings must resolve below the configured data
+directory (normally `/var/lib/muc_banbot`):
+
+```python
+DB_FILE = "/var/lib/muc_banbot/banbot.db"
+DB_BACKUP_DIR = "/var/lib/muc_banbot/backups"
+EXPORT_DIR = "/var/lib/muc_banbot/exports"
+OMEMO_STORAGE_FILE = "/var/lib/muc_banbot/omemo.json"
+```
+
+Do **not** copy an old config to `/etc/muc_banbot/config.py` and leave values such
+as `DB_FILE = "banbot.db"` or `DB_BACKUP_DIR = "data/backups"` unchanged. Relative
+paths still resolve from the checkout working directory, while the hardened unit
+keeps that checkout read-only with `ProtectSystem=strict`. `scripts/deploy.sh
+check` and install/update validation reject this mismatch before the service is
+started or an update proceeds. `AVATAR_PATH` is read-only state and may remain in
+the application checkout.
+
+The recommended ownership/mode baseline is:
+
+```text
+/etc/muc_banbot/             adminbot:adminbot  0750
+/etc/muc_banbot/config.py    adminbot:adminbot  0600
+/var/lib/muc_banbot/         adminbot:adminbot  0700
+```
+
+The config directory must be writable by the service user because `!config
+set/unset` performs an atomic temporary-file + `os.replace()` update. BanBot
+always forces a rewritten config file to `0600`, even in legacy/manual runs with
+a permissive umask. It also warns when the active config is group/world readable
+or is not owned by the running service user.
+
+The running bot deliberately does **not** try to `chown` deployment files. It is
+normally unprivileged, and silently taking ownership of operator-managed custom
+layouts would be unsafe. Instead, `scripts/deploy.sh check` validates ownership
+and modes and prints reviewable repair commands when they differ from the secure
+baseline.
+
+For a manual migration, stop the service first and prepare the directories with
+explicit ownership/modes:
+
+```bash
+sudo systemctl stop muc_banbot.service
+sudo install -d -o adminbot -g adminbot -m 0750 /etc/muc_banbot
+sudo install -d -o adminbot -g adminbot -m 0700 /var/lib/muc_banbot
+sudo install -o adminbot -g adminbot -m 0600 \
+    /srv/adminbot/muc_banbot/config.py /etc/muc_banbot/config.py
+```
+
+Move/copy the existing database, backup/export state and OMEMO file into
+`/var/lib/muc_banbot`. When files were copied as root, normalize the dedicated
+private data tree before starting the service:
+
+```bash
+sudo chown -R adminbot:adminbot /var/lib/muc_banbot
+sudo find /var/lib/muc_banbot -type d -exec chmod 0700 {} +
+sudo find /var/lib/muc_banbot -type f -exec chmod 0600 {} +
+```
+
+Then set the absolute paths above and verify before starting:
+
+```bash
+sudo ./scripts/deploy.sh check
+sudo systemctl start muc_banbot.service
+```
+
+The deploy check also validates existing database/OMEMO files and backup/export
+directories so a `root:root` migration mistake is caught before runtime.
+
+Keep the old source-tree data until the hardened service has been verified.
+
 ## Preservation-first deploy helper
 
 `scripts/deploy.sh` wraps install/update checks without replacing the manual
@@ -189,8 +263,9 @@ The deploy helper auto-detects `ROOT/config.py` for existing non-install
 operations when no external config path is configured and reports the layout as
 `legacy source-tree`.
 
-A migration to the hardened layout should be deliberate: stop the service,
-copy config/data to `/etc/muc_banbot` and `/var/lib/muc_banbot`, change runtime
-paths to absolutes, install/review the hardened unit, run `scripts/deploy.sh
-check`, then start the service. Do not remove the old data until the new service
-has been verified.
+A migration to the hardened layout should be deliberate. Follow the
+[hardened paths and permissions](#hardened-paths-and-permissions) checklist:
+stop the service, copy config/data with explicit ownership and modes, change all
+mutable paths to absolutes below `/var/lib/muc_banbot`, install/review the
+hardened unit, run `sudo ./scripts/deploy.sh check`, and only then start the
+service. Do not remove the old data until the new service has been verified.

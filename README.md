@@ -69,9 +69,14 @@ sudo ./scripts/deploy.sh install
 
 On a fresh install the helper creates `/etc/muc_banbot/config.py` once, with
 absolute mutable paths below `/var/lib/muc_banbot`, and then stops so credentials
-can be edited safely. Rerun `sudo ./scripts/deploy.sh install` after editing the
-config. Existing config, database/data and systemd unit files are never
-overwritten automatically. A bare `./scripts/deploy.sh` only prints help.
+can be edited safely. Hardened deployments must keep `DB_FILE`, `DB_BACKUP_DIR`,
+`EXPORT_DIR`, and `OMEMO_STORAGE_FILE` below the configured data directory; old
+relative source-tree paths are rejected by `deploy.sh check`. The expected
+permission baseline is `/etc/muc_banbot` `0750`, `config.py` `0600`, and
+`/var/lib/muc_banbot` `0700`, owned by the service user/group. Rerun
+`sudo ./scripts/deploy.sh install` after editing the config. Existing config,
+database/data and systemd unit files are never overwritten automatically. A bare
+`./scripts/deploy.sh` only prints help.
 
 Useful read-only checks:
 
@@ -112,7 +117,7 @@ pip install -e .
 # Optional OMEMO support:
 # pip install -e ".[omemo]"
 
-cp config_sample.py config.py
+install -m 0600 config_sample.py config.py
 $EDITOR config.py
 
 muc_banbot

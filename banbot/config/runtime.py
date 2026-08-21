@@ -164,10 +164,14 @@ class ConfigRuntimeMixin:
 
         tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}")
         with open(tmp_path, "w", encoding="utf8") as handle:
+            # config.py contains credentials. Do not rely on the process umask:
+            # legacy/manual deployments commonly run with umask 022.
+            os.chmod(tmp_path, 0o600)
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
+        os.chmod(path, 0o600)
         try:
             dir_fd = os.open(path.parent, os.O_DIRECTORY)
             try:

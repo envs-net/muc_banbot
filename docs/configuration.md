@@ -1,13 +1,17 @@
 # Configuration
 
-Copy `config_sample.py` to `config.py` and edit it before starting the bot.
+Create a private `config.py` from the sample and edit it before starting the bot.
 
 ```bash
-cp config_sample.py config.py
+install -m 0600 config_sample.py config.py
 $EDITOR config.py
 ```
 
-`config.py` is private deployment state. Do not commit it.
+`config.py` contains credentials and is private deployment state. Do not commit
+it and do not make it group/world readable. BanBot warns during config validation
+when an on-disk config is more permissive than `0600`. Runtime `!config set/unset`
+rewrites force the resulting file back to `0600`, independent of the process
+umask.
 
 ## `config_sample.py` as Display Reference
 
@@ -27,6 +31,10 @@ ADMIN_ROOM = "admin@conference.example.org"
 NICK = "BanBot"
 DB_FILE = "banbot.db"
 ```
+
+For the recommended hardened systemd layout, mutable paths must be absolute and
+stay below `/var/lib/muc_banbot` (or the custom `--data-dir` selected for the
+deployment). See [Deployment](deployment.md#hardened-paths-and-permissions).
 
 | Setting | Description |
 | --- | --- |

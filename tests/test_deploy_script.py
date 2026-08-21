@@ -204,3 +204,136 @@ def test_default_config_prefers_legacy_checkout_without_systemd_override(tmp_pat
     # Simulate a stale/unrelated hardened config existing on the same host.
     # A legacy checkout must not silently switch configs unless its unit says so.
     assert deploy._default_config(root, "muc_banbot.service") == legacy.resolve()
+
+
+def test_hardened_runtime_paths_reject_mutable_state_outside_data_dir(tmp_path):
+    deployment = _deployment(tmp_path)
+    runtime = {
+        "database": deployment.root / "banbot.db",
+        "backup_directory": deployment.data_dir / "backups",
+        "export_directory": deployment.data_dir / "exports",
+        "omemo_storage": deployment.data_dir / "omemo.json",
+        "avatar": deployment.root / "avatar.png",
+    }
+
+    with pytest.raises(deploy.DeployError, match="mutable paths outside") as exc_info:
+        deploy._validate_hardened_runtime_paths(deployment, runtime)
+
+    assert "DB_FILE=" in str(exc_info.value)
+    assert str(deployment.data_dir) in str(exc_info.value)
+
+
+def test_hardened_runtime_paths_allow_mutable_state_below_data_dir_and_external_avatar(tmp_path, capsys):
+    deployment = _deployment(tmp_path)
+    runtime = {
+        "database": deployment.data_dir / "banbot.db",
+        "backup_directory": deployment.data_dir / "backups",
+        "export_directory": deployment.data_dir / "exports",
+        "omemo_storage": deployment.data_dir / "omemo.json",
+        "avatar": deployment.root / "avatar.png",
+    }
+
+    deploy._validate_hardened_runtime_paths(deployment, runtime)
+
+    assert "mutable runtime paths stay below" in capsys.readouterr().out
+
+
+def test_legacy_runtime_paths_remain_supported_outside_external_data_dir(tmp_path):
+    deployment = _deployment(tmp_path)
+    deployment = deploy.Deployment(
+        root=deployment.root,
+        venv=deployment.venv,
+        config=deployment.root / "config.py",
+        data_dir=deployment.root,
+        service=deployment.service,
+        service_user=deployment.service_user,
+        service_group=deployment.service_group,
+        unit=deployment.unit,
+        python=deployment.python,
+    )
+    runtime = {
+        "database": deployment.root / "banbot.db",
+        "backup_directory": deployment.root / "data" / "backups",
+        "export_directory": deployment.root / "data" / "exports",
+        "omemo_storage": deployment.root / "data" / "omemo.json",
+        "avatar": deployment.root / "avatar.png",
+    }
+
+    deploy._validate_hardened_runtime_paths(deployment, runtime)
+
+
+def test_hardened_permission_check_accepts_secure_baseline(tmp_path, monkeypatch, capsys):
+    deployment = _deployment(tmp_path)
+    deployment.config.parent.mkdir(parents=True, mode=0o750)
+    deployment.data_dir.mkdir(parents=True, mode=0o700)
+    deployment.config.write_text("PASSWORD = 'secret'\n", encoding="utf-8")
+    deployment.config.parent.chmod(0o750)
+    deployment.data_dir.chmod(0o700)
+    deployment.config.chmod(0o600)
+    uid = os.getuid()
+    gid = os.getgid()
+    monkeypatch.setattr(deploy, "_expected_ids", lambda _deployment: (uid, gid))
+
+    deploy._check_hardened_permissions(deployment)
+
+    assert "hardened permissions" in capsys.readouterr().out
+
+
+def test_hardened_permission_check_rejects_world_readable_config(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    deployment.config.parent.mkdir(parents=True, mode=0o750)
+    deployment.data_dir.mkdir(parents=True, mode=0o700)
+    deployment.config.write_text("PASSWORD = 'secret'\n", encoding="utf-8")
+    deployment.config.parent.chmod(0o750)
+    deployment.data_dir.chmod(0o700)
+    deployment.config.chmod(0o644)
+    uid = os.getuid()
+    gid = os.getgid()
+    monkeypatch.setattr(deploy, "_expected_ids", lambda _deployment: (uid, gid))
+
+    with pytest.raises(deploy.DeployError, match="config file mode is 0644") as exc_info:
+        deploy._check_hardened_permissions(deployment)
+
+    message = str(exc_info.value)
+    assert "sudo chmod 0600" in message
+    assert "contains credentials" in message
+
+
+def test_hardened_runtime_permission_check_rejects_root_owned_migrated_database(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    deployment.data_dir.mkdir(parents=True)
+    database = deployment.data_dir / "banbot.db"
+    database.write_bytes(b"sqlite")
+    runtime = {
+        "database": database,
+        "backup_directory": deployment.data_dir / "backups",
+        "export_directory": deployment.data_dir / "exports",
+        "omemo_storage": deployment.data_dir / "omemo.json",
+        "avatar": deployment.root / "avatar.png",
+    }
+    uid = os.getuid()
+    gid = os.getgid()
+    monkeypatch.setattr(deploy, "_expected_ids", lambda _deployment: (uid + 1, gid + 1))
+
+    with pytest.raises(deploy.DeployError, match="not usable by the service account") as exc_info:
+        deploy._check_hardened_runtime_permissions(deployment, runtime)
+
+    assert "database ownership" in str(exc_info.value)
+    assert "sudo chown -R" in str(exc_info.value)
+
+
+def test_hardened_runtime_permission_check_allows_missing_runtime_targets(tmp_path, monkeypatch, capsys):
+    deployment = _deployment(tmp_path)
+    deployment.data_dir.mkdir(parents=True)
+    runtime = {
+        "database": deployment.data_dir / "banbot.db",
+        "backup_directory": deployment.data_dir / "backups",
+        "export_directory": deployment.data_dir / "exports",
+        "omemo_storage": deployment.data_dir / "omemo.json",
+        "avatar": deployment.root / "avatar.png",
+    }
+    monkeypatch.setattr(deploy, "_expected_ids", lambda _deployment: (os.getuid(), os.getgid()))
+
+    deploy._check_hardened_runtime_permissions(deployment, runtime)
+
+    assert "existing mutable runtime files/directories are usable" in capsys.readouterr().out

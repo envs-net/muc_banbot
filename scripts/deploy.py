@@ -441,6 +441,203 @@ print(json.dumps({
     }
 
 
+
+def _path_is_within(path: Path, parent: Path) -> bool:
+    """Return whether *path* resolves inside *parent* (or equals it)."""
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_hardened_runtime_paths(
+    deployment: Deployment,
+    runtime: dict[str, Path | None],
+) -> None:
+    """Reject mutable runtime paths that escape the hardened data directory."""
+    if deployment.legacy_layout:
+        return
+
+    mutable = {
+        "DB_FILE": runtime.get("database"),
+        "DB_BACKUP_DIR": runtime.get("backup_directory"),
+        "EXPORT_DIR": runtime.get("export_directory"),
+        "OMEMO_STORAGE_FILE": runtime.get("omemo_storage"),
+    }
+    escaped = [
+        f"{name}={path}"
+        for name, path in mutable.items()
+        if path is not None and not _path_is_within(path, deployment.data_dir)
+    ]
+    if escaped:
+        details = "\n  - ".join(escaped)
+        raise DeployError(
+            "hardened deployment has mutable paths outside the configured data directory "
+            f"{deployment.data_dir}:\n  - {details}\n"
+            "Use absolute paths below the data directory (for example "
+            f"{deployment.data_dir}/banbot.db) or select the legacy source-tree layout explicitly."
+        )
+    print(f"OK  mutable runtime paths stay below {deployment.data_dir}")
+
+
+def _mode(path: Path) -> int:
+    return path.stat().st_mode & 0o777
+
+
+def _ownership(path: Path) -> tuple[int, int]:
+    stat_result = path.stat()
+    return stat_result.st_uid, stat_result.st_gid
+
+
+def _expected_ids(deployment: Deployment) -> tuple[int, int] | None:
+    try:
+        user = pwd.getpwnam(deployment.service_user)
+    except KeyError:
+        return None
+    try:
+        gid = grp.getgrnam(deployment.service_group).gr_gid
+    except KeyError:
+        gid = user.pw_gid
+    return user.pw_uid, gid
+
+
+def _permission_hint(deployment: Deployment) -> str:
+    return (
+        "Suggested repair (review before running):\n"
+        f"  sudo chown {shlex.quote(deployment.service_user)}:{shlex.quote(deployment.service_group)} "
+        f"{shlex.quote(str(deployment.config.parent))} {shlex.quote(str(deployment.config))} "
+        f"{shlex.quote(str(deployment.data_dir))}\n"
+        f"  sudo chmod 0750 {shlex.quote(str(deployment.config.parent))}\n"
+        f"  sudo chmod 0600 {shlex.quote(str(deployment.config))}\n"
+        f"  sudo chmod 0700 {shlex.quote(str(deployment.data_dir))}"
+    )
+
+
+def _check_hardened_permissions(deployment: Deployment) -> None:
+    """Validate the secure/usable permission baseline for hardened deployments."""
+    if deployment.legacy_layout:
+        return
+
+    for path, label in (
+        (deployment.config.parent, "config directory"),
+        (deployment.config, "config file"),
+        (deployment.data_dir, "data directory"),
+    ):
+        if not path.exists():
+            raise DeployError(f"{label} does not exist: {path}")
+
+    expected = _expected_ids(deployment)
+    if expected is None:
+        raise DeployError(
+            f"cannot verify hardened file ownership: service user {deployment.service_user!r} does not exist"
+        )
+
+    expected_uid, expected_gid = expected
+    problems: list[str] = []
+
+    for path, label in (
+        (deployment.config.parent, "config directory"),
+        (deployment.config, "config file"),
+        (deployment.data_dir, "data directory"),
+    ):
+        uid, gid = _ownership(path)
+        if (uid, gid) != (expected_uid, expected_gid):
+            problems.append(
+                f"{label} ownership is uid={uid},gid={gid}; expected "
+                f"{deployment.service_user}:{deployment.service_group}"
+            )
+
+    config_dir_mode = _mode(deployment.config.parent)
+    config_mode = _mode(deployment.config)
+    data_mode = _mode(deployment.data_dir)
+
+    if config_dir_mode != 0o750:
+        problems.append(
+            f"config directory mode is {config_dir_mode:04o}; expected 0750 so runtime config edits remain possible"
+        )
+    if config_mode != 0o600:
+        problems.append(
+            f"config file mode is {config_mode:04o}; expected 0600 because it contains credentials"
+        )
+    if data_mode != 0o700:
+        problems.append(
+            f"data directory mode is {data_mode:04o}; expected 0700 because it contains private runtime state/backups"
+        )
+
+    if problems:
+        details = "\n  - ".join(problems)
+        raise DeployError(
+            f"hardened deployment permissions are unsafe or unusable:\n  - {details}\n"
+            + _permission_hint(deployment)
+        )
+
+    print(
+        "OK  hardened permissions: config dir 0750, config 0600, data dir 0700 "
+        f"owned by {deployment.service_user}:{deployment.service_group}"
+    )
+
+def _check_hardened_runtime_permissions(
+    deployment: Deployment,
+    runtime: dict[str, Path | None],
+) -> None:
+    """Check existing mutable runtime targets for service-user ownership/access."""
+    if deployment.legacy_layout:
+        return
+
+    expected = _expected_ids(deployment)
+    if expected is None:
+        return
+    expected_uid, expected_gid = expected
+    problems: list[str] = []
+
+    def check_owner(path: Path, label: str) -> None:
+        uid, gid = _ownership(path)
+        if (uid, gid) != (expected_uid, expected_gid):
+            problems.append(
+                f"{label} ownership is uid={uid},gid={gid}; expected "
+                f"{deployment.service_user}:{deployment.service_group}"
+            )
+
+    for key, label in (("database", "database"), ("omemo_storage", "OMEMO storage")):
+        path = runtime.get(key)
+        if path is None or not path.exists():
+            continue
+        if not path.is_file():
+            problems.append(f"{label} is not a regular file: {path}")
+            continue
+        check_owner(path, label)
+        mode = _mode(path)
+        if mode & 0o600 != 0o600:
+            problems.append(f"{label} is not readable/writable by its owner (mode {mode:04o}): {path}")
+
+    for key, label in (
+        ("backup_directory", "backup directory"),
+        ("export_directory", "export directory"),
+    ):
+        path = runtime.get(key)
+        if path is None or not path.exists():
+            continue
+        if not path.is_dir():
+            problems.append(f"{label} is not a directory: {path}")
+            continue
+        check_owner(path, label)
+        mode = _mode(path)
+        if mode & 0o700 != 0o700:
+            problems.append(f"{label} is not fully accessible by its owner (mode {mode:04o}): {path}")
+
+    if problems:
+        details = "\n  - ".join(problems)
+        raise DeployError(
+            f"hardened runtime files/directories are not usable by the service account:\n  - {details}\n"
+            "Review ownership after migration. For the dedicated data tree, a typical repair is:\n"
+            f"  sudo chown -R {shlex.quote(deployment.service_user)}:{shlex.quote(deployment.service_group)} "
+            f"{shlex.quote(str(deployment.data_dir))}"
+        )
+
+    print("OK  existing mutable runtime files/directories are usable by the service account")
+
+
 def _validate_config(deployment: Deployment) -> None:
     if not deployment.config.is_file():
         raise DeployError(f"runtime config not found: {deployment.config}")
@@ -664,6 +861,9 @@ def install(deployment: Deployment) -> int:
             return 0
         _validate_config(deployment)
         runtime = _runtime_paths(deployment)
+        _validate_hardened_runtime_paths(deployment, runtime)
+        _check_hardened_permissions(deployment)
+        _check_hardened_runtime_permissions(deployment, runtime)
         _print_paths(deployment, runtime=runtime)
         _install_unit_if_missing(deployment)
     except Exception:
@@ -1068,6 +1268,11 @@ def update(
     if not deployment.venv_python.is_file() or not deployment.config.is_file():
         raise DeployError("existing virtualenv and runtime config are required for update")
     _require_clean_tracked_tree(deployment)
+    _validate_config(deployment)
+    runtime = _runtime_paths(deployment)
+    _validate_hardened_runtime_paths(deployment, runtime)
+    _check_hardened_permissions(deployment)
+    _check_hardened_runtime_permissions(deployment, runtime)
     _update_plan(deployment, requested_tag)
     if deployment.dry_run:
         print("\nDRY RUN: no Git refs, files, packages, database or services were changed.")
@@ -1097,6 +1302,10 @@ def update(
                 _restore_project_protected_paths(protected)
         _install_dependencies(deployment)
         _validate_config(deployment)
+        runtime = _runtime_paths(deployment)
+        _validate_hardened_runtime_paths(deployment, runtime)
+        _check_hardened_permissions(deployment)
+        _check_hardened_runtime_permissions(deployment, runtime)
     except Exception:
         if stopped:
             print(
@@ -1195,6 +1404,9 @@ def check(deployment: Deployment) -> int:
         raise DeployError(f"muc_banbot executable not found: {deployment.executable}")
     _validate_config(deployment)
     runtime = _runtime_paths(deployment)
+    _validate_hardened_runtime_paths(deployment, runtime)
+    _check_hardened_permissions(deployment)
+    _check_hardened_runtime_permissions(deployment, runtime)
     database = runtime.get("database")
     if database is not None and not database.parent.exists():
         raise DeployError(f"database parent does not exist: {database.parent}")
