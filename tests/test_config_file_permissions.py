@@ -6,7 +6,6 @@ from pathlib import Path
 import config
 
 from banbot.config.runtime import ConfigRuntimeMixin
-from banbot.config.validation import ConfigValidationMixin
 from tests.test_config_validation_more import ConfigValidationBot, set_valid_config
 
 
