@@ -39,7 +39,7 @@ muc_banbot -> banbot.bot:main
 
 The legacy `python muc_banbot.py` startup path remains a compatibility wrapper around the same `main()` function.
 
-The bundled systemd service sets the repository as `WorkingDirectory` and starts the console command from the virtual environment. `Restart=on-failure` restarts unexpected failures, while an administrator-requested restart exits with a dedicated non-zero code so systemd restarts the process intentionally.
+The recommended systemd service keeps the checkout as `WorkingDirectory`, loads `/etc/muc_banbot/config.py` through `MUC_BANBOT_CONFIG`, and keeps mutable state below `/var/lib/muc_banbot`. It uses `Type=notify`, `WatchdogSec=60`, `ProtectSystem=strict`, and `Restart=on-failure`. The historical source-tree layout remains supported through the legacy unit. See `docs/deployment.md`.
 
 ### Configuration loading
 
@@ -96,9 +96,12 @@ start background workers
         │
         ▼
 set vCard and send startup/update notifications
+        │
+        ▼
+start/confirm process-scoped runtime watchdog and notify systemd READY=1
 ```
 
-Reconnects reuse the same startup sequence, but preserve the process uptime and emit reconnect-specific alerts. Old background workers are cancelled before replacements are created.
+Reconnects reuse the same startup sequence, but preserve the process uptime and emit reconnect-specific alerts. Reconnect-scoped core workers are cancelled before replacements are created. The process-scoped runtime watchdog remains active across XMPP reconnects.
 
 ## MUC Join and Presence Model
 
@@ -305,16 +308,31 @@ MUC affiliation writes are additionally limited by `muc_write_semaphore`, and la
 
 ## Background Workers
 
-The startup sequence supervises these long-running tasks when enabled:
+`banbot.task_supervisor.TaskSupervisor` owns reconnect-scoped long-running core
+workers and restarts them with bounded exponential backoff after unexpected
+exceptions or exits. Startup registers these services when enabled:
 
 - tempban expiry / unban worker
 - room health-check and automatic rejoin worker
 - RTBL periodic refresh worker
 - redaction-index cleanup worker
 - remote version-check worker
-- delayed reconnect task after connection loss
 
-`stop_background_tasks()` cancels the main workers before a new startup sequence. Feature-specific tasks should be stored on the bot instance and cancelled or replaced idempotently.
+`stop_background_tasks()` cancels the `_core` supervisor group before a fresh
+XMPP startup/reconnect sequence. Short-lived redaction operation tasks keep their
+explicit lifecycle because they are operations rather than permanent services.
+The delayed reconnect task is also connection-lifecycle state, not a permanent
+core worker.
+
+`banbot.runtime_watchdog.RuntimeWatchdog` is process-scoped. It measures asyncio
+event-loop lag, exposes state to `!status`, and feeds systemd's watchdog when
+`WATCHDOG_USEC` is active. A lag above `WATCHDOG_LAG_FAILURE_SECONDS` suppresses
+the systemd heartbeat instead of falsely reporting health. `READY=1` is sent
+only after the complete startup sequence succeeds.
+
+The supervisor records worker restart counts and terminal failures so `!status`
+can surface degraded background services even when the main XMPP loop is still
+running.
 
 ## Backups, Import, and Restore
 

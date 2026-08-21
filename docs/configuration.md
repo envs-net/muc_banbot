@@ -344,63 +344,32 @@ AVATAR_PATH = "data/avatar.png"
 
 ## Systemd Service
 
-Install the project in its virtual environment so the `muc_banbot` console
-command is available:
+The recommended production layout keeps configuration and mutable state outside
+the source checkout:
 
-```bash
-cd /srv/adminbot/muc_banbot
-source venv/bin/activate
-pip install -e .
+```text
+/etc/muc_banbot/config.py
+/var/lib/muc_banbot/
 ```
 
-An example system service is provided as
-[`contrib/muc_banbot.service`](../contrib/muc_banbot.service):
+[`contrib/muc_banbot.service`](../contrib/muc_banbot.service) uses the hardened
+layout with `Type=notify`, `WatchdogSec=60`, `ProtectSystem=strict` and
+`ReadWritePaths=/etc/muc_banbot /var/lib/muc_banbot`. The bot sends systemd
+`READY=1` only after complete startup and stops watchdog heartbeats if event-loop
+lag crosses the configured failure threshold.
 
-```ini
-[Unit]
-Description=BanBot XMPP moderation bot
-Documentation=https://github.com/envs-net/muc_banbot
-After=network-online.target
-Wants=network-online.target
+The previous source-tree layout is still supported. Keep an existing custom unit
+or use [`contrib/muc_banbot-legacy.service`](../contrib/muc_banbot-legacy.service),
+where relative `config.py`, database and `data/` paths continue to resolve below
+`WorkingDirectory=/srv/adminbot/muc_banbot`.
 
-[Service]
-Type=simple
-User=adminbot
-Group=adminbot
-WorkingDirectory=/srv/adminbot/muc_banbot
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
-Restart=on-failure
-RestartSec=5
-UMask=0077
-
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-ReadWritePaths=/srv/adminbot/muc_banbot
-
-[Install]
-WantedBy=multi-user.target
-```
-
-The console command checks the current working directory and the editable
-source checkout for `config.py`. Because the service sets `WorkingDirectory`,
-no config environment variable is required. `MUC_BANBOT_CONFIG` remains
-available as an optional override for custom layouts.
+For guided install/update/status/check operations, use `scripts/deploy.sh`; a bare
+invocation is read-only help and existing units/config/data are not overwritten.
+See [deployment.md](deployment.md) for the complete hardened and legacy workflows.
 
 `Restart=on-failure` restarts the bot after startup failures, unexpected event
-loop termination, or the dedicated `!restart confirm` exit code. A normal
-`systemctl stop` remains stopped.
-
-Copy and reload the service after changes:
-
-```bash
-sudo cp contrib/muc_banbot.service /etc/systemd/system/muc_banbot.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now muc_banbot
-sudo systemctl status muc_banbot
-```
+loop termination, systemd watchdog expiry, or the dedicated `!restart confirm`
+exit code. A normal `systemctl stop` remains stopped.
 
 
 ## Startup version notifications

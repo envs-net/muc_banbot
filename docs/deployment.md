@@ -1,0 +1,192 @@
+# Deployment
+
+This page documents the recommended hardened systemd deployment and the
+existing source-tree installation mode. Both remain supported.
+
+## Recommended layout
+
+Use a dedicated service account and separate application code from mutable
+configuration and state:
+
+```text
+/srv/adminbot/muc_banbot/       Git checkout + virtualenv
+/etc/muc_banbot/config.py       runtime-editable configuration
+/var/lib/muc_banbot/            SQLite DB, backups, exports and OMEMO state
+```
+
+The checkout can stay read-only at runtime. New hardened configs should use
+absolute paths, for example:
+
+```python
+DB_FILE = "/var/lib/muc_banbot/banbot.db"
+DB_BACKUP_DIR = "/var/lib/muc_banbot/backups"
+EXPORT_DIR = "/var/lib/muc_banbot/exports"
+OMEMO_STORAGE_FILE = "/var/lib/muc_banbot/omemo.json"
+# Optional custom avatar:
+# AVATAR_PATH = "/var/lib/muc_banbot/avatar.png"
+```
+
+The packaged/default `avatar.png` may remain in the read-only checkout because
+it only needs to be read.
+
+## Preservation-first deploy helper
+
+`scripts/deploy.sh` wraps install/update checks without replacing the manual
+workflow. Running it without a command only prints help:
+
+```bash
+./scripts/deploy.sh
+./scripts/deploy.sh status
+./scripts/deploy.sh check
+./scripts/deploy.sh install --dry-run
+./scripts/deploy.sh update --dry-run
+```
+
+Actual install/update operations require explicit confirmation. Stopping an
+active service and starting it again are confirmed separately. If an operation
+fails after the service was stopped, the helper deliberately leaves it stopped.
+
+The helper preserves operator-managed state:
+
+- existing config files are never replaced;
+- existing databases/data directories are never replaced;
+- existing systemd units are never overwritten automatically;
+- tracked local Git changes block updates;
+- legacy config/database/OMEMO/avatar files inside the checkout are protected
+  across a release checkout; and
+- a consistent SQLite backup is created before code changes during updates.
+
+Custom layouts can be supplied with `--root`, `--venv`, `--config`,
+`--data-dir`, `--service`, `--user`, `--group` and `--unit`. Useful environment
+overrides include `MUC_BANBOT_CONFIG`, `MUC_BANBOT_DATA_DIR`,
+`MUC_BANBOT_VENV`, `MUC_BANBOT_SERVICE`, `MUC_BANBOT_SERVICE_USER`,
+`MUC_BANBOT_SERVICE_GROUP`, `MUC_BANBOT_SYSTEMD_UNIT`,
+`MUC_BANBOT_DEPLOY_REMOTE`, `MUC_BANBOT_DEPLOY_BASE_PYTHON` and
+`MUC_BANBOT_DEPLOY_PYTHON`.
+
+## Fresh hardened install
+
+The helper assumes the account and source checkout already exist; it does not
+guess service-account policy or XMPP credentials:
+
+```bash
+sudo useradd -m -s /bin/bash adminbot -d /srv/adminbot
+sudo -u adminbot git clone https://git.envs.net/envs/muc_banbot.git /srv/adminbot/muc_banbot
+cd /srv/adminbot/muc_banbot
+
+git fetch --tags
+LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
+git checkout "$LATEST_TAG"
+
+./scripts/deploy.sh install --dry-run
+sudo ./scripts/deploy.sh install
+```
+
+On the first run, when the config is missing, the helper creates
+`/etc/muc_banbot/config.py` with the `/var/lib/muc_banbot` paths shown above
+and then stops. Edit at least the account/room values:
+
+```bash
+sudoedit /etc/muc_banbot/config.py
+sudo ./scripts/deploy.sh install
+```
+
+The second run validates the config, creates/reuses the virtualenv, and can
+install a new hardened systemd unit after confirmation. An already installed
+unit is kept for manual review.
+
+Optional OMEMO dependencies are intentionally separate, just as in the manual
+installation:
+
+```bash
+sudo -u adminbot /srv/adminbot/muc_banbot/venv/bin/pip install -e "/srv/adminbot/muc_banbot[omemo]"
+```
+
+## Hardened systemd service
+
+[`contrib/muc_banbot.service`](../contrib/muc_banbot.service) is the recommended
+static example. Important properties are:
+
+```ini
+Type=notify
+NotifyAccess=main
+Environment=MUC_BANBOT_CONFIG=/etc/muc_banbot/config.py
+ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
+Restart=on-failure
+WatchdogSec=60
+ProtectSystem=strict
+ReadWritePaths=/etc/muc_banbot /var/lib/muc_banbot
+```
+
+Additional hardening includes `PrivateTmp`, `PrivateDevices`, kernel/control
+group protection, `NoNewPrivileges`, empty capability sets and `UMask=0077`.
+`Restart=on-failure` still means a normal `systemctl stop` remains stopped,
+while startup failures, unexpected process exits and `!restart confirm` can be
+recovered automatically.
+
+BanBot sends `READY=1` only after database/room startup has completed. Its
+runtime watchdog feeds systemd while the asyncio event loop remains responsive.
+If lag exceeds `WATCHDOG_LAG_FAILURE_SECONDS`, heartbeats are suppressed so the
+systemd watchdog can recover a genuinely stuck process.
+
+Install the static unit manually when desired:
+
+```bash
+sudo install -m 0644 contrib/muc_banbot.service /etc/systemd/system/muc_banbot.service
+sudo systemd-analyze verify /etc/systemd/system/muc_banbot.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now muc_banbot.service
+```
+
+For custom source/config/data paths, let `scripts/deploy.sh install` render a
+matching new unit, or edit/review the unit manually. `scripts/deploy.sh check`
+compares effective systemd properties with the selected deployment layout.
+
+## Safe updates
+
+For the newest stable release:
+
+```bash
+./scripts/deploy.sh update --dry-run
+sudo ./scripts/deploy.sh update
+```
+
+The automatic path never deploys `main`. It refreshes normal remote refs with
+`--no-tags`, queries release tags with `git ls-remote`, selects only stable
+`vX.Y.Z` tags and fetches only the selected release. A conflicting local tag is
+not overwritten. Git ancestry is checked so diverged/non-fast-forward
+deployments are refused.
+
+An intentional older code release must be explicit:
+
+```bash
+sudo ./scripts/deploy.sh update --to v2.6.3 --allow-downgrade
+```
+
+This only permits a code downgrade; it cannot roll a database schema backward.
+A matching database backup may be required if an older release is incompatible.
+
+## Legacy/source-tree deployment
+
+The historical layout remains valid:
+
+```text
+/srv/adminbot/muc_banbot/config.py
+/srv/adminbot/muc_banbot/banbot.db
+/srv/adminbot/muc_banbot/data/backups/
+/srv/adminbot/muc_banbot/data/exports/
+```
+
+Relative paths keep their existing meaning because the working directory remains
+the checkout. Existing installations do **not** have to migrate merely to update
+BanBot. Keep the current unit or use
+[`contrib/muc_banbot-legacy.service`](../contrib/muc_banbot-legacy.service).
+The deploy helper auto-detects `ROOT/config.py` for existing non-install
+operations when no external config path is configured and reports the layout as
+`legacy source-tree`.
+
+A migration to the hardened layout should be deliberate: stop the service,
+copy config/data to `/etc/muc_banbot` and `/var/lib/muc_banbot`, change runtime
+paths to absolutes, install/review the hardened unit, run `scripts/deploy.sh
+check`, then start the service. Do not remove the old data until the new service
+has been verified.

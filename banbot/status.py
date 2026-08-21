@@ -73,6 +73,36 @@ class StatusMixin:
             if should_run and task is not None and task.done():
                 problems.append(f"{task_name} stopped unexpectedly")
 
+        supervisor = getattr(self, "tasks", None)
+        if supervisor is not None:
+            supervised = supervisor.snapshot(include_done=False)
+            failed_tasks = [info for info in supervised if info.status == "failed"]
+            if failed_tasks:
+                preview = ", ".join(info.name for info in failed_tasks[:5])
+                problems.append(f"Supervised background task failure(s): {preview}")
+            restarted = [info for info in supervised if info.restart_count > 0]
+            if restarted:
+                preview = ", ".join(
+                    f"{info.name}×{info.restart_count}" for info in restarted[:5]
+                )
+                warnings.append(f"Background worker restart(s) observed: {preview}")
+
+        watchdog = getattr(self, "runtime_watchdog", None)
+        watchdog_state = getattr(watchdog, "state", None)
+        if watchdog_state is not None and getattr(watchdog_state, "enabled", False):
+            if not getattr(watchdog_state, "worker_running", False):
+                problems.append("Runtime watchdog is enabled but not running")
+            elif getattr(watchdog_state, "heartbeat_suppressed", 0):
+                warnings.append(
+                    "Runtime watchdog suppressed "
+                    f"{watchdog_state.heartbeat_suppressed} heartbeat(s) because of event-loop lag"
+                )
+            elif getattr(watchdog_state, "lag_warnings", 0):
+                notes.append(
+                    "Runtime watchdog observed event-loop lag; "
+                    f"max {watchdog_state.max_lag_seconds:.3f}s"
+                )
+
         protected_rooms = sorted(getattr(self, "protected_rooms", set()))
         if not protected_rooms:
             warnings.append(

@@ -22,6 +22,18 @@ CONNECT_PORT = 5222
 # True  = direct TLS, usually 5223
 CONNECT_DIRECT_TLS = False
 
+# ================= RUNTIME WATCHDOG =================
+
+# Monitor event-loop responsiveness. The hardened systemd service also uses
+# WatchdogSec=60; when systemd requests watchdog heartbeats this worker stays
+# active even if WATCHDOG_ENABLED is False, otherwise systemd would repeatedly
+# restart a healthy process. Disable WatchdogSec in the unit as well to turn it
+# off completely. These settings require a restart.
+WATCHDOG_ENABLED = True
+WATCHDOG_INTERVAL_SECONDS = 20
+WATCHDOG_LAG_WARNING_SECONDS = 2.0
+WATCHDOG_LAG_FAILURE_SECONDS = 30.0
+
 # ================= DATABASE / BACKUPS =================
 
 DB_FILE = "banbot.db"

@@ -7,14 +7,16 @@ This directory contains the operator and developer documentation for BanBot.
 New operators should read:
 
 1. [Project README](../README.md)
-2. [Configuration](configuration.md)
-3. [Commands](commands.md)
-4. [Backups and Restore](backups.md)
-5. [Maintenance](maintenance.md)
-6. [Troubleshooting](troubleshooting.md)
+2. [Deployment](deployment.md)
+3. [Configuration](configuration.md)
+4. [Commands](commands.md)
+5. [Backups and Restore](backups.md)
+6. [Maintenance](maintenance.md)
+7. [Troubleshooting](troubleshooting.md)
 
 ## Operator Guides
 
+* [Deployment](deployment.md) - hardened `/etc` + `/var/lib` systemd layout, preservation-first deploy helper, updates, and supported legacy layout
 * [Configuration](configuration.md) - required settings, runtime-writable settings, startup-only settings, validation, output modes, and systemd setup
 * [Commands](commands.md) - compact admin-room and protected-room command reference aligned with runtime `!help`
 * [Backups and Restore](backups.md) - managed ZIP backup archives, manifest format, verification, restore, safety backups, and legacy compatibility
@@ -44,6 +46,7 @@ New operators should read:
 | Topic | Primary doc |
 | --- | --- |
 | Runtime architecture and code ownership | [Architecture](architecture.md) |
+| Deployment/systemd layout | [Deployment](deployment.md) |
 | Runtime config and `!config` | [Configuration](configuration.md) |
 | Long output paging | [Configuration](configuration.md#output-modes-and-paging), [Commands](commands.md#paging-and-long-output) |
 | ZIP backups and restore | [Backups and Restore](backups.md) |

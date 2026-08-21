@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+DEPLOY_PATH = ROOT / "scripts" / "deploy.py"
+
+
+def _load_deploy_module():
+    spec = importlib.util.spec_from_file_location("muc_banbot_deploy_script", DEPLOY_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+deploy = _load_deploy_module()
+
+
+def _deployment(tmp_path: Path, *, dry_run: bool = False):
+    root = tmp_path / "muc_banbot"
+    root.mkdir()
+    return deploy.Deployment(
+        root=root,
+        venv=root / "venv",
+        config=tmp_path / "etc" / "muc_banbot" / "config.py",
+        data_dir=tmp_path / "var" / "lib" / "muc_banbot",
+        service="muc_banbot-test.service",
+        service_user="test-user",
+        service_group="test-group",
+        unit=tmp_path / "muc_banbot-test.service",
+        python="python3",
+        dry_run=dry_run,
+    )
+
+
+def _source_markers(deployment) -> None:
+    (deployment.root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    (deployment.root / "config_sample.py").write_text(
+        "DB_FILE = 'banbot.db'\n"
+        "DB_BACKUP_DIR = 'data/backups'\n"
+        "EXPORT_DIR = 'data/exports'\n"
+        "OMEMO_STORAGE_FILE = 'data/omemo.json'\n",
+        encoding="utf-8",
+    )
+    scripts = deployment.root / "scripts"
+    scripts.mkdir()
+    (scripts / "deploy.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+
+def test_bare_deploy_command_only_prints_help(capsys):
+    assert deploy.main([]) == 0
+    output = capsys.readouterr().out
+    assert "Interactive, preservation-first muc_banbot deployment helper" in output
+    assert "{status,check,install,update}" in output
+
+
+def test_deploy_shell_wrapper_is_executable_and_defaults_to_help():
+    wrapper = ROOT / "scripts" / "deploy.sh"
+    result = subprocess.run([str(wrapper)], cwd=ROOT, check=False, capture_output=True, text=True)
+    assert os.access(wrapper, os.X_OK)
+    assert result.returncode == 0
+    assert "{status,check,install,update}" in result.stdout
+
+
+def test_hardened_unit_separates_code_config_and_data(tmp_path):
+    deployment = _deployment(tmp_path)
+    unit = deploy._render_systemd_unit(deployment)
+    assert "Type=notify" in unit
+    assert "ProtectSystem=strict" in unit
+    assert f"Environment=MUC_BANBOT_CONFIG={deployment.config}" in unit
+    assert f"ReadWritePaths={deployment.config.parent} {deployment.data_dir}" in unit
+    assert f"ReadWritePaths={deployment.root}" not in unit
+
+
+def test_new_hardened_config_uses_absolute_data_paths(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    _source_markers(deployment)
+    monkeypatch.setattr(deploy, "_account_exists", lambda _user: False)
+
+    assert deploy._write_config_from_sample(deployment) is True
+    text = deployment.config.read_text(encoding="utf-8")
+    assert f"DB_FILE = {str(deployment.data_dir / 'banbot.db')!r}" in text
+    assert f"DB_BACKUP_DIR = {str(deployment.data_dir / 'backups')!r}" in text
+    assert f"EXPORT_DIR = {str(deployment.data_dir / 'exports')!r}" in text
+    assert f"OMEMO_STORAGE_FILE = {str(deployment.data_dir / 'omemo.json')!r}" in text
+
+    deployment.config.write_text("operator config\n", encoding="utf-8")
+    assert deploy._write_config_from_sample(deployment) is False
+    assert deployment.config.read_text(encoding="utf-8") == "operator config\n"
+
+
+def test_project_protected_files_are_restored_after_checkout_changes(tmp_path):
+    deployment = _deployment(tmp_path)
+    config = deployment.root / "config.py"
+    database = deployment.root / "banbot.db"
+    outside = tmp_path / "external.db"
+    config.write_text("operator config\n", encoding="utf-8")
+    database.write_bytes(b"operator db")
+    outside.write_bytes(b"external")
+    backup_dir = tmp_path / "protect"
+    backup_dir.mkdir()
+
+    backups = deploy._backup_project_protected_paths(
+        deployment,
+        {"config": config, "database": database, "external": outside},
+        backup_dir,
+    )
+    assert set(backups) == {"config", "database"}
+
+    config.unlink()
+    database.write_bytes(b"replacement")
+    deploy._restore_project_protected_paths(backups)
+    assert config.read_text(encoding="utf-8") == "operator config\n"
+    assert database.read_bytes() == b"operator db"
+    assert outside.read_bytes() == b"external"
+
+
+def test_install_dry_run_does_not_prompt_or_change_files(tmp_path, monkeypatch, capsys):
+    deployment = _deployment(tmp_path, dry_run=True)
+    _source_markers(deployment)
+    monkeypatch.setattr(deploy, "_confirm", lambda _prompt: pytest.fail("dry-run must not prompt"))
+
+    assert deploy.install(deployment) == 0
+    assert not deployment.config.exists()
+    assert not deployment.venv.exists()
+    assert "DRY RUN" in capsys.readouterr().out
+
+
+def test_explicit_legacy_install_keeps_source_tree_data_dir(tmp_path):
+    root = tmp_path / "muc_banbot"
+    root.mkdir()
+    config = root / "config.py"
+    config.write_text("# operator config\n", encoding="utf-8")
+    parser = deploy._build_parser()
+    options = parser.parse_args([
+        "install",
+        "--root", str(root),
+        "--config", str(config),
+        "--service", "missing-test.service",
+    ])
+    deployment = deploy._deployment(options)
+    assert deployment.legacy_layout is True
+    assert deployment.data_dir == root.resolve()
+
+
+def test_ensure_dir_never_reowns_existing_operator_directory(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    existing = tmp_path / "operator-owned"
+    existing.mkdir(mode=0o711)
+    before_mode = existing.stat().st_mode & 0o777
+    monkeypatch.setattr(deploy.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(deploy, "_account_exists", lambda _user: True)
+    monkeypatch.setattr(
+        deploy.os,
+        "chown",
+        lambda *_args: pytest.fail("existing directory ownership must not change"),
+    )
+
+    deploy._ensure_dir(existing, deployment, mode=0o700)
+    assert existing.stat().st_mode & 0o777 == before_mode
+
+
+def test_default_config_detects_existing_legacy_layout_on_install(tmp_path, monkeypatch):
+    root = tmp_path / "muc_banbot"
+    root.mkdir()
+    legacy = root / "config.py"
+    legacy.write_text("# existing operator config\n", encoding="utf-8")
+    monkeypatch.delenv("MUC_BANBOT_CONFIG", raising=False)
+    monkeypatch.setattr(deploy, "_systemd_environment", lambda *_args: None)
+    original_exists = deploy.Path.exists
+
+    def controlled_exists(path):
+        if path == deploy.Path("/etc/muc_banbot/config.py"):
+            return False
+        return original_exists(path)
+
+    monkeypatch.setattr(deploy.Path, "exists", controlled_exists)
+    assert deploy._default_config(root, "muc_banbot.service") == legacy.resolve()
+
+
+def test_default_config_prefers_legacy_checkout_without_systemd_override(tmp_path, monkeypatch):
+    root = tmp_path / "muc_banbot"
+    root.mkdir()
+    legacy = root / "config.py"
+    legacy.write_text("# existing operator config\n", encoding="utf-8")
+    monkeypatch.delenv("MUC_BANBOT_CONFIG", raising=False)
+    monkeypatch.setattr(deploy, "_systemd_environment", lambda *_args: None)
+
+    # Simulate a stale/unrelated hardened config existing on the same host.
+    # A legacy checkout must not silently switch configs unless its unit says so.
+    assert deploy._default_config(root, "muc_banbot.service") == legacy.resolve()

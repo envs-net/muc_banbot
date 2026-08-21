@@ -273,7 +273,8 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
     assert bot_module.ADMIN_ROOM in bot.registered_rooms
     assert "room1@conference.example.org" in bot.registered_rooms
     assert "room2@conference.example.org" in bot.registered_rooms
-    assert len(created_tasks) == 4
+    assert len(created_tasks) == 5
+    assert bot.runtime_watchdog.task is not None
     assert bot.unban_task is not None
     assert bot.health_check_task is not None
     assert bot.version_check_task is not None
@@ -346,7 +347,8 @@ async def test_start_runs_redaction_cleanup_and_worker_when_enabled(monkeypatch)
 
     assert calls.index("setup_db") < calls.index("redaction_cleanup:system")
     assert "redaction_cleanup:system" in calls
-    assert len(created_tasks) == 4
+    assert len(created_tasks) == 5
+    assert bot.runtime_watchdog.task is not None
     assert bot.redaction_cleanup_task is not None
 
 

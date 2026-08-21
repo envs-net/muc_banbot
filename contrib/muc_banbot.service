@@ -5,22 +5,38 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 User=adminbot
 Group=adminbot
 WorkingDirectory=/srv/adminbot/muc_banbot
+EnvironmentFile=-/etc/default/muc_banbot
 Environment=PYTHONUNBUFFERED=1
+Environment=MUC_BANBOT_CONFIG=/etc/muc_banbot/config.py
 ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
 Restart=on-failure
 RestartSec=5
+WatchdogSec=60
+TimeoutStartSec=300
+TimeoutStopSec=120
 UMask=0077
 
-# Basic hardening. Adjust ReadWritePaths for custom data or backup paths.
+# The source checkout stays read-only. Runtime config and mutable bot state are
+# kept in dedicated system locations instead of granting write access to /srv.
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+PrivateDevices=true
+ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/srv/adminbot/muc_banbot
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/etc/muc_banbot /var/lib/muc_banbot
 
 [Install]
 WantedBy=multi-user.target

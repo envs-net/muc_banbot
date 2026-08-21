@@ -43,6 +43,9 @@ omemo = ["slixmpp-omemo>=2,<3"]
 dev = [
     "hypothesis>=6",
     "mutmut>=3",
+    "mypy>=1.8,<2",
+    "pip-audit>=2.7,<3",
+    "ruff>=0.9,<1",
     "pytest>=8,<10",
     "pytest-asyncio>=1",
     "pytest-cov>=4",
@@ -97,3 +100,19 @@ pytest_add_cli_args = [
 do_not_mutate_patterns = [
     "log\\.\\w+",
 ]
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = ["mutants", ".venv", "venv"]
+
+[tool.ruff.lint]
+# Keep the default correctness gate intentionally small; quality.sh adds F401
+# explicitly so dead imports are caught in tests as well as production code.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true

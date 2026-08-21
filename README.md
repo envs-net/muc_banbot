@@ -41,6 +41,56 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 
 Requires **Python 3.10+**. The project is developed and tested with Python 3.13.
 
+### Recommended hardened systemd deployment
+
+Keep the application checkout separate from mutable configuration and data:
+
+```text
+/srv/adminbot/muc_banbot/       repository + virtualenv
+/etc/muc_banbot/config.py       runtime configuration
+/var/lib/muc_banbot/            database, backups, exports and OMEMO state
+```
+
+Bootstrap the service account and checkout, pin a tagged release, then use the
+preservation-first deploy helper:
+
+```bash
+sudo useradd -m -s /bin/bash adminbot -d /srv/adminbot
+sudo -u adminbot git clone https://git.envs.net/envs/muc_banbot.git /srv/adminbot/muc_banbot
+cd /srv/adminbot/muc_banbot
+
+git fetch --tags
+LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
+git checkout "$LATEST_TAG"
+
+./scripts/deploy.sh install --dry-run
+sudo ./scripts/deploy.sh install
+```
+
+On a fresh install the helper creates `/etc/muc_banbot/config.py` once, with
+absolute mutable paths below `/var/lib/muc_banbot`, and then stops so credentials
+can be edited safely. Rerun `sudo ./scripts/deploy.sh install` after editing the
+config. Existing config, database/data and systemd unit files are never
+overwritten automatically. A bare `./scripts/deploy.sh` only prints help.
+
+Useful read-only checks:
+
+```bash
+./scripts/deploy.sh status
+sudo ./scripts/deploy.sh check
+```
+
+The recommended [`contrib/muc_banbot.service`](contrib/muc_banbot.service) uses
+`Type=notify`, `WatchdogSec=60`, `ProtectSystem=strict` and grants write access
+only to `/etc/muc_banbot` and `/var/lib/muc_banbot`. See
+[docs/deployment.md](docs/deployment.md) for the complete deployment and
+migration notes.
+
+### Legacy/source-tree installation (still supported)
+
+The historical installation layout remains supported for operators who prefer
+manual control or are not ready to migrate existing systems:
+
 ```bash
 sudo useradd -m -s /bin/bash adminbot -d /srv/adminbot
 sudo su - adminbot
@@ -49,20 +99,17 @@ cd /srv/adminbot
 git clone https://git.envs.net/envs/muc_banbot.git
 cd muc_banbot
 
-# Production installs should use the latest tagged release, not the main branch.
 git fetch --tags
 LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
 git checkout "$LATEST_TAG"
-echo "Using muc_banbot release $LATEST_TAG"
 
 python3 -m venv venv
 source venv/bin/activate
 python -m pip install --upgrade pip
 pip install -e .
 
-# Optional: install OMEMO support after installing system libraries.
-# Raspbian example: sudo apt install libsodium-dev libxeddsa-dev
-# Then: pip install -e ".[omemo]"
+# Optional OMEMO support:
+# pip install -e ".[omemo]"
 
 cp config_sample.py config.py
 $EDITOR config.py
@@ -70,43 +117,50 @@ $EDITOR config.py
 muc_banbot
 ```
 
-The legacy `python muc_banbot.py` launcher remains supported. Installing the
-project creates the preferred `muc_banbot` command inside the virtual
-environment.
+In this mode relative paths such as `DB_FILE = "banbot.db"` and
+`DB_BACKUP_DIR = "data/backups"` continue to resolve below the checkout. The
+legacy `python muc_banbot.py` launcher also remains supported. For systemd, use
+[`contrib/muc_banbot-legacy.service`](contrib/muc_banbot-legacy.service) or keep
+your existing unit. `MUC_BANBOT_CONFIG` remains available for custom layouts.
 
-The command looks for `config.py` in the current working directory and editable
-source checkout. The provided systemd unit sets the project directory as its
-working directory, so no additional config environment variable is required.
-`MUC_BANBOT_CONFIG` remains available only as an optional override for custom
-layouts.
-
-For a systemd service example, see [docs/configuration.md](docs/configuration.md#systemd-service).
-
-`main` is the development branch. For production deployments, use the latest tagged release shown on GitHub/Gitea.
+`main` is the development branch. Production deployments should use stable
+`vX.Y.Z` release tags.
 
 ## Updating to a New Release
 
-For production deployments, update to the latest tagged release instead of running directly from `main`:
+The deploy helper is the recommended update path:
 
 ```bash
 cd /srv/adminbot/muc_banbot
+./scripts/deploy.sh update --dry-run
+sudo ./scripts/deploy.sh update
+# Explicit release when desired:
+# sudo ./scripts/deploy.sh update --to v2.6.4
+```
 
+It refuses tracked local Git modifications, never deploys `main` automatically,
+queries remote release tags without bulk-overwriting local tags, fetches only
+the selected stable tag, asks separately before stopping/starting the service,
+and creates a consistent SQLite pre-update backup while the service is stopped.
+For legacy source-tree layouts it additionally protects operator files inside
+the checkout across the tag switch.
+
+The previous fully manual update workflow remains supported:
+
+```bash
+cd /srv/adminbot/muc_banbot
 git fetch --tags
 LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
 git checkout "$LATEST_TAG"
-
 source venv/bin/activate
 pip install -e .
+# Optional: pip install -e ".[omemo]"
 
-# Optional, only when OMEMO support is used:
-# pip install -e ".[omemo]"
-
-systemctl --user restart muc_banbot
-# or, for a system-wide service:
-# sudo systemctl restart muc_banbot
+sudo systemctl restart muc_banbot
 ```
 
-If the release notes mention new configuration options, compare your local `config.py` with the updated `config_sample.py` and add any new settings you want to customize.
+If release notes mention new configuration options, compare the active config
+with `config_sample.py` and add settings you want to customize.
 
 ---
 

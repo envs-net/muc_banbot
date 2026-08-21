@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict
 from copy import deepcopy
 from typing import Any
 

@@ -1,0 +1,26 @@
+[Unit]
+Description=BanBot XMPP moderation bot
+Documentation=https://github.com/envs-net/muc_banbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=adminbot
+Group=adminbot
+WorkingDirectory=/srv/adminbot/muc_banbot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+# Basic hardening. Adjust ReadWritePaths for custom data or backup paths.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/adminbot/muc_banbot
+
+[Install]
+WantedBy=multi-user.target

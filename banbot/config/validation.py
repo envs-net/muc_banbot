@@ -141,6 +141,7 @@ class ConfigValidationMixin:
             "CONNECT_DIRECT_TLS",
             "DB_BACKUP_ON_START",
             "DB_BACKUP_INCLUDE_OMEMO",
+            "WATCHDOG_ENABLED",
             "ALERT_ON_RECONNECT",
             "ALERT_ON_ADMIN_RIGHTS_LOST",
             "ALERT_ON_HEALTH_CHECK_FAILURE",
@@ -161,6 +162,7 @@ class ConfigValidationMixin:
             "CONNECT_DIRECT_TLS": False,
             "DB_BACKUP_ON_START": True,
             "DB_BACKUP_INCLUDE_OMEMO": True,
+            "WATCHDOG_ENABLED": True,
             "ALERT_ON_RECONNECT": True,
             "ALERT_ON_ADMIN_RIGHTS_LOST": True,
             "ALERT_ON_HEALTH_CHECK_FAILURE": True,
@@ -170,6 +172,28 @@ class ConfigValidationMixin:
         for name in bool_names:
             if not isinstance(config_value(name, bool_defaults.get(name)), bool):
                 errors.append(f"{name} must be True or False")
+
+        for name, default, minimum, maximum in (
+            ("WATCHDOG_INTERVAL_SECONDS", 20, 1.0, 300.0),
+            ("WATCHDOG_LAG_WARNING_SECONDS", 2.0, 0.1, 300.0),
+            ("WATCHDOG_LAG_FAILURE_SECONDS", 30.0, 0.1, 600.0),
+        ):
+            value = config_value(name, default)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                errors.append(f"{name} must be a number")
+            elif not minimum <= float(value) <= maximum:
+                errors.append(f"{name} must be between {minimum:g} and {maximum:g}")
+
+        watchdog_warning = config_value("WATCHDOG_LAG_WARNING_SECONDS", 2.0)
+        watchdog_failure = config_value("WATCHDOG_LAG_FAILURE_SECONDS", 30.0)
+        if (
+            isinstance(watchdog_warning, (int, float))
+            and not isinstance(watchdog_warning, bool)
+            and isinstance(watchdog_failure, (int, float))
+            and not isinstance(watchdog_failure, bool)
+            and watchdog_failure < watchdog_warning
+        ):
+            errors.append("WATCHDOG_LAG_FAILURE_SECONDS must be >= WATCHDOG_LAG_WARNING_SECONDS")
 
         version_url = str(config_value("VERSION_CHECK_URL", "")).strip()
         if config_value("VERSION_CHECK_ENABLED", False) and not version_url:

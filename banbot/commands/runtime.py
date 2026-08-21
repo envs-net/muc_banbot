@@ -126,6 +126,14 @@ class CommandRuntimeMixin:
             log.warning("Restart: failed to stop background tasks cleanly: %s", exc)
 
         try:
+            watchdog = getattr(self, "runtime_watchdog", None)
+            stop_watchdog = getattr(watchdog, "stop", None)
+            if callable(stop_watchdog):
+                await stop_watchdog()
+        except Exception as exc:
+            log.warning("Restart: failed to stop runtime watchdog cleanly: %s", exc)
+
+        try:
             disconnect = getattr(self, "disconnect", None)
             if callable(disconnect):
                 try:

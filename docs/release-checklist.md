@@ -8,9 +8,10 @@ Use this before tagging a new release.
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt -r requirements-dev.txt
-python -m py_compile banbot/*.py tests/*.py tests/integration/*.py
-pytest -q
-pytest --cov=banbot --cov-report=term-missing
+./scripts/quality.sh
+./scripts/test.sh --coverage
+./scripts/deploy.sh status
+./scripts/deploy.sh install --dry-run
 ```
 
 The offline test suite should be green before tagging. Keep the configured coverage threshold stable unless there is a deliberate reason to change it.
@@ -71,6 +72,7 @@ Update as needed:
 * `README.md`
 * `docs/README.md`
 * `docs/architecture.md` when runtime ownership, startup flow, persistence, or subsystem boundaries changed
+* `docs/deployment.md` when systemd, runtime paths, install/update behavior, or deploy safety changes
 * `docs/configuration.md`
 * `docs/commands.md`
 * `docs/backups.md`

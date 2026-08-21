@@ -14,6 +14,18 @@ pip install -r requirements-dev.txt
 
 ## Run Tests
 
+The repository wrapper mirrors the release-safe warning policy and skips live
+integration tests by default:
+
+```bash
+./scripts/test.sh
+./scripts/test.sh --coverage
+./scripts/test.sh --last-failed
+./scripts/test.sh --durations 20
+```
+
+Direct pytest usage remains supported:
+
 ```bash
 pytest
 pytest -q
@@ -47,6 +59,21 @@ pytest --cov=banbot --cov-report=term-missing --cov-fail-under=55
 ```
 
 Runtime-heavy entrypoints such as `bot.py` may be excluded from coverage if they mainly wire Slixmpp runtime behavior.
+
+
+## Local quality gate
+
+Before a release, run:
+
+```bash
+./scripts/quality.sh
+```
+
+It compiles Python sources, validates `config_sample.py`, runs the non-integration
+test suite with Runtime-/DeprecationWarnings treated as errors, checks Ruff
+(including unused imports), runs mypy on the new operations/deployment modules,
+and audits `requirements.txt` with `pip-audit`. `./scripts/quality.sh --fix` lets
+Ruff apply safe fixes where supported.
 
 ## Property-Based Tests
 

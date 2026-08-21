@@ -51,6 +51,8 @@ from .omemo import OmemoMixin
 from .alerts import AlertMixin
 from .backups import BackupMixin
 from .protections import ProtectionMixin
+from .task_supervisor import TaskSupervisor
+from .runtime_watchdog import RuntimeWatchdog
 
 _log_level_name = str(getattr(config, "LOG_LEVEL", "INFO")).upper()
 _log_level = getattr(logging, _log_level_name, None)
@@ -221,6 +223,8 @@ class BanBot(
 
         super().__init__(full_jid, password)
         self.db: aiosqlite.Connection | None = None
+        self.tasks = TaskSupervisor()
+        self.runtime_watchdog = RuntimeWatchdog(self)
         self.init_alert_state()
 
         # --- Concurrency limit for MUC write operations ---
@@ -272,6 +276,12 @@ class BanBot(
         self.health_check_interval: int = 300
         self.unban_check_interval: int = 60
         self.max_tempban_days: int = 30
+
+        # --- runtime/systemd watchdog (startup-only settings) ---
+        self.watchdog_enabled: bool = bool(getattr(config, "WATCHDOG_ENABLED", True))
+        self.watchdog_interval_seconds: float = float(getattr(config, "WATCHDOG_INTERVAL_SECONDS", 20))
+        self.watchdog_lag_warning_seconds: float = float(getattr(config, "WATCHDOG_LAG_WARNING_SECONDS", 2.0))
+        self.watchdog_lag_failure_seconds: float = float(getattr(config, "WATCHDOG_LAG_FAILURE_SECONDS", 30.0))
 
         # --- public command rate limits ---
         self.public_command_rate_limit_window: int = 30
@@ -388,9 +398,18 @@ class BanBot(
 
 
     async def stop_background_tasks(self) -> None:
-        """Cancel running background tasks before starting new ones."""
+        """Cancel reconnect-scoped workers before starting fresh ones."""
+        supervisor = getattr(self, "tasks", None)
+        if supervisor is not None:
+            await supervisor.cancel_group("_core")
+
+        # Keep compatibility with lightweight tests/embedders that replace task
+        # attributes without registering them in the supervisor. Short-lived
+        # redaction operation tasks intentionally remain outside the service
+        # supervisor and are cancelled explicitly here.
         operation_tasks = list(getattr(self, "redaction_operation_tasks", set()))
         for task in (
+            self._rtbl_refresh_task,
             self.unban_task,
             self.health_check_task,
             self.version_check_task,
@@ -403,6 +422,15 @@ class BanBot(
                     await task
                 except asyncio.CancelledError:
                     log.debug("Background task cancelled during shutdown")
+
+    def _start_core_service(self, factory, *, name: str) -> asyncio.Task:
+        """Start one resilient reconnect-scoped background service."""
+        return self.tasks.create_resilient(
+            "_core",
+            factory,
+            name=name,
+            service=True,
+        )
 
 
     async def start(self, _) -> None:
@@ -486,23 +514,33 @@ class BanBot(
         await self.setup_rtbl_publish()
 
         # --- Start RTBL periodic refresh worker ---
-        if self._rtbl_refresh_task:
-            self._rtbl_refresh_task.cancel()
-        self._rtbl_refresh_task = asyncio.create_task(self._rtbl_refresh_worker())
+        self._rtbl_refresh_task = self._start_core_service(
+            self._rtbl_refresh_worker,
+            name="rtbl-refresh-worker",
+        )
 
         # --- Start unban worker ---
-        self.unban_task = asyncio.create_task(self.unban_worker())
+        self.unban_task = self._start_core_service(
+            self.unban_worker,
+            name="unban-worker",
+        )
 
         # The health worker is started after reconnect state is cleared below,
         # allowing its immediate first cycle to retry any failed room joins.
 
         # --- Start redaction cleanup worker ---
         if self.redaction_enabled and hasattr(self, "redaction_cleanup_worker"):
-            self.redaction_cleanup_task = asyncio.create_task(self.redaction_cleanup_worker())
+            self.redaction_cleanup_task = self._start_core_service(
+                self.redaction_cleanup_worker,
+                name="redaction-cleanup-worker",
+            )
 
         # --- Start version check worker ---
         if self.version_check_enabled and self.version_check_url:
-            self.version_check_task = asyncio.create_task(self.version_check_worker())
+            self.version_check_task = self._start_core_service(
+                self.version_check_worker,
+                name="version-check-worker",
+            )
 
         # Flush batched redaction-index writes from startup room history before
         # moving on to vCard/startup announcements.
@@ -517,7 +555,10 @@ class BanBot(
         # --- Start health check worker ---
         # Its first cycle runs immediately and retries rooms whose startup join
         # did not produce confirmed self-presence.
-        self.health_check_task = asyncio.create_task(self.health_check_worker())
+        self.health_check_task = self._start_core_service(
+            self.health_check_worker,
+            name="health-check-worker",
+        )
 
         if was_reconnecting:
             await self.send_operational_alert(
@@ -553,6 +594,12 @@ class BanBot(
             )
 
         await self.finalize_startup_version_notice(reconnecting=was_reconnecting)
+
+        # Type=notify units become ready only after the complete room/database
+        # startup path succeeded. The watchdog task itself is process-scoped and
+        # remains active across XMPP reconnects.
+        await self.runtime_watchdog.start()
+        self.runtime_watchdog.notify_ready()
 
         if missing_rooms:
             log.warning(
@@ -590,6 +637,14 @@ def main() -> None:
         xmpp.loop.run_forever()
     except KeyboardInterrupt:
         log.info("Bot stopped manually.")
+        watchdog = getattr(xmpp, "runtime_watchdog", None)
+        stop_watchdog = getattr(watchdog, "stop", None)
+        if callable(stop_watchdog):
+            xmpp.loop.run_until_complete(stop_watchdog())
+        supervisor = getattr(xmpp, "tasks", None)
+        cancel_all = getattr(supervisor, "cancel_all", None)
+        if callable(cancel_all):
+            xmpp.loop.run_until_complete(cancel_all())
         if xmpp.db:
             xmpp.loop.run_until_complete(xmpp.db.close())
         xmpp.disconnect()

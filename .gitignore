@@ -1,8 +1,27 @@
-__pycache__/
-.pytest_cache/
-*.pyc
-*venv/
+# Python environments
+.venv/
+venv/
 
+# Python caches, tests and coverage
+__pycache__/
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build and packaging output
+*.egg-info/
+build/
+dist/
+
+# Static analysis and mutation testing
+.codeql/
+.codeql-db
+/codeql-quality.*
+mutants/
+
+# Runtime data and generated output
 data/
 custom/
 /config.py
@@ -10,16 +29,4 @@ banbot*.db*
 bans_import_*.csv
 import_*.csv
 
-.coverage
-htmlcov/
-coverage.xml
-
-.hypothesis/
-.mutmut-cache/
-mutants/
-
 *.log
-
-.codeql/
-.codeql-db
-/codeql-quality.*

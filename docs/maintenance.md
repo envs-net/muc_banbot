@@ -6,7 +6,7 @@ This page collects manual maintenance tasks for BanBot operators.
 
 BanBot uses SQLite for persistent state. Normal operation does not require manual database maintenance, but after many deletes, imports, restores, or redaction cleanup runs it can be useful to check and compact the database.
 
-Always use the database path configured as `DB_FILE` in `config.py`. The examples below use `banbot.db` as a placeholder.
+Always use the database path configured as `DB_FILE` in the active config. Hardened deployments normally use `/var/lib/muc_banbot/banbot.db`; legacy source-tree deployments may keep `banbot.db`. The examples below use `banbot.db` as a placeholder.
 
 Use your installed systemd unit name for BanBot. The examples below use `muc_banbot.service` as a placeholder (`BANBOT_SERVICE`), but your service name may differ.
 
