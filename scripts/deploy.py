@@ -103,16 +103,33 @@ def _systemd_environment(service: str, key: str) -> str | None:
     return None
 
 
-def _systemd_venv(service: str) -> Path | None:
-    exec_start = _systemd_property(service, "ExecStart")
+def _systemd_exec_path_from_value(exec_start: str) -> Path | None:
+    """Extract the executable path from systemctl show ExecStart output."""
     marker = "path="
     if marker not in exec_start:
         return None
     executable = exec_start.split(marker, 1)[1].split(";", 1)[0].strip()
-    path = Path(executable).expanduser()
-    if path.name == "muc_banbot" and path.parent.name == "bin":
+    if not executable:
+        return None
+    return Path(executable).expanduser()
+
+
+def _systemd_venv(service: str) -> Path | None:
+    path = _systemd_exec_path_from_value(_systemd_property(service, "ExecStart"))
+    if path is not None and path.name == "muc_banbot" and path.parent.name == "bin":
         return path.parent.parent.resolve()
     return None
+
+
+def _systemd_paths(value: str) -> set[str]:
+    """Normalize a systemd path-list property for exact comparisons."""
+    if not value:
+        return set()
+    try:
+        items = shlex.split(value)
+    except ValueError:
+        items = value.split()
+    return set(items)
 
 
 def _default_config(root: Path, service: str) -> Path:
@@ -577,6 +594,7 @@ def _check_hardened_permissions(deployment: Deployment) -> None:
         f"owned by {deployment.service_user}:{deployment.service_group}"
     )
 
+
 def _check_hardened_runtime_permissions(
     deployment: Deployment,
     runtime: dict[str, Path | None],
@@ -605,11 +623,6 @@ def _check_hardened_runtime_permissions(
             continue
         if not path.is_file():
             problems.append(f"{label} is not a regular file: {path}")
-            continue
-        check_owner(path, label)
-        mode = _mode(path)
-        if mode & 0o600 != 0o600:
-            problems.append(f"{label} is not readable/writable by its owner (mode {mode:04o}): {path}")
 
     for key, label in (
         ("backup_directory", "backup directory"),
@@ -620,11 +633,48 @@ def _check_hardened_runtime_permissions(
             continue
         if not path.is_dir():
             problems.append(f"{label} is not a directory: {path}")
+
+    known_labels: dict[Path, str] = {}
+    for key, label in (
+        ("database", "database"),
+        ("backup_directory", "backup directory"),
+        ("export_directory", "export directory"),
+        ("omemo_storage", "OMEMO storage"),
+    ):
+        path = runtime.get(key)
+        if path is not None and path.exists():
+            known_labels[path.resolve()] = label
+
+    # New files are protected by UMask=0077, but migrated data may predate the
+    # hardened unit. Verify the complete private data tree so old backups,
+    # SQLite sidecar files or OMEMO state cannot remain group/world-readable.
+    try:
+        data_entries = list(deployment.data_dir.rglob("*"))
+    except OSError as exc:
+        problems.append(f"could not inspect data directory recursively: {exc}")
+        data_entries = []
+    for path in data_entries:
+        try:
+            if path.is_symlink():
+                problems.append(f"symbolic link is not allowed in hardened data directory: {path}")
+                continue
+            if not path.exists():
+                continue
+            label = known_labels.get(path.resolve(), "data entry")
+            check_owner(path, label)
+            mode = _mode(path)
+            if path.is_dir():
+                if mode != 0o700:
+                    problems.append(f"data directory mode is {mode:04o}; expected 0700: {path}")
+            elif path.is_file():
+                if mode != 0o600:
+                    problems.append(f"data file mode is {mode:04o}; expected 0600: {path}")
+            else:
+                problems.append(f"unsupported filesystem entry in hardened data directory: {path}")
+        except FileNotFoundError:
+            # Runtime files such as SQLite sidecars can disappear while the
+            # active service is being inspected; a vanished entry is harmless.
             continue
-        check_owner(path, label)
-        mode = _mode(path)
-        if mode & 0o700 != 0o700:
-            problems.append(f"{label} is not fully accessible by its owner (mode {mode:04o}): {path}")
 
     if problems:
         details = "\n  - ".join(problems)
@@ -632,10 +682,16 @@ def _check_hardened_runtime_permissions(
             f"hardened runtime files/directories are not usable by the service account:\n  - {details}\n"
             "Review ownership after migration. For the dedicated data tree, a typical repair is:\n"
             f"  sudo chown -R {shlex.quote(deployment.service_user)}:{shlex.quote(deployment.service_group)} "
-            f"{shlex.quote(str(deployment.data_dir))}"
+            f"{shlex.quote(str(deployment.data_dir))}\n"
+            "For a dedicated hardened data tree, private modes can be restored with:\n"
+            f"  sudo find {shlex.quote(str(deployment.data_dir))} -type d -exec chmod 0700 {{}} +\n"
+            f"  sudo find {shlex.quote(str(deployment.data_dir))} -type f -exec chmod 0600 {{}} +"
         )
 
-    print("OK  existing mutable runtime files/directories are usable by the service account")
+    print(
+        "OK  existing mutable runtime files/directories are private and usable "
+        "by the service account"
+    )
 
 
 def _validate_config(deployment: Deployment) -> None:
@@ -1326,7 +1382,11 @@ def _expected_systemd_values(deployment: Deployment) -> dict[str, str]:
         "Group": deployment.service_group,
         "WorkingDirectory": str(deployment.root),
         "Restart": "on-failure",
+        "UMask": "0077",
+        "NoNewPrivileges": "yes",
+        "PrivateDevices": "yes",
         "ProtectSystem": "strict",
+        "ProtectHome": "yes",
     }
 
 
@@ -1355,19 +1415,36 @@ def _check_installed_systemd(deployment: Deployment) -> bool:
     print(f"  {'OK' if config_ok else 'FAIL':<4}  MUC_BANBOT_CONFIG: {config_value or '-'}")
     ok = ok and config_ok
 
+    bytecode_value = _systemd_environment(deployment.service, "PYTHONDONTWRITEBYTECODE")
+    bytecode_ok = bytecode_value == "1"
+    print(
+        f"  {'OK' if bytecode_ok else 'FAIL':<4}  "
+        f"PYTHONDONTWRITEBYTECODE: {bytecode_value or '-'}"
+    )
+    ok = ok and bytecode_ok
+
     exec_start = _systemd_property(deployment.service, "ExecStart")
-    exec_ok = str(deployment.executable) in exec_start
-    print(f"  {'OK' if exec_ok else 'FAIL':<4}  ExecStart: {exec_start or '-'}")
+    exec_path = _systemd_exec_path_from_value(exec_start)
+    exec_ok = exec_path is not None and exec_path.resolve() == deployment.executable.resolve()
+    exec_display = str(exec_path) if exec_path is not None else (exec_start or "-")
+    print(f"  {'OK' if exec_ok else 'FAIL':<4}  ExecStart: {exec_display}")
+    if not exec_ok:
+        print(f"        expected: {deployment.executable}")
     ok = ok and exec_ok
 
     writable = _systemd_property(deployment.service, "ReadWritePaths")
-    writable_ok = str(deployment.config.parent) in writable and str(deployment.data_dir) in writable
+    expected_writable = {str(deployment.config.parent), str(deployment.data_dir)}
+    writable_ok = _systemd_paths(writable) == expected_writable
     print(f"  {'OK' if writable_ok else 'FAIL':<4}  ReadWritePaths: {writable or '-'}")
+    if not writable_ok:
+        print(f"        expected exactly: {' '.join(sorted(expected_writable))}")
     ok = ok and writable_ok
 
     watchdog = _systemd_property(deployment.service, "WatchdogUSec")
-    watchdog_ok = bool(watchdog and watchdog not in {"0", "0us"})
+    watchdog_ok = watchdog in {"1min", "60s", "60000000us"}
     print(f"  {'OK' if watchdog_ok else 'FAIL':<4}  WatchdogUSec: {watchdog or '-'}")
+    if not watchdog_ok:
+        print("        expected: 1min (60s)")
     ok = ok and watchdog_ok
     return ok
 

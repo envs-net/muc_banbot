@@ -87,6 +87,131 @@ def test_deploy_python_environment_disables_bytecode_writes(tmp_path):
     assert deployment.environment["MUC_BANBOT_CONFIG"] == str(deployment.config)
 
 
+def test_systemd_exec_path_parser_returns_clean_executable_path():
+    value = (
+        "{ path=/srv/adminbot/muc_banbot/venv/bin/muc_banbot ; "
+        "argv[]=/srv/adminbot/muc_banbot/venv/bin/muc_banbot ; ignore_errors=no ; }"
+    )
+
+    assert deploy._systemd_exec_path_from_value(value) == Path(
+        "/srv/adminbot/muc_banbot/venv/bin/muc_banbot"
+    )
+
+
+def test_installed_systemd_check_prints_clean_execstart_and_rejects_extra_writable_path(
+    tmp_path, monkeypatch, capsys
+):
+    deployment = _deployment(tmp_path)
+    deployment.executable.parent.mkdir(parents=True)
+    deployment.executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    deployment.config.parent.mkdir(parents=True)
+    deployment.config.write_text("# config\n", encoding="utf-8")
+    deployment.data_dir.mkdir(parents=True)
+
+    properties = {
+        "Type": "notify",
+        "NotifyAccess": "main",
+        "User": deployment.service_user,
+        "Group": deployment.service_group,
+        "WorkingDirectory": str(deployment.root),
+        "Restart": "on-failure",
+        "UMask": "0077",
+        "NoNewPrivileges": "yes",
+        "PrivateDevices": "yes",
+        "ProtectSystem": "strict",
+        "ProtectHome": "yes",
+        "Environment": (
+            f"MUC_BANBOT_CONFIG={deployment.config} "
+            "PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1"
+        ),
+        "ExecStart": (
+            f"{{ path={deployment.executable} ; argv[]={deployment.executable} ; "
+            "ignore_errors=no ; }}"
+        ),
+        "ReadWritePaths": (
+            f"{deployment.config.parent} {deployment.data_dir} /srv"
+        ),
+        "WatchdogUSec": "1min",
+    }
+    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
+    monkeypatch.setattr(
+        deploy,
+        "_systemd_property",
+        lambda _service, prop: properties.get(prop, ""),
+    )
+
+    assert deploy._check_installed_systemd(deployment) is False
+    output = capsys.readouterr().out
+    assert f"ExecStart: {deployment.executable}" in output
+    assert "argv[]=" not in output
+    assert "FAIL  ReadWritePaths:" in output
+    assert "expected exactly:" in output
+
+
+def test_installed_systemd_check_accepts_expected_hardened_unit(
+    tmp_path, monkeypatch, capsys
+):
+    deployment = _deployment(tmp_path)
+    deployment.executable.parent.mkdir(parents=True)
+    deployment.executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    deployment.config.parent.mkdir(parents=True)
+    deployment.config.write_text("# config\n", encoding="utf-8")
+    deployment.data_dir.mkdir(parents=True)
+
+    properties = {
+        **deploy._expected_systemd_values(deployment),
+        "Environment": (
+            f"MUC_BANBOT_CONFIG={deployment.config} "
+            "PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1"
+        ),
+        "ExecStart": f"{{ path={deployment.executable} ; }}",
+        "ReadWritePaths": f"{deployment.config.parent} {deployment.data_dir}",
+        "WatchdogUSec": "1min",
+    }
+    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
+    monkeypatch.setattr(
+        deploy,
+        "_systemd_property",
+        lambda _service, prop: properties.get(prop, ""),
+    )
+
+    assert deploy._check_installed_systemd(deployment) is True
+    output = capsys.readouterr().out
+    assert f"OK    ExecStart: {deployment.executable}" in output
+    assert "FAIL" not in output
+
+
+def test_installed_systemd_check_requires_bytecode_guard_and_expected_watchdog(
+    tmp_path, monkeypatch, capsys
+):
+    deployment = _deployment(tmp_path)
+    deployment.executable.parent.mkdir(parents=True)
+    deployment.executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    deployment.config.parent.mkdir(parents=True)
+    deployment.config.write_text("# config\n", encoding="utf-8")
+    deployment.data_dir.mkdir(parents=True)
+
+    properties = {
+        **deploy._expected_systemd_values(deployment),
+        "Environment": f"MUC_BANBOT_CONFIG={deployment.config}",
+        "ExecStart": f"{{ path={deployment.executable} ; }}",
+        "ReadWritePaths": f"{deployment.config.parent} {deployment.data_dir}",
+        "WatchdogUSec": "5min",
+    }
+    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
+    monkeypatch.setattr(
+        deploy,
+        "_systemd_property",
+        lambda _service, prop: properties.get(prop, ""),
+    )
+
+    assert deploy._check_installed_systemd(deployment) is False
+    output = capsys.readouterr().out
+    assert "FAIL  PYTHONDONTWRITEBYTECODE: -" in output
+    assert "FAIL  WatchdogUSec: 5min" in output
+    assert "expected: 1min (60s)" in output
+
+
 def test_new_hardened_config_uses_absolute_data_paths(tmp_path, monkeypatch):
     deployment = _deployment(tmp_path)
     _source_markers(deployment)
@@ -322,6 +447,62 @@ def test_hardened_runtime_permission_check_rejects_root_owned_migrated_database(
     assert "sudo chown -R" in str(exc_info.value)
 
 
+def test_hardened_runtime_permission_check_rejects_world_readable_nested_backup(
+    tmp_path, monkeypatch
+):
+    deployment = _deployment(tmp_path)
+    deployment.data_dir.mkdir(parents=True, mode=0o700)
+    backup_dir = deployment.data_dir / "backups"
+    backup_dir.mkdir(mode=0o700)
+    backup = backup_dir / "snapshot.zip"
+    backup.write_bytes(b"backup")
+    backup.chmod(0o644)
+    runtime = {
+        "database": deployment.data_dir / "banbot.db",
+        "backup_directory": backup_dir,
+        "export_directory": deployment.data_dir / "exports",
+        "omemo_storage": deployment.data_dir / "omemo.json",
+        "avatar": deployment.root / "avatar.png",
+    }
+    monkeypatch.setattr(
+        deploy, "_expected_ids", lambda _deployment: (os.getuid(), os.getgid())
+    )
+
+    with pytest.raises(deploy.DeployError, match="data file mode is 0644") as exc_info:
+        deploy._check_hardened_runtime_permissions(deployment, runtime)
+
+    message = str(exc_info.value)
+    assert "expected 0600" in message
+    assert "find" in message
+    assert "chmod 0600" in message
+
+
+def test_hardened_runtime_permission_check_accepts_private_nested_data(
+    tmp_path, monkeypatch, capsys
+):
+    deployment = _deployment(tmp_path)
+    deployment.data_dir.mkdir(parents=True, mode=0o700)
+    backup_dir = deployment.data_dir / "backups"
+    backup_dir.mkdir(mode=0o700)
+    backup = backup_dir / "snapshot.zip"
+    backup.write_bytes(b"backup")
+    backup.chmod(0o600)
+    runtime = {
+        "database": deployment.data_dir / "banbot.db",
+        "backup_directory": backup_dir,
+        "export_directory": deployment.data_dir / "exports",
+        "omemo_storage": deployment.data_dir / "omemo.json",
+        "avatar": deployment.root / "avatar.png",
+    }
+    monkeypatch.setattr(
+        deploy, "_expected_ids", lambda _deployment: (os.getuid(), os.getgid())
+    )
+
+    deploy._check_hardened_runtime_permissions(deployment, runtime)
+
+    assert "private and usable" in capsys.readouterr().out
+
+
 def test_hardened_runtime_permission_check_allows_missing_runtime_targets(tmp_path, monkeypatch, capsys):
     deployment = _deployment(tmp_path)
     deployment.data_dir.mkdir(parents=True)
@@ -336,4 +517,4 @@ def test_hardened_runtime_permission_check_allows_missing_runtime_targets(tmp_pa
 
     deploy._check_hardened_runtime_permissions(deployment, runtime)
 
-    assert "existing mutable runtime files/directories are usable" in capsys.readouterr().out
+    assert "existing mutable runtime files/directories are private and usable" in capsys.readouterr().out
