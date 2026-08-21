@@ -269,6 +269,16 @@ class CommandUsageMixin:
         p = self.command_prefix
         return f"Usage: {p}status"
 
+    def _tasks_usage_text(self) -> str:
+        """Return usage text for background task diagnostics."""
+        p = self.command_prefix
+        return (
+            "Usage:\n"
+            f"  {p}tasks\n"
+            f"  {p}tasks all\n"
+            f"  {p}tasks failed"
+        )
+
     def _whoami_usage_text(self) -> str:
         """Return usage text for whoami command."""
         p = self.command_prefix

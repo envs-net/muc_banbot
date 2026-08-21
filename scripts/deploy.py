@@ -62,6 +62,8 @@ class Deployment:
     def environment(self) -> dict[str, str]:
         env = os.environ.copy()
         env["MUC_BANBOT_CONFIG"] = str(self.config)
+        # Keep operator config directories clean when deploy/check imports config.py.
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         return env
 
     @property
@@ -491,6 +493,7 @@ Group={deployment.service_group}
 WorkingDirectory={deployment.root}
 EnvironmentFile=-/etc/default/muc_banbot
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=MUC_BANBOT_CONFIG={deployment.config}
 ExecStart={deployment.executable}
 Restart=on-failure

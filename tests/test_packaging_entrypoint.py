@@ -38,6 +38,7 @@ def test_systemd_service_uses_hardened_runtime_layout() -> None:
     assert "Type=notify" in service
     assert "NotifyAccess=main" in service
     assert "WorkingDirectory=/srv/adminbot/muc_banbot" in service
+    assert "Environment=PYTHONDONTWRITEBYTECODE=1" in service
     assert "Environment=MUC_BANBOT_CONFIG=/etc/muc_banbot/config.py" in service
     assert "ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot" in service
     assert "Restart=on-failure" in service

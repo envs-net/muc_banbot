@@ -12,6 +12,7 @@ ADMIN_COMMANDS = {
     "reloadconfig",
     "restart",
     "status",
+    "tasks",
     "checkupdate",
     "updatecheck",
     "room",

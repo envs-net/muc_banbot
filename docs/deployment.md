@@ -110,6 +110,7 @@ static example. Important properties are:
 ```ini
 Type=notify
 NotifyAccess=main
+Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=MUC_BANBOT_CONFIG=/etc/muc_banbot/config.py
 ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot
 Restart=on-failure
@@ -120,6 +121,9 @@ ReadWritePaths=/etc/muc_banbot /var/lib/muc_banbot
 
 Additional hardening includes `PrivateTmp`, `PrivateDevices`, kernel/control
 group protection, `NoNewPrivileges`, empty capability sets and `UMask=0077`.
+`PYTHONDONTWRITEBYTECODE=1` prevents imports/reloads of `/etc/muc_banbot/config.py`
+from creating an `__pycache__` directory there. An old cache left by an earlier
+unit can be removed once with `sudo rm -rf /etc/muc_banbot/__pycache__`.
 `Restart=on-failure` still means a normal `systemctl stop` remains stopped,
 while startup failures, unexpected process exits and `!restart confirm` can be
 recovered automatically.

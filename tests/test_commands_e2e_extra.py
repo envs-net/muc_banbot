@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -55,6 +56,44 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
         self.flushed_redaction = False
         self.stopped_background_tasks = False
         self.disconnect_calls = []
+        self.tasks = SimpleNamespace(
+            snapshot=lambda include_done=True: [
+                SimpleNamespace(
+                    group="_core",
+                    name="health-check-worker",
+                    status="running",
+                    kind="service",
+                    created_at=time.time(),
+                    heartbeat_at=None,
+                    restart_count=0,
+                    last_error=None,
+                ),
+                SimpleNamespace(
+                    group="_core",
+                    name="unban-worker",
+                    status="running",
+                    kind="service",
+                    created_at=time.time(),
+                    heartbeat_at=None,
+                    restart_count=1,
+                    last_error=None,
+                ),
+            ]
+        )
+        self.runtime_watchdog = SimpleNamespace(
+            runtime_state=lambda: {
+                "enabled": True,
+                "systemd_active": True,
+                "worker_running": True,
+                "heartbeats": 4,
+                "last_heartbeat_at": int(time.time()),
+                "last_lag_seconds": 0.002,
+                "max_lag_seconds": 0.015,
+                "lag_warnings": 0,
+                "heartbeat_suppressed": 0,
+                "last_error": None,
+            }
+        )
 
     async def bot_send_message(self, **kwargs):
         self.sent.append(kwargs)
@@ -269,6 +308,43 @@ async def test_admin_import_dryrun_command_path_is_exercised(fake_msg_factory, m
     assert "Skipped: 1" in body
     assert "No backup created and no database changes made." in body
     assert "line 2: skipped in dry run" in body
+
+
+@pytest.mark.asyncio
+async def test_admin_tasks_shows_supervised_workers_and_watchdog(fake_msg_factory, monkeypatch):
+    commands = importlib.import_module("banbot.commands")
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!tasks"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "Background Tasks: 2 running, 0 failed, 0 other" in body
+    assert "health-check-worker — running • restarts: 0" in body
+    assert "unban-worker — running • restarts: 1" in body
+    assert "Runtime Watchdog" in body
+    assert "Status: healthy" in body
+    assert "systemd watchdog: active" in body
+    assert "0.002s current / 0.015s max" in body
+    assert "heartbeats: 4 • suppressed: 0" in body
+
+
+@pytest.mark.asyncio
+async def test_admin_tasks_failed_and_invalid_usage(fake_msg_factory, monkeypatch):
+    commands = importlib.import_module("banbot.commands")
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!tasks failed"))
+    assert "No failed background tasks" in bot.sent[-1]["mbody"]
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!tasks nonsense"))
+    assert "❌ Usage:" in bot.sent[-1]["mbody"]
+    assert "!tasks failed" in bot.sent[-1]["mbody"]
 
 
 @pytest.mark.asyncio
@@ -694,6 +770,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
     expected = {
         "help": "!help <command>",
         "status": "!status",
+        "tasks": "!tasks failed",
         "config": "!config show [all|page|last]",
         "reload": "!reload / !reloadconfig",
         "reloadconfig": "!reload / !reloadconfig",

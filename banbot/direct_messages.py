@@ -190,6 +190,10 @@ class DirectMessageMixin:
                 await self._cmd_status(reply_to)
                 return True
 
+            if cmd == "tasks":
+                await self._cmd_tasks(reply_to, args, mtype="chat")
+                return True
+
             if cmd in ("checkupdate", "updatecheck"):
                 is_update, remote_version, error_message = await self.check_for_updates_once(announce=False)
 
@@ -486,6 +490,7 @@ class DirectMessageMixin:
                     f"{p}help",
                     f"{p}config",
                     f"{p}status",
+                    f"{p}tasks",
                     f"{p}protections list",
                     f"{p}omemo status",
                     f"{p}omemo devices",
@@ -519,7 +524,7 @@ class DirectMessageMixin:
                 "🤖 Admin DM support is read-only.\n"
                 f"Allowed: {self.command_prefix}help, "
                 f"{self.command_prefix}config, {self.command_prefix}status, "
-                f"{self.command_prefix}protections list, "
+                f"{self.command_prefix}tasks, {self.command_prefix}protections list, "
                 f"{self.command_prefix}omemo status, {self.command_prefix}omemo devices, "
                 f"{self.command_prefix}checkupdate, {self.command_prefix}updatecheck, "
                 f"{self.command_prefix}banlist, {self.command_prefix}bansearch, "

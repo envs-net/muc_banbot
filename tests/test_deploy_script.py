@@ -75,9 +75,16 @@ def test_hardened_unit_separates_code_config_and_data(tmp_path):
     unit = deploy._render_systemd_unit(deployment)
     assert "Type=notify" in unit
     assert "ProtectSystem=strict" in unit
+    assert "Environment=PYTHONDONTWRITEBYTECODE=1" in unit
     assert f"Environment=MUC_BANBOT_CONFIG={deployment.config}" in unit
     assert f"ReadWritePaths={deployment.config.parent} {deployment.data_dir}" in unit
     assert f"ReadWritePaths={deployment.root}" not in unit
+
+
+def test_deploy_python_environment_disables_bytecode_writes(tmp_path):
+    deployment = _deployment(tmp_path)
+    assert deployment.environment["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert deployment.environment["MUC_BANBOT_CONFIG"] == str(deployment.config)
 
 
 def test_new_hardened_config_uses_absolute_data_paths(tmp_path, monkeypatch):

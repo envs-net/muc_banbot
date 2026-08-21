@@ -332,7 +332,8 @@ only after the complete startup sequence succeeds.
 
 The supervisor records worker restart counts and terminal failures so `!status`
 can surface degraded background services even when the main XMPP loop is still
-running.
+running. `!tasks`, `!tasks all`, and `!tasks failed` provide the detailed
+operator-facing worker/watchdog view.
 
 ## Backups, Import, and Restore
 

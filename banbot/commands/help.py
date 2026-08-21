@@ -63,6 +63,7 @@ class CommandHelpMixin:
             "reload": self._reload_usage_text,
             "checkupdate": self._checkupdate_usage_text,
             "status": self._status_usage_text,
+            "tasks": self._tasks_usage_text,
             "whoami": self._whoami_usage_text,
             "sync": self._sync_usage_text,
             "syncadmins": self._syncadmins_usage_text,
@@ -146,6 +147,7 @@ class CommandHelpMixin:
             "🛠️ Core / Runtime\n"
             f"{p}help - show this help\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"
+            f"{p}tasks [all|failed] - show supervised background tasks and watchdog state\n"
             f"{p}config [all|page|last] / show/search/find/diff/set/unset - show/edit runtime config\n"
             f"{p}reload / {p}reloadconfig - reload config.py at runtime\n"
             f"{p}restart confirm - stop the bot so a supervisor can restart it\n"

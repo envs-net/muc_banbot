@@ -111,6 +111,10 @@ class DirectBot(DirectMessageMixin):
         self.calls.append(("status", room))
         await self.bot_send_message(mto=room, mbody="status output", mtype="chat")
 
+    async def _cmd_tasks(self, room, args, *, mtype="groupchat"):
+        self.calls.append(("tasks", room, tuple(args), mtype))
+        await self.bot_send_message(mto=room, mbody="tasks output", mtype=mtype)
+
     async def check_for_updates_once(self, announce=False):
         self.calls.append(("checkupdate", announce))
         return self.update_result
@@ -337,6 +341,18 @@ async def test_admin_dm_can_use_status_readonly_command():
     assert bot.calls == [("status", "admin@example.org")]
     assert bot.sent[-1]["mtype"] == "chat"
     assert bot.sent[-1]["mbody"] == "status output"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_can_use_tasks_readonly_command():
+    bot = DirectBot()
+    await bot.on_direct_message(
+        FakeDirectMessage(bare="admin@example.org", resource="laptop", body="!tasks all")
+    )
+
+    assert bot.calls == [("tasks", "admin@example.org", ("all",), "chat")]
+    assert bot.sent[-1]["mtype"] == "chat"
+    assert bot.sent[-1]["mbody"] == "tasks output"
 
 
 @pytest.mark.asyncio
