@@ -216,38 +216,38 @@ class CommandRuntimeMixin:
 
         await asyncio_module.sleep(0.5)
 
-        try:
-            if hasattr(self, "flush_redaction_index"):
-                await self.flush_redaction_index()
-        except Exception as exc:
-            log.warning("Restart: failed to flush redaction index: %s", exc)
-
-        try:
-            if hasattr(self, "stop_background_tasks"):
-                await self.stop_background_tasks()
-        except Exception as exc:
-            log.warning("Restart: failed to stop background tasks cleanly: %s", exc)
-
-        try:
-            watchdog = getattr(self, "runtime_watchdog", None)
-            stop_watchdog = getattr(watchdog, "stop", None)
-            if callable(stop_watchdog):
-                await stop_watchdog()
-        except Exception as exc:
-            log.warning("Restart: failed to stop runtime watchdog cleanly: %s", exc)
-
-        try:
-            disconnect = getattr(self, "disconnect", None)
-            if callable(disconnect):
-                try:
-                    result = disconnect(wait=False)
-                except TypeError:
-                    result = disconnect()
-
+        shutdown = getattr(self, "shutdown", None)
+        if callable(shutdown):
+            try:
+                result = shutdown()
                 if inspect.isawaitable(result):
                     await result
-        except Exception as exc:
-            log.warning("Restart: failed to disconnect cleanly: %s", exc)
+            except Exception as exc:
+                log.warning("Restart: graceful shutdown failed: %s", exc)
+        else:
+            # Compatibility for lightweight embedders that use the command mixin
+            # without the full BanBot lifecycle implementation.
+            try:
+                if hasattr(self, "flush_redaction_index"):
+                    await self.flush_redaction_index()
+            except Exception as exc:
+                log.warning("Restart: failed to flush redaction index: %s", exc)
+            try:
+                if hasattr(self, "stop_background_tasks"):
+                    await self.stop_background_tasks()
+            except Exception as exc:
+                log.warning("Restart: failed to stop background tasks cleanly: %s", exc)
+            try:
+                disconnect = getattr(self, "disconnect", None)
+                if callable(disconnect):
+                    try:
+                        result = disconnect(wait=False)
+                    except TypeError:
+                        result = disconnect()
+                    if inspect.isawaitable(result):
+                        await result
+            except Exception as exc:
+                log.warning("Restart: failed to disconnect cleanly: %s", exc)
 
         log.info("Restart: exiting process now")
         os_module._exit(SUPERVISOR_RESTART_EXIT_CODE)

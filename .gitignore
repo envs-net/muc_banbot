@@ -4,10 +4,13 @@ venv/
 
 # Python caches, tests and coverage
 __pycache__/
+*.pyc
 .hypothesis/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # Build and packaging output
@@ -20,6 +23,7 @@ dist/
 .codeql-db
 /codeql-quality.*
 mutants/
+.mutmut-cache/
 
 # Runtime data and generated output
 data/

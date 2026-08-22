@@ -8,7 +8,6 @@ import importlib
 import logging
 import os
 import pprint
-import re
 from typing import Any
 
 import config
@@ -152,26 +151,70 @@ class ConfigRuntimeMixin:
     def render_config_assignment(self, key: str, value: Any) -> str:
         return f"{key} = {pprint.pformat(value, width=88, sort_dicts=False)}"
 
-    def update_config_file_assignment(self, key: str, value: Any) -> None:
-        path = self._config_file_path()
-        text = path.read_text(encoding="utf8")
-        assignment = self.render_config_assignment(key, value)
-        pattern = re.compile(rf"^(?P<prefix>\s*){re.escape(key)}\s*=.*$", re.MULTILINE)
-        if pattern.search(text):
-            text = pattern.sub(lambda m: m.group("prefix") + assignment, text, count=1)
-        else:
-            text = text.rstrip() + "\n\n# Runtime config edits\n" + assignment + "\n"
+    @staticmethod
+    def _replace_config_assignment_text(
+        text: str,
+        key: str,
+        assignment: str,
+        *,
+        filename: str = "config.py",
+    ) -> str:
+        """Replace one top-level assignment without leaving multiline remnants."""
+        tree = ast.parse(text, filename=filename)
+        matching_nodes: list[ast.AST] = []
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                names = [
+                    target.id
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                ]
+                if key in names:
+                    matching_nodes.append(node)
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == key
+            ):
+                matching_nodes.append(node)
 
+        if len(matching_nodes) > 1:
+            raise ValueError(f"Config contains multiple top-level assignments for {key}")
+
+        lines = text.splitlines(keepends=True)
+        if matching_nodes:
+            node = matching_nodes[0]
+            start = int(node.lineno) - 1
+            end = int(getattr(node, "end_lineno", node.lineno))
+            newline = "\r\n" if lines[start].endswith("\r\n") else "\n"
+            lines[start:end] = [assignment + newline]
+            updated = "".join(lines)
+        else:
+            updated = text.rstrip() + "\n\n# Runtime config edits\n" + assignment + "\n"
+
+        # Never install a config.py which Python itself cannot import.
+        compile(updated, filename, "exec")
+        return updated
+
+    @staticmethod
+    def _write_config_text_atomic(path, text: str) -> None:
         tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-        with open(tmp_path, "w", encoding="utf8") as handle:
-            # config.py contains credentials. Do not rely on the process umask:
-            # legacy/manual deployments commonly run with umask 022.
-            os.chmod(tmp_path, 0o600)
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-        os.chmod(path, 0o600)
+        try:
+            with open(tmp_path, "w", encoding="utf8") as handle:
+                # config.py contains credentials. Do not rely on the process umask:
+                # legacy/manual deployments commonly run with umask 022.
+                os.chmod(tmp_path, 0o600)
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, path)
+            os.chmod(path, 0o600)
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
         try:
             dir_fd = os.open(path.parent, os.O_DIRECTORY)
             try:
@@ -180,6 +223,18 @@ class ConfigRuntimeMixin:
                 os.close(dir_fd)
         except OSError as exc:
             log.debug("Failed to fsync config directory %s: %s", path.parent, exc)
+
+    def update_config_file_assignment(self, key: str, value: Any) -> None:
+        path = self._config_file_path()
+        text = path.read_text(encoding="utf8")
+        assignment = self.render_config_assignment(key, value)
+        updated = self._replace_config_assignment_text(
+            text,
+            key,
+            assignment,
+            filename=str(path),
+        )
+        self._write_config_text_atomic(path, updated)
 
     async def set_runtime_config_value(
         self,
@@ -220,14 +275,35 @@ class ConfigRuntimeMixin:
                 self._restore_config_values(previous_module_values)
                 return False, f"Config was not changed because pre-change backup failed: {backup_message}"
 
+        config_path = self._config_file_path()
+        try:
+            original_config_text = config_path.read_text(encoding="utf8")
+        except OSError as exc:
+            self._restore_config_values(previous_module_values)
+            return False, f"Failed to read config.py before update: {exc}"
+
         try:
             self.update_config_file_assignment(key, new_value)
             importlib.reload(config)
             self.apply_runtime_config()
             await self.update_vcard()
         except Exception as exc:
-            self._restore_config_values(previous_module_values)
-            return False, f"Failed to write/apply config: {format_config_import_error(exc) if isinstance(exc, BaseException) else exc}"
+            rollback_error: Exception | None = None
+            try:
+                self._write_config_text_atomic(config_path, original_config_text)
+                importlib.reload(config)
+                self.apply_runtime_config()
+            except Exception as rollback_exc:
+                rollback_error = rollback_exc
+                self._restore_config_values(previous_module_values)
+
+            message = format_config_import_error(exc)
+            if rollback_error is not None:
+                message += (
+                    "\n⚠️ Failed to restore the previous config.py cleanly: "
+                    + format_config_import_error(rollback_error)
+                )
+            return False, f"Failed to write/apply config: {message}"
 
         return True, f"✅ {key} updated: {old_value!r} → {new_value!r}"
 

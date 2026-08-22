@@ -590,3 +590,52 @@ def test_main_closes_db_and_disconnects_on_keyboard_interrupt(monkeypatch):
 
     assert bot_module.main() is None
     assert events == ["run_forever", "run_until_complete", "db.close", "disconnect"]
+
+
+def test_main_handles_sigterm_as_clean_shutdown(monkeypatch):
+    events = []
+    installed_handlers = {}
+
+    class FakeLoop:
+        def run_forever(self):
+            events.append("run_forever")
+            installed_handlers[bot_module.signal.SIGTERM](bot_module.signal.SIGTERM, None)
+
+        def stop(self):
+            events.append("loop.stop")
+
+        def run_until_complete(self, coro):
+            events.append("run_until_complete")
+            try:
+                coro.send(None)
+            except StopIteration:
+                return None
+
+    class FakeBanBot:
+        def __init__(self, jid, password, resource):
+            self.loop = FakeLoop()
+            self.db = None
+
+        def _validate_config(self):
+            return [], []
+
+        def _format_config_validation(self, errors, warnings):
+            return "✅ Config validation passed"
+
+        def connect(self):
+            return True
+
+        async def shutdown(self):
+            events.append("shutdown")
+
+    monkeypatch.setattr(bot_module, "BanBot", FakeBanBot)
+    monkeypatch.setattr(bot_module, "get_config_resource", lambda: "tests")
+    monkeypatch.setattr(bot_module.signal, "getsignal", lambda _signum: object())
+    monkeypatch.setattr(
+        bot_module.signal,
+        "signal",
+        lambda signum, handler: installed_handlers.__setitem__(signum, handler),
+    )
+
+    assert bot_module.main() is None
+    assert events == ["run_forever", "loop.stop", "run_until_complete", "shutdown"]

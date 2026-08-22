@@ -1223,13 +1223,36 @@ def _relative_to_root(path: Path | None, root: Path) -> bool:
     return True
 
 
+def _git_path_is_tracked(deployment: Deployment, path: Path) -> bool:
+    """Return whether *path* is tracked by the deployment Git checkout."""
+    if not _relative_to_root(path, deployment.root):
+        return False
+    relative = path.resolve().relative_to(deployment.root.resolve())
+    result = _run(
+        ["git", "ls-files", "--error-unmatch", "--", str(relative)],
+        deployment=deployment,
+        cwd=deployment.root,
+        capture=True,
+        check=False,
+        announce=False,
+    )
+    return result.returncode == 0
+
+
 def _protected_paths(deployment: Deployment) -> dict[str, Path]:
     runtime = _runtime_paths(deployment)
     protected: dict[str, Path] = {"config": deployment.config}
-    for key in ("database", "omemo_storage", "avatar"):
+    for key in ("database", "omemo_storage"):
         path = runtime.get(key)
         if path is not None:
             protected[key.replace("_", " ")] = path
+
+    # The repository's default avatar.png is tracked release content and must
+    # be allowed to change during an update. Preserve only an operator-supplied
+    # avatar that is not tracked by Git.
+    avatar = runtime.get("avatar")
+    if avatar is not None and not _git_path_is_tracked(deployment, avatar):
+        protected["avatar"] = avatar
     return protected
 
 

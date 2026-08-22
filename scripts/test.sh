@@ -71,7 +71,7 @@ fi
 
 coverage_args=""
 if [ "$coverage" -eq 1 ]; then
-  coverage_args="--cov=banbot --cov-report=term-missing"
+  coverage_args="--cov=banbot --cov-report=term-missing --cov-fail-under=55"
 fi
 
 # Mirror envsbot's warning policy: coroutine leaks and deprecations fail the

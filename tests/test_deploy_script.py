@@ -518,3 +518,50 @@ def test_hardened_runtime_permission_check_allows_missing_runtime_targets(tmp_pa
     deploy._check_hardened_runtime_permissions(deployment, runtime)
 
     assert "existing mutable runtime files/directories are private and usable" in capsys.readouterr().out
+
+
+def test_protected_paths_do_not_preserve_tracked_release_avatar(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    avatar = deployment.root / "avatar.png"
+    runtime = {
+        "database": deployment.root / "banbot.db",
+        "backup_directory": deployment.root / "data" / "backups",
+        "export_directory": deployment.root / "data" / "exports",
+        "omemo_storage": deployment.root / "data" / "omemo.json",
+        "avatar": avatar,
+    }
+    monkeypatch.setattr(deploy, "_runtime_paths", lambda _deployment: runtime)
+    monkeypatch.setattr(
+        deploy,
+        "_git_path_is_tracked",
+        lambda _deployment, path: path == avatar,
+    )
+
+    protected = deploy._protected_paths(deployment)
+
+    assert "avatar" not in protected
+    assert protected["database"] == runtime["database"]
+    assert protected["omemo storage"] == runtime["omemo_storage"]
+
+
+def test_protected_paths_preserve_untracked_custom_avatar(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    avatar = deployment.root / "custom" / "operator-avatar.png"
+    runtime = {
+        "database": deployment.root / "banbot.db",
+        "backup_directory": deployment.root / "data" / "backups",
+        "export_directory": deployment.root / "data" / "exports",
+        "omemo_storage": deployment.root / "data" / "omemo.json",
+        "avatar": avatar,
+    }
+    monkeypatch.setattr(deploy, "_runtime_paths", lambda _deployment: runtime)
+    monkeypatch.setattr(deploy, "_git_path_is_tracked", lambda _deployment, _path: False)
+
+    protected = deploy._protected_paths(deployment)
+
+    assert protected["avatar"] == avatar
+
+
+def test_local_coverage_script_enforces_ci_threshold():
+    text = (ROOT / "scripts" / "test.sh").read_text(encoding="utf-8")
+    assert "--cov-fail-under=55" in text

@@ -1,12 +1,12 @@
 """Main BanBot class, XMPP plugin setup, lifecycle startup, and entry point."""
 
 import asyncio
-import logging
-import time
 import inspect
-from datetime import datetime
-
+import logging
+import signal
 import sys
+import time
+from datetime import datetime
 
 from .config_loader import format_config_import_error, load_config_module
 
@@ -225,6 +225,8 @@ class BanBot(
         self.db: aiosqlite.Connection | None = None
         self.tasks = TaskSupervisor()
         self.runtime_watchdog = RuntimeWatchdog(self)
+        self._shutdown_lock = asyncio.Lock()
+        self._shutdown_complete = False
         self.init_alert_state()
 
         # --- Concurrency limit for MUC write operations ---
@@ -422,6 +424,54 @@ class BanBot(
                     await task
                 except asyncio.CancelledError:
                     log.debug("Background task cancelled during shutdown")
+
+    async def shutdown(self) -> None:
+        """Flush state and stop process-scoped resources exactly once."""
+        async with self._shutdown_lock:
+            if self._shutdown_complete:
+                return
+
+            try:
+                flush_redaction_index = getattr(self, "flush_redaction_index", None)
+                if callable(flush_redaction_index):
+                    await flush_redaction_index()
+            except Exception as exc:
+                log.warning("Shutdown: failed to flush redaction index: %s", exc)
+
+            try:
+                await self.stop_background_tasks()
+            except Exception as exc:
+                log.warning("Shutdown: failed to stop background tasks cleanly: %s", exc)
+
+            try:
+                await self.runtime_watchdog.stop()
+            except Exception as exc:
+                log.warning("Shutdown: failed to stop runtime watchdog cleanly: %s", exc)
+
+            try:
+                await self.tasks.cancel_all()
+            except Exception as exc:
+                log.warning("Shutdown: failed to cancel supervised tasks cleanly: %s", exc)
+
+            db = getattr(self, "db", None)
+            if db is not None:
+                try:
+                    await db.close()
+                    self.db = None
+                except Exception as exc:
+                    log.warning("Shutdown: failed to close database cleanly: %s", exc)
+
+            try:
+                try:
+                    result = self.disconnect(wait=False)
+                except TypeError:
+                    result = self.disconnect()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:
+                log.warning("Shutdown: failed to disconnect XMPP cleanly: %s", exc)
+
+            self._shutdown_complete = True
 
     def _start_core_service(self, factory, *, name: str) -> asyncio.Task:
         """Start one resilient reconnect-scoped background service."""
@@ -632,26 +682,59 @@ def main() -> None:
         log.error("Unable to connect to XMPP server.")
         raise SystemExit(1)
 
+    shutdown_signal: int | None = None
+    previous_signal_handlers: dict[int, object] = {}
+
+    def request_shutdown(signum: int, _frame) -> None:
+        nonlocal shutdown_signal
+        if shutdown_signal is None:
+            shutdown_signal = signum
+            try:
+                signal_name = signal.Signals(signum).name
+            except ValueError:
+                signal_name = str(signum)
+            log.info("Received %s; shutting down cleanly.", signal_name)
+        stop = getattr(xmpp.loop, "stop", None)
+        if callable(stop):
+            stop()
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        try:
+            previous_signal_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, request_shutdown)
+        except (OSError, RuntimeError, ValueError):
+            # Embedders/tests may run the entry point outside the main thread.
+            pass
+
     log.info("Connected successfully. Starting event loop...")
+    unexpected_loop_stop = False
     try:
         xmpp.loop.run_forever()
+        unexpected_loop_stop = shutdown_signal is None
     except KeyboardInterrupt:
+        # Keep compatibility with environments where SIGINT still manifests as
+        # KeyboardInterrupt instead of going through the installed handler.
+        shutdown_signal = signal.SIGINT
         log.info("Bot stopped manually.")
-        watchdog = getattr(xmpp, "runtime_watchdog", None)
-        stop_watchdog = getattr(watchdog, "stop", None)
-        if callable(stop_watchdog):
-            xmpp.loop.run_until_complete(stop_watchdog())
-        supervisor = getattr(xmpp, "tasks", None)
-        cancel_all = getattr(supervisor, "cancel_all", None)
-        if callable(cancel_all):
-            xmpp.loop.run_until_complete(cancel_all())
-        if xmpp.db:
-            xmpp.loop.run_until_complete(xmpp.db.close())
-        xmpp.disconnect()
-        return
+    finally:
+        for signum, previous in previous_signal_handlers.items():
+            try:
+                signal.signal(signum, previous)
+            except (OSError, RuntimeError, ValueError):
+                pass
 
-    # A normal service stop terminates the process with SIGTERM before this
-    # point. If the event loop returns by itself, treat that as an unexpected
-    # runtime failure so Restart=on-failure can recover the service.
-    log.error("XMPP event loop stopped unexpectedly.")
-    raise SystemExit(1)
+        shutdown = getattr(xmpp, "shutdown", None)
+        if callable(shutdown):
+            xmpp.loop.run_until_complete(shutdown())
+        else:
+            # Compatibility for lightweight embedders/test doubles.
+            db = getattr(xmpp, "db", None)
+            if db is not None:
+                xmpp.loop.run_until_complete(db.close())
+            disconnect = getattr(xmpp, "disconnect", None)
+            if callable(disconnect):
+                disconnect()
+
+    if unexpected_loop_stop:
+        log.error("XMPP event loop stopped unexpectedly.")
+        raise SystemExit(1)
