@@ -212,8 +212,8 @@ class ConfigRuntimeMixin:
         finally:
             try:
                 tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("Failed to remove temporary config file %s: %s", tmp_path, exc)
 
         try:
             dir_fd = os.open(path.parent, os.O_DIRECTORY)

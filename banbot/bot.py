@@ -720,8 +720,8 @@ def main() -> None:
         for signum, previous in previous_signal_handlers.items():
             try:
                 signal.signal(signum, previous)
-            except (OSError, RuntimeError, ValueError):
-                pass
+            except (OSError, RuntimeError, ValueError) as exc:
+                log.debug("Failed to restore signal handler for %s: %s", signum, exc)
 
         shutdown = getattr(xmpp, "shutdown", None)
         if callable(shutdown):
