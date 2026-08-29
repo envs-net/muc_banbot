@@ -15,6 +15,63 @@ URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 EMAIL_RE = re.compile(r"\b[\w.+-]+@[a-z0-9.-]+\.[a-z]{2,}\b", re.IGNORECASE)
 TOKEN_RE = re.compile(r"[a-z0-9]+|<url>|<email>", re.IGNORECASE)
 
+REPLY_NS = "urn:xmpp:reply:0"
+FALLBACK_NS = "urn:xmpp:fallback:0"
+
+
+def message_body_without_reply_fallback(msg: object, body: str) -> str:
+    """Return the authored body with an XEP-0461 reply fallback removed.
+
+    Supporting clients render the quoted fallback as reply context rather than
+    newly authored message content.  Protection checks must therefore ignore
+    that range, otherwise media URLs, mentions or blocked words from the quoted
+    message can produce false positives.
+
+    The fallback is trusted only when the stanza also carries a matching
+    XEP-0461 ``<reply/>`` element and the advertised body ranges are valid.
+    Invalid or incomplete metadata leaves the original body untouched.
+    """
+    text = str(body or "")
+    if not text:
+        return text
+
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return text
+
+    try:
+        if xml.find(f"{{{REPLY_NS}}}reply") is None:
+            return text
+
+        ranges: list[tuple[int, int]] = []
+        for fallback in xml.findall(f"{{{FALLBACK_NS}}}fallback"):
+            if fallback.get("for") != REPLY_NS:
+                continue
+            for child in list(fallback):
+                if child.tag not in {"body", f"{{{FALLBACK_NS}}}body"}:
+                    continue
+                start_raw = child.get("start")
+                end_raw = child.get("end")
+                if start_raw is None or end_raw is None:
+                    continue
+                try:
+                    start = int(start_raw)
+                    end = int(end_raw)
+                except ValueError:
+                    continue
+                if 0 <= start < end <= len(text):
+                    ranges.append((start, end))
+
+        if not ranges:
+            return text
+
+        cleaned = text
+        for start, end in sorted(ranges, reverse=True):
+            cleaned = cleaned[:start] + cleaned[end:]
+        return cleaned.strip()
+    except (AttributeError, TypeError):
+        return text
+
 
 
 def normalize_spam_body(body: str) -> str:

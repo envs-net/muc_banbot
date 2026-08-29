@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from xml.etree import ElementTree as ET
 
 import pytest
 
@@ -179,7 +180,9 @@ async def test_flood_window_expires_old_hits(fake_msg_factory, monkeypatch) -> N
 @pytest.mark.asyncio
 async def test_first_media_triggers_only_for_observed_recent_first_message(fake_msg_factory) -> None:
     bot = DummyProtections()
-    bot.protections["FirstMessageMediaProtection"].update({"enabled": True, "action": "tempban", "redact": True})
+    bot.protections["FirstMessageMediaProtection"].update(
+        {"enabled": True, "action": "tempban", "redact": True}
+    )
     await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
     msg = fake_msg_factory(room=ROOM, nick="Spammer", body="https://upload.example.org/file.jpg")
 
@@ -190,6 +193,69 @@ async def test_first_media_triggers_only_for_observed_recent_first_message(fake_
     assert bot.bans[0][1] is not None
     assert bot.bans[0][2] == "protection:FirstMessageMediaProtection"
     assert bot.redactions and bot.redactions[0][1] == "first message was media spam"
+
+
+@pytest.mark.asyncio
+async def test_first_media_ignores_media_url_inside_reply_fallback(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["FirstMessageMediaProtection"].update(
+        {"enabled": True, "action": "tempban", "redact": True}
+    )
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+
+    quoted = "> https://upload.example.org/launchpad.png\n"
+    body = quoted + "i love this emoji"
+    xml = ET.Element("message")
+    ET.SubElement(
+        xml,
+        "{urn:xmpp:reply:0}reply",
+        {"to": "pockets@example.org", "id": "old-message"},
+    )
+    fallback = ET.SubElement(xml, "{urn:xmpp:fallback:0}fallback", {"for": "urn:xmpp:reply:0"})
+    ET.SubElement(
+        fallback,
+        "{urn:xmpp:fallback:0}body",
+        {"start": "0", "end": str(len(quoted))},
+    )
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body=body, xml=xml)
+
+    handled = await bot.protections_on_message(msg, ROOM, "Spammer", body)
+
+    assert handled is False
+    assert bot.bans == []
+    assert bot.redactions == []
+    assert (ROOM, "spam@example.org") in bot.protection_first_message_seen
+
+
+@pytest.mark.asyncio
+async def test_first_media_still_detects_media_authored_after_reply_fallback(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["FirstMessageMediaProtection"].update(
+        {"enabled": True, "action": "tempban", "redact": True}
+    )
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+
+    quoted = "> old reply context\n"
+    body = quoted + "https://upload.example.org/new-spam.jpg"
+    xml = ET.Element("message")
+    ET.SubElement(
+        xml,
+        "{urn:xmpp:reply:0}reply",
+        {"to": "alice@example.org", "id": "old-message"},
+    )
+    fallback = ET.SubElement(xml, "{urn:xmpp:fallback:0}fallback", {"for": "urn:xmpp:reply:0"})
+    ET.SubElement(
+        fallback,
+        "{urn:xmpp:fallback:0}body",
+        {"start": "0", "end": str(len(quoted))},
+    )
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body=body, xml=xml)
+
+    handled = await bot.protections_on_message(msg, ROOM, "Spammer", body)
+
+    assert handled is True
+    assert bot.bans
+    assert bot.redactions
 
 
 @pytest.mark.asyncio
@@ -243,6 +309,37 @@ async def test_mention_limit_equal_limit_does_not_trigger(fake_msg_factory) -> N
 
     assert handled is False
     assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_wordlist_ignores_blocked_word_inside_reply_fallback(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["WordListNewJoinerProtection"].update(
+        {"enabled": True, "words": ["spamword"], "action": "kick"}
+    )
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+
+    quoted = "> spamword\n"
+    body = quoted + "that old message was odd"
+    xml = ET.Element("message")
+    ET.SubElement(
+        xml,
+        "{urn:xmpp:reply:0}reply",
+        {"to": "alice@example.org", "id": "old-message"},
+    )
+    fallback = ET.SubElement(xml, "{urn:xmpp:fallback:0}fallback", {"for": "urn:xmpp:reply:0"})
+    ET.SubElement(
+        fallback,
+        "{urn:xmpp:fallback:0}body",
+        {"start": "0", "end": str(len(quoted))},
+    )
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body=body, xml=xml)
+
+    handled = await bot.protections_on_message(msg, ROOM, "Spammer", body)
+
+    assert handled is False
+    assert bot.muc_plugin.roles == []
+    assert bot.redactions == []
 
 
 @pytest.mark.asyncio

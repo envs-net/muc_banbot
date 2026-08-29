@@ -11,6 +11,7 @@ from config import ADMIN_ROOM
 from .detection import (
     body_contains_blocked_word,
     count_mentions,
+    message_body_without_reply_fallback,
     message_looks_like_media,
     messages_are_similar,
     normalize_spam_body,
@@ -142,6 +143,13 @@ class ProtectionChecksMixin:
             return False
         subject = jid or normalized_nick
         now = time.time()
+        protection_body = message_body_without_reply_fallback(msg, body)
+        if protection_body != body:
+            log.debug(
+                "Ignoring XEP-0461 reply fallback while evaluating protections in %s: nick=%s",
+                room,
+                nick,
+            )
 
         # Stop after the first matching protection.  A single message should
         # never apply multiple punitive actions to the same target because that
@@ -149,13 +157,13 @@ class ProtectionChecksMixin:
         # followed by "Ban already exists" from a second protection path.
         if await self._protection_check_flood(msg, room, nick, subject, now):
             return True
-        if await self._protection_check_first_media(msg, room, nick, subject, body, now):
+        if await self._protection_check_first_media(msg, room, nick, subject, protection_body, now):
             return True
-        if await self._protection_check_similar_messages(msg, room, nick, subject, body, now):
+        if await self._protection_check_similar_messages(msg, room, nick, subject, protection_body, now):
             return True
-        if await self._protection_check_mentions(msg, room, nick, body):
+        if await self._protection_check_mentions(msg, room, nick, protection_body):
             return True
-        if await self._protection_check_wordlist(msg, room, nick, subject, body, now):
+        if await self._protection_check_wordlist(msg, room, nick, subject, protection_body, now):
             return True
         return False
 
