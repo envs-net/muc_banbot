@@ -10,9 +10,17 @@ log = logging.getLogger(__name__)
 
 from .locks import ban_state_lock
 from .muc_join import await_muc_join_compat
+from .utils import looks_like_domain
 
 
 class SyncMixin:
+    def _sync_canonical_outcast_target(self, value: str) -> str:
+        """Return BanBot's canonical target for one MUC outcast entry."""
+        bare = self.bare_jid(value)
+        if looks_like_domain(bare):
+            return f"*.{bare.strip('.')}"
+        return bare
+
     def _sync_bot_is_admin_or_owner(self, room: str) -> bool:
         """Return cached bot rights without emitting one warning per poll."""
         bot_entry = getattr(self, "_bot_occupant_entry", None)
@@ -82,7 +90,13 @@ class SyncMixin:
         for target_type, target, until, comment in db_bans:
             if until > 0 and until <= now:  # skip expired temporary bans
                 continue
-            ban_jid = target if target_type == "jid" else None
+            ban_jid = (
+                target
+                if target_type == "jid"
+                else f"*.{target}"
+                if target_type == "domain"
+                else None
+            )
             ban_nick = target if target_type == "nick" else None
             active_bans.append((ban_jid, ban_nick, comment))
 
@@ -123,7 +137,7 @@ class SyncMixin:
             # --- Fetch current outcasts in this room ---
             try:
                 outcast_entries = await self._sync_fetch_room_outcasts(room)
-                outcasts_bare = [jid for jid, _reason in outcast_entries]
+                outcasts_bare = [self._sync_canonical_outcast_target(jid) for jid, _reason in outcast_entries]
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
                 outcasts_bare = []
@@ -395,14 +409,22 @@ class SyncMixin:
         if not reason:
             return None
 
+        canonical = self._sync_canonical_outcast_target(jid_bare)
+        if canonical.startswith("*."):
+            target_type = "domain"
+            target = canonical[2:].strip(".")
+        else:
+            target_type = "jid"
+            target = canonical
+
         async with self.db.execute(
             """
             SELECT comment FROM bans
-            WHERE target_type = 'jid'
+            WHERE target_type = ?
               AND (target = ? OR jid = ?)
             LIMIT 1
             """,
-            (jid_bare, jid_bare),
+            (target_type, target, canonical),
         ) as cursor:
             row = await cursor.fetchone()
 
@@ -410,7 +432,7 @@ class SyncMixin:
         if current_comment and current_comment != "Recovered from room":
             return current_comment
 
-        await self.upsert_ban_db(jid_bare, None, 0, issuer, reason)
+        await self.upsert_ban_db(canonical, None, 0, issuer, reason)
         return reason
 
 
@@ -421,7 +443,11 @@ class SyncMixin:
         actor: str,
     ) -> None:
         """Run manual-ban auto-redaction when enabled and reason matches."""
-        if not reason or not hasattr(self, "maybe_auto_redact_after_manual_muc_ban"):
+        if (
+            not reason
+            or looks_like_domain(jid_bare)
+            or not hasattr(self, "maybe_auto_redact_after_manual_muc_ban")
+        ):
             return
         await self.maybe_auto_redact_after_manual_muc_ban(jid_bare, reason, actor=actor)
 
@@ -477,14 +503,20 @@ class SyncMixin:
             for target_type, target, until, comment in db_bans:
                 if until > 0 and until <= now:
                     continue  # Skip expired temporary bans
-                ban_jid = target if target_type == "jid" else None
+                ban_jid = (
+                    target
+                    if target_type == "jid"
+                    else f"*.{target}"
+                    if target_type == "domain"
+                    else None
+                )
                 ban_nick = target if target_type == "nick" else None
                 active_bans.append((ban_jid, ban_nick, until, comment))
 
             # --- Fetch current outcasts in the room ---
             try:
                 outcast_entries = await self._sync_fetch_room_outcasts(room)
-                outcasts_bare = [jid for jid, _reason in outcast_entries]
+                outcasts_bare = [self._sync_canonical_outcast_target(jid) for jid, _reason in outcast_entries]
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
                 outcast_entries = []
@@ -495,8 +527,13 @@ class SyncMixin:
             # as room outcasts into recovered permanent bans.
             to_insert = []
             for jid_bare, room_reason in outcast_entries:
+                canonical_outcast = self._sync_canonical_outcast_target(jid_bare)
                 existing_comment = next(
-                    (comment for ban_jid, _nick, _until, comment in active_bans if ban_jid and self.bare_jid(ban_jid) == jid_bare),
+                    (
+                        comment
+                        for ban_jid, _nick, _until, comment in active_bans
+                        if ban_jid and self.bare_jid(ban_jid) == canonical_outcast
+                    ),
                     None,
                 )
                 if existing_comment is not None:
@@ -509,7 +546,7 @@ class SyncMixin:
                             await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
                     continue
 
-                if await self._sync_outcast_is_expired_tempban(jid_bare, now):
+                if not canonical_outcast.startswith("*.") and await self._sync_outcast_is_expired_tempban(jid_bare, now):
                     log.info(
                         "♻️ Sync: outcast %s in %s belongs to an expired tempban; unbanning instead of recovering as permanent",
                         jid_bare,
@@ -519,8 +556,8 @@ class SyncMixin:
                     continue
 
                 comment_value = room_reason or "Recovered from room"
-                to_insert.append((jid_bare, None, 0, issuer_tag, comment_value))
-                active_bans.append((jid_bare, None, 0, comment_value))
+                to_insert.append((canonical_outcast, None, 0, issuer_tag, comment_value))
+                active_bans.append((canonical_outcast, None, 0, comment_value))
                 await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
 
             if to_insert:
@@ -651,7 +688,13 @@ class SyncMixin:
         for target_type, target, until, comment in db_bans:
             if until > 0 and until <= now:
                 continue
-            ban_jid = target if target_type == "jid" else None
+            ban_jid = (
+                target
+                if target_type == "jid"
+                else f"*.{target}"
+                if target_type == "domain"
+                else None
+            )
             ban_nick = target if target_type == "nick" else None
             active_bans.append((ban_jid, ban_nick, comment))
 
@@ -701,7 +744,7 @@ class SyncMixin:
             # --- Fetch current outcasts ---
             try:
                 outcast_entries = await self._sync_fetch_room_outcasts(room)
-                outcasts_bare = [jid for jid, _reason in outcast_entries]
+                outcasts_bare = [self._sync_canonical_outcast_target(jid) for jid, _reason in outcast_entries]
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
                 outcast_entries = []
@@ -713,8 +756,13 @@ class SyncMixin:
             orphan_bans = []
             issuer_tag = "sync_startup" if startup else "syncbans"
             for jid_bare, room_reason in outcast_entries:
+                canonical_outcast = self._sync_canonical_outcast_target(jid_bare)
                 existing_comment = next(
-                    (comment for ban_jid, _nick, comment in active_bans if ban_jid and self.bare_jid(ban_jid) == jid_bare),
+                    (
+                        comment
+                        for ban_jid, _nick, comment in active_bans
+                        if ban_jid and self.bare_jid(ban_jid) == canonical_outcast
+                    ),
                     None,
                 )
                 if existing_comment is not None:
@@ -727,7 +775,7 @@ class SyncMixin:
                             await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
                     continue
 
-                if await self._sync_outcast_is_expired_tempban(jid_bare, now):
+                if not canonical_outcast.startswith("*.") and await self._sync_outcast_is_expired_tempban(jid_bare, now):
                     log.info(
                         "♻️ Sync: outcast %s in %s belongs to an expired tempban; unbanning instead of recovering as permanent",
                         jid_bare,
@@ -737,12 +785,12 @@ class SyncMixin:
                     continue
 
                 comment = room_reason or "Recovered from room"
-                orphan_bans.append((jid_bare, None, comment))
+                orphan_bans.append((canonical_outcast, None, comment))
                 await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
 
             if orphan_bans:
                 for jid, nick, comment in orphan_bans:
-                    await self.upsert_ban_db(self.bare_jid(jid) if jid else None, nick, 0, issuer_tag, comment)
+                    await self.upsert_ban_db(jid, nick, 0, issuer_tag, comment)
                 active_bans.extend(orphan_bans)
                 log.info("✅ Added %d orphan outcasts to DB for room %s", len(orphan_bans), room)
 

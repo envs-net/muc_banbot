@@ -371,6 +371,27 @@ async def test_muc_offline_recovers_manual_ban_and_auto_redacts(temp_db_path):
         await bot.db.close()
 
 
+@pytest.mark.asyncio
+async def test_manual_domain_outcast_is_recovered_as_domain_ban_without_redaction(temp_db_path):
+    bot = MucBotFixture(temp_db_path)
+    await bot.setup_db()
+    try:
+        await bot._handle_manual_muc_ban_presence(
+            ROOM_JID,
+            "",
+            "xmpp.party",
+            MANUAL_BAN_REASON,
+        )
+
+        await bot.load_bans_from_db()
+        assert "xmpp.party" in bot.ban_index_by_domain
+        assert "xmpp.party" not in bot.ban_index_by_jid
+        assert "*.xmpp.party" in bot.ban_cache
+        assert bot.manual_redactions == []
+    finally:
+        await bot.db.close()
+
+
 
 @pytest.mark.asyncio
 async def test_muc_offline_preserves_active_tempban_on_ban_presence(temp_db_path):

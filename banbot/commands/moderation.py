@@ -47,7 +47,7 @@ class CommandModerationMixin:
         if len(args) < 1:
             await self.bot_send_message(
                 mto=room,
-                mbody=f"❌ Usage: {self.command_prefix}unban <jid|nick|*.domain.tld>",
+                mbody=f"❌ Usage: {self.command_prefix}unban <jid|nick|domain.tld|*.domain.tld>",
                 mtype="groupchat",
             )
             return

@@ -227,7 +227,7 @@ class CommandUsageMixin:
     def _unban_usage_text(self) -> str:
         """Return usage text for unban command."""
         p = self.command_prefix
-        return f"Usage: {p}unban <jid|nick|*.domain.tld>"
+        return f"Usage: {p}unban <jid|nick|domain.tld|*.domain.tld>"
 
     def _banlist_usage_text(self) -> str:
         """Return usage text for banlist/blacklist command."""

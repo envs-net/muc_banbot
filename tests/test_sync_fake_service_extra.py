@@ -383,6 +383,31 @@ async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
 
 
 @pytest.mark.asyncio
+async def test_sync_single_room_recovers_domain_only_outcast_as_domain_ban(temp_db_path):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): ["xmpp.party"]}
+    )
+    try:
+        await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+        await bot.load_bans_from_db()
+
+        async with bot.db.execute(
+            "SELECT target_type, target, jid, issuer, comment FROM bans"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        assert rows == [
+            ("domain", "xmpp.party", "*.xmpp.party", "sync_room_add", "Recovered from room")
+        ]
+        assert "xmpp.party" in bot.ban_index_by_domain
+        assert "xmpp.party" not in bot.ban_index_by_jid
+        assert bot.applied == []
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_sync_single_room_does_not_auto_redact_known_outcast(temp_db_path):
     bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(

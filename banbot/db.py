@@ -6,7 +6,7 @@ import time
 import aiosqlite
 from config import DB_FILE
 
-from .utils import normalize_actor, normalize_ban_target
+from .utils import looks_like_domain, normalize_actor, normalize_ban_target
 
 log = logging.getLogger(__name__)
 
@@ -409,10 +409,23 @@ class DatabaseMixin:
                         nick or target,
                     )
                 else:
-                    normalized_type, normalized_target, normalized_jid, normalized_nick = normalize_ban_target(
-                        jid or target,
-                        nick,
-                    )
+                    raw_jid = str(jid or target or "").strip().lower()
+                    # Older startup-sync code could persist a domain-only MUC
+                    # outcast (for example ``xmpp.party``) as a JID ban.  BanBot
+                    # does not otherwise create domainpart-only JID bans: bare
+                    # domains are represented as wildcard domain bans.  Repair
+                    # those legacy rows here so command lookup/cache semantics
+                    # are consistent again.
+                    if looks_like_domain(raw_jid):
+                        normalized_type = "domain"
+                        normalized_target = raw_jid.strip(".")
+                        normalized_jid = f"*.{normalized_target}"
+                        normalized_nick = nick.lower().strip() if nick else None
+                    else:
+                        normalized_type, normalized_target, normalized_jid, normalized_nick = normalize_ban_target(
+                            raw_jid,
+                            nick,
+                        )
             except Exception as exc:
                 log.warning(
                     "Skipping invalid ban row during normalization: id=%r target_type=%r target=%r jid=%r nick=%r error=%s",
@@ -491,9 +504,9 @@ class DatabaseMixin:
         """Delete a ban by JID, nick, or wildcard domain and return the affected row count."""
         ident = identifier.lower().strip()
 
-        if ident.startswith("*."):
+        if ident.startswith("*.") or looks_like_domain(ident):
             target_type = "domain"
-            target = ident[2:].strip(".")
+            target = (ident[2:] if ident.startswith("*.") else ident).strip(".")
         elif "@" in ident:
             target_type = "jid"
             target = self.bare_jid(ident)

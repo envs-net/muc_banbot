@@ -157,15 +157,40 @@ async def test_domain_ban_publishes_domain_and_applies_only_matching_occupants(t
 
 
 @pytest.mark.asyncio
-async def test_unban_all_rejects_plain_domain_and_missing_target(temp_db_path, monkeypatch):
+@pytest.mark.parametrize("identifier", ["example.org", "*.example.org"])
+async def test_unban_all_accepts_plain_or_wildcard_domain(temp_db_path, monkeypatch, identifier):
     moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
     bot = await make_bot()
     try:
-        await bot.unban_all("example.org", issuer="admin@example.test")
-        assert "Invalid domain unban" in bot.sent[-1]["mbody"]
+        await bot.upsert_ban_db("*.example.org", None, 0, "admin@example.test", "domain spam")
+        await bot.load_bans_from_db()
 
+        await bot.unban_all(identifier, issuer="admin@example.test")
+
+        async with bot.db.execute(
+            "SELECT 1 FROM bans WHERE target_type = 'domain' AND target = 'example.org'"
+        ) as cursor:
+            assert await cursor.fetchone() is None
+        assert "example.org" not in bot.ban_index_by_domain
+        assert bot.retracted == [(None, "example.org")]
+        assert any(
+            call.get("jid") == "example.org" and call.get("affiliation") == "none"
+            for call in bot.plugin["xep_0045"].affiliations
+        )
+        assert any(f"Unbanned {identifier}" in msg["mbody"] for msg in bot.sent)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_unban_all_reports_missing_target(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
         await bot.unban_all("missing@example.test", issuer="admin@example.test")
         assert "No ban found" in bot.sent[-1]["mbody"]
     finally:

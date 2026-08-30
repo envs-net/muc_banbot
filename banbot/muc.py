@@ -9,7 +9,7 @@ from config import ADMIN_ROOM, NICK
 from .locks import ban_state_lock
 from .muc_join import start_muc_join_task
 from .occupants import BotOccupantMixin
-from .utils import domain_matches
+from .utils import domain_matches, looks_like_domain
 
 log = logging.getLogger(__name__)
 
@@ -544,11 +544,18 @@ class MucMixin(BotOccupantMixin):
             return
 
         jid_bare = self.bare_jid(jid)
+        is_domain_outcast = looks_like_domain(jid_bare)
+        ban_target = f"*.{jid_bare.strip('.')}" if is_domain_outcast else jid_bare
         issuer = "manual_muc_ban"
         comment = reason or "Recovered from room"
         now = int(time.time())
 
-        existing_ban = self.ban_index_by_jid.get(jid_bare)
+        existing_ban = None
+        if is_domain_outcast:
+            domain_bans = self.ban_index_by_domain.get(jid_bare.strip("."), [])
+            existing_ban = domain_bans[0] if domain_bans else None
+        else:
+            existing_ban = self.ban_index_by_jid.get(jid_bare)
         if existing_ban:
             _existing_jid, _existing_nick, existing_until, _existing_issuer, existing_comment = existing_ban
             if existing_until <= 0 or existing_until > now:
@@ -560,7 +567,7 @@ class MucMixin(BotOccupantMixin):
                     )
                     return
 
-        if hasattr(self, "_sync_outcast_is_expired_tempban"):
+        if not is_domain_outcast and hasattr(self, "_sync_outcast_is_expired_tempban"):
             try:
                 if await self._sync_outcast_is_expired_tempban(jid_bare, now):
                     await self.unban_all(jid_bare, issuer="system", notify_policy=False)
@@ -569,12 +576,12 @@ class MucMixin(BotOccupantMixin):
                 log.debug("Could not check expired tempban state for manual MUC ban %s: %s", jid_bare, exc)
 
         async with ban_state_lock(self):
-            await self.upsert_ban_db(jid_bare, nick, 0, issuer, comment)
+            await self.upsert_ban_db(ban_target, None if is_domain_outcast else nick, 0, issuer, comment)
             await self.load_bans_from_db()
 
         log.info("✅ Recovered live manual MUC ban for %s in %s", jid_bare, room)
 
-        if hasattr(self, "maybe_auto_redact_after_manual_muc_ban"):
+        if not is_domain_outcast and hasattr(self, "maybe_auto_redact_after_manual_muc_ban"):
             await self.maybe_auto_redact_after_manual_muc_ban(jid_bare, reason, actor=issuer)
 
 

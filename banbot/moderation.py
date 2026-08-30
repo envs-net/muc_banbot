@@ -686,8 +686,13 @@ class ModerationMixin:
         """
         try:
             # --- Step 1: Remove Outcast (works offline) ---
-            if ban_jid:
-                bare = self.bare_jid(ban_jid)
+            # A MUC affiliation list may contain domainpart-only outcasts such
+            # as ``xmpp.party``.  Those are represented in BanBot as wildcard
+            # domain bans (``*.xmpp.party``), but the server-side affiliation
+            # key itself is the bare domain and must be cleared explicitly.
+            outcast_target = domain or (self.bare_jid(ban_jid) if ban_jid else None)
+            if outcast_target:
+                bare = outcast_target
                 for attempt in range(3):
                     try:
                         async with self.muc_write_semaphore:
@@ -772,30 +777,26 @@ class ModerationMixin:
     ) -> None:
         """
         Remove a ban from a user (JID, nick, or domain) and unban in all protected rooms.
-        Supports exact wildcard-domain unbans (*.domain.tld).
+        Supports exact domain unbans in both domain.tld and *.domain.tld form.
         """
         if not identifier:
             return
 
         identifier = identifier.strip().lower()
 
-        if looks_like_domain(identifier):
-            await self.bot_send_message(
-                mto=ADMIN_ROOM,
-                mbody=(
-                    f"❌ Invalid domain unban: {identifier}\n"
-                    f"Use wildcard format instead: *.{identifier}"
-                ),
-                mtype="groupchat"
-            )
-            return
-
-        is_domain_ban = identifier.startswith("*.")
+        is_domain_ban = identifier.startswith("*.") or looks_like_domain(identifier)
         is_jid = "@" in identifier
-        domain = identifier[2:].strip(".") if is_domain_ban else None
+        domain = (
+            identifier[2:].strip(".")
+            if identifier.startswith("*.")
+            else identifier.strip(".")
+            if is_domain_ban
+            else None
+        )
 
         if is_domain_ban:
-            is_valid, error_msg = validate_domain_ban(identifier)
+            wildcard_identifier = f"*.{domain}"
+            is_valid, error_msg = validate_domain_ban(wildcard_identifier)
             if not is_valid:
                 await self.bot_send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
                 return

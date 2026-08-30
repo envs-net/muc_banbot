@@ -153,6 +153,44 @@ async def test_setup_db_normalizes_existing_full_jid_bans(temp_db_path):
 
 
 @pytest.mark.asyncio
+async def test_setup_db_repairs_domain_only_outcast_stored_as_jid(temp_db_path):
+    db = await aiosqlite.connect(temp_db_path)
+    try:
+        await create_legacy_bans_table(db)
+        await insert_legacy_ban(
+            db,
+            target="xmpp.party",
+            jid="xmpp.party",
+            nick=None,
+            until=0,
+            issuer="sync_startup",
+            comment="Recovered from room",
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    bot = DbBot()
+    await bot.setup_db()
+    try:
+        async with bot.db.execute(
+            "SELECT target_type, target, jid, issuer, comment FROM bans"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        assert rows == [
+            ("domain", "xmpp.party", "*.xmpp.party", "sync_startup", "Recovered from room")
+        ]
+
+        await bot.load_bans_from_db()
+        assert "xmpp.party" in bot.ban_index_by_domain
+        assert "xmpp.party" not in bot.ban_index_by_jid
+        assert "*.xmpp.party" in bot.ban_cache
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_setup_db_deduplicates_full_and_bare_jid_bans(temp_db_path):
     db = await aiosqlite.connect(temp_db_path)
     try:

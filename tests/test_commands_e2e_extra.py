@@ -534,7 +534,7 @@ async def test_admin_incomplete_commands_show_usage(fake_msg_factory, monkeypatc
     cases = [
         ("!ban", "Usage: !ban <jid|nick|*.domain.tld> [comment]"),
         ("!tempban", "Usage: !tempban <jid|nick> <10m|2h|1d> [comment]"),
-        ("!unban", "Usage: !unban <jid|nick|*.domain.tld>"),
+        ("!unban", "Usage: !unban <jid|nick|domain.tld|*.domain.tld>"),
         ("!bansearch", "Usage: !bansearch <query> [all|page|last]"),
         ("!bansearch all", "Usage: !bansearch <query> [all|page|last]"),
         ("!room", "!room list [all|page]"),
@@ -788,7 +788,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
         "rules": "!policy show",
         "ban": "!ban <jid|nick|*.domain.tld> [comment]",
         "tempban": "!tempban <jid|nick> <10m|2h|1d> [comment]",
-        "unban": "!unban <jid|nick|*.domain.tld>",
+        "unban": "!unban <jid|nick|domain.tld|*.domain.tld>",
         "redact": "!redact cleanup",
         "banlist": "!banlist [all|page|last]",
         "blacklist": "!blacklist ... - alias for !banlist",
