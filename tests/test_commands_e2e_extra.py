@@ -321,7 +321,7 @@ async def test_admin_tasks_shows_supervised_workers_and_watchdog(fake_msg_factor
     await bot.on_message(admin_msg(fake_msg_factory, "!tasks"))
 
     body = bot.sent[-1]["mbody"]
-    assert "Background Tasks: 2 running, 0 failed, 0 other" in body
+    assert "Background Tasks: 2 running, 0 restarting, 0 failed, 0 other" in body
     assert "health-check-worker — running • restarts: 0" in body
     assert "unban-worker — running • restarts: 1" in body
     assert "Runtime Watchdog" in body
@@ -329,6 +329,39 @@ async def test_admin_tasks_shows_supervised_workers_and_watchdog(fake_msg_factor
     assert "systemd watchdog: active" in body
     assert "0.002s current / 0.015s max" in body
     assert "heartbeats: 4 • suppressed: 0" in body
+
+
+@pytest.mark.asyncio
+async def test_admin_tasks_shows_restart_backoff_state(fake_msg_factory, monkeypatch):
+    commands = importlib.import_module("banbot.commands")
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    bot = CommandE2EBot()
+    restart_at = time.time() + 5.0
+    bot.tasks = SimpleNamespace(
+        snapshot=lambda include_done=True: [
+            SimpleNamespace(
+                group="_core",
+                name="unban-worker",
+                status="restarting",
+                kind="service",
+                created_at=time.time(),
+                heartbeat_at=None,
+                restart_count=2,
+                last_error="RuntimeError: temporary failure",
+                restart_at=restart_at,
+            )
+        ]
+    )
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!tasks"))
+
+    body = bot.sent[-1]["mbody"]
+    assert "Background Tasks: 0 running, 1 restarting, 0 failed, 0 other" in body
+    assert "🔄 unban-worker — restarting • restarts: 2" in body
+    assert "retry in:" in body
+    assert "last error: RuntimeError: temporary failure" in body
 
 
 @pytest.mark.asyncio

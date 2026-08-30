@@ -639,3 +639,51 @@ def test_main_handles_sigterm_as_clean_shutdown(monkeypatch):
 
     assert bot_module.main() is None
     assert events == ["run_forever", "loop.stop", "run_until_complete", "shutdown"]
+
+
+@pytest.mark.asyncio
+async def test_stop_background_tasks_does_not_reawait_supervisor_owned_workers():
+    class NeverAwaitDirectly:
+        def __init__(self):
+            self.cancel_calls = 0
+
+        def done(self):
+            return False
+
+        def cancel(self):
+            self.cancel_calls += 1
+
+        def __await__(self):
+            async def fail():
+                raise AssertionError("supervisor-owned task must not be awaited twice")
+
+            return fail().__await__()
+
+    task = NeverAwaitDirectly()
+
+    class Supervisor:
+        def __init__(self):
+            self.cancelled_groups = []
+
+        async def cancel_group(self, group):
+            self.cancelled_groups.append(group)
+            return 1
+
+        def owns(self, candidate):
+            return candidate is task
+
+    class Bot:
+        def __init__(self):
+            self.tasks = Supervisor()
+            self._rtbl_refresh_task = task
+            self.unban_task = None
+            self.health_check_task = None
+            self.version_check_task = None
+            self.redaction_cleanup_task = None
+            self.redaction_operation_tasks = set()
+
+    bot = Bot()
+    await bot_module.BanBot.stop_background_tasks(bot)
+
+    assert bot.tasks.cancelled_groups == ["_core"]
+    assert task.cancel_calls == 0

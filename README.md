@@ -197,7 +197,7 @@ Examples assume the default command prefix `!`.
 | --- | --- |
 | `!help [all\|page\|last]` / `!help <command>` | Show available commands or focused help for every command topic, including subtopics such as `room invite` and `rtbl publish` |
 | `!status` | Show bot health, uptime, rooms, bans, RTBL, DB state, and protection status |
-| `!tasks [all\|failed]` | Show supervised background workers, restart counts, and runtime/systemd watchdog health |
+| `!tasks [all\|failed]` | Show supervised background workers, restart/backoff state, restart counts, and runtime/systemd watchdog health |
 | `!config [all\|page\|last]` / `!config show [all\|page\|last]` | Show active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config search/find <query>` | Search config option names and displayed values |
 | `!config diff [all\|page\|last]` | Show current values that differ from `config_sample.py` defaults |

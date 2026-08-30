@@ -24,6 +24,7 @@ class TaskInfo:
     heartbeat_at: float | None
     restart_count: int
     last_error: str | None
+    restart_at: float | None
 
 
 class TaskSupervisor:
@@ -75,6 +76,8 @@ class TaskSupervisor:
             "heartbeat_at": None,
             "restart_count": 0,
             "last_error": None,
+            "state": "running",
+            "restart_at": None,
         }
         add_done_callback = getattr(task, "add_done_callback", None)
         if callable(add_done_callback):
@@ -100,6 +103,8 @@ class TaskSupervisor:
                 task = task_ref.get("task")
                 meta = self._tasks.get(task) if task is not None else None
                 if meta is not None:
+                    meta["state"] = "running"
+                    meta["restart_at"] = None
                     meta["last_error"] = None
                 try:
                     await factory()
@@ -123,6 +128,10 @@ class TaskSupervisor:
                     raise RuntimeError(
                         f"background service {name} exceeded restart limit: {error_text}"
                     )
+
+                if meta is not None:
+                    meta["state"] = "restarting"
+                    meta["restart_at"] = time.time() + delay
 
                 log.warning(
                     "Restarting background service %s in %.0fs after %s",
@@ -172,7 +181,7 @@ class TaskSupervisor:
             elif task.done():
                 status = "failed" if meta.get("last_error") else "done"
             else:
-                status = "running"
+                status = str(meta.get("state") or "running")
             if not include_done and status in {"done", "cancelled"}:
                 continue
             result.append(
@@ -185,6 +194,7 @@ class TaskSupervisor:
                     heartbeat_at=meta.get("heartbeat_at"),
                     restart_count=int(meta.get("restart_count") or 0),
                     last_error=meta.get("last_error"),
+                    restart_at=meta.get("restart_at"),
                 )
             )
         return sorted(result, key=lambda item: (item.group, item.name))
@@ -196,9 +206,19 @@ class TaskSupervisor:
             info
             for info in self.snapshot(include_done=False)
             if info.kind == "service"
+            and info.status == "running"
             and info.heartbeat_at is not None
             and now - info.heartbeat_at > max_age_seconds
         ]
+
+    def owns(self, task: object | None) -> bool:
+        """Return whether *task* is owned by this supervisor."""
+        if task is None:
+            return False
+        try:
+            return task in self._tasks
+        except TypeError:
+            return False
 
     async def cancel_group(self, group: str, *, timeout: float = 5.0) -> int:
         """Cancel all running tasks in one lifecycle group."""

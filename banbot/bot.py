@@ -400,16 +400,20 @@ class BanBot(
 
 
     async def stop_background_tasks(self) -> None:
-        """Cancel reconnect-scoped workers before starting fresh ones."""
+        """Cancel reconnect-scoped workers without allowing shutdown to hang."""
         supervisor = getattr(self, "tasks", None)
         if supervisor is not None:
             await supervisor.cancel_group("_core")
 
         # Keep compatibility with lightweight tests/embedders that replace task
-        # attributes without registering them in the supervisor. Short-lived
-        # redaction operation tasks intentionally remain outside the service
-        # supervisor and are cancelled explicitly here.
+        # attributes without registering them in the supervisor. Do not await a
+        # supervisor-owned task again here: cancel_group() already drained it
+        # with a bounded timeout. Short-lived redaction operation tasks remain
+        # outside the service supervisor and are cancelled explicitly.
+        owns = getattr(supervisor, "owns", None) if supervisor is not None else None
         operation_tasks = list(getattr(self, "redaction_operation_tasks", set()))
+        unmanaged_tasks = []
+        seen_task_ids: set[int] = set()
         for task in (
             self._rtbl_refresh_task,
             self.unban_task,
@@ -418,12 +422,45 @@ class BanBot(
             self.redaction_cleanup_task,
             *operation_tasks,
         ):
-            if task and not task.done():
-                task.cancel()
+            if task is None or task.done():
+                continue
+            if callable(owns) and owns(task):
+                continue
+            task_id = id(task)
+            if task_id in seen_task_ids:
+                continue
+            seen_task_ids.add(task_id)
+            task.cancel()
+            unmanaged_tasks.append(task)
+
+        asyncio_tasks = [task for task in unmanaged_tasks if isinstance(task, asyncio.Future)]
+        if asyncio_tasks:
+            done, pending = await asyncio.wait(asyncio_tasks, timeout=5.0)
+            for task in done:
                 try:
-                    await task
+                    task.result()
                 except asyncio.CancelledError:
                     log.debug("Background task cancelled during shutdown")
+                except Exception as exc:  # noqa: BLE001 - cleanup boundary
+                    log.debug("Background task raised during shutdown", exc_info=exc)
+            for task in pending:
+                get_name = getattr(task, "get_name", None)
+                task_name = get_name() if callable(get_name) else "unknown"
+                log.warning(
+                    "Unsupervised background task did not stop within 5.0s: %s",
+                    task_name,
+                )
+
+        # Non-asyncio task doubles are only used by lightweight embedders/tests;
+        # real BanBot workers are asyncio Tasks and therefore take the bounded
+        # path above.
+        for task in unmanaged_tasks:
+            if isinstance(task, asyncio.Future):
+                continue
+            try:
+                await task
+            except asyncio.CancelledError:
+                log.debug("Background task cancelled during shutdown")
 
     async def shutdown(self) -> None:
         """Flush state and stop process-scoped resources exactly once."""

@@ -54,7 +54,7 @@ Explicit full output remains available regardless of mode:
 | --- | --- |
 | `!help [all\|page\|last]` / `!help <command>` | Shows admin help or focused command help |
 | `!status` | Shows health, uptime, rooms, bans, DB, RTBL, workers, alerts, reconnect state, and all protection states |
-| `!tasks [all\|failed]` | Shows supervised background workers, restart counts, terminal failures, and runtime/systemd watchdog health |
+| `!tasks [all\|failed]` | Shows supervised background workers, restart/backoff state, restart counts, terminal failures, and runtime/systemd watchdog health |
 | `!config [all\|page\|last]` | Shows active configuration; secrets are hidden |
 | `!config show [all\|page\|last]` | Same as `!config`, explicit show form |
 | `!config search/find <query>` | Searches config option names and displayed values |

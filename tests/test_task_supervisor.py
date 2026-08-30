@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -61,3 +62,41 @@ async def test_resilient_service_exposes_terminal_failure():
     assert info.status == "failed"
     assert info.restart_count == 1
     assert "exceeded restart limit" in (info.last_error or "")
+
+
+@pytest.mark.asyncio
+async def test_resilient_service_reports_restart_backoff(monkeypatch):
+    supervisor = TaskSupervisor()
+    sleeping = asyncio.Event()
+    release = asyncio.Event()
+
+    async def controlled_sleep(delay: float) -> None:
+        assert delay == 1.0
+        sleeping.set()
+        await release.wait()
+
+    monkeypatch.setattr(asyncio, "sleep", controlled_sleep)
+
+    async def worker() -> None:
+        raise RuntimeError("boom")
+
+    task = supervisor.create_resilient(
+        "_core",
+        worker,
+        name="backoff-worker",
+        max_restarts=1,
+    )
+    await asyncio.wait_for(sleeping.wait(), timeout=1)
+
+    info = supervisor.snapshot(include_done=False)[0]
+    assert info.status == "restarting"
+    assert info.restart_count == 1
+    assert info.restart_at is not None
+    assert info.restart_at >= time.time()
+    assert "RuntimeError: boom" in (info.last_error or "")
+    assert supervisor.owns(task) is True
+    assert supervisor.stale_services(0) == []
+
+    release.set()
+    with pytest.raises(RuntimeError, match="exceeded restart limit"):
+        await task

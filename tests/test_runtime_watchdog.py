@@ -64,3 +64,38 @@ async def test_systemd_watchdog_forces_runtime_worker_even_if_config_disabled(mo
 
     await watchdog.stop()
     assert watchdog.state.worker_running is False
+
+
+@pytest.mark.asyncio
+async def test_watchdog_stop_uses_supervisor_bounded_cancellation(monkeypatch):
+    class DummyTask:
+        def done(self):
+            return False
+
+        def cancel(self):  # pragma: no cover - supervisor owns cancellation
+            raise AssertionError("watchdog must not cancel a supervisor-owned task directly")
+
+    task = DummyTask()
+
+    class Supervisor:
+        def __init__(self):
+            self.calls = []
+
+        def owns(self, candidate):
+            return candidate is task
+
+        async def cancel_group(self, group, *, timeout):
+            self.calls.append((group, timeout))
+            return 1
+
+    supervisor = Supervisor()
+    bot = SimpleNamespace(tasks=supervisor)
+    watchdog = runtime_watchdog.RuntimeWatchdog(bot)
+    watchdog.task = task
+    watchdog.state.worker_running = True
+    monkeypatch.setattr(runtime_watchdog, "sd_notify", lambda _payload: True)
+
+    await watchdog.stop()
+
+    assert supervisor.calls == [("_runtime", 5.0)]
+    assert watchdog.state.worker_running is False

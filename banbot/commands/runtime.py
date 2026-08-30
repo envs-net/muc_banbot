@@ -4,6 +4,8 @@ import asyncio
 import inspect
 import logging
 import os
+import time
+
 from .._version import __version__
 from .context import commands_module_attr
 
@@ -76,23 +78,30 @@ class CommandRuntimeMixin:
 
         all_infos = list(snapshot(include_done=True))
         running_count = sum(info.status == "running" for info in all_infos)
+        restarting_count = sum(info.status == "restarting" for info in all_infos)
         failed_count = sum(info.status == "failed" for info in all_infos)
-        other_count = len(all_infos) - running_count - failed_count
+        other_count = len(all_infos) - running_count - restarting_count - failed_count
 
         lines = [
             "🧵 Background Tasks: "
-            f"{running_count} running, {failed_count} failed, {other_count} other"
+            f"{running_count} running, {restarting_count} restarting, "
+            f"{failed_count} failed, {other_count} other"
         ]
 
         if task_infos:
             for info in task_infos:
                 icon = {
                     "running": "✅",
+                    "restarting": "🔄",
                     "failed": "❌",
                     "done": "☑️",
                     "cancelled": "⏹️",
                 }.get(info.status, "ℹ️")
                 detail = f"{icon} {info.name} — {info.status} • restarts: {info.restart_count}"
+                restart_at = getattr(info, "restart_at", None)
+                if info.status == "restarting" and restart_at is not None:
+                    restart_in = max(0.0, float(restart_at) - time.time())
+                    detail += f" • retry in: {restart_in:.1f}s"
                 if info.last_error:
                     detail += f" • last error: {info.last_error}"
                 lines.append(detail)

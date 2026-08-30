@@ -330,10 +330,20 @@ event-loop lag, exposes state to `!status`, and feeds systemd's watchdog when
 the systemd heartbeat instead of falsely reporting health. `READY=1` is sent
 only after the complete startup sequence succeeds.
 
-The supervisor records worker restart counts and terminal failures so `!status`
-can surface degraded background services even when the main XMPP loop is still
-running. `!tasks`, `!tasks all`, and `!tasks failed` provide the detailed
-operator-facing worker/watchdog view.
+The supervisor records worker restart counts, active restart/backoff state, and
+terminal failures so `!status` can surface degraded background services even
+when the main XMPP loop is still running. `!tasks`, `!tasks all`, and
+`!tasks failed` provide the detailed operator-facing worker/watchdog view,
+including the remaining retry delay while a resilient worker is backing off.
+
+Reconnect-scoped worker cancellation is bounded. Supervisor-owned tasks are
+drained once by the supervisor and are not awaited a second time by the legacy
+compatibility path; unsupervised operation tasks also use a bounded asyncio
+drain. This prevents a cancellation-resistant worker from hanging shutdown.
+
+`DatabaseMixin.setup_db()` closes an existing SQLite connection before opening
+a replacement on a new XMPP session, preventing reconnect cycles from leaking
+aiosqlite worker threads or file descriptors.
 
 ## Backups, Import, and Restore
 

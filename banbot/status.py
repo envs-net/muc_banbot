@@ -80,7 +80,15 @@ class StatusMixin:
             if failed_tasks:
                 preview = ", ".join(info.name for info in failed_tasks[:5])
                 problems.append(f"Supervised background task failure(s): {preview}")
-            restarted = [info for info in supervised if info.restart_count > 0]
+            restarting_tasks = [info for info in supervised if info.status == "restarting"]
+            if restarting_tasks:
+                preview = ", ".join(info.name for info in restarting_tasks[:5])
+                warnings.append(f"Background worker restart/backoff in progress: {preview}")
+            restarted = [
+                info
+                for info in supervised
+                if info.restart_count > 0 and info.status != "restarting"
+            ]
             if restarted:
                 preview = ", ".join(
                     f"{info.name}×{info.restart_count}" for info in restarted[:5]

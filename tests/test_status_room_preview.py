@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -116,3 +117,35 @@ async def test_status_reuses_room_list_lines_and_keeps_ten_room_preview(monkeypa
     assert "room11@conference.example.test" not in body
     assert "... and 2 more." in body
     assert "Use !room list [page] to view all protected rooms." in body
+
+
+@pytest.mark.asyncio
+async def test_status_reports_current_worker_restart_backoff_without_duplicate_history(monkeypatch):
+    bot = StatusRoomPreviewBot()
+    bot.tasks = SimpleNamespace(
+        snapshot=lambda include_done=False: [
+            SimpleNamespace(
+                name="unban-worker",
+                status="restarting",
+                restart_count=1,
+            )
+        ]
+    )
+    status_module = importlib.import_module("banbot.status")
+
+    class FakeProcess:
+        def memory_info(self):
+            return type("Mem", (), {"rss": 42 * 1024 * 1024})()
+
+        def cpu_percent(self, interval):
+            return 0.5
+
+    monkeypatch.setattr(status_module.psutil, "Process", lambda pid: FakeProcess())
+    monkeypatch.setattr(status_module.psutil, "getloadavg", lambda: (0.1, 0.2, 0.3))
+    monkeypatch.setattr(status_module.psutil, "cpu_count", lambda: 8)
+
+    await bot._cmd_status("admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+
+    assert "Background worker restart/backoff in progress: unban-worker" in body
+    assert "Background worker restart(s) observed: unban-worker×1" not in body

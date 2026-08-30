@@ -107,8 +107,30 @@ class RuntimeWatchdog:
         task = self.task
         self.task = None
         if task is not None and not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            supervisor = getattr(self.bot, "tasks", None)
+            owns = getattr(supervisor, "owns", None) if supervisor is not None else None
+            if callable(owns) and owns(task):
+                await supervisor.cancel_group("_runtime", timeout=5.0)
+            else:
+                task.cancel()
+                if isinstance(task, asyncio.Future):
+                    done, pending = await asyncio.wait({task}, timeout=5.0)
+                    for finished in done:
+                        try:
+                            finished.result()
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception as exc:  # noqa: BLE001 - cleanup boundary
+                            log.debug("Runtime watchdog raised while stopping", exc_info=exc)
+                    if pending:
+                        log.warning("Runtime watchdog did not stop within 5.0s")
+                else:
+                    # Compatibility for lightweight embedders/tests. Production
+                    # watchdog workers are asyncio Tasks and use the bounded path.
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        log.debug("Runtime watchdog cancelled during shutdown")
         self.state.worker_running = False
         sd_notify("STOPPING=1\nSTATUS=muc_banbot shutting down")
 

@@ -38,6 +38,19 @@ class DatabaseMixin:
         if create_startup_backup and hasattr(self, "create_startup_database_snapshot"):
             await self.create_startup_database_snapshot()
 
+        # session_start runs again after XMPP reconnects. Always close the
+        # previous SQLite connection before replacing self.db so its worker
+        # thread/file descriptors cannot accumulate across reconnect cycles.
+        existing_db = getattr(self, "db", None)
+        if existing_db is not None:
+            try:
+                await existing_db.commit()
+            finally:
+                try:
+                    await existing_db.close()
+                finally:
+                    self.db = None
+
         self.db = await aiosqlite.connect(DB_FILE)
         await self.db.execute("PRAGMA foreign_keys = ON")
 

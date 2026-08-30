@@ -226,3 +226,18 @@ async def test_setup_db_deduplicates_full_and_bare_jid_bans(temp_db_path):
         assert rows == [("user@example.org", "user@example.org", "newnick", 0, "new", "permanent")]
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_db_closes_previous_connection_before_reconnect(temp_db_path):
+    bot = DbBot()
+    await bot.setup_db(create_startup_backup=False)
+    first_db = bot.db
+
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        assert bot.db is not first_db
+        with pytest.raises(ValueError, match="no active connection"):
+            await first_db.execute("SELECT 1")
+    finally:
+        await bot.db.close()
