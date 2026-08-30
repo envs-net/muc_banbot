@@ -43,6 +43,29 @@ def _config_candidates() -> tuple[Path, ...]:
     return tuple(unique)
 
 
+def _exec_config_file(module: ModuleType, config_path: Path) -> None:
+    """Execute config source directly from *config_path* into *module*.
+
+    Reading and compiling the source explicitly avoids importlib's bytecode
+    cache lookup. That matters for runtime reloads where an operator may edit a
+    same-sized config twice within one filesystem timestamp tick.
+    """
+    spec = importlib.util.spec_from_file_location("config", config_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load config module from {config_path}")
+
+    module.__file__ = str(config_path)
+    module.__loader__ = spec.loader
+    module.__package__ = spec.parent
+    module.__spec__ = spec
+    if spec.cached is not None:
+        module.__cached__ = spec.cached
+
+    source = config_path.read_bytes()
+    code = compile(source, str(config_path), "exec")
+    exec(code, module.__dict__)
+
+
 def load_config_module() -> ModuleType:
     """Load and return the external config module.
 
@@ -69,18 +92,85 @@ def load_config_module() -> ModuleType:
         exc.name = "config"
         raise exc
 
-    spec = importlib.util.spec_from_file_location("config", config_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load config module from {config_path}")
-
-    module = importlib.util.module_from_spec(spec)
+    module = ModuleType("config")
     sys.modules["config"] = module
     try:
-        spec.loader.exec_module(module)
+        _exec_config_file(module, config_path)
     except BaseException:
         if sys.modules.get("config") is module:
             sys.modules.pop("config", None)
         raise
+    return module
+
+
+def _active_config_path(module: ModuleType | None = None) -> Path:
+    """Return the exact config file backing the active module.
+
+    Reloads must not rediscover ``config`` through ``sys.path``: hardened
+    deployments intentionally keep ``/etc/muc_banbot`` outside the Python
+    import path. Prefer the already-loaded module's file and fall back to the
+    normal startup resolution only when no module path is available.
+    """
+    if module is not None:
+        module_file = getattr(module, "__file__", None)
+        if module_file:
+            path = Path(module_file).expanduser()
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            return path.resolve()
+
+    candidates = _config_candidates()
+    if os.environ.get(CONFIG_ENV_VAR):
+        candidate = candidates[0]
+        if candidate.is_file():
+            return candidate
+    else:
+        candidate = next((path for path in candidates if path.is_file()), None)
+        if candidate is not None:
+            return candidate
+
+    attempted = ", ".join(str(path) for path in candidates)
+    exc = ModuleNotFoundError(f"No module named 'config' (looked in: {attempted})")
+    exc.name = "config"
+    raise exc
+
+
+def reload_config_module(module: ModuleType | None = None) -> ModuleType:
+    """Reload ``config`` from its exact active file while preserving identity.
+
+    ``importlib.reload()`` asks Python's import machinery to find the module by
+    name again. That fails for the hardened layout because
+    ``/etc/muc_banbot`` is deliberately not on ``sys.path``. Executing the
+    loader from an explicit file spec keeps all existing ``import config``
+    references valid and also restores the previous module dictionary if the
+    new file raises while loading.
+    """
+    if module is None:
+        module = sys.modules.get("config")
+    if module is None:
+        return load_config_module()
+
+    builtins.true = True
+    builtins.false = False
+    config_path = _active_config_path(module)
+    if not config_path.is_file():
+        exc = ModuleNotFoundError(
+            f"No module named 'config' (configured file does not exist: {config_path})"
+        )
+        exc.name = "config"
+        raise exc
+
+    previous = module.__dict__.copy()
+    sys.modules["config"] = module
+
+    try:
+        _exec_config_file(module, config_path)
+    except BaseException:
+        module.__dict__.clear()
+        module.__dict__.update(previous)
+        sys.modules["config"] = module
+        raise
+
     return module
 
 
@@ -103,6 +193,7 @@ def format_config_import_error(exc: BaseException) -> str:
             if Path(frame_filename).name == "config.py" or frame_path in candidate_paths:
                 filename = frame_filename
                 lineno = tb.tb_lineno
+                linecache.checkcache(frame_filename)
                 text = linecache.getline(frame_filename, lineno).strip() or None
             tb = tb.tb_next
 
@@ -123,12 +214,18 @@ def format_config_import_error(exc: BaseException) -> str:
         lines.append("This bot also accepts lowercase true/false.")
 
     if isinstance(exc, ModuleNotFoundError) and getattr(exc, "name", None) == "config":
-        lines.append("Hint: config.py is missing from the working directory or source checkout.")
-        lines.append("Create it from the sample config first:")
-        lines.append("  cp config_sample.py config.py")
-        lines.append("Then edit config.py and start the bot again.")
-        lines.append(
-            f"Optional override: {CONFIG_ENV_VAR}=/absolute/path/to/config.py."
-        )
+        configured_path = os.environ.get(CONFIG_ENV_VAR)
+        if configured_path:
+            lines.append(f"Hint: the configured config file could not be loaded: {configured_path}")
+            lines.append("Check that the file exists and is readable by the BanBot service user.")
+            lines.append(f"Current override: {CONFIG_ENV_VAR}={configured_path}")
+        else:
+            lines.append("Hint: config.py is missing from the working directory or source checkout.")
+            lines.append("Create it from the sample config first:")
+            lines.append("  cp config_sample.py config.py")
+            lines.append("Then edit config.py and start the bot again.")
+            lines.append(
+                f"Optional override: {CONFIG_ENV_VAR}=/absolute/path/to/config.py."
+            )
 
     return "\n".join(lines)

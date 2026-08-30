@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import importlib
 import logging
 import os
 import pprint
@@ -12,7 +11,7 @@ from typing import Any
 
 import config
 
-from ..config_loader import format_config_import_error
+from ..config_loader import format_config_import_error, reload_config_module
 from ..locks import database_file_lock
 
 log = logging.getLogger(__name__)
@@ -284,14 +283,14 @@ class ConfigRuntimeMixin:
 
         try:
             self.update_config_file_assignment(key, new_value)
-            importlib.reload(config)
+            reload_config_module(config)
             self.apply_runtime_config()
             await self.update_vcard()
         except Exception as exc:
             rollback_error: Exception | None = None
             try:
                 self._write_config_text_atomic(config_path, original_config_text)
-                importlib.reload(config)
+                reload_config_module(config)
                 self.apply_runtime_config()
             except Exception as rollback_exc:
                 rollback_error = rollback_exc
@@ -347,7 +346,7 @@ class ConfigRuntimeMixin:
         previous_module_values = {key: getattr(config, key, None) for key in restore_keys}
 
         try:
-            importlib.reload(config)
+            reload_config_module(config)
         except Exception as e:
             # Keep the last known good config module values for code paths that read config directly.
             self._restore_config_values(previous_module_values)

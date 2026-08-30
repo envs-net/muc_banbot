@@ -195,6 +195,8 @@ ReadWritePaths=/etc/muc_banbot /var/lib/muc_banbot
 
 Additional hardening includes `PrivateTmp`, `PrivateDevices`, kernel/control
 group protection, `NoNewPrivileges`, empty capability sets and `UMask=0077`.
+The unit's `EnvironmentFile=-/etc/default/muc_banbot` is optional: the leading
+`-` tells systemd to continue normally when that file does not exist.
 `PYTHONDONTWRITEBYTECODE=1` prevents imports/reloads of `/etc/muc_banbot/config.py`
 from creating an `__pycache__` directory there. An old cache left by an earlier
 unit can be removed once with `sudo rm -rf /etc/muc_banbot/__pycache__`.

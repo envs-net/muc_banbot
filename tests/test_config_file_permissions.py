@@ -119,7 +119,7 @@ async def test_runtime_config_apply_failure_restores_previous_file(tmp_path, mon
         return module
 
     monkeypatch.setattr(config, "LOG_LEVEL", "INFO", raising=False)
-    monkeypatch.setattr("banbot.config.runtime.importlib.reload", fake_reload)
+    monkeypatch.setattr("banbot.config.runtime.reload_config_module", fake_reload)
     writer = FailingApplyWriter()
 
     ok, message = await writer.set_runtime_config_value(
