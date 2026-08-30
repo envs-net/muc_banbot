@@ -109,7 +109,7 @@ class RuntimeWatchdog:
         if task is not None and not task.done():
             supervisor = getattr(self.bot, "tasks", None)
             owns = getattr(supervisor, "owns", None) if supervisor is not None else None
-            if callable(owns) and owns(task):
+            if supervisor is not None and callable(owns) and owns(task):
                 await supervisor.cancel_group("_runtime", timeout=5.0)
             else:
                 task.cancel()

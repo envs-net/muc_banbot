@@ -99,4 +99,4 @@ async def test_resilient_service_reports_restart_backoff(monkeypatch):
 
     release.set()
     with pytest.raises(RuntimeError, match="exceeded restart limit"):
-        await task
+        await asyncio.wait_for(task, timeout=1.0)
