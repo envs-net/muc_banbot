@@ -457,7 +457,6 @@ async def test_failed_restore_rolls_back_database_config_and_omemo(
     tmp_path,
     monkeypatch,
 ):
-    _db_path, _backup_dir = backup_config
     backups_module = importlib.import_module("banbot.backups")
 
     config_path = pathlib.Path(backups_module.config.__file__)
