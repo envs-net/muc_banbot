@@ -469,7 +469,7 @@ async def test_unban_all_removes_db_cache_applies_unban_and_retracts(temp_db_pat
         await bot.unban_all("user@example.org", issuer="admin@example.test")
 
         assert "user@example.org" not in bot.ban_index_by_jid
-        assert bot.applied_unbans == [("room@conference.example.test", "user@example.org", "nick", None, True)]
+        assert bot.applied_unbans == [("room@conference.example.test", "user@example.org", "nick", None, False)]
         assert bot.retracted == [("user@example.org", None)]
         assert any("♻️ Unbanned user@example.org" in msg["mbody"] for msg in bot.sent)
     finally:
@@ -711,5 +711,119 @@ async def test_unban_worker_keeps_expired_rows_while_disconnected(temp_db_path, 
         ) as cursor:
             row = await cursor.fetchone()
         assert row == (until,)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_manual_unban_retains_ban_when_any_room_unban_fails(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+
+    bot = await make_bot()
+    bot.protected_rooms = {
+        "one@conference.example.test",
+        "two@conference.example.test",
+    }
+    try:
+        await bot.upsert_ban_db(
+            "user@example.org",
+            "User",
+            0,
+            "admin@example.test",
+            "spam",
+        )
+        await bot.load_bans_from_db()
+
+        calls = []
+
+        async def partial_unban(room, ban_jid, ban_nick, domain=None, *, announce=True):
+            calls.append((room, ban_jid, ban_nick, domain, announce))
+            return room != "two@conference.example.test"
+
+        bot.apply_unban_to_room = partial_unban
+
+        removed = await bot.unban_all("user@example.org", issuer="admin@example.test")
+
+        assert removed is False
+        assert {call[0] for call in calls} == bot.protected_rooms
+        assert all(call[-1] is False for call in calls)
+        async with bot.db.execute(
+            "SELECT target FROM bans WHERE target_type='jid' AND target=?",
+            ("user@example.org",),
+        ) as cursor:
+            assert await cursor.fetchone() == ("user@example.org",)
+        assert bot.retracted == []
+        assert "Unban not completed" in bot.sent[-1]["mbody"]
+        assert not any(message["mbody"].startswith("♻️ Unbanned") for message in bot.sent)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_unban_dotted_nick_falls_back_when_no_domain_ban_exists(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+
+    bot = await make_bot()
+    bot.allow_user_cmds = False
+    try:
+        await bot.upsert_ban_db(
+            None,
+            "john.doe",
+            0,
+            "admin@example.test",
+            "nick spam",
+        )
+        await bot.load_bans_from_db()
+
+        removed = await bot.unban_all("john.doe", issuer="admin@example.test")
+
+        assert removed is True
+        async with bot.db.execute(
+            "SELECT 1 FROM bans WHERE target_type='nick' AND target='john.doe'"
+        ) as cursor:
+            assert await cursor.fetchone() is None
+        assert bot.applied_unbans == [
+            ("room@conference.example.test", None, "john.doe", None, False)
+        ]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_unban_plain_domain_prefers_existing_domain_over_same_named_nick(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+
+    bot = await make_bot()
+    bot.allow_user_cmds = False
+    try:
+        await bot.upsert_ban_db(
+            "*.example.org",
+            None,
+            0,
+            "admin@example.test",
+            "domain spam",
+        )
+        await bot.upsert_ban_db(
+            None,
+            "example.org",
+            0,
+            "admin@example.test",
+            "same-named nick",
+        )
+        await bot.load_bans_from_db()
+
+        removed = await bot.unban_all("example.org", issuer="admin@example.test")
+
+        assert removed is True
+        async with bot.db.execute(
+            "SELECT target_type FROM bans WHERE target='example.org' ORDER BY target_type"
+        ) as cursor:
+            assert await cursor.fetchall() == [("nick",)]
+        assert bot.applied_unbans == [
+            ("room@conference.example.test", None, None, "example.org", False)
+        ]
     finally:
         await bot.db.close()

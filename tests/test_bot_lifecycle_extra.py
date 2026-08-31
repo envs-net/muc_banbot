@@ -366,6 +366,8 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     bot.redaction_enabled = False
     bot.announce_startup = True
     bot.reconnecting = True
+    reconnect_event = bot._get_reconnect_success_event()
+    assert reconnect_event.is_set() is False
 
     calls = []
 
@@ -414,6 +416,7 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     assert "setup_db:False" in calls
     assert bot.reconnecting is False
     assert bot.last_reconnect_time is not None
+    assert reconnect_event.is_set() is True
     assert bot.sent
     assert "Bot has reconnected" in bot.sent[-1]["mbody"]
     assert "Bot has restarted" not in bot.sent[-1]["mbody"]
@@ -734,3 +737,53 @@ async def test_start_is_ignored_once_shutdown_has_begun(monkeypatch):
     await bot.start(None)
 
     assert called is False
+
+
+@pytest.mark.asyncio
+async def test_reconnect_success_is_not_signalled_when_late_startup_stage_fails(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    bot.protected_rooms = set()
+    bot.registered_rooms = set()
+    bot.plugin = {"xep_0045": FakeMucPlugin()}
+    _install_successful_join_stub(bot)
+    bot.version_check_enabled = False
+    bot.version_check_url = None
+    bot.redaction_enabled = False
+    bot.announce_startup = False
+    bot.reconnecting = True
+    reconnect_event = bot._get_reconnect_success_event()
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def fail_rtbl_publish():
+        raise RuntimeError("forced late startup failure")
+
+    bot.setup_db = noop
+    bot.prepare_startup_version_notice = noop
+    bot.load_pending_room_invites = noop
+    bot.load_bans_from_db = noop
+    bot.cleanup_old_audit_logs = noop
+    bot.setup_ignorelist = noop
+    bot.load_protections = noop
+    bot.get_roster = noop
+    bot.wait_for_occupants = noop
+    bot.check_bot_admin_rights = noop
+    bot.sync_admins = noop
+    bot.sync_bans_startup = noop
+    bot.setup_rtbl = noop
+    bot.setup_rtbl_publish = fail_rtbl_publish
+    bot.send_presence = lambda: None
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(RuntimeError, match="forced late startup failure"):
+        await bot.start(None)
+
+    assert reconnect_event.is_set() is False
+    assert bot.reconnecting is True
+    assert bot.last_reconnect_time is None

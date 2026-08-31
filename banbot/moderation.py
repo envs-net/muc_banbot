@@ -728,6 +728,7 @@ class ModerationMixin:
 
             # --- Step 2: Restore role if online ---
             room_occupants = self.occupants.get(room, {})
+            nick_role_restore_failed = False
             for nick, info in room_occupants.items():
                 jid_in_room = info.get("jid")
                 jid_bare = self.bare_jid(jid_in_room) if jid_in_room else ""
@@ -738,6 +739,7 @@ class ModerationMixin:
                     or (ban_nick and nick.lower() == ban_nick)
                     or matches_domain
                 ):
+                    restored = False
                     for attempt in range(2):
                         try:
                             async with self.muc_write_semaphore:
@@ -747,6 +749,7 @@ class ModerationMixin:
                                     role="participant",
                                 )
                             log.info("✅ Participant role restored for %s in %s", nick, room)
+                            restored = True
                             break
                         except IqTimeout:
                             log.warning("Timeout restoring role for %s in %s, retrying...", nick, room)
@@ -755,6 +758,14 @@ class ModerationMixin:
                         except IqError as exc:
                             log.debug("IqError restoring role for %s in %s: %s", nick, room, exc)
                             break
+                    # Nick-only bans have no persistent affiliation to clear;
+                    # restoring the matching occupant role is the actual
+                    # server-side unban operation, so report its failure.
+                    if ban_nick and not outcast_target and not restored:
+                        nick_role_restore_failed = True
+
+            if nick_role_restore_failed:
+                return False
 
             # --- Step 3: Optional public notification ---
             if announce and room != ADMIN_ROOM and self.allow_user_cmds:
@@ -804,99 +815,138 @@ class ModerationMixin:
 
         identifier = identifier.strip().lower()
 
-        is_domain_ban = identifier.startswith("*.") or looks_like_domain(identifier)
-        is_jid = "@" in identifier
-        domain = (
-            identifier[2:].strip(".")
-            if identifier.startswith("*.")
-            else identifier.strip(".")
-            if is_domain_ban
-            else None
-        )
+        async def fetch_exact(target_type: str, target: str):
+            async with self.db.execute(
+                "SELECT jid, nick, until, issuer "
+                "FROM bans WHERE target_type = ? AND target = ?",
+                (target_type, target),
+            ) as cursor:
+                return await cursor.fetchone()
 
-        if is_domain_ban:
+        row = None
+        target_type = ""
+        target = ""
+        domain: str | None = None
+        is_jid = "@" in identifier
+
+        if identifier.startswith("*."):
+            domain = identifier[2:].strip(".")
             wildcard_identifier = f"*.{domain}"
             is_valid, error_msg = validate_domain_ban(wildcard_identifier)
             if not is_valid:
-                await self.bot_send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
+                await self.bot_send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=error_msg,
+                    mtype="groupchat",
+                )
                 return False
             target_type = "domain"
             target = domain
+            row = await fetch_exact(target_type, target)
         elif is_jid:
             target_type = "jid"
             target = self.bare_jid(identifier)
+            row = await fetch_exact(target_type, target)
         else:
-            target_type = "nick"
-            target = identifier
+            # A dotted bare value is ambiguous: it may be an existing domain
+            # ban (``example.org``) or a valid nick (``john.doe``). Prefer an
+            # exact domain ban, then fall back to an exact nick ban.
+            if looks_like_domain(identifier):
+                domain_candidate = identifier.strip(".")
+                row = await fetch_exact("domain", domain_candidate)
+                if row:
+                    target_type = "domain"
+                    target = domain_candidate
+                    domain = domain_candidate
 
-        row = None
-        async with self.db.execute(
-            "SELECT jid, nick, until, issuer FROM bans WHERE target_type = ? AND target = ?",
-            (target_type, target),
-        ) as cur:
-            row = await cur.fetchone()
+            if not row:
+                target_type = "nick"
+                target = identifier
+                domain = None
+                row = await fetch_exact(target_type, target)
 
-        if not row and not is_domain_ban and not is_jid:
-            async with self.db.execute("SELECT jid, nick, until, issuer FROM bans WHERE target_type = 'jid'") as cursor:
-                async for jid_db, nick_db, until_db, issuer_db in cursor:
-                    if jid_db and self.bare_jid(jid_db).split("@", 1)[0].lower() == identifier:
-                        row = (jid_db, nick_db, until_db, issuer_db)
-                        target_type = "jid"
-                        target = self.bare_jid(jid_db)
-                        break
+            if not row:
+                async with self.db.execute(
+                    "SELECT jid, nick, until, issuer "
+                    "FROM bans WHERE target_type = 'jid'"
+                ) as cursor:
+                    async for jid_db, nick_db, until_db, issuer_db in cursor:
+                        if (
+                            jid_db
+                            and self.bare_jid(jid_db).split("@", 1)[0].lower()
+                            == identifier
+                        ):
+                            row = (jid_db, nick_db, until_db, issuer_db)
+                            target_type = "jid"
+                            target = self.bare_jid(jid_db)
+                            break
 
         if not row:
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=f"❌ No ban found for {identifier}",
-                mtype="groupchat"
+                mtype="groupchat",
             )
             return False
 
-        ban_jid = row[0] if row and row[0] else None
-        ban_nick = row[1] if row and row[1] else None
-        ban_until = int(row[2] or 0) if row else 0
-        ban_issuer = (row[3] or "") if row and len(row) > 3 else ""
-        is_expired_system_tempban = (
-            issuer == "system"
-            and ban_until > 0
-            and ban_until <= int(time.time())
-        )
+        ban_jid = row[0] if row[0] else None
+        ban_nick = row[1] if row[1] else None
+        ban_until = int(row[2] or 0)
+        ban_issuer = row[3] or ""
+        is_domain_ban = target_type == "domain"
+        if is_domain_ban:
+            domain = target
 
-        # For automatic expiry, clear the server-side outcasts before deleting
-        # the DB row. If XMPP drops mid-cycle or one room rejects the change,
-        # retaining the expired row lets sync identify the stale outcast as an
-        # expired tempban instead of recovering it as a permanent ban.
-        rooms_precleared = False
-        if is_expired_system_tempban:
-            if getattr(self, "reconnecting", False):
-                log.info("Deferring expired tempban removal for %s while reconnecting", identifier)
-                return False
-
-            failed_rooms: list[str] = []
-            for room in self.protected_rooms:
-                try:
-                    removed = await self.apply_unban_to_room(
-                        room,
-                        ban_jid if not is_domain_ban else None,
-                        ban_nick,
-                        domain=domain if is_domain_ban else None,
-                        announce=False,
-                    )
-                except Exception as exc:  # noqa: BLE001 - per-room XMPP boundary
-                    log.warning("Error unbanning %s in %s: %s", identifier, room, exc)
-                    removed = False
-                if removed is False:
-                    failed_rooms.append(room)
-
-            if failed_rooms:
-                log.warning(
-                    "Expired tempban %s retained in DB because room unban failed for: %s",
-                    identifier,
-                    ", ".join(sorted(failed_rooms)),
+        # Clear server-side state before deleting the authoritative DB row. A
+        # failed/partial room unban therefore keeps the ban in SQLite, allowing
+        # the next sync to repair rooms instead of recovering a stale outcast as
+        # a new permanent ban. This is used for manual and automatic unbans.
+        if getattr(self, "reconnecting", False):
+            log.info("Deferring unban for %s while reconnecting", identifier)
+            if issuer != "system":
+                await self.bot_send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=(
+                        f"❌ Unban deferred for {identifier}: XMPP reconnect is "
+                        "in progress; ban kept."
+                    ),
+                    mtype="groupchat",
                 )
-                return False
-            rooms_precleared = True
+            return False
+
+        failed_rooms: list[str] = []
+        for room in self.protected_rooms:
+            try:
+                removed = await self.apply_unban_to_room(
+                    room,
+                    ban_jid if not is_domain_ban else None,
+                    ban_nick,
+                    domain=domain if is_domain_ban else None,
+                    announce=False,
+                )
+            except Exception as exc:  # noqa: BLE001 - per-room XMPP boundary
+                log.warning("Error unbanning %s in %s: %s", identifier, room, exc)
+                removed = False
+            if removed is False:
+                failed_rooms.append(room)
+
+        if failed_rooms:
+            rooms_text = ", ".join(sorted(failed_rooms))
+            log.warning(
+                "Ban %s retained in DB because room unban failed for: %s",
+                identifier,
+                rooms_text,
+            )
+            if issuer != "system":
+                await self.bot_send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=(
+                        f"❌ Unban not completed for {identifier}; ban kept because "
+                        f"server-side removal failed in: {rooms_text}"
+                    ),
+                    mtype="groupchat",
+                )
+            return False
 
         await self.db.execute(
             "DELETE FROM bans WHERE target_type = ? AND target = ?",
@@ -908,7 +958,7 @@ class ModerationMixin:
         # Only permanent JID/domain bans are published, so only those need to
         # be retracted. Tempban expiry/unban should not touch the publish feed.
         if ban_until <= 0 and ban_issuer != "rtbl":
-            if target_type == "jid" and ban_jid and not (ban_jid or "").startswith("*."):
+            if target_type == "jid" and ban_jid and not ban_jid.startswith("*."):
                 await self.rtbl_retract_ban(jid=ban_jid, domain=None)
             elif target_type == "domain" and domain:
                 await self.rtbl_retract_ban(jid=None, domain=domain)
@@ -918,29 +968,22 @@ class ModerationMixin:
         else:
             self._remove_ban_from_cache(identifier, ban_jid=ban_jid, ban_nick=ban_nick)
 
-        if rooms_precleared:
-            # Server-side removal already succeeded everywhere. Emit the public
-            # notices only now, after the DB row has been removed, so a partial
-            # failure cannot produce repeated "unbanned" announcements.
-            if self.allow_user_cmds and ban_nick:
-                for room in self.protected_rooms:
-                    if room == ADMIN_ROOM:
-                        continue
-                    try:
-                        await self.notify_protected(room, f"♻️ Unbanned {ban_nick}")
-                    except Exception as exc:  # noqa: BLE001 - notification is best effort
-                        log.warning("Failed to announce unban for %s in %s: %s", identifier, room, exc)
-        else:
+        # Server-side removal succeeded everywhere. Emit public notices only
+        # after DB/cache state has been committed, so a failed room removal can
+        # never produce a misleading successful-unban announcement.
+        if self.allow_user_cmds and ban_nick:
             for room in self.protected_rooms:
+                if room == ADMIN_ROOM:
+                    continue
                 try:
-                    await self.apply_unban_to_room(
+                    await self.notify_protected(room, f"♻️ Unbanned {ban_nick}")
+                except Exception as exc:  # noqa: BLE001 - notification is best effort
+                    log.warning(
+                        "Failed to announce unban for %s in %s: %s",
+                        identifier,
                         room,
-                        ban_jid if not is_domain_ban else None,
-                        ban_nick,
-                        domain=domain if is_domain_ban else None,
+                        exc,
                     )
-                except Exception as exc:  # noqa: BLE001 - per-room XMPP boundary
-                    log.warning("Error unbanning %s in %s: %s", identifier, room, exc)
 
         if issuer == "system":
             msg_admin = f"♻️ Unbanned {identifier} (tempban expired)"

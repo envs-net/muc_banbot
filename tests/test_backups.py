@@ -449,3 +449,73 @@ async def test_failed_restore_reopens_database_after_runtime_db_was_closed(
     finally:
         if bot.db:
             await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_restore_rolls_back_database_config_and_omemo(
+    backup_config,
+    tmp_path,
+    monkeypatch,
+):
+    _db_path, _backup_dir = backup_config
+    backups_module = importlib.import_module("banbot.backups")
+
+    config_path = pathlib.Path(backups_module.config.__file__)
+    omemo_path = tmp_path / "omemo.json"
+    monkeypatch.setattr(backups_module.config, "OMEMO_STORAGE_FILE", str(omemo_path), raising=False)
+    monkeypatch.setattr(backups_module.config, "DB_BACKUP_INCLUDE_OMEMO", True, raising=False)
+
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        await bot.db.execute("INSERT INTO rooms(room) VALUES ('backup@conference.example.org')")
+        await bot.db.commit()
+        config_path.write_text('JID = "backup@example.org"\nPASSWORD = "backup-secret"\n', encoding="utf-8")
+        omemo_path.write_text('{"state": "backup"}\n', encoding="utf-8")
+
+        ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
+        assert ok is True
+
+        await bot.db.execute("DELETE FROM rooms")
+        await bot.db.execute("INSERT INTO rooms(room) VALUES ('current@conference.example.org')")
+        await bot.db.commit()
+        current_config = 'JID = "current@example.org"\nPASSWORD = "current-secret"\n'
+        current_omemo = '{"state": "current"}\n'
+        config_path.write_text(current_config, encoding="utf-8")
+        omemo_path.write_text(current_omemo, encoding="utf-8")
+
+        # The selected backup contains OMEMO, but the safety backup deliberately
+        # does not. Rollback must therefore use the independent pre-restore file
+        # snapshot rather than depending on DB_BACKUP_INCLUDE_OMEMO.
+        monkeypatch.setattr(backups_module.config, "DB_BACKUP_INCLUDE_OMEMO", False, raising=False)
+
+        real_reload = bot._reload_database_runtime_after_restore
+        reload_calls = 0
+
+        async def fail_first_runtime_reload():
+            nonlocal reload_calls
+            reload_calls += 1
+            if reload_calls == 1:
+                raise RuntimeError("forced runtime reload failure")
+            await real_reload()
+
+        monkeypatch.setattr(bot, "_reload_database_runtime_after_restore", fail_first_runtime_reload)
+
+        ok, message = await bot.restore_database_backup(
+            pathlib.Path(backup_path).name,
+            actor="admin@example.org",
+        )
+
+        assert ok is False
+        assert "forced runtime reload failure" in message
+        assert "Previous files were restored" in message
+        assert "Database connection/runtime state was recovered" in message
+        assert bot.db is not None
+
+        async with bot.db.execute("SELECT room FROM rooms") as cursor:
+            assert await cursor.fetchall() == [("current@conference.example.org",)]
+        assert config_path.read_text(encoding="utf-8") == current_config
+        assert omemo_path.read_text(encoding="utf-8") == current_omemo
+    finally:
+        if bot.db:
+            await bot.db.close()

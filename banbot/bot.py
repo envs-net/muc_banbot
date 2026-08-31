@@ -580,11 +580,6 @@ class BanBot(
         if not was_reconnecting:
             # First connection only
             self.bot_start_time = time.time()
-        else:
-            self.last_reconnect_time = time.time()
-            log.info("🔄 Reconnected successfully")
-            if self.reconnect_success_event is not None:
-                self.reconnect_success_event.set()
 
         self.send_presence()
         await self.get_roster()
@@ -670,24 +665,6 @@ class BanBot(
         # --- Set Bot vCard ---
         await self.update_vcard()
 
-        self.reconnecting = False
-
-        # --- Start health check worker ---
-        # Its first cycle runs immediately and retries rooms whose startup join
-        # did not produce confirmed self-presence.
-        self.health_check_task = self._start_core_service(
-            self.health_check_worker,
-            name="health-check-worker",
-        )
-
-        if was_reconnecting:
-            await self.send_operational_alert(
-                "reconnect_success",
-                "Reconnect completed",
-                "BanBot reconnected successfully and synced rooms/bans.",
-                enabled=getattr(self, "alert_on_reconnect", True),
-            )
-
         missing_rooms = sorted(
             room
             for room in managed_rooms
@@ -720,6 +697,32 @@ class BanBot(
         # remains active across XMPP reconnects.
         await self.runtime_watchdog.start()
         self.runtime_watchdog.notify_ready()
+
+        # Start the health worker only after all awaited startup stages have
+        # completed. There is deliberately no await between creating the task
+        # and clearing reconnecting, so its immediate first cycle sees the
+        # connection as healthy and can retry any failed room joins.
+        self.health_check_task = self._start_core_service(
+            self.health_check_worker,
+            name="health-check-worker",
+        )
+        self.reconnecting = False
+
+        # The reconnect loop must only stop after the entire critical startup
+        # path succeeded (DB, rooms, sync, RTBL, workers and watchdog). Setting
+        # this earlier can leave a connected but only partially initialized bot
+        # with no retry path if a later startup stage raises.
+        if was_reconnecting:
+            self.last_reconnect_time = time.time()
+            log.info("🔄 Reconnected successfully")
+            if self.reconnect_success_event is not None:
+                self.reconnect_success_event.set()
+            await self.send_operational_alert(
+                "reconnect_success",
+                "Reconnect completed",
+                "BanBot reconnected successfully and synced rooms/bans.",
+                enabled=getattr(self, "alert_on_reconnect", True),
+            )
 
         if missing_rooms:
             log.warning(

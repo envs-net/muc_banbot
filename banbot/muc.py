@@ -13,6 +13,8 @@ from .utils import domain_matches, looks_like_domain
 
 log = logging.getLogger(__name__)
 
+_RECONNECT_STARTUP_TIMEOUT_SECONDS = 120
+
 
 class MucMixin(BotOccupantMixin):
     def _get_reconnect_success_event(self) -> asyncio.Event:
@@ -312,11 +314,17 @@ class MucMixin(BotOccupantMixin):
                     continue
 
                 try:
-                    await asyncio.wait_for(success_event.wait(), timeout=30)
+                    await asyncio.wait_for(
+                        success_event.wait(),
+                        timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
+                    )
                     log.info("🔄 Reconnect completed")
                     return
                 except asyncio.TimeoutError:
-                    log.warning("Reconnect did not complete within 30s; retrying")
+                    log.warning(
+                        "Reconnect startup did not complete within %ss; retrying",
+                        _RECONNECT_STARTUP_TIMEOUT_SECONDS,
+                    )
                     self.reconnecting = True
                     delay = min(delay * 2, 60)
 

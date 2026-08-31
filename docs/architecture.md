@@ -101,7 +101,7 @@ set vCard and send startup/update notifications
 start/confirm process-scoped runtime watchdog and notify systemd READY=1
 ```
 
-Reconnects reuse the same startup sequence, but preserve the process uptime and emit reconnect-specific alerts. Reconnect-scoped core workers are cancelled before replacements are created. The process-scoped runtime watchdog remains active across XMPP reconnects.
+Reconnects reuse the same startup sequence, but preserve the process uptime and emit reconnect-specific alerts. Reconnect-scoped core workers are cancelled before replacements are created. A reconnect is signalled as successful only after the complete critical startup path (DB, room joins/sync, RTBL, workers and watchdog) has completed. The process-scoped runtime watchdog remains active across XMPP reconnects.
 
 ## MUC Join and Presence Model
 
@@ -207,7 +207,7 @@ ban_state_lock
 
 The administrator acknowledgement is sent as soon as the local ban is safely committed. Potentially slow room, PubSub, and bulk-redaction network operations are not allowed to delay that acknowledgement. Room enforcement has priority over auto-redaction traffic, and per-room writes remain bounded by the shared MUC write semaphore.
 
-`banbot.moderation` owns applying and removing bans in rooms and the tempban expiry worker. `banbot.sync` reconciles persisted bans with room affiliation state after startup, reconnects, manual syncs, and room recovery. `banbot.ban_queries` serves list, search, history, details, and edit operations.
+`banbot.moderation` owns applying and removing bans in rooms and the tempban expiry worker. `banbot.sync` reconciles persisted bans with room affiliation state after startup, reconnects, manual syncs, and room recovery. `banbot.ban_queries` serves list, search, history, details, and edit operations. Manual and automatic unbans keep the database row until server-side removal succeeds in every protected room, so a partial failure cannot be mistaken for a completed unban or recovered as a new permanent ban.
 
 The main in-memory indexes are:
 
@@ -356,7 +356,7 @@ aiosqlite worker threads or file descriptors.
 - `restore.py` — guarded restore and safety backup flow
 - `commands.py` — command presentation
 
-Backup and restore operations use the database/file lock. Restore/import paths must preserve consistency between the on-disk database, the active SQLite connection, and in-memory caches.
+Backup and restore operations use the database/file lock. Restore/import paths must preserve consistency between the on-disk database, the active SQLite connection, and in-memory caches. A failed restore rolls back every file it already touched (database, config and OMEMO state) to its pre-restore state before reopening runtime database state.
 
 `banbot.import_export` owns managed CSV import/export and creates safety backups before mutating imports.
 
