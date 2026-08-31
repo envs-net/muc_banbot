@@ -263,6 +263,7 @@ class BanBot(
         self.last_reconnect_time: float | None = None
         self.reconnect_task: asyncio.Task | None = None
         self.reconnect_success_event: asyncio.Event | None = None
+        self.reconnect_failure_event: asyncio.Event | None = None
         self.health_check_task: asyncio.Task | None = None
         self.unban_task: asyncio.Task | None = None
 
@@ -371,7 +372,7 @@ class BanBot(
         self.configure_omemo()
 
         # --- Event handlers ---
-        self.add_event_handler("session_start", self.start)
+        self.add_event_handler("session_start", self._handle_session_start)
 
         # Inspect raw message stanzas for direct/mediated MUC invite payloads.
         # This catches invites that do not reliably trigger a Slixmpp invite event.
