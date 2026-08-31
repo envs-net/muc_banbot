@@ -418,7 +418,8 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     assert bot.last_reconnect_time is not None
     assert reconnect_event.is_set() is True
     assert bot.sent
-    assert "Bot has reconnected" in bot.sent[-1]["mbody"]
+    assert "Reconnect completed" in bot.sent[-1]["mbody"]
+    assert "BanBot reconnected successfully" in bot.sent[-1]["mbody"]
     assert "Bot has restarted" not in bot.sent[-1]["mbody"]
 
 
