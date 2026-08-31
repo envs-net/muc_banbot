@@ -877,7 +877,8 @@ async def test_admin_dm_reply_context_does_not_leak_to_child_tasks() -> None:
             mbody="status output",
             mtype="groupchat",
         )
-        await child
+        child_result = await asyncio.wait_for(child, timeout=1)
+        assert child_result is None
 
     bot._cmd_status = status_with_child
     await bot.on_direct_message(
