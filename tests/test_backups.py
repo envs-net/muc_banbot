@@ -404,3 +404,48 @@ async def test_backup_list_paginates_and_delete_remove_aliases(backup_config):
     finally:
         if bot.db:
             await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_restore_reopens_database_after_runtime_db_was_closed(
+    backup_config,
+    monkeypatch,
+):
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        await bot.db.execute("INSERT INTO rooms(room) VALUES ('backup@conference.example.org')")
+        await bot.db.commit()
+        ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
+        assert ok is True
+
+        await bot.db.execute("DELETE FROM rooms")
+        await bot.db.execute("INSERT INTO rooms(room) VALUES ('current@conference.example.org')")
+        await bot.db.commit()
+
+        real_check = bot._check_sqlite_integrity
+        calls = 0
+
+        async def fail_only_after_file_swap(path):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                return False, "forced post-copy failure"
+            return await real_check(path)
+
+        monkeypatch.setattr(bot, "_check_sqlite_integrity", fail_only_after_file_swap)
+        ok, message = await bot.restore_database_backup(
+            pathlib.Path(backup_path).name,
+            actor="admin@example.org",
+        )
+
+        assert ok is False
+        assert "forced post-copy failure" in message
+        assert "Database connection/runtime state was recovered" in message
+        assert bot.db is not None
+        async with bot.db.execute("SELECT room FROM rooms") as cursor:
+            rows = await cursor.fetchall()
+        assert rows == [("current@conference.example.org",)]
+    finally:
+        if bot.db:
+            await bot.db.close()

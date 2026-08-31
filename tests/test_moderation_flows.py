@@ -51,8 +51,9 @@ class FlowBot(ModerationMixin, DatabaseMixin, CacheMixin):
     async def apply_ban_to_room(self, room, ban_jid, ban_nick, comment, issuer=None, announce_missing_rights=True):
         self.applied_bans.append((room, ban_jid, ban_nick, comment, issuer))
 
-    async def apply_unban_to_room(self, room, ban_jid, ban_nick, domain=None):
-        self.applied_unbans.append((room, ban_jid, ban_nick, domain))
+    async def apply_unban_to_room(self, room, ban_jid, ban_nick, domain=None, *, announce=True):
+        self.applied_unbans.append((room, ban_jid, ban_nick, domain, announce))
+        return True
 
     async def rtbl_publish_ban(self, jid=None, domain=None, comment=None):
         self.published.append((jid, domain, comment))
@@ -468,7 +469,7 @@ async def test_unban_all_removes_db_cache_applies_unban_and_retracts(temp_db_pat
         await bot.unban_all("user@example.org", issuer="admin@example.test")
 
         assert "user@example.org" not in bot.ban_index_by_jid
-        assert bot.applied_unbans == [("room@conference.example.test", "user@example.org", "nick", None)]
+        assert bot.applied_unbans == [("room@conference.example.test", "user@example.org", "nick", None, True)]
         assert bot.retracted == [("user@example.org", None)]
         assert any("♻️ Unbanned user@example.org" in msg["mbody"] for msg in bot.sent)
     finally:
@@ -605,5 +606,110 @@ async def test_unban_worker_suppresses_policy_notice_for_expired_tempban(temp_db
             await bot.unban_worker()
 
         assert calls == [("expired@example.org", "system", False)]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_expired_tempban_is_retained_if_room_unban_fails(temp_db_path):
+    bot = await make_bot()
+    try:
+        until = int(time.time()) - 1
+        await bot.upsert_ban_db(
+            "expired@example.org",
+            "Expired",
+            until,
+            "admin@example.test",
+            "spam",
+        )
+
+        async def failed_room_unban(*_args, **_kwargs):
+            return False
+
+        bot.apply_unban_to_room = failed_room_unban
+        removed = await bot.unban_all(
+            "expired@example.org",
+            issuer="system",
+            notify_policy=False,
+        )
+
+        assert removed is False
+        async with bot.db.execute(
+            "SELECT until FROM bans WHERE target_type='jid' AND target=?",
+            ("expired@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (until,)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_expired_tempban_unban_is_deferred_while_reconnecting(temp_db_path):
+    bot = await make_bot()
+    try:
+        until = int(time.time()) - 1
+        await bot.upsert_ban_db(
+            "expired@example.org",
+            "Expired",
+            until,
+            "admin@example.test",
+            "spam",
+        )
+        bot.reconnecting = True
+
+        removed = await bot.unban_all(
+            "expired@example.org",
+            issuer="system",
+            notify_policy=False,
+        )
+
+        assert removed is False
+        assert bot.applied_unbans == []
+        async with bot.db.execute(
+            "SELECT until FROM bans WHERE target_type='jid' AND target=?",
+            ("expired@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (until,)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_unban_worker_keeps_expired_rows_while_disconnected(temp_db_path, monkeypatch):
+    bot = await make_bot()
+    try:
+        until = int(time.time()) - 1
+        await bot.upsert_ban_db(
+            "expired@example.org",
+            "Expired",
+            until,
+            "admin@example.test",
+            "spam",
+        )
+        bot.reconnecting = True
+        bot.unban_check_interval = 0
+        sleeps = 0
+
+        async def stop_after_one_skip(_delay):
+            nonlocal sleeps
+            sleeps += 1
+            raise asyncio.CancelledError
+
+        moderation_module = importlib.import_module("banbot.moderation")
+        monkeypatch.setattr(moderation_module.asyncio, "sleep", stop_after_one_skip)
+
+        with pytest.raises(asyncio.CancelledError):
+            await bot.unban_worker()
+
+        assert sleeps == 1
+        assert bot.applied_unbans == []
+        async with bot.db.execute(
+            "SELECT until FROM bans WHERE target_type='jid' AND target=?",
+            ("expired@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (until,)
     finally:
         await bot.db.close()

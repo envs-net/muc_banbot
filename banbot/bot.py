@@ -226,6 +226,7 @@ class BanBot(
         self.tasks = TaskSupervisor()
         self.runtime_watchdog = RuntimeWatchdog(self)
         self._shutdown_lock = asyncio.Lock()
+        self._shutdown_in_progress = False
         self._shutdown_complete = False
         self.init_alert_state()
 
@@ -464,9 +465,37 @@ class BanBot(
 
     async def shutdown(self) -> None:
         """Flush state and stop process-scoped resources exactly once."""
+        if self._shutdown_complete:
+            return
+
+        # Set this before disconnecting/cancelling anything. Slixmpp may emit a
+        # disconnected event immediately, and that event must never schedule a
+        # fresh reconnect while process shutdown is already underway.
+        self._shutdown_in_progress = True
+
         async with self._shutdown_lock:
             if self._shutdown_complete:
                 return
+
+            reconnect_task = getattr(self, "reconnect_task", None)
+            if (
+                reconnect_task is not None
+                and not reconnect_task.done()
+                and reconnect_task is not asyncio.current_task()
+            ):
+                reconnect_task.cancel()
+                done, pending = await asyncio.wait({reconnect_task}, timeout=5.0)
+                if pending:
+                    log.warning("Reconnect task did not stop within 5.0s during shutdown")
+                elif done:
+                    try:
+                        reconnect_task.result()
+                    except asyncio.CancelledError:
+                        log.debug("Reconnect task cancelled during shutdown")
+                    except Exception as exc:  # noqa: BLE001 - shutdown boundary
+                        log.debug("Reconnect task raised during shutdown", exc_info=exc)
+                if getattr(self, "reconnect_task", None) is reconnect_task:
+                    self.reconnect_task = None
 
             try:
                 flush_redaction_index = getattr(self, "flush_redaction_index", None)
@@ -530,11 +559,15 @@ class BanBot(
         - Applies all bans in parallel
         - Starts unban worker
         """
+        if getattr(self, "_shutdown_in_progress", False):
+            log.info("Ignoring session_start while shutdown is in progress")
+            return
+
         await self.stop_background_tasks()
 
         was_reconnecting = bool(self.reconnecting)
 
-        await self.setup_db()
+        await self.setup_db(create_startup_backup=not was_reconnecting)
         await self.prepare_startup_version_notice(reconnecting=was_reconnecting)
         if self.redaction_enabled and hasattr(self, "run_redaction_cleanup_automatic"):
             await self.run_redaction_cleanup_automatic(actor="system")

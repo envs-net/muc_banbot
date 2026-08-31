@@ -78,19 +78,21 @@ class DirectMessageMixin:
 
     @asynccontextmanager
     async def _redirect_command_output_to_dm(self, reply_to: str):
-        """Temporarily redirect existing command output helpers to a DM reply."""
-        original_send = self.bot_send_message
+        """Route command output to a DM without mutating shared bot methods."""
+        set_target = getattr(self, "_set_reply_target_context", None)
+        reset_target = getattr(self, "_reset_reply_target_context", None)
 
-        async def send_to_dm(**kwargs):
-            kwargs["mto"] = reply_to
-            kwargs["mtype"] = "chat"
-            await original_send(**kwargs)
+        if not callable(set_target) or not callable(reset_target):
+            # Lightweight embedders that use DirectMessageMixin without the
+            # central MessagingMixin already pass the DM target to handlers.
+            yield
+            return
 
-        self.bot_send_message = send_to_dm
+        token = set_target(reply_to, "chat")
         try:
             yield
         finally:
-            self.bot_send_message = original_send
+            reset_target(token)
 
 
     @staticmethod

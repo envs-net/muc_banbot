@@ -683,3 +683,26 @@ async def test_sync_bans_to_rooms_distinguishes_missing_join_from_missing_rights
         assert not any("has no admin/owner rights" in msg["mbody"] for msg in bot.sent)
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_single_room_unbans_expired_domain_tempban_instead_of_recovering(temp_db_path):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): ["expired.example.test"]}
+    )
+    try:
+        await bot.upsert_ban_db(
+            "*.expired.example.test",
+            None,
+            int(time.time()) - EXPIRY_THRESHOLD_SECONDS,
+            "tester",
+            "expired domain",
+        )
+        await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+
+        assert bot.unbanned == [("expired.example.test", "system")]
+        await bot.load_bans_from_db()
+        assert "expired.example.test" not in bot.ban_index_by_domain
+    finally:
+        await bot.db.close()

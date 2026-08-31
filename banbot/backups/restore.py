@@ -13,7 +13,55 @@ from ..locks import database_mutation_locks
 
 log = logging.getLogger(__name__)
 
+
 class BackupRestoreMixin:
+
+    async def _reload_database_runtime_after_restore(self) -> None:
+        """Open the current DB file and refresh DB-backed runtime state."""
+        room_set = getattr(self, "protected_rooms", None)
+        previous_rooms = set(room_set) if isinstance(room_set, set) else None
+        if isinstance(room_set, set):
+            room_set.clear()
+
+        try:
+            if hasattr(self, "setup_db"):
+                try:
+                    await self.setup_db(create_startup_backup=False)
+                except TypeError:
+                    await self.setup_db()
+
+            if hasattr(self, "load_bans_from_db"):
+                await self.load_bans_from_db()
+            if hasattr(self, "_load_ignorelist_from_db"):
+                await self._load_ignorelist_from_db()
+            elif hasattr(self, "setup_ignorelist"):
+                await self.setup_ignorelist()
+            if hasattr(self, "_load_rtbl_subscriptions_from_db") and getattr(self, "rtbl_enabled", False):
+                await self._load_rtbl_subscriptions_from_db()
+            if hasattr(self, "load_pending_room_invites"):
+                await self.load_pending_room_invites()
+        except Exception:
+            if isinstance(room_set, set) and previous_rooms is not None:
+                room_set.clear()
+                room_set.update(previous_rooms)
+            raise
+
+    async def _recover_database_runtime_after_failed_restore(self) -> str:
+        """Best-effort recovery note after a restore failed post DB-close."""
+        try:
+            await self._reload_database_runtime_after_restore()
+        except Exception as exc:
+            db = getattr(self, "db", None)
+            if db is not None:
+                try:
+                    await db.close()
+                except Exception as close_exc:
+                    log.debug("Failed to close unusable DB connection after restore recovery error: %s", close_exc)
+                finally:
+                    self.db = None
+            log.error("Failed to reopen database after restore failure: %s", exc)
+            return f" Database recovery also failed: {exc}"
+        return " Database connection/runtime state was recovered."
 
     async def restore_database_backup(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
         """Restore a managed database backup and reload DB-backed caches."""
@@ -52,11 +100,14 @@ class BackupRestoreMixin:
             if not safety_ok and db_path.exists():
                 return False, f"Restore aborted: failed to create safety backup: {safety_message}"
 
+            database_closed = False
+            runtime_reloaded = False
             try:
                 if getattr(self, "db", None):
                     await self.db.commit()
                     await self.db.close()
                     self.db = None
+                    database_closed = True
 
                 await asyncio.to_thread(shutil.copy2, database_source, db_path)  # type: ignore[arg-type]
                 try:
@@ -78,7 +129,10 @@ class BackupRestoreMixin:
                             rollback_note = f" Safety backup was restored: {safety_message}"
                         except Exception as rollback_exc:
                             rollback_note = f" Safety backup restore failed: {rollback_exc}"
-                    return False, f"Restore aborted: restored DB failed integrity_check: {restored_message}.{rollback_note}"
+                    recovery_note = ""
+                    if database_closed:
+                        recovery_note = await self._recover_database_runtime_after_failed_restore()
+                    return False, f"Restore aborted: restored DB failed integrity_check: {restored_message}.{rollback_note}{recovery_note}"
 
                 restored_config = False
                 config_source = sources.get("config")
@@ -108,26 +162,10 @@ class BackupRestoreMixin:
                         log.debug("Failed to restrict restored OMEMO storage permissions for %s: %s", omemo_path, exc)
                     restored_omemo = True
 
-                # Re-open and reload the most important DB-backed runtime state when
-                # the full bot mixin stack is available. Lightweight tests may only
-                # exercise the file operation and skip these optional hooks.
-                if hasattr(self, "protected_rooms") and isinstance(self.protected_rooms, set):
-                    self.protected_rooms.clear()
-                if hasattr(self, "setup_db"):
-                    try:
-                        await self.setup_db(create_startup_backup=False)
-                    except TypeError:
-                        await self.setup_db()
-                if hasattr(self, "load_bans_from_db"):
-                    await self.load_bans_from_db()
-                if hasattr(self, "_load_ignorelist_from_db"):
-                    await self._load_ignorelist_from_db()
-                elif hasattr(self, "setup_ignorelist"):
-                    await self.setup_ignorelist()
-                if hasattr(self, "_load_rtbl_subscriptions_from_db") and getattr(self, "rtbl_enabled", False):
-                    await self._load_rtbl_subscriptions_from_db()
-                if hasattr(self, "load_pending_room_invites"):
-                    await self.load_pending_room_invites()
+                # Re-open and reload DB-backed runtime state after the file swap.
+                # Lightweight tests may provide only a subset of these hooks.
+                await self._reload_database_runtime_after_restore()
+                runtime_reloaded = True
 
                 self.last_database_restore_file = str(backup.path)
                 await self.prune_database_backups(preserve=backup.path)
@@ -183,7 +221,10 @@ class BackupRestoreMixin:
                 return True, "\n".join(lines)
             except Exception as exc:
                 log.error("Failed to restore database backup %s: %s", backup.path, exc)
-                return False, str(exc)
+                recovery_note = ""
+                if database_closed and not runtime_reloaded:
+                    recovery_note = await self._recover_database_runtime_after_failed_restore()
+                return False, str(exc) + recovery_note
 
     async def delete_database_backup(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
         """Delete a managed database backup archive and any legacy companion files."""

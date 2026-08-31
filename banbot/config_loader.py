@@ -160,17 +160,16 @@ def reload_config_module(module: ModuleType | None = None) -> ModuleType:
         exc.name = "config"
         raise exc
 
-    previous = module.__dict__.copy()
+    # Execute into a fresh module first. Reusing the active module dictionary
+    # would leave attributes behind when an operator removes an assignment from
+    # config.py. Only publish the new namespace after the file executed fully,
+    # so syntax/runtime errors leave the last-known-good config untouched.
+    candidate = ModuleType("config")
+    _exec_config_file(candidate, config_path)
+
+    module.__dict__.clear()
+    module.__dict__.update(candidate.__dict__)
     sys.modules["config"] = module
-
-    try:
-        _exec_config_file(module, config_path)
-    except BaseException:
-        module.__dict__.clear()
-        module.__dict__.update(previous)
-        sys.modules["config"] = module
-        raise
-
     return module
 
 

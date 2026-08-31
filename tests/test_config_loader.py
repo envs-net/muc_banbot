@@ -206,3 +206,23 @@ def test_config_loader_does_not_create_bytecode_cache(
 
     assert module.VALUE == 2
     assert not (tmp_path / "__pycache__").exists()
+
+
+def test_reload_config_module_removes_deleted_assignments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.py"
+    config_path.write_text('KEEP = "old"\nREMOVE_ME = 123\n', encoding="utf-8")
+    monkeypatch.setenv(CONFIG_ENV_VAR, str(config_path))
+    _clear_config_module(monkeypatch)
+
+    module = load_config_module()
+    assert module.REMOVE_ME == 123
+
+    config_path.write_text('KEEP = "new"\n', encoding="utf-8")
+    reloaded = reload_config_module(module)
+
+    assert reloaded is module
+    assert module.KEEP == "new"
+    assert not hasattr(module, "REMOVE_ME")

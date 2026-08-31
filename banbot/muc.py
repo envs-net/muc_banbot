@@ -240,6 +240,10 @@ class MucMixin(BotOccupantMixin):
 
 
     async def on_disconnect(self, _) -> None:
+        if getattr(self, "_shutdown_in_progress", False) or getattr(self, "_shutdown_complete", False):
+            log.debug("Disconnect event received during shutdown; reconnect suppressed")
+            return
+
         # During the initial connection/STARTTLS negotiation Slixmpp may emit a
         # disconnect-like event before session_start completed. Do not start a
         # reconnect loop there; the original connection may still finish.
@@ -283,8 +287,15 @@ class MucMixin(BotOccupantMixin):
 
         try:
             while True:
+                if getattr(self, "_shutdown_in_progress", False) or getattr(self, "_shutdown_complete", False):
+                    log.debug("Reconnect loop stopped because shutdown is in progress")
+                    return
+
                 log.info("🔄 Attempting reconnect in %ds...", delay)
                 await asyncio.sleep(delay)
+                if getattr(self, "_shutdown_in_progress", False) or getattr(self, "_shutdown_complete", False):
+                    log.debug("Reconnect attempt suppressed because shutdown is in progress")
+                    return
                 success_event.clear()
 
                 try:
@@ -567,10 +578,10 @@ class MucMixin(BotOccupantMixin):
                     )
                     return
 
-        if not is_domain_outcast and hasattr(self, "_sync_outcast_is_expired_tempban"):
+        if hasattr(self, "_sync_outcast_is_expired_tempban"):
             try:
                 if await self._sync_outcast_is_expired_tempban(jid_bare, now):
-                    await self.unban_all(jid_bare, issuer="system", notify_policy=False)
+                    await self.unban_all(ban_target, issuer="system", notify_policy=False)
                     return
             except Exception as exc:
                 log.debug("Could not check expired tempban state for manual MUC ban %s: %s", jid_bare, exc)

@@ -631,6 +631,14 @@ class ModerationMixin:
                     log.debug("unban_worker skipped while maintenance operation is active")
                     await asyncio.sleep(self.unban_check_interval)
                     continue
+                if getattr(self, "reconnecting", False):
+                    # Keep the expired DB row until XMPP is usable again. The
+                    # row is the evidence sync needs to recognize a still-set
+                    # MUC outcast as an expired tempban instead of recovering it
+                    # as a permanent manual ban.
+                    log.debug("unban_worker skipped while reconnecting")
+                    await asyncio.sleep(self.unban_check_interval)
+                    continue
                 # --- Fetch expired bans (limited to 100 per check) ---
                 async with self.db.execute(
                     "SELECT target_type, target, jid, nick FROM bans WHERE until > 0 AND until <= ? LIMIT 100", (now,)
@@ -641,8 +649,13 @@ class ModerationMixin:
                 for target_type, target, ban_jid, ban_nick in rows:
                     identifier = f"*.{target}" if target_type == "domain" else (self.bare_jid(ban_jid) if ban_jid else ban_nick)
                     log.info("⏳ Temporary ban expired: %s, auto-unbanning...", identifier)
-                    expired.append(identifier)
-                    await self.unban_all(identifier, issuer="system", notify_policy=False)
+                    removed = await self.unban_all(
+                        identifier,
+                        issuer="system",
+                        notify_policy=False,
+                    )
+                    if removed:
+                        expired.append(identifier)
 
                 if expired:
                     await self.load_bans_from_db()
@@ -677,79 +690,86 @@ class ModerationMixin:
         room: str,
         ban_jid: str | None,
         ban_nick: str | None,
-        domain: str | None = None
-    ) -> None:
-        """
-        Removes Outcast for a user reliably.
-        If user is online, restores participant role.
-        Sends notifications according to room type and config.
-        """
+        domain: str | None = None,
+        *,
+        announce: bool = True,
+    ) -> bool:
+        """Remove a room outcast and return whether server-side removal succeeded."""
         try:
-            # --- Step 1: Remove Outcast (works offline) ---
+            # --- Step 1: Remove Outcast (works for offline occupants) ---
             # A MUC affiliation list may contain domainpart-only outcasts such
-            # as ``xmpp.party``.  Those are represented in BanBot as wildcard
-            # domain bans (``*.xmpp.party``), but the server-side affiliation
-            # key itself is the bare domain and must be cleared explicitly.
+            # as ``xmpp.party``. Those are represented in BanBot as wildcard
+            # domain bans, while the server-side affiliation key is the bare
+            # domain and must be cleared explicitly.
             outcast_target = domain or (self.bare_jid(ban_jid) if ban_jid else None)
             if outcast_target:
                 bare = outcast_target
+                removed = False
                 for attempt in range(3):
                     try:
                         async with self.muc_write_semaphore:
                             await self.plugin["xep_0045"].set_affiliation(
                                 room=room,
                                 jid=bare,
-                                affiliation="none"
+                                affiliation="none",
                             )
                         log.info("✅ Outcast removed for %s in %s", bare, room)
+                        removed = True
                         break
                     except IqTimeout:
                         log.warning("Timeout removing outcast for %s in %s, retrying...", bare, room)
-                        await asyncio.sleep(1)
-                    except IqError as e:
-                        log.debug("IqError removing outcast for %s in %s: %s", bare, room, e)
+                        if attempt < 2:
+                            await asyncio.sleep(1)
+                    except IqError as exc:
+                        log.debug("IqError removing outcast for %s in %s: %s", bare, room, exc)
                         break
+                if not removed:
+                    return False
 
             # --- Step 2: Restore role if online ---
             room_occupants = self.occupants.get(room, {})
-            for n, info in room_occupants.items():
+            for nick, info in room_occupants.items():
                 jid_in_room = info.get("jid")
-                if ((ban_jid and jid_in_room and self.bare_jid(jid_in_room) == self.bare_jid(ban_jid)) or
-                    (ban_nick and n.lower() == ban_nick) or
-                    (domain and jid_in_room and domain_matches(self.bare_jid(jid_in_room).split("@")[1].lower(), domain))):
+                jid_bare = self.bare_jid(jid_in_room) if jid_in_room else ""
+                jid_domain = jid_bare.partition("@")[2].lower()
+                matches_domain = bool(domain and jid_domain and domain_matches(jid_domain, domain))
+                if (
+                    (ban_jid and jid_in_room and jid_bare == self.bare_jid(ban_jid))
+                    or (ban_nick and nick.lower() == ban_nick)
+                    or matches_domain
+                ):
                     for attempt in range(2):
                         try:
                             async with self.muc_write_semaphore:
                                 await self.plugin["xep_0045"].set_role(
                                     room=room,
-                                    nick=n,
-                                    role="participant"
+                                    nick=nick,
+                                    role="participant",
                                 )
-                            log.info("✅ Participant role restored for %s in %s", n, room)
+                            log.info("✅ Participant role restored for %s in %s", nick, room)
                             break
                         except IqTimeout:
-                            log.warning("Timeout restoring role for %s in %s, retrying...", n, room)
-                            await asyncio.sleep(1)
-                        except IqError as e:
-                            log.debug("IqError restoring role for %s in %s: %s", n, room, e)
+                            log.warning("Timeout restoring role for %s in %s, retrying...", nick, room)
+                            if attempt < 1:
+                                await asyncio.sleep(1)
+                        except IqError as exc:
+                            log.debug("IqError restoring role for %s in %s: %s", nick, room, exc)
                             break
 
             # --- Step 3: Optional public notification ---
-            # The admin-room confirmation is emitted once, centrally, by
-            # _unban_all_locked() where actor and expiry context are known.
-            if room != ADMIN_ROOM and self.allow_user_cmds:
+            if announce and room != ADMIN_ROOM and self.allow_user_cmds:
                 if not ban_nick:
                     log.debug(
                         "Skipping public unban announcement in %s because no public nick is known",
                         room,
                     )
-                    return
+                else:
+                    await self.notify_protected(room, f"♻️ Unbanned {ban_nick}")
 
-                msg = f"♻️ Unbanned {ban_nick}"
-                await self.notify_protected(room, msg)
-
-        except (IqError, IqTimeout) as e:
-            log.warning("Failed to unban %s in %s: %s", ban_jid or ban_nick, room, e)
+            return True
+        except (IqError, IqTimeout) as exc:
+            log.warning("Failed to unban %s in %s: %s", ban_jid or ban_nick or domain, room, exc)
+            return False
 
 
     async def unban_all(
@@ -758,11 +778,11 @@ class ModerationMixin:
         issuer: str | None = None,
         *,
         notify_policy: bool = True,
-    ) -> None:
+    ) -> bool:
         """Unban a target while holding the shared ban-state lock."""
         issuer = normalize_actor(issuer)
         async with ban_state_lock(self):
-            await self._unban_all_locked(
+            return await self._unban_all_locked(
                 identifier,
                 issuer=issuer,
                 notify_policy=notify_policy,
@@ -774,13 +794,13 @@ class ModerationMixin:
         issuer: str | None = None,
         *,
         notify_policy: bool = True,
-    ) -> None:
+    ) -> bool:
         """
         Remove a ban from a user (JID, nick, or domain) and unban in all protected rooms.
         Supports exact domain unbans in both domain.tld and *.domain.tld form.
         """
         if not identifier:
-            return
+            return False
 
         identifier = identifier.strip().lower()
 
@@ -799,7 +819,7 @@ class ModerationMixin:
             is_valid, error_msg = validate_domain_ban(wildcard_identifier)
             if not is_valid:
                 await self.bot_send_message(mto=ADMIN_ROOM, mbody=error_msg, mtype="groupchat")
-                return
+                return False
             target_type = "domain"
             target = domain
         elif is_jid:
@@ -831,12 +851,52 @@ class ModerationMixin:
                 mbody=f"❌ No ban found for {identifier}",
                 mtype="groupchat"
             )
-            return
+            return False
 
         ban_jid = row[0] if row and row[0] else None
         ban_nick = row[1] if row and row[1] else None
         ban_until = int(row[2] or 0) if row else 0
         ban_issuer = (row[3] or "") if row and len(row) > 3 else ""
+        is_expired_system_tempban = (
+            issuer == "system"
+            and ban_until > 0
+            and ban_until <= int(time.time())
+        )
+
+        # For automatic expiry, clear the server-side outcasts before deleting
+        # the DB row. If XMPP drops mid-cycle or one room rejects the change,
+        # retaining the expired row lets sync identify the stale outcast as an
+        # expired tempban instead of recovering it as a permanent ban.
+        rooms_precleared = False
+        if is_expired_system_tempban:
+            if getattr(self, "reconnecting", False):
+                log.info("Deferring expired tempban removal for %s while reconnecting", identifier)
+                return False
+
+            failed_rooms: list[str] = []
+            for room in self.protected_rooms:
+                try:
+                    removed = await self.apply_unban_to_room(
+                        room,
+                        ban_jid if not is_domain_ban else None,
+                        ban_nick,
+                        domain=domain if is_domain_ban else None,
+                        announce=False,
+                    )
+                except Exception as exc:  # noqa: BLE001 - per-room XMPP boundary
+                    log.warning("Error unbanning %s in %s: %s", identifier, room, exc)
+                    removed = False
+                if removed is False:
+                    failed_rooms.append(room)
+
+            if failed_rooms:
+                log.warning(
+                    "Expired tempban %s retained in DB because room unban failed for: %s",
+                    identifier,
+                    ", ".join(sorted(failed_rooms)),
+                )
+                return False
+            rooms_precleared = True
 
         await self.db.execute(
             "DELETE FROM bans WHERE target_type = ? AND target = ?",
@@ -858,16 +918,29 @@ class ModerationMixin:
         else:
             self._remove_ban_from_cache(identifier, ban_jid=ban_jid, ban_nick=ban_nick)
 
-        for room in self.protected_rooms:
-            try:
-                await self.apply_unban_to_room(
-                    room,
-                    ban_jid if not is_domain_ban else None,
-                    ban_nick,
-                    domain=domain if is_domain_ban else None
-                )
-            except Exception as e:
-                log.warning("Error unbanning %s in %s: %s", identifier, room, e)
+        if rooms_precleared:
+            # Server-side removal already succeeded everywhere. Emit the public
+            # notices only now, after the DB row has been removed, so a partial
+            # failure cannot produce repeated "unbanned" announcements.
+            if self.allow_user_cmds and ban_nick:
+                for room in self.protected_rooms:
+                    if room == ADMIN_ROOM:
+                        continue
+                    try:
+                        await self.notify_protected(room, f"♻️ Unbanned {ban_nick}")
+                    except Exception as exc:  # noqa: BLE001 - notification is best effort
+                        log.warning("Failed to announce unban for %s in %s: %s", identifier, room, exc)
+        else:
+            for room in self.protected_rooms:
+                try:
+                    await self.apply_unban_to_room(
+                        room,
+                        ban_jid if not is_domain_ban else None,
+                        ban_nick,
+                        domain=domain if is_domain_ban else None,
+                    )
+                except Exception as exc:  # noqa: BLE001 - per-room XMPP boundary
+                    log.warning("Error unbanning %s in %s: %s", identifier, room, exc)
 
         if issuer == "system":
             msg_admin = f"♻️ Unbanned {identifier} (tempban expired)"
@@ -898,3 +971,5 @@ class ModerationMixin:
                 actor=issuer or "system",
                 target=ban_jid or ban_nick or identifier,
             )
+
+        return True

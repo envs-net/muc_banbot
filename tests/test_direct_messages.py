@@ -1,3 +1,4 @@
+import asyncio
 from typing import NamedTuple
 
 import pytest
@@ -8,6 +9,7 @@ from banbot.direct_messages import (
     LAST_PAGE_MARKER,
     VERSION_CHECK_URL,
 )
+from banbot.messaging import MessagingMixin
 from banbot.utils import bare_jid
 
 
@@ -64,7 +66,7 @@ class FakeDirectMessage:
         return self._data[key]
 
 
-class DirectBot(DirectMessageMixin):
+class DirectBot(MessagingMixin, DirectMessageMixin):
     """Minimal DirectMessageMixin test fixture.
 
     Provides mocked bot state and command handlers so admin-DM behavior can be
@@ -100,8 +102,9 @@ class DirectBot(DirectMessageMixin):
         """Provide the method expected by DirectMessageMixin in this fixture."""
         return bare_jid(jid)
 
-    async def bot_send_message(self, **kwargs):
+    def send_message(self, **kwargs):
         self.sent.append(kwargs)
+        return kwargs
 
     async def _cmd_config(self, room):
         self.calls.append(("config", room))
@@ -809,3 +812,86 @@ async def test_admin_muc_pm_commands_can_be_disabled():
     body = bot.sent[-1]["mbody"]
     assert "admin room" in body
     assert ADMIN_ROOM in body
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_output_redirection_is_task_local() -> None:
+    bot = DirectBot()
+    command_started = asyncio.Event()
+    release_command = asyncio.Event()
+
+    async def slow_status(room):
+        command_started.set()
+        await release_command.wait()
+        await bot.bot_send_message(
+            mto=ADMIN_ROOM,
+            mbody="status output",
+            mtype="groupchat",
+        )
+
+    bot._cmd_status = slow_status
+    command_task = asyncio.create_task(
+        bot.on_direct_message(
+            FakeDirectMessage(
+                bare="admin@example.org",
+                resource="desktop",
+                body="!status",
+            )
+        )
+    )
+
+    await asyncio.wait_for(command_started.wait(), timeout=1)
+    await bot.bot_send_message(
+        mto=ADMIN_ROOM,
+        mbody="background alert",
+        mtype="groupchat",
+    )
+    release_command.set()
+    await asyncio.wait_for(command_task, timeout=1)
+
+    background = next(item for item in bot.sent if item["mbody"] == "background alert")
+    command_reply = next(item for item in bot.sent if item["mbody"] == "status output")
+    assert background["mto"] == ADMIN_ROOM
+    assert background["mtype"] == "groupchat"
+    assert command_reply["mto"] == "admin@example.org"
+    assert command_reply["mtype"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_dm_reply_context_does_not_leak_to_child_tasks() -> None:
+    bot = DirectBot()
+    child_done = asyncio.Event()
+
+    async def status_with_child(room):
+        async def background_send():
+            await bot.bot_send_message(
+                mto=ADMIN_ROOM,
+                mbody="child background",
+                mtype="groupchat",
+            )
+            child_done.set()
+
+        child = asyncio.create_task(background_send())
+        await bot.bot_send_message(
+            mto=ADMIN_ROOM,
+            mbody="status output",
+            mtype="groupchat",
+        )
+        await child
+
+    bot._cmd_status = status_with_child
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="admin@example.org",
+            resource="desktop",
+            body="!status",
+        )
+    )
+    await asyncio.wait_for(child_done.wait(), timeout=1)
+
+    child_message = next(item for item in bot.sent if item["mbody"] == "child background")
+    command_reply = next(item for item in bot.sent if item["mbody"] == "status output")
+    assert child_message["mto"] == ADMIN_ROOM
+    assert child_message["mtype"] == "groupchat"
+    assert command_reply["mto"] == "admin@example.org"
+    assert command_reply["mtype"] == "chat"

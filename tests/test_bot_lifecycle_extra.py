@@ -216,7 +216,7 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
         calls.append(name)
         return result
 
-    bot.setup_db = lambda: record("setup_db")
+    bot.setup_db = lambda **kwargs: record(f"setup_db:{kwargs.get('create_startup_backup')}")
     bot.load_bans_from_db = lambda: record("load_bans_from_db")
     bot.cleanup_old_audit_logs = lambda: record("cleanup_old_audit_logs", 0)
     bot.setup_ignorelist = lambda: record("setup_ignorelist")
@@ -254,7 +254,7 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
 
     await bot.start(None)
 
-    assert "setup_db" in calls
+    assert "setup_db:True" in calls
     assert "load_bans_from_db" in calls
     assert "setup_ignorelist" in calls
     assert "wait_for_occupants:6" in calls
@@ -304,7 +304,7 @@ async def test_start_runs_redaction_cleanup_and_worker_when_enabled(monkeypatch)
         calls.append(name)
         return result
 
-    bot.setup_db = lambda: record("setup_db")
+    bot.setup_db = lambda **kwargs: record(f"setup_db:{kwargs.get('create_startup_backup')}")
     bot.run_redaction_cleanup_automatic = lambda actor="system": record(f"redaction_cleanup:{actor}")
     bot.load_pending_room_invites = lambda: record("load_pending_room_invites")
     bot.load_bans_from_db = lambda: record("load_bans_from_db")
@@ -345,7 +345,7 @@ async def test_start_runs_redaction_cleanup_and_worker_when_enabled(monkeypatch)
 
     await bot.start(None)
 
-    assert calls.index("setup_db") < calls.index("redaction_cleanup:system")
+    assert calls.index("setup_db:True") < calls.index("redaction_cleanup:system")
     assert "redaction_cleanup:system" in calls
     assert len(created_tasks) == 5
     assert bot.runtime_watchdog.task is not None
@@ -373,7 +373,7 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
         calls.append(name)
         return result
 
-    bot.setup_db = lambda: record("setup_db")
+    bot.setup_db = lambda **kwargs: record(f"setup_db:{kwargs.get('create_startup_backup')}")
     bot.load_bans_from_db = lambda: record("load_bans_from_db")
     bot.cleanup_old_audit_logs = lambda: record("cleanup_old_audit_logs", 0)
     bot.setup_ignorelist = lambda: record("setup_ignorelist")
@@ -411,6 +411,7 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
 
     await bot.start(None)
 
+    assert "setup_db:False" in calls
     assert bot.reconnecting is False
     assert bot.last_reconnect_time is not None
     assert bot.sent
@@ -687,3 +688,49 @@ async def test_stop_background_tasks_does_not_reawait_supervisor_owned_workers()
 
     assert bot.tasks.cancelled_groups == ["_core"]
     assert task.cancel_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_pending_reconnect_before_disconnect(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    reconnect_started = asyncio.Event()
+
+    async def blocked_reconnect():
+        reconnect_started.set()
+        await asyncio.Event().wait()
+
+    bot.reconnect_task = asyncio.create_task(blocked_reconnect())
+    await asyncio.wait_for(reconnect_started.wait(), timeout=1)
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    bot.flush_redaction_index = noop
+    bot.stop_background_tasks = noop
+    bot.runtime_watchdog.stop = noop
+    bot.tasks.cancel_all = noop
+    bot.disconnect = lambda **_kwargs: None
+
+    await asyncio.wait_for(bot.shutdown(), timeout=1)
+
+    assert bot._shutdown_in_progress is True
+    assert bot._shutdown_complete is True
+    assert bot.reconnect_task is None
+
+
+@pytest.mark.asyncio
+async def test_start_is_ignored_once_shutdown_has_begun(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    bot._shutdown_in_progress = True
+    called = False
+
+    async def setup_db(**_kwargs):
+        nonlocal called
+        called = True
+
+    bot.setup_db = setup_db
+    await bot.start(None)
+
+    assert called is False

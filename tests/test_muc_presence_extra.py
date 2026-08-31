@@ -756,3 +756,39 @@ async def test_delayed_reconnect_retries_until_session_start_signal(monkeypatch)
     await bot._delayed_reconnect()
 
     assert connect_mock.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_on_disconnect_does_not_reconnect_during_shutdown(monkeypatch):
+    bot = MucBotFixture()
+    bot._shutdown_in_progress = True
+    called = False
+
+    async def fake_reconnect():
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(bot, "_delayed_reconnect", fake_reconnect)
+    await bot.on_disconnect(None)
+    await asyncio.sleep(0)
+
+    assert called is False
+    assert bot.reconnect_task is None
+
+
+@pytest.mark.asyncio
+async def test_delayed_reconnect_stops_before_connect_when_shutdown_begins(monkeypatch):
+    bot = MucBotFixture()
+    bot.reconnecting = True
+    bot._shutdown_in_progress = False
+    connect_mock = Mock(return_value=True)
+
+    async def begin_shutdown(_delay):
+        bot._shutdown_in_progress = True
+
+    monkeypatch.setattr(muc_module.asyncio, "sleep", begin_shutdown)
+    bot.connect_with_config = connect_mock
+
+    await bot._delayed_reconnect()
+
+    assert connect_mock.call_count == 0

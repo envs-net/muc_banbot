@@ -249,29 +249,44 @@ class SyncMixin:
         jid_bare: str,
         now: int,
     ) -> bool:
-        """
-        Return True if this room outcast belongs to an expired JID tempban.
+        """Return True when a room outcast belongs to an expired tempban.
 
-        This prevents sync from promoting an expired tempban that is still set
-        as a room outcast into a recovered permanent ban.
+        Both JID and domain outcasts must be covered. Otherwise an expired
+        wildcard-domain tempban that remains on a room during a disconnect can
+        be recovered as a new permanent domain ban on reconnect.
         """
         if not jid_bare:
             return False
 
-        target = self.bare_jid(jid_bare)
-
-        async with self.db.execute(
-            """
-            SELECT until FROM bans
-            WHERE target_type = 'jid'
-              AND (target = ? OR jid = ?)
-              AND until > 0
-              AND until <= ?
-            LIMIT 1
-            """,
-            (target, target, now),
-        ) as cursor:
-            row = await cursor.fetchone()
+        canonical = self._sync_canonical_outcast_target(jid_bare)
+        if canonical.startswith("*."):
+            domain = canonical[2:]
+            async with self.db.execute(
+                """
+                SELECT until FROM bans
+                WHERE target_type = 'domain'
+                  AND target = ?
+                  AND until > 0
+                  AND until <= ?
+                LIMIT 1
+                """,
+                (domain, now),
+            ) as cursor:
+                row = await cursor.fetchone()
+        else:
+            target = self.bare_jid(canonical)
+            async with self.db.execute(
+                """
+                SELECT until FROM bans
+                WHERE target_type = 'jid'
+                  AND (target = ? OR jid = ?)
+                  AND until > 0
+                  AND until <= ?
+                LIMIT 1
+                """,
+                (target, target, now),
+            ) as cursor:
+                row = await cursor.fetchone()
 
         return row is not None
 
@@ -546,7 +561,7 @@ class SyncMixin:
                             await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
                     continue
 
-                if not canonical_outcast.startswith("*.") and await self._sync_outcast_is_expired_tempban(jid_bare, now):
+                if await self._sync_outcast_is_expired_tempban(jid_bare, now):
                     log.info(
                         "♻️ Sync: outcast %s in %s belongs to an expired tempban; unbanning instead of recovering as permanent",
                         jid_bare,
@@ -775,7 +790,7 @@ class SyncMixin:
                             await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
                     continue
 
-                if not canonical_outcast.startswith("*.") and await self._sync_outcast_is_expired_tempban(jid_bare, now):
+                if await self._sync_outcast_is_expired_tempban(jid_bare, now):
                     log.info(
                         "♻️ Sync: outcast %s in %s belongs to an expired tempban; unbanning instead of recovering as permanent",
                         jid_bare,
