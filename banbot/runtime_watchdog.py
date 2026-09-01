@@ -65,6 +65,7 @@ class RuntimeWatchdog:
         self.task: asyncio.Task[Any] | None = None
         self.stop_event = asyncio.Event()
         self.state = WatchdogState()
+        self._ready_notification_pending = False
 
     async def start(self) -> None:
         configured = bool(getattr(self.bot, "watchdog_enabled", True))
@@ -93,14 +94,49 @@ class RuntimeWatchdog:
             self.task = asyncio.create_task(self._run(), name="runtime-watchdog")
         self.state.worker_running = True
 
-    def notify_ready(self) -> bool:
-        """Tell systemd that complete BanBot startup has succeeded."""
+    def _runtime_ready_for_systemd(self) -> bool:
+        """Return whether BanBot has completed its full runtime startup."""
+        # Lightweight embedders/tests may not expose the reconnect-scoped
+        # health task at all; preserve the historical immediate notification
+        # behavior for those callers. A real BanBot always has this attribute.
+        if not hasattr(self.bot, "health_check_task"):
+            return True
+        return (
+            getattr(self.bot, "health_check_task", None) is not None
+            and not bool(getattr(self.bot, "reconnecting", False))
+        )
+
+    def _send_ready(self) -> bool:
         status = (
             "muc_banbot started and monitoring event-loop health"
             if self.state.enabled
             else "muc_banbot startup complete"
         )
         return sd_notify(f"READY=1\nSTATUS={status}")
+
+    def _notify_ready_if_complete(self) -> None:
+        self._ready_notification_pending = False
+        if self._runtime_ready_for_systemd():
+            self._send_ready()
+
+    def notify_ready(self) -> bool:
+        """Tell systemd only after complete BanBot runtime startup succeeded."""
+        if self._runtime_ready_for_systemd():
+            return self._send_ready()
+        if self._ready_notification_pending:
+            return False
+
+        # bot.start() historically invokes notify_ready() immediately before it
+        # creates the health worker and clears reconnecting. Defer the datagram
+        # by one event-loop turn; those two synchronous assignments then happen
+        # before READY=1 can be emitted.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        self._ready_notification_pending = True
+        loop.call_soon(self._notify_ready_if_complete)
+        return False
 
     async def stop(self) -> None:
         self.stop_event.set()

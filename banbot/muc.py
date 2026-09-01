@@ -1,6 +1,7 @@
 """MUC connection, presence tracking, and occupant handling."""
 
 import asyncio
+import inspect
 import logging
 import time
 
@@ -24,6 +25,43 @@ class MucMixin(BotOccupantMixin):
             event = asyncio.Event()
             self.reconnect_success_event = event
         return event
+
+
+    async def _disconnect_partial_reconnect(self, reason: str) -> None:
+        """Drop a reconnect session that never reached usable startup state."""
+        self.reconnecting = True
+
+        # The partially initialized session must not leak occupant/admin/join
+        # state into the next connection attempt. on_disconnect() normally does
+        # this cleanup, but it intentionally does not schedule a second loop
+        # while the current reconnect task is still active.
+        self.occupants.clear()
+        self.bot_admin_state.clear()
+        self.room_join_time.clear()
+        getattr(self, "room_bot_nicks", {}).clear()
+        getattr(self, "room_join_events", {}).clear()
+
+        try:
+            try:
+                result = self.disconnect(wait=False)
+            except TypeError:
+                result = self.disconnect()
+            if inspect.isawaitable(result):
+                try:
+                    disconnect_task = asyncio.ensure_future(result)
+                    await asyncio.wait_for(disconnect_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    log.warning(
+                        "Partial reconnect session did not disconnect within 5.0s "
+                        "after %s",
+                        reason,
+                    )
+        except Exception as exc:
+            log.warning(
+                "Failed to disconnect partial reconnect session after %s: %s",
+                reason,
+                exc,
+            )
 
 
     def _get_muc_join_event(self, room: str) -> asyncio.Event:
@@ -303,9 +341,11 @@ class MucMixin(BotOccupantMixin):
                 try:
                     connect_with_config = getattr(self, "connect_with_config", None)
                     if connect_with_config:
-                        connect_with_config()
+                        connected = connect_with_config()
                     else:
-                        self.connect()
+                        connected = self.connect()
+                    if connected is False:
+                        raise ConnectionError("Reconnect initiation returned False")
 
                     log.info("🔌 Reconnect initiated")
                 except Exception as e:
@@ -322,10 +362,11 @@ class MucMixin(BotOccupantMixin):
                     return
                 except asyncio.TimeoutError:
                     log.warning(
-                        "Reconnect startup did not complete within %ss; retrying",
+                        "Reconnect startup did not complete within %ss; "
+                        "disconnecting partial session before retry",
                         _RECONNECT_STARTUP_TIMEOUT_SECONDS,
                     )
-                    self.reconnecting = True
+                    await self._disconnect_partial_reconnect("startup timeout")
                     delay = min(delay * 2, 60)
 
         except asyncio.CancelledError:
