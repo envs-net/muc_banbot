@@ -372,7 +372,7 @@ class BanBot(
         self.configure_omemo()
 
         # --- Event handlers ---
-        self.add_event_handler("session_start", self._handle_session_start)
+        self.add_event_handler("session_start", self.start)
 
         # Inspect raw message stanzas for direct/mediated MUC invite payloads.
         # This catches invites that do not reliably trigger a Slixmpp invite event.
