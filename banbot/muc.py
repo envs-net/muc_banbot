@@ -344,7 +344,7 @@ class MucMixin(BotOccupantMixin):
         """Reconnect until session_start confirms that the connection is usable."""
         current_task = asyncio.current_task()
         success_event = self._get_reconnect_success_event()
-        had_successful_session = self.server_connect_time is not None
+        had_successful_session = getattr(self, "server_connect_time", None) is not None
         delay = 5
 
         try:
