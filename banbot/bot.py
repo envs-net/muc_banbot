@@ -264,6 +264,7 @@ class BanBot(
         self.reconnect_task: asyncio.Task | None = None
         self.reconnect_success_event: asyncio.Event | None = None
         self.reconnect_failure_event: asyncio.Event | None = None
+        self._session_start_received = False
         self.health_check_task: asyncio.Task | None = None
         self.unban_task: asyncio.Task | None = None
 
@@ -564,6 +565,12 @@ class BanBot(
             log.info("Ignoring session_start while shutdown is in progress")
             return
 
+        # Mark the XMPP session as established immediately. The systemd startup
+        # timeout extender only runs while we are still waiting for
+        # ``session_start``; once this point is reached the normal
+        # TimeoutStartSec safety net should apply to the remaining startup path.
+        self._session_start_received = True
+
         await self.stop_background_tasks()
 
         was_reconnecting = bool(self.reconnecting)
@@ -755,6 +762,19 @@ def main() -> None:
     if not connect_xmpp(xmpp):
         log.error("Unable to connect to XMPP server.")
         raise SystemExit(1)
+
+    # Slixmpp may return from connect() before the TCP/XMPP session has
+    # actually been established. While waiting for ``session_start`` keep the
+    # Type=notify startup deadline alive. Once session_start arrives, the
+    # extender stops and the normal TimeoutStartSec limit protects the rest of
+    # startup from genuine hangs.
+    arm_startup_timeout = getattr(
+        getattr(xmpp, "runtime_watchdog", None),
+        "arm_startup_timeout_extension",
+        None,
+    )
+    if callable(arm_startup_timeout):
+        arm_startup_timeout(xmpp.loop)
 
     shutdown_signal: int | None = None
     previous_signal_handlers: dict[int, object] = {}

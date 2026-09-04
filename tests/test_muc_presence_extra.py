@@ -677,6 +677,49 @@ async def test_on_disconnect_clears_runtime_state_and_schedules_reconnect(monkey
     assert bot.reconnect_task.done()
 
 @pytest.mark.asyncio
+async def test_on_disconnect_before_first_session_schedules_reconnect(monkeypatch):
+    bot = MucBotFixture()
+    bot.server_connect_time = None
+    bot._session_start_received = False
+    calls = {"count": 0}
+
+    async def fake_reconnect():
+        calls["count"] += 1
+
+    monkeypatch.setattr(bot, "_delayed_reconnect", fake_reconnect)
+
+    await bot.on_disconnect(None)
+    assert bot.reconnecting is True
+    assert bot.reconnect_task is not None
+
+    done, pending = await asyncio.wait({bot.reconnect_task}, timeout=1)
+    assert pending == set()
+    assert bot.reconnect_task in done
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delayed_reconnect_does_not_double_connect_if_session_started_during_backoff(
+    monkeypatch,
+):
+    bot = MucBotFixture()
+    bot.reconnecting = True
+    bot._session_start_received = False
+    connect_mock = Mock(return_value=True)
+
+    async def session_starts_during_backoff(_delay):
+        bot._session_start_received = True
+        bot._get_reconnect_success_event().set()
+
+    monkeypatch.setattr(muc_module.asyncio, "sleep", session_starts_during_backoff)
+    bot.connect_with_config = connect_mock
+
+    await bot._delayed_reconnect()
+
+    assert connect_mock.call_count == 0
+
+
+@pytest.mark.asyncio
 async def test_on_disconnect_does_not_schedule_overlapping_reconnects(monkeypatch):
     bot = MucBotFixture()
     blocker = asyncio.Event()

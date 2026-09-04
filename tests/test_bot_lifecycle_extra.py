@@ -512,6 +512,53 @@ def test_main_exits_when_connect_fails(monkeypatch):
     assert excinfo.value.code == 1
 
 
+def test_main_arms_systemd_startup_timeout_extension_before_event_loop(monkeypatch):
+    events = []
+
+    class FakeRuntimeWatchdog:
+        def arm_startup_timeout_extension(self, loop):
+            events.append(("arm-startup-timeout", loop))
+
+    class FakeLoop:
+        def run_forever(self):
+            events.append(("run_forever", self))
+            raise KeyboardInterrupt()
+
+        def run_until_complete(self, coro):
+            events.append(("run_until_complete", self))
+            try:
+                coro.send(None)
+            except StopIteration:
+                return None
+
+    class FakeBanBot:
+        def __init__(self, jid, password, resource):
+            self.loop = FakeLoop()
+            self.runtime_watchdog = FakeRuntimeWatchdog()
+            self.db = None
+
+        def _validate_config(self):
+            return [], []
+
+        def _format_config_validation(self, errors, warnings):
+            return "✅ Config validation passed"
+
+        def connect(self):
+            return True
+
+        async def shutdown(self):
+            events.append(("shutdown", self.loop))
+
+    monkeypatch.setattr(bot_module, "BanBot", FakeBanBot)
+    monkeypatch.setattr(bot_module, "get_config_resource", lambda: "tests")
+
+    assert bot_module.main() is None
+
+    assert events[0][0] == "arm-startup-timeout"
+    assert events[1][0] == "run_forever"
+    assert events[0][1] is events[1][1]
+
+
 def test_main_exits_when_bot_initialization_fails(monkeypatch):
     class FailingBanBot:
         def __init__(self, jid, password, resource):

@@ -30,6 +30,7 @@ class MucMixin(BotOccupantMixin):
     async def _disconnect_partial_reconnect(self, reason: str) -> None:
         """Drop a reconnect session that never reached usable startup state."""
         self.reconnecting = True
+        self._session_start_received = False
 
         # The partially initialized session must not leak occupant/admin/join
         # state into the next connection attempt. on_disconnect() normally does
@@ -284,16 +285,22 @@ class MucMixin(BotOccupantMixin):
             log.debug("Disconnect event received during shutdown; reconnect suppressed")
             return
 
-        # During the initial connection/STARTTLS negotiation Slixmpp may emit a
-        # disconnect-like event before session_start completed. Do not start a
-        # reconnect loop there; the original connection may still finish.
-        if (
+        pre_session_disconnect = (
             hasattr(self, "server_connect_time")
             and getattr(self, "server_connect_time", None) is None
             and not getattr(self, "reconnecting", False)
-        ):
-            log.debug("Pre-session disconnect event received before session_start completed; ignoring")
-            return
+        )
+        if pre_session_disconnect:
+            # connect() is asynchronous in Slixmpp: it can return True even
+            # though the TCP/TLS/XMPP negotiation later fails. Ignoring this
+            # event leaves a Type=notify service stuck in "activating" until
+            # TimeoutStartSec kills it. Schedule the normal reconnect loop
+            # instead; its backoff gives any already queued session_start event
+            # a chance to win before another connect attempt is made.
+            log.warning(
+                "Initial XMPP connection ended before session_start; "
+                "scheduling reconnect"
+            )
 
         if self.reconnect_task and not self.reconnect_task.done():
             log.info("🔄 Disconnect event received while reconnect is already scheduled")
@@ -301,7 +308,21 @@ class MucMixin(BotOccupantMixin):
 
         log.warning("⚠️  Disconnected from server")
         self.reconnecting = True
+        self._session_start_received = False
         self._get_reconnect_success_event().clear()
+
+        # Before the first successful READY=1, a remote XMPP outage may last
+        # longer than systemd's normal startup timeout (for example while the
+        # server is offline for backups). Keep the startup deadline alive while
+        # the event loop is healthy and we are waiting for a new session.
+        runtime_watchdog = getattr(self, "runtime_watchdog", None)
+        arm_startup_timeout = getattr(
+            runtime_watchdog,
+            "arm_startup_timeout_extension",
+            None,
+        )
+        if callable(arm_startup_timeout):
+            arm_startup_timeout()
 
         # Remember existing occupants before clearing runtime state.  If the
         # XMPP server restarts, everyone can leave and rejoin in a burst; those
@@ -336,6 +357,31 @@ class MucMixin(BotOccupantMixin):
                 if getattr(self, "_shutdown_in_progress", False) or getattr(self, "_shutdown_complete", False):
                     log.debug("Reconnect attempt suppressed because shutdown is in progress")
                     return
+
+                # A pre-session disconnect event can race with a session_start
+                # that was already queued by Slixmpp. Never open a second
+                # connection while that session is already running its startup
+                # path; wait for the normal full-startup success signal instead.
+                if bool(getattr(self, "_session_start_received", False)):
+                    try:
+                        await asyncio.wait_for(
+                            success_event.wait(),
+                            timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
+                        )
+                        log.info("🔄 Reconnect completed during backoff")
+                        return
+                    except asyncio.TimeoutError:
+                        log.warning(
+                            "Session startup did not complete within %ss; "
+                            "disconnecting partial session before retry",
+                            _RECONNECT_STARTUP_TIMEOUT_SECONDS,
+                        )
+                        await self._disconnect_partial_reconnect(
+                            "session startup timeout"
+                        )
+                        delay = min(delay * 2, 60)
+                        continue
+
                 success_event.clear()
 
                 try:
