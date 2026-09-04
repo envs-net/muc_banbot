@@ -57,7 +57,8 @@ async def test_new_disconnect_replaces_stale_reconnect_waiter(
     await asyncio.sleep(0)
     assert stale_task.cancelled()
     await asyncio.wait_for(replacement_started.wait(), timeout=1)
-    await replacement_task
+    replacement_result = await replacement_task
+    assert replacement_result is None
 
 
 @pytest.mark.asyncio
