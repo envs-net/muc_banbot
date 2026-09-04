@@ -29,6 +29,31 @@ class ReconnectFixture(muc_module.MucMixin):
 
 
 @pytest.mark.asyncio
+async def test_initial_connection_failed_uses_slixmpp_retry_without_parallel_loop() -> None:
+    bot = ReconnectFixture()
+    bot.reconnecting = False
+    bot._startup_completed_once = False
+    bot._session_start_received = False
+    timeout_arms: list[str] = []
+    bot.runtime_watchdog = SimpleNamespace(
+        arm_startup_timeout_extension=lambda: timeout_arms.append("armed")
+    )
+
+    original_occupants = dict(bot.occupants)
+    original_admin_state = dict(bot.bot_admin_state)
+    original_join_time = dict(bot.room_join_time)
+
+    await bot.on_connection_failed(None)
+
+    assert bot.reconnecting is False
+    assert bot.reconnect_task is None
+    assert bot.occupants == original_occupants
+    assert bot.bot_admin_state == original_admin_state
+    assert bot.room_join_time == original_join_time
+    assert timeout_arms == ["armed"]
+
+
+@pytest.mark.asyncio
 async def test_new_disconnect_replaces_stale_reconnect_waiter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

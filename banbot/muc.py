@@ -280,6 +280,55 @@ class MucMixin(BotOccupantMixin):
         return False
 
 
+    async def on_connection_failed(self, _) -> None:
+        """Let Slixmpp retry failed connection attempts without a second loop."""
+        if (
+            getattr(self, "_shutdown_in_progress", False)
+            or getattr(self, "_shutdown_complete", False)
+        ):
+            log.debug(
+                "connection_failed received during shutdown; retry handling suppressed"
+            )
+            return
+
+        # ``connection_failed`` describes a failed transport/negotiation
+        # attempt, not the loss of an established XMPP session. Slixmpp owns
+        # retry scheduling for this event. Starting BanBot's reconnect loop as
+        # well would create two independent retry mechanisms which can race and
+        # cancel each other's connection attempts.
+        if not bool(getattr(self, "_session_start_received", False)):
+            if bool(getattr(self, "_startup_completed_once", False)):
+                log.info(
+                    "XMPP reconnect attempt failed before session_start; "
+                    "waiting for Slixmpp retry"
+                )
+            else:
+                log.warning(
+                    "Initial XMPP connection attempt failed before session_start; "
+                    "waiting for Slixmpp retry"
+                )
+
+            # On the very first process startup, keep Type=notify alive while
+            # Slixmpp retries an unavailable remote server. This helper is
+            # idempotent, so repeated connection_failed events only keep the
+            # existing extender armed.
+            if not bool(getattr(self, "_startup_completed_once", False)):
+                runtime_watchdog = getattr(self, "runtime_watchdog", None)
+                arm_startup_timeout = getattr(
+                    runtime_watchdog,
+                    "arm_startup_timeout_extension",
+                    None,
+                )
+                if callable(arm_startup_timeout):
+                    arm_startup_timeout()
+            return
+
+        log.info(
+            "XMPP connection attempt failed after session_start; "
+            "waiting for disconnected/session lifecycle handling"
+        )
+
+
     async def on_disconnect(self, _) -> None:
         if getattr(self, "_shutdown_in_progress", False) or getattr(self, "_shutdown_complete", False):
             log.debug("Disconnect event received during shutdown; reconnect suppressed")

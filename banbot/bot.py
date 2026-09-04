@@ -398,7 +398,7 @@ class BanBot(
         self.add_event_handler("groupchat_presence", self.on_muc_presence)
 
         self.add_event_handler("disconnected", self.on_disconnect)
-        self.add_event_handler("connection_failed", self.on_disconnect)
+        self.add_event_handler("connection_failed", self.on_connection_failed)
 
 
     def connect_with_config(self) -> bool:
