@@ -573,7 +573,17 @@ class BanBot(
 
         await self.stop_background_tasks()
 
-        was_reconnecting = bool(self.reconnecting)
+        # A reconnect loop may already be active even though this process has
+        # never completed an XMPP session.  This happens when the initial
+        # connection emits a disconnect/connection_failed event immediately
+        # before a queued session_start wins the race.  Keep that first
+        # successful session classified as normal startup, while still
+        # remembering that a reconnect waiter must be released at the end.
+        reconnect_waiter_active = bool(self.reconnecting)
+        was_reconnecting = bool(
+            reconnect_waiter_active
+            and self.server_connect_time is not None
+        )
 
         await self.setup_db(create_startup_backup=not was_reconnecting)
         await self.prepare_startup_version_notice(reconnecting=was_reconnecting)
@@ -717,14 +727,16 @@ class BanBot(
         self.reconnecting = False
 
         # The reconnect loop must only stop after the entire critical startup
-        # path succeeded (DB, rooms, sync, RTBL, workers and watchdog). Setting
-        # this earlier can leave a connected but only partially initialized bot
-        # with no retry path if a later startup stage raises.
+        # path succeeded (DB, rooms, sync, RTBL, workers and watchdog).  A
+        # pre-session disconnect can also create that waiter during the first
+        # process startup, so release it independently from the semantic
+        # reconnect classification.
+        if reconnect_waiter_active and self.reconnect_success_event is not None:
+            self.reconnect_success_event.set()
+
         if was_reconnecting:
             self.last_reconnect_time = time.time()
             log.info("🔄 Reconnected successfully")
-            if self.reconnect_success_event is not None:
-                self.reconnect_success_event.set()
             await self.send_operational_alert(
                 "reconnect_success",
                 "Reconnect completed",

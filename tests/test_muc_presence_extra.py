@@ -704,6 +704,7 @@ async def test_delayed_reconnect_does_not_double_connect_if_session_started_duri
 ):
     bot = MucBotFixture()
     bot.reconnecting = True
+    bot.server_connect_time = None
     bot._session_start_received = False
     connect_mock = Mock(return_value=True)
 

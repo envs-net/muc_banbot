@@ -344,6 +344,7 @@ class MucMixin(BotOccupantMixin):
         """Reconnect until session_start confirms that the connection is usable."""
         current_task = asyncio.current_task()
         success_event = self._get_reconnect_success_event()
+        had_successful_session = self.server_connect_time is not None
         delay = 5
 
         try:
@@ -368,7 +369,12 @@ class MucMixin(BotOccupantMixin):
                             success_event.wait(),
                             timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
                         )
-                        log.info("🔄 Reconnect completed during backoff")
+                        if had_successful_session:
+                            log.info("🔄 Reconnect completed during backoff")
+                        else:
+                            log.info(
+                                "✅ Initial XMPP startup completed during reconnect backoff"
+                            )
                         return
                     except asyncio.TimeoutError:
                         log.warning(
@@ -404,7 +410,10 @@ class MucMixin(BotOccupantMixin):
                         success_event.wait(),
                         timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
                     )
-                    log.info("🔄 Reconnect completed")
+                    if had_successful_session:
+                        log.info("🔄 Reconnect completed")
+                    else:
+                        log.info("✅ Initial XMPP startup completed after retry")
                     return
                 except asyncio.TimeoutError:
                     log.warning(
