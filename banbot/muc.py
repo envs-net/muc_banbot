@@ -302,9 +302,21 @@ class MucMixin(BotOccupantMixin):
                 "scheduling reconnect"
             )
 
-        if self.reconnect_task and not self.reconnect_task.done():
-            log.info("🔄 Disconnect event received while reconnect is already scheduled")
-            return
+        existing_reconnect = getattr(self, "reconnect_task", None)
+        if existing_reconnect is not None and not existing_reconnect.done():
+            if getattr(self, "reconnecting", False):
+                log.info("🔄 Disconnect event received while reconnect is already scheduled")
+                return
+
+            # A successful startup clears reconnecting before the old reconnect
+            # waiter necessarily gets its final event-loop turn.  If another
+            # disconnect lands in that narrow window, the old waiter is stale:
+            # cancel it and schedule a fresh reconnect instead of swallowing the
+            # new outage.
+            log.info("🔄 Replacing stale reconnect waiter after a new disconnect")
+            existing_reconnect.cancel()
+            if getattr(self, "reconnect_task", None) is existing_reconnect:
+                self.reconnect_task = None
 
         log.warning("⚠️  Disconnected from server")
         self.reconnecting = True
@@ -344,7 +356,9 @@ class MucMixin(BotOccupantMixin):
         """Reconnect until session_start confirms that the connection is usable."""
         current_task = asyncio.current_task()
         success_event = self._get_reconnect_success_event()
-        had_successful_session = getattr(self, "server_connect_time", None) is not None
+        had_completed_startup = bool(
+            getattr(self, "_startup_completed_once", False)
+        )
         delay = 5
 
         try:
@@ -369,7 +383,7 @@ class MucMixin(BotOccupantMixin):
                             success_event.wait(),
                             timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
                         )
-                        if had_successful_session:
+                        if had_completed_startup:
                             log.info("🔄 Reconnect completed during backoff")
                         else:
                             log.info(
@@ -410,7 +424,7 @@ class MucMixin(BotOccupantMixin):
                         success_event.wait(),
                         timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
                     )
-                    if had_successful_session:
+                    if had_completed_startup:
                         log.info("🔄 Reconnect completed")
                     else:
                         log.info("✅ Initial XMPP startup completed after retry")

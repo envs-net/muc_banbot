@@ -29,6 +29,38 @@ class ReconnectFixture(muc_module.MucMixin):
 
 
 @pytest.mark.asyncio
+async def test_new_disconnect_replaces_stale_reconnect_waiter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bot = ReconnectFixture()
+    bot.reconnecting = False
+    stale_blocker = asyncio.Event()
+    replacement_started = asyncio.Event()
+
+    async def stale_reconnect() -> None:
+        await stale_blocker.wait()
+
+    async def replacement_reconnect() -> None:
+        replacement_started.set()
+
+    stale_task = asyncio.create_task(stale_reconnect())
+    bot.reconnect_task = stale_task
+    monkeypatch.setattr(bot, "_delayed_reconnect", replacement_reconnect)
+
+    await bot.on_disconnect(None)
+    replacement_task = bot.reconnect_task
+
+    assert replacement_task is not None
+    assert replacement_task is not stale_task
+    assert bot.reconnecting is True
+
+    await asyncio.sleep(0)
+    assert stale_task.cancelled()
+    await asyncio.wait_for(replacement_started.wait(), timeout=1)
+    await replacement_task
+
+
+@pytest.mark.asyncio
 async def test_reconnect_timeout_disconnects_partial_session_before_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -265,6 +265,10 @@ class BanBot(
         self.reconnect_success_event: asyncio.Event | None = None
         self.reconnect_failure_event: asyncio.Event | None = None
         self._session_start_received = False
+        # True only after this process has completed the full critical startup
+        # path at least once.  Unlike server_connect_time, this is safe for
+        # deciding whether a later session_start is a semantic reconnect.
+        self._startup_completed_once = False
         self.health_check_task: asyncio.Task | None = None
         self.unban_task: asyncio.Task | None = None
 
@@ -582,7 +586,7 @@ class BanBot(
         reconnect_waiter_active = bool(self.reconnecting)
         was_reconnecting = bool(
             reconnect_waiter_active
-            and self.server_connect_time is not None
+            and getattr(self, "_startup_completed_once", False)
         )
 
         await self.setup_db(create_startup_backup=not was_reconnecting)
@@ -725,6 +729,11 @@ class BanBot(
             name="health-check-worker",
         )
         self.reconnecting = False
+        # Set this only after every critical startup stage and core worker
+        # creation succeeded.  A failed first startup may already have a
+        # server_connect_time, but must still be treated as initial startup on
+        # the next successful attempt.
+        self._startup_completed_once = True
 
         # The reconnect loop must only stop after the entire critical startup
         # path succeeded (DB, rooms, sync, RTBL, workers and watchdog).  A

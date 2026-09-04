@@ -367,6 +367,7 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     bot.announce_startup = True
     bot.reconnecting = True
     bot.server_connect_time = 123.0
+    bot._startup_completed_once = True
     reconnect_event = bot._get_reconnect_success_event()
     assert reconnect_event.is_set() is False
 
@@ -417,6 +418,7 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     assert "setup_db:False" in calls
     assert bot.reconnecting is False
     assert bot.last_reconnect_time is not None
+    assert bot._startup_completed_once is True
     assert reconnect_event.is_set() is True
     assert bot.sent
     assert "Reconnect completed" in bot.sent[-1]["mbody"]
@@ -441,7 +443,10 @@ async def test_initial_session_after_pre_session_disconnect_remains_startup(monk
     # The initial connection failed early and on_disconnect() already armed the
     # reconnect loop, but this process has never completed a session yet.
     bot.reconnecting = True
-    bot.server_connect_time = None
+    # A failed first startup can already have reached the point where this
+    # timestamp is set.  It is not proof that startup ever completed.
+    bot.server_connect_time = 123.0
+    bot._startup_completed_once = False
     reconnect_event = bot._get_reconnect_success_event()
     assert reconnect_event.is_set() is False
 
@@ -508,6 +513,7 @@ async def test_initial_session_after_pre_session_disconnect_remains_startup(monk
     assert "finalize_version:False" in calls
     assert bot.reconnecting is False
     assert bot.last_reconnect_time is None
+    assert bot._startup_completed_once is True
     assert reconnect_event.is_set() is True
     assert bot.sent
     assert "Bot has restarted" in bot.sent[-1]["mbody"]
