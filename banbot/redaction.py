@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from xml.etree import ElementTree as ET
 
 from config import ADMIN_ROOM
@@ -580,8 +580,8 @@ class RedactionMixin:
         if mam is None or not hasattr(mam, "iterate"):
             return []
 
-        start = datetime.fromtimestamp(start_ts, tz=timezone.utc)
-        end = datetime.fromtimestamp(end_ts, tz=timezone.utc)
+        start = datetime.fromtimestamp(start_ts, tz=UTC)
+        end = datetime.fromtimestamp(end_ts, tz=UTC)
 
         async def collect() -> list:
             messages = []
@@ -760,8 +760,8 @@ class RedactionMixin:
             except Exception as send_exc:
                 try:
                     await asyncio.wait_for(confirmation.wait(), timeout=min(2.0, timeout))
-                except asyncio.TimeoutError:
-                    raise send_exc
+                except TimeoutError:
+                    raise send_exc from None
                 log.info(
                     "Redaction IQ did not complete cleanly, but the moderation broadcast "
                     "confirmed stanza %s in %s",
@@ -865,7 +865,7 @@ class RedactionMixin:
             summary["failure_reasons"] = failure_reasons
 
         unconfirmed_rows: list[tuple[int, str, str, int]] = []
-        for row, (status, row_value) in zip(rows, results):
+        for row, (status, row_value) in zip(rows, results, strict=True):
             if status == "redacted" and isinstance(row_value, int):
                 summary["redacted"] += 1
                 changed_rows.append(row_value)

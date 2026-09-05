@@ -30,7 +30,6 @@ log = logging.getLogger(__name__)
 from .locks import database_mutation_locks
 from .managed_files import ManagedFile, format_file_size, list_managed_files, prune_managed_files, resolve_managed_file
 
-
 ExportFile = ManagedFile
 
 
@@ -132,7 +131,7 @@ class ImportExportMixin:
             await self.prune_export_files(preserve=filename)
             log.info("✅ Exported %d bans to %s", len(rows), filename)
             return True, f"✅ Exported {len(rows)} bans to {filename}"
-        except IOError as e:
+        except OSError as e:
             log.error("File I/O error during export: %s", e)
             return False, f"❌ Failed to write file: {e}"
         except Exception as e:
@@ -259,12 +258,12 @@ class ImportExportMixin:
         if not path.exists():
             return [], 0, [f"❌ File not found: {filename}"]
         try:
-            with open(path, "r", encoding="utf-8") as csvfile:
+            with open(path, encoding="utf-8") as csvfile:
                 reader = csv.DictReader(csvfile)
                 if not reader.fieldnames or set(reader.fieldnames) != {"jid", "nick", "until", "issuer", "comment"}:
                     return [], 0, ["❌ Invalid CSV header. Expected: jid,nick,until,issuer,comment"]
                 rows = list(reader)
-        except IOError as e:
+        except OSError as e:
             log.error("Import file error: %s", e)
             return [], 0, [f"❌ File I/O error: {e}"]
 

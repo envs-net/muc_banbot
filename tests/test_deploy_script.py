@@ -4,6 +4,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -562,6 +563,10 @@ def test_protected_paths_preserve_untracked_custom_avatar(tmp_path, monkeypatch)
     assert protected["avatar"] == avatar
 
 
-def test_local_coverage_script_enforces_ci_threshold():
-    text = (ROOT / "scripts" / "test.sh").read_text(encoding="utf-8")
-    assert "--cov-fail-under=55" in text
+def test_local_coverage_profile_enforces_ci_threshold():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    testing = pyproject["tool"]["envs-xmpp"]["testing"]
+
+    assert testing["coverage-source"] == "banbot"
+    assert testing["coverage-report"] == "term-missing"
+    assert testing["coverage-fail-under"] == 55

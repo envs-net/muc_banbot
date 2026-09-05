@@ -12,18 +12,18 @@ from config import ADMIN_ROOM, NICK
 
 from .backups import CommandBackupMixin
 from .config_display import ConfigCommandMixin
-from .omemo import CommandOmemoMixin
-from .runtime import CommandRuntimeMixin
 from .constants import ADMIN_COMMANDS, PUBLIC_COMMANDS
 from .entrypoint import CommandEntryPointMixin
 from .help import CommandHelpMixin
 from .ignore import CommandIgnoreMixin
 from .import_export import CommandImportExportMixin
 from .moderation import CommandModerationMixin
+from .omemo import CommandOmemoMixin
 from .policy import CommandPolicyMixin
 from .rooms import CommandRoomsMixin
 from .router import CommandRouterMixin
 from .rtbl import CommandRtblMixin
+from .runtime import CommandRuntimeMixin
 from .usage import CommandUsageMixin
 
 

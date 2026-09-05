@@ -1,12 +1,18 @@
 """Runtime configuration package."""
 
+from ..config_loader import format_config_import_error
 from .common import (
     NEVER_WRITABLE_CONFIG_KEYS as _COMMON_NEVER_WRITABLE_CONFIG_KEYS,
+)
+from .common import (
     RUNTIME_WRITABLE_CONFIG_KEYS as _COMMON_RUNTIME_WRITABLE_CONFIG_KEYS,
+)
+from .common import (
     SECRET_CONFIG_KEYS as _COMMON_SECRET_CONFIG_KEYS,
+)
+from .common import (
     STARTUP_ONLY_CONFIG_KEYS as _COMMON_STARTUP_ONLY_CONFIG_KEYS,
 )
-from ..config_loader import format_config_import_error
 from .display import ConfigDisplayMixin
 from .imports import get_config_resource
 from .runtime import ConfigRuntimeMixin

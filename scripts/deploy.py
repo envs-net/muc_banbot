@@ -18,8 +18,8 @@ import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import partial
-from datetime import datetime, timezone
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -1205,7 +1205,7 @@ def _backup_database_before_update(deployment: Deployment) -> Path | None:
     if backup_dir is None:
         backup_dir = deployment.data_dir / "backups"
     _ensure_dir(backup_dir, deployment, mode=0o700)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
     target = backup_dir / f"pre-update-{stamp}.sqlite3"
     source_conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     try:

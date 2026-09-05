@@ -6,7 +6,11 @@ import urllib.request
 
 from envs_xmpp_core.release.github import (
     fetch_latest_release_version_via_github_api_sync as core_fetch_api,
+)
+from envs_xmpp_core.release.github import (
     fetch_latest_release_version_via_redirect_sync as core_fetch_redirect,
+)
+from envs_xmpp_core.release.github import (
     github_api_url_from_release_url,
 )
 from envs_xmpp_core.release.versions import compare_versions, parse_version_tuple

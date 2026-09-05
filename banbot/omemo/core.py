@@ -145,7 +145,7 @@ class OmemoCoreMixin:
         try:
             await asyncio.wait_for(self.omemo_ready.wait(), timeout=timeout)
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("OMEMO: initialization did not complete within %ss", timeout)
             return False
 
@@ -199,7 +199,7 @@ class OmemoCoreMixin:
         skipped_recipients: set[str] = set()
         max_attempts = max(1, len(current_recipients) + 1)
 
-        for attempt in range(1, max_attempts + 1):
+        for _attempt in range(1, max_attempts + 1):
             if not current_recipients:
                 raise RuntimeError(f"No usable OMEMO recipients left for {mto}")
 

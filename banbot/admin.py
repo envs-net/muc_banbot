@@ -3,8 +3,9 @@
 import asyncio
 import logging
 
-from config import ADMIN_ROOM
 from slixmpp.exceptions import IqError, IqTimeout
+
+from config import ADMIN_ROOM
 
 from .occupants import BotOccupantMixin
 from .utils import domain_matches

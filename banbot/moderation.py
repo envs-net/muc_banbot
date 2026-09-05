@@ -4,16 +4,17 @@ import asyncio
 import logging
 import time
 
-from config import ADMIN_ROOM
 from slixmpp.exceptions import IqError, IqTimeout
+
+from config import ADMIN_ROOM
 
 from .locks import ban_state_lock, is_maintenance_mode
 from .utils import (
     domain_matches,
     human_time,
     looks_like_domain,
-    normalize_ban_target,
     normalize_actor,
+    normalize_ban_target,
     validate_domain_ban,
     validate_jid_format,
 )
@@ -173,7 +174,7 @@ class ModerationMixin:
 
         # --- Step 1: Set Outcast (offline ban) ---
         if ban_jid_bare and not is_domain:
-            for attempt in range(3):
+            for _attempt in range(3):
                 try:
                     async with self.muc_write_semaphore:
                         await self.plugin["xep_0045"].set_affiliation(
@@ -211,7 +212,7 @@ class ModerationMixin:
                     log.info("❌ Skipped kick for admin/owner %s in %s", nick_name, room)
                     return
 
-                for attempt in range(3):
+                for _attempt in range(3):
                     try:
                         async with self.muc_write_semaphore:
                             await self.plugin["xep_0045"].set_role(

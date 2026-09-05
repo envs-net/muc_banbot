@@ -1,12 +1,12 @@
 """Direct-message and MUC-PM policy for admin read-only commands."""
 
-from contextlib import asynccontextmanager
 import inspect
+from contextlib import asynccontextmanager
 
 from config import ADMIN_ROOM
+
 from ._version import __version__
 from .utils import wants_all_pages, without_all_pages_arg
-
 
 LAST_PAGE_MARKER = -1
 VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"

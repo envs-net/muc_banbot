@@ -11,6 +11,12 @@ Run these helpers from the repository root inside the project virtualenv.
 | `quality.sh` | Local release gate: compilation, config syntax, warning-strict tests, Ruff, focused mypy and dependency audit. | `./scripts/quality.sh`, `./scripts/quality.sh --fix` |
 | `test.sh` | Fast non-integration pytest wrapper with warnings treated as errors. | `./scripts/test.sh`, `./scripts/test.sh --coverage`, `./scripts/test.sh --last-failed` |
 
+`quality.sh` and `test.sh` intentionally use the same shared runners as the
+other envs.net XMPP bot. Repository-specific source roots, project validation
+commands, integration markers and coverage thresholds are declared under
+`[tool.envs-xmpp.quality]` and `[tool.envs-xmpp.testing]` in `pyproject.toml`;
+the runner implementation lives in `envs-xmpp`.
+
 The deploy helper deliberately does not replace an existing systemd unit or
 operator configuration. New installs default to the hardened
 `/etc/muc_banbot/config.py` + `/var/lib/muc_banbot/` layout. Existing

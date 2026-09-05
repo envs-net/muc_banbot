@@ -8,7 +8,12 @@ import logging
 import time
 from pathlib import Path
 
-from .helpers import _backup_existing_path, _current_omemo_identity, _omemo_identity_metadata_path, _write_omemo_identity_metadata
+from .helpers import (
+    _backup_existing_path,
+    _current_omemo_identity,
+    _omemo_identity_metadata_path,
+    _write_omemo_identity_metadata,
+)
 
 log = logging.getLogger(__name__)
 

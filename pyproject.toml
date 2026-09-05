@@ -13,7 +13,7 @@ authors = [
     { name = "~creme", email = "creme@envs.net" },
 ]
 dependencies = [
-    "envs-xmpp>=0.3.1,<0.4",
+    "envs-xmpp>=0.3.2,<0.4",
     "slixmpp>=1.8,<2",
     "aiosqlite>=0.20,<1",
     "psutil>=5.9,<8",
@@ -115,3 +115,19 @@ ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = true
 no_implicit_optional = true
+
+[tool.envs-xmpp.quality]
+compile-targets = ["muc_banbot.py", "banbot", "scripts"]
+ruff-targets = ["muc_banbot.py", "banbot", "scripts"]
+mypy-targets = ["banbot/task_supervisor.py", "banbot/runtime_watchdog.py", "scripts/deploy.py"]
+mypy-args = ["--follow-imports=skip"]
+
+[[tool.envs-xmpp.quality.project-checks]]
+name = "Configuration sample syntax"
+command = ["python", "-m", "py_compile", "config_sample.py"]
+
+[tool.envs-xmpp.testing]
+marker = "not integration"
+coverage-source = "banbot"
+coverage-report = "term-missing"
+coverage-fail-under = 55

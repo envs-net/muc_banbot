@@ -5,14 +5,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 try:  # Optional dependency; only required when OMEMO_ENABLED=True.
+    import slixmpp_omemo as XEP_0384_module
     from omemo.storage import Just, Maybe, Nothing, Storage
     from omemo.types import DeviceInformation, JSONType
     from slixmpp.plugins import register_plugin  # type: ignore[attr-defined]
-    import slixmpp_omemo as XEP_0384_module
     XEP_0384 = XEP_0384_module.XEP_0384
 
     OMEMO_AVAILABLE = True

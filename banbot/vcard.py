@@ -5,9 +5,10 @@ import hashlib
 import logging
 import pathlib
 
-import config
 from slixmpp.stanza.presence import Presence
 from slixmpp.xmlstream import ET
+
+import config
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class VCardMixin:
 
         if hasattr(self, "connected"):
             try:
-                return bool(getattr(self, "connected"))
+                return bool(self.connected)
             except Exception:
                 return False
 
@@ -76,7 +77,7 @@ class VCardMixin:
                     image_data = f.read()
                 avatar_type = f"image/{pathlib.Path(avatar_path).suffix.lstrip('.').lower()}"
                 log.info("✅ Avatar loaded from: %s", avatar_path)
-            except (FileNotFoundError, IOError) as e:
+            except (OSError, FileNotFoundError) as e:
                 log.warning("⚠️ Failed to load avatar image: %s", e)
         else:
             if avatar_path:

@@ -5,6 +5,7 @@ import logging
 import time
 
 from config import ADMIN_ROOM, NICK
+
 from .locks import is_maintenance_mode
 
 log = logging.getLogger(__name__)

@@ -1,25 +1,62 @@
 ---
 kind: pipeline
 type: docker
-name: pytest
+name: quality-3.13
 
 steps:
-  - name: build pytest
-    image: python:3.13
-    commands:
-      - python --version
-      - python -m pip install --upgrade pip setuptools wheel
-      - cp config_sample.py config.py
-      - pip install -r requirements.txt
-      - pip install -r requirements-dev.txt
-      - python -m compileall -q banbot tests
-      - pytest --cov=banbot --cov-report=term-missing --cov-fail-under=55
+- name: quality
+  image: python:3.13
+  commands:
+    - python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
+    - python -m pip check
+    - cp config_sample.py config.py
+    - sh scripts/quality.sh --skip-tests
 
 trigger:
-  branch:
-    - main
   event:
     - push
+    - pull_request
+    - tag
+
+---
+kind: pipeline
+type: docker
+name: pytest-3.12
+
+steps:
+- name: test
+  image: python:3.12
+  commands:
+    - python -m pip install -c constraints/python312.txt -r requirements.txt -r requirements-dev.txt
+    - python -m pip check
+    - cp config_sample.py config.py
+    - pip-audit -r constraints/python312.txt
+    - sh scripts/test.sh
+
+trigger:
+  event:
+    - push
+    - pull_request
+    - tag
+
+---
+kind: pipeline
+type: docker
+name: pytest-3.13
+
+steps:
+- name: test
+  image: python:3.13
+  commands:
+    - python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
+    - python -m pip check
+    - cp config_sample.py config.py
+    - sh scripts/test.sh --coverage
+
+trigger:
+  event:
+    - push
+    - pull_request
     - tag
 
 ---
@@ -28,16 +65,16 @@ type: docker
 name: mutmut
 
 steps:
-  - name: mutation tests
-    image: python:3.13
-    commands:
-      - python --version
-      - python -m pip install --upgrade pip setuptools wheel
-      - cp config_sample.py config.py
-      - pip install -r requirements.txt
-      - pip install -r requirements-dev.txt
-      - PYTHONPATH="$PWD" mutmut run
-      - mutmut results
+- name: mutation tests
+  image: python:3.13
+  commands:
+    - python --version
+    - python -m pip install --upgrade pip setuptools wheel
+    - cp config_sample.py config.py
+    - pip install -r requirements.txt
+    - pip install -r requirements-dev.txt
+    - PYTHONPATH="$PWD" mutmut run
+    - mutmut results
 
 trigger:
   event:

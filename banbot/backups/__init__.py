@@ -5,10 +5,10 @@ import config
 from .archive import BackupArchiveMixin
 from .base import BackupBaseMixin
 from .commands import BackupCommandMixin
+from .common import DatabaseBackup
 from .create import BackupCreateMixin
 from .restore import BackupRestoreMixin
 from .verify import BackupVerifyMixin
-from .common import DatabaseBackup
 
 
 class BackupMixin(

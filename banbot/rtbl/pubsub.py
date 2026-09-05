@@ -6,8 +6,8 @@ import time
 
 from slixmpp.exceptions import IqError, IqTimeout
 
-from .utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _is_domain, _is_sha256
 from ..locks import is_maintenance_mode
+from .utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _is_domain, _is_sha256
 
 log = logging.getLogger(__name__)
 
@@ -80,8 +80,9 @@ class RtblPubSubMixin:
         Callers can use the return value to report manual refresh failures
         without raising for transient remote PubSub errors.
         """
-        from config import ADMIN_ROOM
         from xml.etree import ElementTree as ET
+
+        from config import ADMIN_ROOM
 
         _PUBSUB = "http://jabber.org/protocol/pubsub"
         _RSM = "http://jabber.org/protocol/rsm"

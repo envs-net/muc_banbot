@@ -3,6 +3,7 @@
 import logging
 import time
 
+from ..rtbl.utils import _looks_like_pubsub_node, _looks_like_pubsub_service_jid
 from ..utils import (
     get_list_page_size,
     human_time,
@@ -11,7 +12,6 @@ from ..utils import (
     wants_all_pages,
     without_all_pages_arg,
 )
-from ..rtbl.utils import _looks_like_pubsub_node, _looks_like_pubsub_service_jid
 
 log = logging.getLogger(__name__)
 

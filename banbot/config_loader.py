@@ -12,8 +12,8 @@ import builtins
 import importlib.util
 import linecache
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import ModuleType
 
 CONFIG_ENV_VAR = "MUC_BANBOT_CONFIG"

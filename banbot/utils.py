@@ -1,7 +1,9 @@
 """Pure helper functions for time formatting, JID handling, domains, and pagination."""
 
-from envs_xmpp_core.pagination import paginate, resolve_page as _core_resolve_page
+from envs_xmpp_core.pagination import paginate
+from envs_xmpp_core.pagination import resolve_page as _core_resolve_page
 from envs_xmpp_core.xmpp.jid import bare_jid
+
 
 def parse_duration(s: str) -> int:
     """
@@ -15,7 +17,7 @@ def parse_duration(s: str) -> int:
     try:
         value = int(s[:-1])
     except ValueError:
-        raise ValueError("Invalid duration number")
+        raise ValueError("Invalid duration number") from None
     if value <= 0:
         raise ValueError("Duration must be greater than zero")
     return value * units[s[-1].lower()]

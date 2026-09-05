@@ -4,7 +4,7 @@ import json
 import logging
 import pathlib
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from config import DB_FILE
 
@@ -19,7 +19,7 @@ class AuditMixin:
         if not self.structured_event_logs:
             log.log(level, "%s: %s", event, fields)
             return
-        payload = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"), "event": event, **fields}
+        payload = {"ts": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"), "event": event, **fields}
         try:
             log.log(level, json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
         except Exception:

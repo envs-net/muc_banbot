@@ -17,46 +17,44 @@ except Exception as exc:
     raise SystemExit(1) from None
 
 import aiosqlite
-from slixmpp import ClientXMPP
-
 from envs_xmpp_core.xmpp.connection import connect_kwargs as _core_connect_kwargs
 from envs_xmpp_core.xmpp.jid import boundjid_domain
-
+from slixmpp import ClientXMPP
 
 JID = config.JID
 PASSWORD = config.PASSWORD
 ADMIN_ROOM = config.ADMIN_ROOM
 NICK = config.NICK
 from . import config as banbot_config
+
 get_config_resource = banbot_config.get_config_resource
-from .utils import bare_jid, safe_jid
-from .audit import AuditMixin
-from .cache import CacheMixin
-from .db import DatabaseMixin
-from .import_export import ImportExportMixin
 from .admin import AdminMixin
-from .moderation import ModerationMixin
-from .commands import CommandMixin
-from .direct_messages import DirectMessageMixin
-from .rooms import RoomMixin
-from .rooms import RoomInviteMixin
-from .redaction import RedactionMixin
-from .ban_queries import BanQueryMixin
-from .status import StatusMixin
-from .muc import MucMixin
-from .health_check import HealthCheckMixin
-from .sync import SyncMixin
-from .vcard import VCardMixin
-from .updates import UpdateMixin
-from .ignorelist import IgnorelistMixin
-from .rtbl import RtblMixin
-from .messaging import MessagingMixin
-from .omemo import OmemoMixin
 from .alerts import AlertMixin
+from .audit import AuditMixin
 from .backups import BackupMixin
+from .ban_queries import BanQueryMixin
+from .cache import CacheMixin
+from .commands import CommandMixin
+from .db import DatabaseMixin
+from .direct_messages import DirectMessageMixin
+from .health_check import HealthCheckMixin
+from .ignorelist import IgnorelistMixin
+from .import_export import ImportExportMixin
+from .messaging import MessagingMixin
+from .moderation import ModerationMixin
+from .muc import MucMixin
+from .omemo import OmemoMixin
 from .protections import ProtectionMixin
-from .task_supervisor import TaskSupervisor
+from .redaction import RedactionMixin
+from .rooms import RoomInviteMixin, RoomMixin
+from .rtbl import RtblMixin
 from .runtime_watchdog import RuntimeWatchdog
+from .status import StatusMixin
+from .sync import SyncMixin
+from .task_supervisor import TaskSupervisor
+from .updates import UpdateMixin
+from .utils import bare_jid, safe_jid
+from .vcard import VCardMixin
 
 _log_level_name = str(getattr(config, "LOG_LEVEL", "INFO")).upper()
 _log_level = getattr(logging, _log_level_name, None)
@@ -610,7 +608,7 @@ class BanBot(
                 for room in managed_rooms
             )
         )
-        failed_joins = [room for room, joined in zip(managed_rooms, join_results) if not joined]
+        failed_joins = [room for room, joined in zip(managed_rooms, join_results, strict=True) if not joined]
         if failed_joins:
             log.warning("MUC joins failed for: %s", ", ".join(failed_joins))
 
@@ -760,7 +758,7 @@ def main() -> None:
                 log.info(line)
     except Exception as e:
         log.error("Startup config validation failed: %s", e)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     if not connect_xmpp(xmpp):
         log.error("Unable to connect to XMPP server.")

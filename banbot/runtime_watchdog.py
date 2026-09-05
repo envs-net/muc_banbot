@@ -11,6 +11,8 @@ from envs_xmpp_core.runtime.systemd import sd_notify as _core_sd_notify
 from envs_xmpp_core.runtime.systemd import systemd_watchdog_interval
 from envs_xmpp_core.runtime.watchdog import (
     RuntimeWatchdog as CoreRuntimeWatchdog,
+)
+from envs_xmpp_core.runtime.watchdog import (
     WatchdogOptions,
     WatchdogState,
 )

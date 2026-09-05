@@ -51,7 +51,7 @@ class MucMixin(BotOccupantMixin):
                 try:
                     disconnect_task = asyncio.ensure_future(result)
                     await asyncio.wait_for(disconnect_task, timeout=5.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     log.warning(
                         "Partial reconnect session did not disconnect within 5.0s "
                         "after %s",
@@ -116,7 +116,7 @@ class MucMixin(BotOccupantMixin):
 
             try:
                 await asyncio.wait_for(event.wait(), timeout=min(0.1, remaining))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
 
@@ -260,7 +260,7 @@ class MucMixin(BotOccupantMixin):
             if last_error is None:
                 last_error = waiter_error
             if last_error is None:
-                last_error = asyncio.TimeoutError(
+                last_error = TimeoutError(
                     f"No self-presence received within {float(timeout):g}s"
                 )
 
@@ -439,7 +439,7 @@ class MucMixin(BotOccupantMixin):
                                 "✅ Initial XMPP startup completed during reconnect backoff"
                             )
                         return
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         log.warning(
                             "Session startup did not complete within %ss; "
                             "disconnecting partial session before retry",
@@ -478,7 +478,7 @@ class MucMixin(BotOccupantMixin):
                     else:
                         log.info("✅ Initial XMPP startup completed after retry")
                     return
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     log.warning(
                         "Reconnect startup did not complete within %ss; "
                         "disconnecting partial session before retry",
@@ -609,7 +609,7 @@ class MucMixin(BotOccupantMixin):
             if domain:
                 for banned_domain, bans in self.ban_index_by_domain.items():
                     if domain_matches(domain, banned_domain):
-                        for ban_jid, ban_nick, until, issuer, comment in bans:
+                        for ban_jid, ban_nick, until, _issuer, comment in bans:
                             if until <= 0 or until > now:
                                 tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
 

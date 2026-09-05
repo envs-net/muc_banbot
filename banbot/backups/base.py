@@ -10,7 +10,7 @@ from typing import Any
 import config
 
 from ..managed_files import format_file_size, list_managed_files, resolve_managed_file
-from .common import DatabaseBackup, _BACKUP_CONFIG_ENTRY, _BACKUP_OMEMO_ENTRY, _BACKUP_SAFE_RE
+from .common import _BACKUP_CONFIG_ENTRY, _BACKUP_OMEMO_ENTRY, _BACKUP_SAFE_RE, DatabaseBackup
 
 log = logging.getLogger(__name__)
 

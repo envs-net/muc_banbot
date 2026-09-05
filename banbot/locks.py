@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import weakref
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
-
+from typing import Any
 
 _FALLBACK_DATABASE_FILE_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = weakref.WeakKeyDictionary()
 _FALLBACK_BAN_STATE_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = weakref.WeakKeyDictionary()

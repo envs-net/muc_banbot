@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pathlib
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Iterable
 
 
 @dataclass(frozen=True)

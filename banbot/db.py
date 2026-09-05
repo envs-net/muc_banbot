@@ -4,6 +4,7 @@ import logging
 import time
 
 import aiosqlite
+
 from config import DB_FILE
 
 from .utils import looks_like_domain, normalize_actor, normalize_ban_target

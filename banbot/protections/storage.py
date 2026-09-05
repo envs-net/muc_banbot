@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+
 from .definitions import canonical_protection_name
 
 log = logging.getLogger(__name__)

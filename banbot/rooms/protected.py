@@ -6,8 +6,9 @@ import logging
 import re
 import sys
 
-from config import ADMIN_ROOM, NICK
 from slixmpp.exceptions import IqError, IqTimeout
+
+from config import ADMIN_ROOM, NICK
 
 from ..muc_join import await_muc_join_compat
 from ..occupants import BotOccupantMixin, bot_room_status_line

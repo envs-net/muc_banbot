@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
 import logging
 import time
+from collections import defaultdict, deque
 from typing import Any
 
 from ..utils import bare_jid
@@ -18,7 +18,6 @@ from .definitions import (
 )
 from .notifications import ProtectionNotificationMixin
 from .storage import ProtectionStorageMixin
-
 
 log = logging.getLogger(__name__)
 

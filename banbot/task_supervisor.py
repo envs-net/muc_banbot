@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from envs_xmpp_core.runtime.tasks import SupervisorOptions, TaskSupervisor as CoreTaskSupervisor
+from envs_xmpp_core.runtime.tasks import SupervisorOptions
+from envs_xmpp_core.runtime.tasks import TaskSupervisor as CoreTaskSupervisor
 
 
 @dataclass(frozen=True)

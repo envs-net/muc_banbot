@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Any
+from collections.abc import Mapping
+from typing import Any
 
 from .definitions import (
     PROTECTION_ACTIONS_BY_PROTECTION,

@@ -452,7 +452,7 @@ class BanQueryMixin:
         ) as cursor:
             hash_rows = await cursor.fetchall()
 
-        for hash_val, service_jid, node, reason, created_at in hash_rows:
+        for hash_val, service_jid, node, reason, _created_at in hash_rows:
             label = f"[{service_jid}/{node}]"
             reason_str = f" — {reason}" if reason else ""
             entries.append(f"🔑 {hash_val[:16]}…  {label}{reason_str}")
@@ -467,7 +467,7 @@ class BanQueryMixin:
         ) as cursor:
             domain_rows = await cursor.fetchall()
 
-        for domain, service_jid, node, reason, created_at in domain_rows:
+        for domain, service_jid, node, reason, _created_at in domain_rows:
             label = f"[{service_jid}/{node}]"
             reason_str = f" — {reason}" if reason else ""
             entries.append(f"🌐 *.{domain}  {label}{reason_str}")

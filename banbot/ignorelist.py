@@ -3,8 +3,8 @@
 import logging
 
 from .utils import (
-    get_list_page_size,
     domain_matches,
+    get_list_page_size,
     resolve_page,
     validate_domain_ban,
     validate_jid_format,

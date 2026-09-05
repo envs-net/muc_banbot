@@ -213,7 +213,7 @@ class SyncMixin:
                 sync_single_room(batch_num + 1 + i, room, active_bans)
                 for i, room in enumerate(batch)
             ), return_exceptions=True)
-            for room, result in zip(batch, results):
+            for room, result in zip(batch, results, strict=True):
                 if isinstance(result, Exception):
                     log.warning(
                         "Error syncing room %s in batch %d-%d: %s",
@@ -584,7 +584,7 @@ class SyncMixin:
             tasks = []
             new_bans_count = 0
 
-            for ban_jid, ban_nick, until, comment in active_bans:
+            for ban_jid, ban_nick, _until, comment in active_bans:
                 # Check if already outcast in this room
                 already_banned = False
 
