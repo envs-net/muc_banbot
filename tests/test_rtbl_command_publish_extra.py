@@ -428,4 +428,3 @@ async def test_setup_rtbl_publish_disables_publish_when_sanity_retract_fails(tem
         assert any(item[1] == "muc_bans_sha256" for item in bot.plugin["xep_0060"].retracted)
     finally:
         await bot.db.close()
-

@@ -15,4 +15,3 @@ def get_config_resource() -> str | None:
     if resource is not None:
         return resource
     return getattr(config, "RESSOURCE", None)
-

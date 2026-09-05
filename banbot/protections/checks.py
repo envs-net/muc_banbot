@@ -327,4 +327,3 @@ class ProtectionChecksMixin:
             details={"word": word},
         )
         return True
-
