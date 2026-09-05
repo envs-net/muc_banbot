@@ -15,7 +15,7 @@ spec.loader.exec_module(bootstrap)
 
 
 def test_matching_version_needs_no_bootstrap(monkeypatch):
-    monkeypatch.setattr(bootstrap, "_installed_version", lambda: "0.3.0")
+    monkeypatch.setattr(bootstrap, "_installed_version", lambda: "0.3.1")
     monkeypatch.setattr(
         bootstrap.subprocess,
         "run",
@@ -36,7 +36,7 @@ def test_different_patch_version_bootstraps(monkeypatch, tmp_path):
     class Reexec(Exception):
         pass
 
-    monkeypatch.setattr(bootstrap, "_installed_version", lambda: "0.3.1")
+    monkeypatch.setattr(bootstrap, "_installed_version", lambda: "0.3.0")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     monkeypatch.delenv("ENVS_XMPP_DEPLOY_SOURCE", raising=False)
     monkeypatch.setattr(
@@ -53,14 +53,14 @@ def test_different_patch_version_bootstraps(monkeypatch, tmp_path):
     with pytest.raises(Reexec):
         bootstrap.ensure_envs_xmpp()
 
-    deploy_python = tmp_path / "envs-xmpp" / "deploy" / "0.3.0" / "bin" / "python"
+    deploy_python = tmp_path / "envs-xmpp" / "deploy" / "0.3.1" / "bin" / "python"
     assert calls[0] == [
         str(bootstrap.sys.executable),
         "-m",
         "venv",
         str(deploy_python.parent.parent),
     ]
-    assert calls[1][-1] == "envs-xmpp==0.3.0"
+    assert calls[1][-1] == "envs-xmpp==0.3.1"
 
 
 def test_missing_version_bootstraps_source_override_and_reexecs(monkeypatch, tmp_path):
@@ -86,7 +86,7 @@ def test_missing_version_bootstraps_source_override_and_reexecs(monkeypatch, tmp
     with pytest.raises(Reexec):
         bootstrap.ensure_envs_xmpp()
 
-    deploy_python = tmp_path / "envs-xmpp" / "deploy" / "0.3.0" / "bin" / "python"
+    deploy_python = tmp_path / "envs-xmpp" / "deploy" / "0.3.1" / "bin" / "python"
     assert calls[0] == [
         str(bootstrap.sys.executable),
         "-m",

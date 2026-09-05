@@ -6,9 +6,14 @@ import asyncio
 import json
 import logging
 import pathlib
-import shutil
 import zipfile
 from typing import Any
+
+from envs_xmpp_core.storage.archive import (
+    UnsafeArchiveMember,
+    extract_zip_member,
+    safe_zip_members,
+)
 
 from .common import (
     _BACKUP_CONFIG_ENTRY,
@@ -52,7 +57,10 @@ class BackupArchiveMixin:
             raise ValueError(f"Invalid backup archive: {exc}") from exc
 
         with archive:
-            names = set(archive.namelist())
+            try:
+                names = safe_zip_members(archive)
+            except UnsafeArchiveMember as exc:
+                raise ValueError(str(exc)) from exc
             if _BACKUP_MANIFEST_ENTRY not in names:
                 raise ValueError("Backup archive is missing manifest.json")
             if _BACKUP_DATABASE_ENTRY not in names:
@@ -63,21 +71,27 @@ class BackupArchiveMixin:
             if manifest.get("format") != _BACKUP_FORMAT:
                 raise ValueError(f"Unsupported backup format: {manifest.get('format')!r}")
 
-            database_path = target_dir / _BACKUP_DATABASE_ENTRY
-            with archive.open(_BACKUP_DATABASE_ENTRY, "r") as src, database_path.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
+            database_path = extract_zip_member(
+                archive,
+                _BACKUP_DATABASE_ENTRY,
+                target_dir / _BACKUP_DATABASE_ENTRY,
+            )
 
             config_path: pathlib.Path | None = None
             if _BACKUP_CONFIG_ENTRY in names:
-                config_path = target_dir / _BACKUP_CONFIG_ENTRY
-                with archive.open(_BACKUP_CONFIG_ENTRY, "r") as src, config_path.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                config_path = extract_zip_member(
+                    archive,
+                    _BACKUP_CONFIG_ENTRY,
+                    target_dir / _BACKUP_CONFIG_ENTRY,
+                )
 
             omemo_path: pathlib.Path | None = None
             if _BACKUP_OMEMO_ENTRY in names:
-                omemo_path = target_dir / _BACKUP_OMEMO_ENTRY
-                with archive.open(_BACKUP_OMEMO_ENTRY, "r") as src, omemo_path.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                omemo_path = extract_zip_member(
+                    archive,
+                    _BACKUP_OMEMO_ENTRY,
+                    target_dir / _BACKUP_OMEMO_ENTRY,
+                )
 
         return {
             "database": database_path,

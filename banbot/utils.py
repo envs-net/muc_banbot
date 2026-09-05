@@ -1,5 +1,6 @@
 """Pure helper functions for time formatting, JID handling, domains, and pagination."""
 
+from envs_xmpp_core.pagination import paginate, resolve_page as _core_resolve_page
 from envs_xmpp_core.xmpp.jid import bare_jid
 
 def parse_duration(s: str) -> int:
@@ -175,12 +176,13 @@ def paginate_lines(lines: list[str], page: int, per_page: int = 10) -> tuple[lis
     Paginate a list of lines.
     Returns: (page_lines, current_page, total_pages, total_items)
     """
-    total_items = len(lines)
-    total_pages = max(1, (total_items + per_page - 1) // per_page)
-    current_page = max(1, min(page, total_pages))
-    start = (current_page - 1) * per_page
-    end = start + per_page
-    return lines[start:end], current_page, total_pages, total_items
+    result = paginate(
+        lines,
+        page=page,
+        page_size=per_page,
+        last_page_sentinel=None,
+    )
+    return result.items, result.page, result.total_pages, result.total_items
 
 def resolve_page(page: int, total_items: int, per_page: int = 10) -> int:
     """
@@ -194,7 +196,10 @@ def resolve_page(page: int, total_items: int, per_page: int = 10) -> int:
     Returns:
         Resolved page number (always >= 1).
     """
-    total_pages = max(1, (total_items + per_page - 1) // per_page)
-    if page == -1:
-        return total_pages
-    return max(1, min(page, total_pages))
+    current_page, _total_pages = _core_resolve_page(
+        page,
+        total_items=total_items,
+        page_size=per_page,
+        last_page_sentinel=-1,
+    )
+    return current_page
