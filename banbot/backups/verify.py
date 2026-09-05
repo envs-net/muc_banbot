@@ -6,8 +6,9 @@ import asyncio
 import json
 import logging
 import pathlib
-import sqlite3
 import tempfile
+
+from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
 
 log = logging.getLogger(__name__)
 
@@ -16,21 +17,8 @@ class BackupVerifyMixin:
     @staticmethod
     def _check_sqlite_integrity_sync(path: pathlib.Path) -> tuple[bool, str]:
         """Run SQLite PRAGMA integrity_check for a database file."""
-        if not path.exists():
-            return False, f"Database file does not exist: {path}"
-        if not path.is_file():
-            return False, f"Database path is not a regular file: {path}"
-        if path.stat().st_size <= 0:
-            return False, f"Database file is empty: {path}"
-
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        try:
-            result = connection.execute("PRAGMA integrity_check").fetchone()
-        finally:
-            connection.close()
-
-        message = str(result[0]) if result else "no integrity_check result"
-        return message.lower() == "ok", message
+        result = check_sqlite_integrity(path, require_nonempty_file=True)
+        return result.ok, result.message
 
     async def _check_sqlite_integrity(self, path: pathlib.Path) -> tuple[bool, str]:
         """Run SQLite integrity_check without blocking the event loop."""

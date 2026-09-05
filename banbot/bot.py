@@ -19,6 +19,10 @@ except Exception as exc:
 import aiosqlite
 from slixmpp import ClientXMPP
 
+from envs_xmpp_core.xmpp.connection import connect_kwargs as _core_connect_kwargs
+from envs_xmpp_core.xmpp.jid import boundjid_domain
+
+
 JID = config.JID
 PASSWORD = config.PASSWORD
 ADMIN_ROOM = config.ADMIN_ROOM
@@ -134,42 +138,20 @@ def connect_xmpp(xmpp) -> bool:
     """Connect using optional startup-only host/port/direct-TLS settings."""
     host = getattr(config, "CONNECT_HOST", None)
     port = getattr(config, "CONNECT_PORT", 5222)
-    direct_tls = getattr(config, "CONNECT_DIRECT_TLS", False)
-
-    configured_jid_domain = str(getattr(config, "JID", "")).split("@", 1)[-1].split("/", 1)[0]
-    boundjid = getattr(xmpp, "boundjid", None)
-    bound_host = (
-        getattr(boundjid, "host", None)
-        or getattr(boundjid, "domain", None)
+    direct_tls = bool(getattr(config, "CONNECT_DIRECT_TLS", False))
+    jid_domain = str(getattr(config, "JID", "")).split("@", 1)[-1].split("/", 1)[0]
+    connect_host = host or boundjid_domain(xmpp) or jid_domain
+    kwargs = _core_connect_kwargs(
+        xmpp,
+        host=connect_host,
+        port=port,
+        direct_tls=direct_tls,
+        jid_domain=jid_domain,
     )
-    connect_host = host or bound_host or configured_jid_domain
-    connect_port = int(port)
-
-    signature = inspect.signature(xmpp.connect)
-    parameters = signature.parameters
-    kwargs = {}
-
-    # Current Slixmpp accepts address=(host, port). Some older versions used
-    # host=/port=. Keep both forms compatible without passing unknown kwargs.
-    if "address" in parameters:
-        kwargs["address"] = (connect_host, connect_port)
-    else:
-        if "host" in parameters:
-            kwargs["host"] = connect_host
-        if "port" in parameters:
-            kwargs["port"] = connect_port
-
-    # Direct TLS / legacy SSL mode. For normal STARTTLS connections, do not
-    # force STARTTLS here; let Slixmpp negotiate stream features itself.
-    if "use_ssl" in parameters:
-        kwargs["use_ssl"] = bool(direct_tls)
-    if direct_tls and "force_starttls" in parameters:
-        kwargs["force_starttls"] = False
-
     log.info(
         "Connecting to XMPP server %s:%s (%s)",
         connect_host,
-        connect_port,
+        int(port),
         "direct TLS" if direct_tls else "STARTTLS",
     )
     return xmpp.connect(**kwargs)
@@ -264,6 +246,11 @@ class BanBot(
         self.reconnect_task: asyncio.Task | None = None
         self.reconnect_success_event: asyncio.Event | None = None
         self.reconnect_failure_event: asyncio.Event | None = None
+        self._session_start_received = False
+        # True only after this process has completed the full critical startup
+        # path at least once.  Unlike server_connect_time, this is safe for
+        # deciding whether a later session_start is a semantic reconnect.
+        self._startup_completed_once = False
         self.health_check_task: asyncio.Task | None = None
         self.unban_task: asyncio.Task | None = None
 
@@ -393,7 +380,7 @@ class BanBot(
         self.add_event_handler("groupchat_presence", self.on_muc_presence)
 
         self.add_event_handler("disconnected", self.on_disconnect)
-        self.add_event_handler("connection_failed", self.on_disconnect)
+        self.add_event_handler("connection_failed", self.on_connection_failed)
 
 
     def connect_with_config(self) -> bool:
@@ -564,9 +551,25 @@ class BanBot(
             log.info("Ignoring session_start while shutdown is in progress")
             return
 
+        # Mark the XMPP session as established immediately. The systemd startup
+        # timeout extender only runs while we are still waiting for
+        # ``session_start``; once this point is reached the normal
+        # TimeoutStartSec safety net should apply to the remaining startup path.
+        self._session_start_received = True
+
         await self.stop_background_tasks()
 
-        was_reconnecting = bool(self.reconnecting)
+        # A reconnect loop may already be active even though this process has
+        # never completed an XMPP session.  This happens when the initial
+        # connection emits a disconnect/connection_failed event immediately
+        # before a queued session_start wins the race.  Keep that first
+        # successful session classified as normal startup, while still
+        # remembering that a reconnect waiter must be released at the end.
+        reconnect_waiter_active = bool(self.reconnecting)
+        was_reconnecting = bool(
+            reconnect_waiter_active
+            and getattr(self, "_startup_completed_once", False)
+        )
 
         await self.setup_db(create_startup_backup=not was_reconnecting)
         await self.prepare_startup_version_notice(reconnecting=was_reconnecting)
@@ -708,16 +711,23 @@ class BanBot(
             name="health-check-worker",
         )
         self.reconnecting = False
+        # Set this only after every critical startup stage and core worker
+        # creation succeeded.  A failed first startup may already have a
+        # server_connect_time, but must still be treated as initial startup on
+        # the next successful attempt.
+        self._startup_completed_once = True
 
         # The reconnect loop must only stop after the entire critical startup
-        # path succeeded (DB, rooms, sync, RTBL, workers and watchdog). Setting
-        # this earlier can leave a connected but only partially initialized bot
-        # with no retry path if a later startup stage raises.
+        # path succeeded (DB, rooms, sync, RTBL, workers and watchdog).  A
+        # pre-session disconnect can also create that waiter during the first
+        # process startup, so release it independently from the semantic
+        # reconnect classification.
+        if reconnect_waiter_active and self.reconnect_success_event is not None:
+            self.reconnect_success_event.set()
+
         if was_reconnecting:
             self.last_reconnect_time = time.time()
             log.info("🔄 Reconnected successfully")
-            if self.reconnect_success_event is not None:
-                self.reconnect_success_event.set()
             await self.send_operational_alert(
                 "reconnect_success",
                 "Reconnect completed",
@@ -755,6 +765,19 @@ def main() -> None:
     if not connect_xmpp(xmpp):
         log.error("Unable to connect to XMPP server.")
         raise SystemExit(1)
+
+    # Slixmpp may return from connect() before the TCP/XMPP session has
+    # actually been established. While waiting for ``session_start`` keep the
+    # Type=notify startup deadline alive. Once session_start arrives, the
+    # extender stops and the normal TimeoutStartSec limit protects the rest of
+    # startup from genuine hangs.
+    arm_startup_timeout = getattr(
+        getattr(xmpp, "runtime_watchdog", None),
+        "arm_startup_timeout_extension",
+        None,
+    )
+    if callable(arm_startup_timeout):
+        arm_startup_timeout(xmpp.loop)
 
     shutdown_signal: int | None = None
     previous_signal_handlers: dict[int, object] = {}

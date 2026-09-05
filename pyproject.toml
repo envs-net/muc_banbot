@@ -7,15 +7,16 @@ name = "muc-banbot"
 dynamic = ["version"]
 description = "XMPP multi-room ban management and moderation bot"
 readme = "README.md"
-requires-python = ">=3.10"
-license = "MIT"
+requires-python = ">=3.12"
+license = "GPL-3.0-only"
 authors = [
     { name = "~creme", email = "creme@envs.net" },
 ]
 dependencies = [
-    "slixmpp>=1.8.0",
-    "aiosqlite>=0.18.0",
-    "psutil>=5.9.0",
+    "envs-xmpp>=0.3,<0.4",
+    "slixmpp>=1.8,<2",
+    "aiosqlite>=0.20,<1",
+    "psutil>=5.9,<8",
 ]
 keywords = ["xmpp", "muc", "moderation", "banbot", "rtbl"]
 classifiers = [
@@ -23,8 +24,6 @@ classifiers = [
     "Intended Audience :: System Administrators",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Communications :: Chat",
@@ -101,7 +100,7 @@ do_not_mutate_patterns = [
     "log\\.\\w+",
 ]
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 120
 exclude = ["mutants", ".venv", "venv"]
 
@@ -111,7 +110,7 @@ exclude = ["mutants", ".venv", "venv"]
 select = ["E9", "F63", "F7", "F82"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = true

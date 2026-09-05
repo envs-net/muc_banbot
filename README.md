@@ -39,7 +39,7 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 
 ## Installation / Quickstart
 
-Requires **Python 3.10+**. The project is developed and tested with Python 3.13.
+Requires **Python 3.12+**. The project is developed and tested with Python 3.13.
 
 ### Recommended hardened systemd deployment
 
@@ -66,6 +66,8 @@ git checkout "$LATEST_TAG"
 ./scripts/deploy.sh install --dry-run
 sudo ./scripts/deploy.sh install
 ```
+
+The deploy frontend uses the shared `envs-xmpp` operations layer. On a fresh checkout it bootstraps the exact deployment-tooling version into `$XDG_CACHE_HOME/envs-xmpp/deploy/` (or `~/.cache/envs-xmpp/deploy/`) before continuing; no manual pre-install is required. `ENVS_XMPP_DEPLOY_SOURCE` can point to a local checkout or wheel for pre-release testing.
 
 On a fresh install the helper creates `/etc/muc_banbot/config.py` once, with
 absolute mutable paths below `/var/lib/muc_banbot`, and then stops so credentials

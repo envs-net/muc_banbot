@@ -2,7 +2,7 @@
 
 # muc_banbot: XMPP Multi-Room Ban Management Bot
 # Author: creme <xmpp:creme@envs.net>
-# License: MIT
+# License: GPL-3.0-only
 
 """Command-line entry point for the BanBot XMPP bot."""
 

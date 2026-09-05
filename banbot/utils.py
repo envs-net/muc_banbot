@@ -1,5 +1,7 @@
 """Pure helper functions for time formatting, JID handling, domains, and pagination."""
 
+from envs_xmpp_core.xmpp.jid import bare_jid
+
 def parse_duration(s: str) -> int:
     """
     Parse a duration string into seconds.
@@ -39,11 +41,6 @@ def human_time(seconds: int) -> str:
     if s:
         parts.append(f"{s}s")
     return " ".join(parts)
-
-
-def bare_jid(jid: str | None) -> str | None:
-    """Return the bare JID without resource."""
-    return jid.split("/")[0].lower() if jid else None
 
 
 def normalize_actor(actor: str | None) -> str | None:

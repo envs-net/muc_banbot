@@ -204,10 +204,17 @@ unit can be removed once with `sudo rm -rf /etc/muc_banbot/__pycache__`.
 while startup failures, unexpected process exits and `!restart confirm` can be
 recovered automatically.
 
-BanBot sends `READY=1` only after database/room startup has completed. Its
-runtime watchdog feeds systemd while the asyncio event loop remains responsive.
-If lag exceeds `WATCHDOG_LAG_FAILURE_SECONDS`, heartbeats are suppressed so the
-systemd watchdog can recover a genuinely stuck process.
+BanBot sends `READY=1` only after database/room startup has completed. While
+the first XMPP session is still unavailable, BanBot periodically extends
+systemd's startup deadline with `EXTEND_TIMEOUT_USEC`. This lets a `Type=notify`
+service survive a deliberately offline XMPP server (for example during a long
+backup window) without disabling `TimeoutStartSec` entirely. As soon as
+`session_start` is received, the extension stops and the normal startup timeout
+again protects the remaining initialization path from genuine hangs.
+
+Its runtime watchdog feeds systemd after startup while the asyncio event loop
+remains responsive. If lag exceeds `WATCHDOG_LAG_FAILURE_SECONDS`, heartbeats
+are suppressed so the systemd watchdog can recover a genuinely stuck process.
 
 Install the static unit manually when desired:
 

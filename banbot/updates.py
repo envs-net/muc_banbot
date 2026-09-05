@@ -1,11 +1,15 @@
 """GitHub release/version check helpers."""
 
 import asyncio
-import json
 import logging
-import re
 import urllib.request
-from urllib.parse import urlparse
+
+from envs_xmpp_core.release.github import (
+    fetch_latest_release_version_via_github_api_sync as core_fetch_api,
+    fetch_latest_release_version_via_redirect_sync as core_fetch_redirect,
+    github_api_url_from_release_url,
+)
+from envs_xmpp_core.release.versions import compare_versions, parse_version_tuple
 
 from config import ADMIN_ROOM
 
@@ -18,31 +22,13 @@ _LAST_STARTED_VERSION_KEY = "last_successful_start_version"
 
 class UpdateMixin:
     def _parse_version_tuple(self, version: str) -> tuple[int, ...]:
-        parts = re.findall(r"\d+", version)
-        return tuple(int(p) for p in parts)
+        return parse_version_tuple(version)
 
     def _is_remote_version_newer(self, remote_version: str, local_version: str) -> bool:
-        return self._parse_version_tuple(remote_version) > self._parse_version_tuple(local_version)
+        return compare_versions(remote_version, local_version) > 0
 
     def _github_api_url_from_release_url(self, release_url: str) -> str | None:
-        """
-        Convert a GitHub releases URL into the releases/latest API endpoint.
-
-        Example:
-          https://github.com/envs-net/muc_banbot/releases/latest
-        becomes:
-          https://api.github.com/repos/envs-net/muc_banbot/releases/latest
-        """
-        parsed = urlparse(release_url)
-        if parsed.netloc.lower() != "github.com":
-            return None
-
-        parts = [p for p in parsed.path.split("/") if p]
-        if len(parts) < 2:
-            return None
-
-        owner, repo = parts[0], parts[1]
-        return f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        return github_api_url_from_release_url(release_url)
 
 
     async def prepare_startup_version_notice(self, *, reconnecting: bool) -> str | None:
@@ -113,58 +99,27 @@ class UpdateMixin:
         return was_updated
 
     def _fetch_latest_release_version_via_github_api_sync(self) -> str:
-        """Fetch the latest GitHub release tag via the GitHub REST API."""
-        api_url = self._github_api_url_from_release_url(self.version_check_url)
-        if not api_url:
-            raise ValueError("VERSION_CHECK_URL is not a supported GitHub releases URL")
-
-        req = urllib.request.Request(
-            api_url,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "User-Agent": f"muc_banbot/{__version__}",
-            },
-        )
-
-        with urllib.request.urlopen(req, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-
-        tag = str(payload.get("tag_name", "")).strip()
-        if not tag:
-            raise ValueError("GitHub API response did not contain tag_name")
-
-        return tag.lstrip("v")
+        try:
+            return core_fetch_api(
+                self.version_check_url,
+                user_agent=f"muc_banbot/{__version__}",
+                timeout=15,
+                urlopen=urllib.request.urlopen,
+            )
+        except ValueError as exc:
+            if "supported GitHub" in str(exc):
+                raise ValueError("VERSION_CHECK_URL is not a supported GitHub releases URL") from exc
+            raise
 
     def _fetch_latest_release_version_via_redirect_sync(self) -> str:
-        """
-        Fetch the latest GitHub release version by following the /releases/latest redirect.
-
-        Example final URL:
-          https://github.com/envs-net/muc_banbot/releases/tag/v1.3.0
-
-        Returns:
-          1.3.0
-        """
         if not self.version_check_url:
             raise ValueError("VERSION_CHECK_URL is not configured")
-
-        req = urllib.request.Request(
+        return core_fetch_redirect(
             self.version_check_url,
-            headers={"User-Agent": f"muc_banbot/{__version__}"},
+            user_agent=f"muc_banbot/{__version__}",
+            timeout=15,
+            urlopen=urllib.request.urlopen,
         )
-
-        with urllib.request.urlopen(req, timeout=15) as response:
-            final_url = response.geturl()
-
-        marker = "/releases/tag/"
-        if marker not in final_url:
-            raise ValueError(f"Unexpected release redirect URL: {final_url}")
-
-        tag = final_url.split(marker, 1)[1].strip().strip("/")
-        if not tag:
-            raise ValueError("Could not extract release tag from redirect URL")
-
-        return tag.lstrip("v")
 
     def _fetch_latest_release_version_sync(self) -> str:
         """

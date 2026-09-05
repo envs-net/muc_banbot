@@ -6,6 +6,8 @@ Run these helpers from the repository root inside the project virtualenv.
 | --- | --- | --- |
 | `deploy.sh` | Preservation-first install/update/status/check helper. A bare invocation only prints help. | `./scripts/deploy.sh status`, `./scripts/deploy.sh install --dry-run`, `sudo ./scripts/deploy.sh update` |
 | `deploy.py` | Python backend for `deploy.sh`; normally invoke the shell wrapper instead. | `python scripts/deploy.py --help` |
+| `_envs_xmpp_bootstrap.py` | Stdlib-only bootstrap for the shared `envs-xmpp` deployment tooling. | Internal helper; `deploy.py` uses it automatically. |
+| `deploy_profile.py` | Declarative envs-xmpp deployment profile used by the bootstrap deploy path. | Defines bot-specific defaults while shared deployment mechanics live in `envs_xmpp_ops`. |
 | `quality.sh` | Local release gate: compilation, config syntax, warning-strict tests, Ruff, focused mypy and dependency audit. | `./scripts/quality.sh`, `./scripts/quality.sh --fix` |
 | `test.sh` | Fast non-integration pytest wrapper with warnings treated as errors. | `./scripts/test.sh`, `./scripts/test.sh --coverage`, `./scripts/test.sh --last-failed` |
 

@@ -29,6 +29,64 @@ class ReconnectFixture(muc_module.MucMixin):
 
 
 @pytest.mark.asyncio
+async def test_initial_connection_failed_uses_slixmpp_retry_without_parallel_loop() -> None:
+    bot = ReconnectFixture()
+    bot.reconnecting = False
+    bot._startup_completed_once = False
+    bot._session_start_received = False
+    timeout_arms: list[str] = []
+    bot.runtime_watchdog = SimpleNamespace(
+        arm_startup_timeout_extension=lambda: timeout_arms.append("armed")
+    )
+
+    original_occupants = dict(bot.occupants)
+    original_admin_state = dict(bot.bot_admin_state)
+    original_join_time = dict(bot.room_join_time)
+
+    await bot.on_connection_failed(None)
+
+    assert bot.reconnecting is False
+    assert bot.reconnect_task is None
+    assert bot.occupants == original_occupants
+    assert bot.bot_admin_state == original_admin_state
+    assert bot.room_join_time == original_join_time
+    assert timeout_arms == ["armed"]
+
+
+@pytest.mark.asyncio
+async def test_new_disconnect_replaces_stale_reconnect_waiter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bot = ReconnectFixture()
+    bot.reconnecting = False
+    stale_blocker = asyncio.Event()
+    replacement_started = asyncio.Event()
+
+    async def stale_reconnect() -> None:
+        await stale_blocker.wait()
+
+    async def replacement_reconnect() -> None:
+        replacement_started.set()
+
+    stale_task = asyncio.create_task(stale_reconnect())
+    bot.reconnect_task = stale_task
+    monkeypatch.setattr(bot, "_delayed_reconnect", replacement_reconnect)
+
+    await bot.on_disconnect(None)
+    replacement_task = bot.reconnect_task
+
+    assert replacement_task is not None
+    assert replacement_task is not stale_task
+    assert bot.reconnecting is True
+
+    await asyncio.sleep(0)
+    assert stale_task.cancelled()
+    await asyncio.wait_for(replacement_started.wait(), timeout=1)
+    replacement_result = await replacement_task
+    assert replacement_result is None
+
+
+@pytest.mark.asyncio
 async def test_reconnect_timeout_disconnects_partial_session_before_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

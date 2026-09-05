@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import logging
-import os
 import pprint
 from typing import Any
+
+from envs_xmpp_core.config.literals import parse_literal
+from envs_xmpp_core.config.python_file import replace_or_append_assignment_text
+from envs_xmpp_core.storage.files import atomic_write_text
 
 import config
 
@@ -135,17 +137,7 @@ class ConfigRuntimeMixin:
         self.redaction_iq_timeout_seconds = getattr(config, "REDACTION_IQ_TIMEOUT_SECONDS", 5)
 
     def parse_config_value(self, raw: str) -> Any:
-        text = raw.strip()
-        if text.lower() == "true":
-            return True
-        if text.lower() == "false":
-            return False
-        if text.lower() == "none":
-            return None
-        try:
-            return ast.literal_eval(text)
-        except Exception:
-            return raw
+        return parse_literal(raw)
 
     def render_config_assignment(self, key: str, value: Any) -> str:
         return f"{key} = {pprint.pformat(value, width=88, sort_dicts=False)}"
@@ -158,70 +150,16 @@ class ConfigRuntimeMixin:
         *,
         filename: str = "config.py",
     ) -> str:
-        """Replace one top-level assignment without leaving multiline remnants."""
-        tree = ast.parse(text, filename=filename)
-        matching_nodes: list[ast.AST] = []
-        for node in tree.body:
-            if isinstance(node, ast.Assign):
-                names = [
-                    target.id
-                    for target in node.targets
-                    if isinstance(target, ast.Name)
-                ]
-                if key in names:
-                    matching_nodes.append(node)
-            elif (
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == key
-            ):
-                matching_nodes.append(node)
-
-        if len(matching_nodes) > 1:
-            raise ValueError(f"Config contains multiple top-level assignments for {key}")
-
-        lines = text.splitlines(keepends=True)
-        if matching_nodes:
-            node = matching_nodes[0]
-            start = int(node.lineno) - 1
-            end = int(getattr(node, "end_lineno", node.lineno))
-            newline = "\r\n" if lines[start].endswith("\r\n") else "\n"
-            lines[start:end] = [assignment + newline]
-            updated = "".join(lines)
-        else:
-            updated = text.rstrip() + "\n\n# Runtime config edits\n" + assignment + "\n"
-
-        # Never install a config.py which Python itself cannot import.
-        compile(updated, filename, "exec")
-        return updated
+        try:
+            return replace_or_append_assignment_text(
+                text, key, assignment, filename=filename
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc).replace("expected exactly one assignment", "Config assignment error")) from exc
 
     @staticmethod
     def _write_config_text_atomic(path, text: str) -> None:
-        tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-        try:
-            with open(tmp_path, "w", encoding="utf8") as handle:
-                # config.py contains credentials. Do not rely on the process umask:
-                # legacy/manual deployments commonly run with umask 022.
-                os.chmod(tmp_path, 0o600)
-                handle.write(text)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp_path, path)
-            os.chmod(path, 0o600)
-        finally:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError as exc:
-                log.debug("Failed to remove temporary config file %s: %s", tmp_path, exc)
-
-        try:
-            dir_fd = os.open(path.parent, os.O_DIRECTORY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError as exc:
-            log.debug("Failed to fsync config directory %s: %s", path.parent, exc)
+        atomic_write_text(path, text, mode=0o600, encoding="utf-8")
 
     def update_config_file_assignment(self, key: str, value: Any) -> None:
         path = self._config_file_path()

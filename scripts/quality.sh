@@ -30,6 +30,12 @@ printf '%s\n' '[6/7] mypy: typed operations/deployment modules'
 mypy --follow-imports=skip banbot/task_supervisor.py banbot/runtime_watchdog.py scripts/deploy.py
 
 printf '%s\n' '[7/7] Dependency audit (pip-audit)'
-pip-audit -r requirements.txt
+python_minor=$(python -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
+constraint_file="constraints/python${python_minor}.txt"
+if [ ! -f "$constraint_file" ]; then
+  echo "No audited dependency snapshot for Python ${python_minor}" >&2
+  exit 1
+fi
+pip-audit -r "$constraint_file"
 
 printf '%s\n' 'Quality checks passed (7/7).'

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -99,3 +100,67 @@ async def test_watchdog_stop_uses_supervisor_bounded_cancellation(monkeypatch):
 
     assert supervisor.calls == [("_runtime", 5.0)]
     assert watchdog.state.worker_running is False
+
+@pytest.mark.asyncio
+async def test_startup_timeout_extension_keeps_waiting_service_alive(monkeypatch):
+    calls: list[str] = []
+    bot = SimpleNamespace(_session_start_received=False)
+    watchdog = runtime_watchdog.RuntimeWatchdog(bot)
+    real_sleep = runtime_watchdog.asyncio.sleep
+
+    monkeypatch.setenv("NOTIFY_SOCKET", "/tmp/example-notify.sock")
+    monkeypatch.setattr(
+        runtime_watchdog,
+        "sd_notify",
+        lambda payload: calls.append(payload) or True,
+    )
+
+    sleep_calls = 0
+
+    async def controlled_sleep(_delay):
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls >= 2:
+            bot._session_start_received = True
+        await real_sleep(0)
+
+    monkeypatch.setattr(runtime_watchdog.asyncio, "sleep", controlled_sleep)
+
+    assert watchdog.arm_startup_timeout_extension(asyncio.get_running_loop()) is True
+    await real_sleep(0)
+    await real_sleep(0)
+    await real_sleep(0)
+
+    assert calls
+    assert calls[0] == (
+        "EXTEND_TIMEOUT_USEC=300000000\n"
+        "STATUS=muc_banbot waiting for XMPP session"
+    )
+    assert any(call.startswith("EXTEND_TIMEOUT_USEC=") for call in calls)
+    assert watchdog.startup_timeout_task is None
+
+
+@pytest.mark.asyncio
+async def test_ready_cancels_startup_timeout_extension(monkeypatch):
+    calls: list[str] = []
+    bot = SimpleNamespace(_session_start_received=False)
+    watchdog = runtime_watchdog.RuntimeWatchdog(bot)
+
+    monkeypatch.setenv("NOTIFY_SOCKET", "/tmp/example-notify.sock")
+    monkeypatch.setattr(
+        runtime_watchdog,
+        "sd_notify",
+        lambda payload: calls.append(payload) or True,
+    )
+
+    assert watchdog.arm_startup_timeout_extension(asyncio.get_running_loop()) is True
+    task = watchdog.startup_timeout_task
+    assert task is not None
+
+    assert watchdog.notify_ready() is True
+    assert watchdog.ready_sent is True
+    assert watchdog.startup_timeout_task is None
+
+    await asyncio.sleep(0)
+    assert task.cancelled() or task.done()
+    assert calls[-1].startswith("READY=1\nSTATUS=")

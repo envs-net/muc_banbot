@@ -366,6 +366,8 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     bot.redaction_enabled = False
     bot.announce_startup = True
     bot.reconnecting = True
+    bot.server_connect_time = 123.0
+    bot._startup_completed_once = True
     reconnect_event = bot._get_reconnect_success_event()
     assert reconnect_event.is_set() is False
 
@@ -416,11 +418,106 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     assert "setup_db:False" in calls
     assert bot.reconnecting is False
     assert bot.last_reconnect_time is not None
+    assert bot._startup_completed_once is True
     assert reconnect_event.is_set() is True
     assert bot.sent
     assert "Reconnect completed" in bot.sent[-1]["mbody"]
     assert "BanBot reconnected successfully" in bot.sent[-1]["mbody"]
     assert "Bot has restarted" not in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_initial_session_after_pre_session_disconnect_remains_startup(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    bot.protected_rooms = set()
+    bot.registered_rooms = set()
+    bot.plugin = {"xep_0045": FakeMucPlugin()}
+    _install_successful_join_stub(bot)
+    bot.sent = []
+    bot.version_check_enabled = False
+    bot.version_check_url = None
+    bot.redaction_enabled = False
+    bot.announce_startup = True
+
+    # The initial connection failed early and on_disconnect() already armed the
+    # reconnect loop, but this process has never completed a session yet.
+    bot.reconnecting = True
+    # A failed first startup can already have reached the point where this
+    # timestamp is set.  It is not proof that startup ever completed.
+    bot.server_connect_time = 123.0
+    bot._startup_completed_once = False
+    reconnect_event = bot._get_reconnect_success_event()
+    assert reconnect_event.is_set() is False
+
+    calls = []
+
+    async def record(name, result=None):
+        calls.append(name)
+        return result
+
+    bot.setup_db = lambda **kwargs: record(
+        f"setup_db:{kwargs.get('create_startup_backup')}"
+    )
+    bot.prepare_startup_version_notice = lambda *, reconnecting: record(
+        f"prepare_version:{reconnecting}"
+    )
+    bot.finalize_startup_version_notice = lambda *, reconnecting: record(
+        f"finalize_version:{reconnecting}", False
+    )
+    bot.load_bans_from_db = lambda: record("load_bans_from_db")
+    bot.cleanup_old_audit_logs = lambda: record("cleanup_old_audit_logs", 0)
+    bot.setup_ignorelist = lambda: record("setup_ignorelist")
+    bot.get_roster = lambda: record("get_roster")
+    bot.wait_for_occupants = lambda timeout=20: record(
+        f"wait_for_occupants:{timeout}"
+    )
+    bot.check_bot_admin_rights = lambda: record("check_bot_admin_rights")
+    bot.sync_admins = lambda announce=False: record(f"sync_admins:{announce}")
+    bot.sync_bans_startup = lambda: record("sync_bans_startup")
+    bot.setup_rtbl = lambda: record("setup_rtbl")
+    bot.setup_rtbl_publish = lambda: record("setup_rtbl_publish")
+    bot.update_vcard = lambda: record("update_vcard")
+    bot.bot_send_message = lambda **kwargs: record(
+        "bot_send_message", bot.sent.append(kwargs)
+    )
+    bot.send_presence = lambda: calls.append("send_presence")
+
+    async def never_running_worker():
+        await asyncio.sleep(999)
+
+    bot._rtbl_refresh_worker = never_running_worker
+    bot.unban_worker = never_running_worker
+    bot.health_check_worker = never_running_worker
+    bot.version_check_worker = never_running_worker
+
+    async def no_sleep(_delay):
+        return None
+
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+        coro.close()
+        return CompletedTask(f"task-{len(created_tasks)}")
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(bot_module.asyncio, "create_task", fake_create_task)
+
+    await bot.start(None)
+
+    # First successful session semantics must be preserved even though a
+    # reconnect waiter was already active.
+    assert "setup_db:True" in calls
+    assert "prepare_version:False" in calls
+    assert "finalize_version:False" in calls
+    assert bot.reconnecting is False
+    assert bot.last_reconnect_time is None
+    assert bot._startup_completed_once is True
+    assert reconnect_event.is_set() is True
+    assert bot.sent
+    assert "Bot has restarted" in bot.sent[-1]["mbody"]
+    assert "reconnected" not in bot.sent[-1]["mbody"].lower()
 
 
 def test_connect_xmpp_uses_configured_address_and_direct_tls(monkeypatch):
@@ -510,6 +607,53 @@ def test_main_exits_when_connect_fails(monkeypatch):
         bot_module.main()
 
     assert excinfo.value.code == 1
+
+
+def test_main_arms_systemd_startup_timeout_extension_before_event_loop(monkeypatch):
+    events = []
+
+    class FakeRuntimeWatchdog:
+        def arm_startup_timeout_extension(self, loop):
+            events.append(("arm-startup-timeout", loop))
+
+    class FakeLoop:
+        def run_forever(self):
+            events.append(("run_forever", self))
+            raise KeyboardInterrupt()
+
+        def run_until_complete(self, coro):
+            events.append(("run_until_complete", self))
+            try:
+                coro.send(None)
+            except StopIteration:
+                return None
+
+    class FakeBanBot:
+        def __init__(self, jid, password, resource):
+            self.loop = FakeLoop()
+            self.runtime_watchdog = FakeRuntimeWatchdog()
+            self.db = None
+
+        def _validate_config(self):
+            return [], []
+
+        def _format_config_validation(self, errors, warnings):
+            return "✅ Config validation passed"
+
+        def connect(self):
+            return True
+
+        async def shutdown(self):
+            events.append(("shutdown", self.loop))
+
+    monkeypatch.setattr(bot_module, "BanBot", FakeBanBot)
+    monkeypatch.setattr(bot_module, "get_config_resource", lambda: "tests")
+
+    assert bot_module.main() is None
+
+    assert events[0][0] == "arm-startup-timeout"
+    assert events[1][0] == "run_forever"
+    assert events[0][1] is events[1][1]
 
 
 def test_main_exits_when_bot_initialization_fails(monkeypatch):
