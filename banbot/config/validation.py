@@ -9,7 +9,6 @@ import pathlib
 
 from envs_xmpp_core.config.schema import (
     MISSING,
-    matches_expected_type,
     schema_value_violation,
 )
 
