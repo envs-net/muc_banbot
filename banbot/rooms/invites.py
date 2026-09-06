@@ -25,6 +25,7 @@ from envs_xmpp_core.xmpp.invites import (
 )
 from envs_xmpp_core.xmpp.pending_invites import (
     PendingRoomInvite,
+    PendingRoomInviteSqlRepository,
     PendingRoomInviteStore,
     PendingRoomInviteStoreResult,
 )
@@ -44,8 +45,8 @@ from ..utils import (
 log = logging.getLogger(__name__)
 
 
-class _BanBotRoomInviteRepository:
-    """Adapt BanBot's aiosqlite connection to the shared invite store."""
+class _BanBotRoomInviteSqlBackend:
+    """Adapt BanBot's aiosqlite connection to the shared SQL repository."""
 
     def __init__(self, bot) -> None:
         self.bot = bot
@@ -53,119 +54,34 @@ class _BanBotRoomInviteRepository:
     def available(self) -> bool:
         return getattr(self.bot, "db", None) is not None
 
-    async def setup(self) -> None:
-        if not self.available():
-            return
-        await self.bot.db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS room_invites (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                room_jid TEXT NOT NULL,
-                inviter TEXT NOT NULL,
-                reason TEXT,
-                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                UNIQUE(room_jid, inviter)
-            )
-            """
-        )
-        await self.bot.db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at ON room_invites(created_at)"
-        )
-        await self.bot.db.commit()
-
-    async def load_all(self) -> list[PendingRoomInvite]:
-        if not self.available():
-            return []
-        async with self.bot.db.execute(
-            """
-            SELECT id, room_jid, inviter, reason, created_at
-            FROM room_invites
-            ORDER BY id ASC
-            """
-        ) as cursor:
-            rows = await cursor.fetchall()
-        return [PendingRoomInvite.from_row(row) for row in rows]
-
-    async def insert_if_absent(
-        self,
-        room_jid: str,
-        inviter: str,
-        reason: str,
-        created_at: int,
-    ) -> PendingRoomInviteStoreResult:
+    async def execute(self, query, params=(), *, label: str = "room_invites") -> int:
+        del label
         if not self.available():
             raise RuntimeError("room invite database is unavailable")
-        cur = await self.bot.db.execute(
-            """
-            INSERT INTO room_invites (room_jid, inviter, reason, created_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(room_jid, inviter) DO NOTHING
-            """,
-            (room_jid, inviter, reason, created_at),
-        )
+        cur = await self.bot.db.execute(query, params)
         await self.bot.db.commit()
-        async with self.bot.db.execute(
-            """
-            SELECT id, room_jid, inviter, reason, created_at
-            FROM room_invites
-            WHERE room_jid = ? AND inviter = ?
-            """,
-            (room_jid, inviter),
-        ) as cursor:
-            row = await cursor.fetchone()
-        if not row:
-            raise RuntimeError(f"could not reload stored room invite for {room_jid} from {inviter}")
-        return PendingRoomInviteStoreResult(
-            PendingRoomInvite.from_row(row),
-            created=cur.rowcount == 1,
-        )
+        rowcount = cur.rowcount
+        return rowcount if rowcount is not None and rowcount >= 0 else 0
 
-    async def get(self, invite_id: int) -> PendingRoomInvite | None:
+    async def fetch_one(self, query, params=()):
         if not self.available():
             return None
-        async with self.bot.db.execute(
-            """
-            SELECT id, room_jid, inviter, reason, created_at
-            FROM room_invites
-            WHERE id = ?
-            """,
-            (invite_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-        return PendingRoomInvite.from_row(row) if row else None
+        async with self.bot.db.execute(query, params) as cursor:
+            return await cursor.fetchone()
 
-    async def delete(self, invite_id: int) -> int:
+    async def fetch_all(self, query, params=()):
         if not self.available():
-            return 0
-        cur = await self.bot.db.execute("DELETE FROM room_invites WHERE id = ?", (invite_id,))
-        await self.bot.db.commit()
-        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
-
-    async def delete_many(self, invite_ids) -> int:
-        ids = [int(invite_id) for invite_id in invite_ids]
-        if not ids or not self.available():
-            return 0
-        placeholders = ",".join("?" for _ in ids)
-        cur = await self.bot.db.execute(
-            f"DELETE FROM room_invites WHERE id IN ({placeholders})",
-            ids,
-        )
-        await self.bot.db.commit()
-        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else len(ids)
-
-    async def clear(self) -> int:
-        if not self.available():
-            return 0
-        cur = await self.bot.db.execute("DELETE FROM room_invites")
-        await self.bot.db.commit()
-        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
+            return []
+        async with self.bot.db.execute(query, params) as cursor:
+            return await cursor.fetchall()
 
 
 def _pending_invite_store(bot) -> PendingRoomInviteStore:
     """Return the shared store while preserving historical injected state."""
     store = getattr(bot, "_pending_room_invite_store", None)
     if not isinstance(store, PendingRoomInviteStore):
-        store = PendingRoomInviteStore(_BanBotRoomInviteRepository(bot))
+        repository = PendingRoomInviteSqlRepository(_BanBotRoomInviteSqlBackend(bot))
+        store = PendingRoomInviteStore(repository)
         bot._pending_room_invite_store = store
 
     current = getattr(bot, "pending_room_invites", None)
@@ -186,7 +102,8 @@ class RoomInviteMixin:
         """Initialize runtime pending invite cache."""
         self.room_invites_enabled = False
         self.room_invite_max_age_days = 30
-        store = PendingRoomInviteStore(_BanBotRoomInviteRepository(self))
+        repository = PendingRoomInviteSqlRepository(_BanBotRoomInviteSqlBackend(self))
+        store = PendingRoomInviteStore(repository)
         self._pending_room_invite_store = store
         self.pending_room_invites = store.pending
         self.pending_room_invite_index = store.index

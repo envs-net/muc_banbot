@@ -1,5 +1,5 @@
 # Reproducible runtime pins for Python 3.12.
-envs-xmpp==0.4.0
+envs-xmpp==0.4.1
 aiosqlite==0.22.1
 psutil==7.2.2
 slixmpp==1.17.0
