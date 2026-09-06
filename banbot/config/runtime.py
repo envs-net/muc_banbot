@@ -9,8 +9,11 @@ from typing import Any
 
 from envs_xmpp_core.config.changes import config_value_changes
 from envs_xmpp_core.config.literals import parse_literal
-from envs_xmpp_core.config.python_file import replace_or_append_assignment_text
-from envs_xmpp_core.storage.files import atomic_write_text
+from envs_xmpp_core.config.python_file import (
+    ConfigFileTransactionError,
+    apply_config_edit_transaction,
+    prepare_assignment_edit,
+)
 
 import config
 
@@ -140,36 +143,14 @@ class ConfigRuntimeMixin:
     def render_config_assignment(self, key: str, value: Any) -> str:
         return f"{key} = {pprint.pformat(value, width=88, sort_dicts=False)}"
 
-    @staticmethod
-    def _replace_config_assignment_text(
-        text: str,
-        key: str,
-        assignment: str,
-        *,
-        filename: str = "config.py",
-    ) -> str:
-        try:
-            return replace_or_append_assignment_text(
-                text, key, assignment, filename=filename
-            )
-        except ValueError as exc:
-            raise ValueError(str(exc).replace("expected exactly one assignment", "Config assignment error")) from exc
-
-    @staticmethod
-    def _write_config_text_atomic(path, text: str) -> None:
-        atomic_write_text(path, text, mode=0o600, encoding="utf-8")
-
     def update_config_file_assignment(self, key: str, value: Any) -> None:
-        path = self._config_file_path()
-        text = path.read_text(encoding="utf8")
-        assignment = self.render_config_assignment(key, value)
-        updated = self._replace_config_assignment_text(
-            text,
+        edit = prepare_assignment_edit(
+            self._config_file_path(),
             key,
-            assignment,
-            filename=str(path),
+            self.render_config_assignment(key, value),
+            mode=0o600,
         )
-        self._write_config_text_atomic(path, updated)
+        edit.write()
 
     async def set_runtime_config_value(
         self,
@@ -196,47 +177,70 @@ class ConfigRuntimeMixin:
 
         old_value = getattr(config, key, None)
         new_value = self.parse_config_value(raw_value)
-        previous_module_values = {name: getattr(config, name, None) for name in (*self.CONFIG_KEYS, *self.STARTUP_ONLY_CONFIG_KEYS)}
+        restore_keys = (*self.CONFIG_KEYS, *self.STARTUP_ONLY_CONFIG_KEYS)
+        previous_module_values = {name: getattr(config, name, None) for name in restore_keys}
+
         setattr(config, key, new_value)
         errors, warnings = self._validate_config()
+        for name, value in previous_module_values.items():
+            setattr(config, name, value)
         if errors:
-            self._restore_config_values(previous_module_values)
             return False, "Invalid value; config.py was not changed.\n" + self._format_config_validation(errors, warnings)
 
         create_backup = getattr(self, "create_database_backup", None)
         if callable(create_backup):
             backup_ok, backup_message = await create_backup("before-config", actor=actor or "unknown", lock=False)
             if not backup_ok:
-                self._restore_config_values(previous_module_values)
                 return False, f"Config was not changed because pre-change backup failed: {backup_message}"
 
         config_path = self._config_file_path()
         try:
-            original_config_text = config_path.read_text(encoding="utf8")
+            edit = prepare_assignment_edit(
+                config_path,
+                key,
+                self.render_config_assignment(key, new_value),
+                mode=0o600,
+            )
         except OSError as exc:
-            self._restore_config_values(previous_module_values)
             return False, f"Failed to read config.py before update: {exc}"
+        except Exception as exc:
+            return False, f"Failed to write/apply config: {format_config_import_error(exc)}"
 
-        try:
-            self.update_config_file_assignment(key, new_value)
+        async def apply_candidate() -> None:
             reload_config_module(config)
             self.apply_runtime_config()
             await self.update_vcard()
-        except Exception as exc:
-            rollback_error: Exception | None = None
+
+        async def rollback_runtime(file_restored: bool) -> None:
+            if not file_restored:
+                self._restore_config_values(previous_module_values)
+                return
             try:
-                self._write_config_text_atomic(config_path, original_config_text)
                 reload_config_module(config)
                 self.apply_runtime_config()
-            except Exception as rollback_exc:
-                rollback_error = rollback_exc
+            except Exception:
                 self._restore_config_values(previous_module_values)
+                raise
 
-            message = format_config_import_error(exc)
-            if rollback_error is not None:
+        try:
+            await apply_config_edit_transaction(
+                edit,
+                apply=apply_candidate,
+                rollback_apply=rollback_runtime,
+            )
+        except ConfigFileTransactionError as exc:
+            message = format_config_import_error(exc.error)
+            if exc.rollback_errors:
+                rollback_message = "; ".join(
+                    format_config_import_error(error)
+                    for error in exc.rollback_errors
+                    if isinstance(error, Exception)
+                )
+                if not rollback_message:
+                    rollback_message = "; ".join(str(error) for error in exc.rollback_errors)
                 message += (
                     "\n⚠️ Failed to restore the previous config.py cleanly: "
-                    + format_config_import_error(rollback_error)
+                    + rollback_message
                 )
             return False, f"Failed to write/apply config: {message}"
 

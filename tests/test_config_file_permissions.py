@@ -133,3 +133,38 @@ async def test_runtime_config_apply_failure_restores_previous_file(tmp_path, mon
     assert "vCard update failed" in message
     assert path.read_text(encoding="utf-8") == original
     assert config.LOG_LEVEL == "INFO"
+
+
+@pytest.mark.asyncio
+async def test_runtime_config_backup_failure_keeps_previous_module_value(tmp_path, monkeypatch):
+    path = tmp_path / "config.py"
+    path.write_text("LOG_LEVEL = 'INFO'\n", encoding="utf-8")
+
+    class BackupFailWriter(ConfigRuntimeMixin):
+        CONFIG_KEYS = ("LOG_LEVEL",)
+        STARTUP_ONLY_CONFIG_KEYS = ()
+        CONFIG_NEVER_WRITABLE_KEYS = ()
+
+        def _config_file_path(self) -> Path:
+            return path
+
+        def _validate_config(self):
+            return [], []
+
+        async def create_database_backup(self, *_args, **_kwargs):
+            return False, "backup failed"
+
+    monkeypatch.setattr(config, "LOG_LEVEL", "INFO", raising=False)
+    writer = BackupFailWriter()
+
+    ok, message = await writer.set_runtime_config_value(
+        "LOG_LEVEL",
+        "DEBUG",
+        actor="tester",
+        _locked=True,
+    )
+
+    assert ok is False
+    assert "pre-change backup failed" in message
+    assert config.LOG_LEVEL == "INFO"
+    assert path.read_text(encoding="utf-8") == "LOG_LEVEL = 'INFO'\n"
