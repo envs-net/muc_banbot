@@ -144,4 +144,3 @@ async def test_service_can_be_stale_before_first_heartbeat():
     assert [item.name for item in stale] == ["silent-worker"]
 
     await supervisor.cancel_group("_core")
-
