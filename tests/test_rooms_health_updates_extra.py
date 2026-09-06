@@ -636,7 +636,7 @@ async def test_room_invite_accept_removes_persisted_invite(temp_db_path, monkeyp
             "please add",
         )
 
-        await bot.cmd_room_invite(["accept", str(invite["id"])], "admin@conference.example.org")
+        await bot.cmd_room_invite(["accept", str(invite.invite["id"])], "admin@conference.example.org")
 
         assert "stored@conference.example.test" in bot.protected_rooms
         assert bot.pending_room_invites == {}
@@ -662,7 +662,7 @@ async def test_room_invite_decline_removes_persisted_invite(temp_db_path, monkey
             "please add",
         )
 
-        await bot.cmd_room_invite(["decline", str(invite["id"])], "admin@conference.example.org")
+        await bot.cmd_room_invite(["decline", str(invite.invite["id"])], "admin@conference.example.org")
 
         assert bot.pending_room_invites == {}
         async with bot.db.execute("SELECT COUNT(*) FROM room_invites") as cursor:

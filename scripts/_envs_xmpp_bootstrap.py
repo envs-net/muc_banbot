@@ -8,7 +8,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-_REQUIRED_VERSION = "0.3.3"
+_REQUIRED_VERSION = "0.4.0"
 _REQUIRED_SPEC = f"envs-xmpp=={_REQUIRED_VERSION}"
 
 

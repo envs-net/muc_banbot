@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from xml.etree import ElementTree as ET
 
 from envs_xmpp_core.xmpp.invites import (
@@ -24,6 +23,11 @@ from envs_xmpp_core.xmpp.invites import (
 from envs_xmpp_core.xmpp.invites import (
     room_invite_from_muc_plugin as core_room_invite_from_muc_plugin,
 )
+from envs_xmpp_core.xmpp.pending_invites import (
+    PendingRoomInvite,
+    PendingRoomInviteStore,
+    PendingRoomInviteStoreResult,
+)
 from envs_xmpp_core.xmpp.stanza import safe_get_plugin, safe_plugin_value
 
 from config import ADMIN_ROOM
@@ -40,15 +44,153 @@ from ..utils import (
 log = logging.getLogger(__name__)
 
 
+class _BanBotRoomInviteRepository:
+    """Adapt BanBot's aiosqlite connection to the shared invite store."""
+
+    def __init__(self, bot) -> None:
+        self.bot = bot
+
+    def available(self) -> bool:
+        return getattr(self.bot, "db", None) is not None
+
+    async def setup(self) -> None:
+        if not self.available():
+            return
+        await self.bot.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS room_invites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_jid TEXT NOT NULL,
+                inviter TEXT NOT NULL,
+                reason TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                UNIQUE(room_jid, inviter)
+            )
+            """
+        )
+        await self.bot.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at ON room_invites(created_at)"
+        )
+        await self.bot.db.commit()
+
+    async def load_all(self) -> list[PendingRoomInvite]:
+        if not self.available():
+            return []
+        async with self.bot.db.execute(
+            """
+            SELECT id, room_jid, inviter, reason, created_at
+            FROM room_invites
+            ORDER BY id ASC
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [PendingRoomInvite.from_row(row) for row in rows]
+
+    async def insert_if_absent(
+        self,
+        room_jid: str,
+        inviter: str,
+        reason: str,
+        created_at: int,
+    ) -> PendingRoomInviteStoreResult:
+        if not self.available():
+            raise RuntimeError("room invite database is unavailable")
+        cur = await self.bot.db.execute(
+            """
+            INSERT INTO room_invites (room_jid, inviter, reason, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(room_jid, inviter) DO NOTHING
+            """,
+            (room_jid, inviter, reason, created_at),
+        )
+        await self.bot.db.commit()
+        async with self.bot.db.execute(
+            """
+            SELECT id, room_jid, inviter, reason, created_at
+            FROM room_invites
+            WHERE room_jid = ? AND inviter = ?
+            """,
+            (room_jid, inviter),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            raise RuntimeError(f"could not reload stored room invite for {room_jid} from {inviter}")
+        return PendingRoomInviteStoreResult(
+            PendingRoomInvite.from_row(row),
+            created=cur.rowcount == 1,
+        )
+
+    async def get(self, invite_id: int) -> PendingRoomInvite | None:
+        if not self.available():
+            return None
+        async with self.bot.db.execute(
+            """
+            SELECT id, room_jid, inviter, reason, created_at
+            FROM room_invites
+            WHERE id = ?
+            """,
+            (invite_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return PendingRoomInvite.from_row(row) if row else None
+
+    async def delete(self, invite_id: int) -> int:
+        if not self.available():
+            return 0
+        cur = await self.bot.db.execute("DELETE FROM room_invites WHERE id = ?", (invite_id,))
+        await self.bot.db.commit()
+        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
+
+    async def delete_many(self, invite_ids) -> int:
+        ids = [int(invite_id) for invite_id in invite_ids]
+        if not ids or not self.available():
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        cur = await self.bot.db.execute(
+            f"DELETE FROM room_invites WHERE id IN ({placeholders})",
+            ids,
+        )
+        await self.bot.db.commit()
+        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else len(ids)
+
+    async def clear(self) -> int:
+        if not self.available():
+            return 0
+        cur = await self.bot.db.execute("DELETE FROM room_invites")
+        await self.bot.db.commit()
+        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
+
+
+def _pending_invite_store(bot) -> PendingRoomInviteStore:
+    """Return the shared store while preserving historical injected state."""
+    store = getattr(bot, "_pending_room_invite_store", None)
+    if not isinstance(store, PendingRoomInviteStore):
+        store = PendingRoomInviteStore(_BanBotRoomInviteRepository(bot))
+        bot._pending_room_invite_store = store
+
+    current = getattr(bot, "pending_room_invites", None)
+    if isinstance(current, dict) and current is not store.pending:
+        store.adopt(current)
+    elif not isinstance(current, dict) and current is not store.pending:
+        store.adopt({})
+
+    bot.pending_room_invites = store.pending
+    bot.pending_room_invite_index = store.index
+    bot.next_room_invite_id = store.next_id
+    return store
+
+
 class RoomInviteMixin:
 
     def init_room_invite_state(self) -> None:
         """Initialize runtime pending invite cache."""
         self.room_invites_enabled = False
         self.room_invite_max_age_days = 30
-        self.pending_room_invites: dict[int, dict[str, object]] = {}
-        self.pending_room_invite_index: dict[tuple[str, str], int] = {}
-        self.next_room_invite_id = 1
+        store = PendingRoomInviteStore(_BanBotRoomInviteRepository(self))
+        self._pending_room_invite_store = store
+        self.pending_room_invites = store.pending
+        self.pending_room_invite_index = store.index
+        self.next_room_invite_id = store.next_id
 
     def _room_invite_max_age_days(self) -> int:
         """Return configured pending invite max age in days.
@@ -62,7 +204,7 @@ class RoomInviteMixin:
             value = 30
         return max(0, value)
 
-    def _room_invite_is_expired(self, invite: dict[str, object], now: int | None = None) -> bool:
+    def _room_invite_is_expired(self, invite, now: int | None = None) -> bool:
         """Return True when a pending room invite is older than the configured limit."""
         return core_invite_is_expired(
             invite.get("created_at", 0),
@@ -71,7 +213,7 @@ class RoomInviteMixin:
         )
 
     async def cleanup_expired_room_invites(self, room: str | None = None) -> int:
-        """Delete expired pending room invites from DB/runtime cache and optionally report."""
+        """Delete expired pending room invites and optionally report."""
         max_age_days = self._room_invite_max_age_days()
         if max_age_days <= 0:
             if room:
@@ -86,34 +228,9 @@ class RoomInviteMixin:
                 )
             return 0
 
-        now = int(time.time())
-        expired_ids = [
-            invite_id
-            for invite_id, invite in list(self.pending_room_invites.items())
-            if self._room_invite_is_expired(invite, now=now)
-        ]
-
-        cutoff = now - (max_age_days * 86400)
-        deleted_from_db = 0
-        if getattr(self, "db", None):
-            await self.setup_room_invites_db()
-            cur = await self.db.execute(
-                "DELETE FROM room_invites WHERE created_at > 0 AND created_at < ?",
-                (cutoff,),
-            )
-            await self.db.commit()
-            deleted_from_db = cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
-
-        deleted = 0
-        for invite_id in expired_ids:
-            invite = self.pending_room_invites.pop(invite_id, None)
-            if invite:
-                key = (str(invite["room_jid"]), str(invite["inviter"]))
-                self.pending_room_invite_index.pop(key, None)
-                deleted += 1
-
-        deleted = max(deleted, deleted_from_db)
-
+        store = _pending_invite_store(self)
+        deleted = await store.cleanup_expired(max_age_days=max_age_days)
+        self.next_room_invite_id = store.next_id
         if room:
             await self.bot_send_message(
                 mto=room,
@@ -128,195 +245,47 @@ class RoomInviteMixin:
 
     async def setup_room_invites_db(self) -> None:
         """Create the persistent pending room invite table when needed."""
-        if not getattr(self, "db", None):
-            return
-
-        await self.db.execute("""
-            CREATE TABLE IF NOT EXISTS room_invites (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                room_jid TEXT NOT NULL,
-                inviter TEXT NOT NULL,
-                reason TEXT,
-                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                UNIQUE(room_jid, inviter)
-            )
-        """)
-        await self.db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at ON room_invites(created_at)"
-        )
-        await self.db.commit()
+        await _pending_invite_store(self).setup()
 
     async def load_pending_room_invites(self) -> None:
-        """Load persisted pending room invites into runtime cache."""
-        if not getattr(self, "db", None):
-            return
-
-        self.pending_room_invites.clear()
-        self.pending_room_invite_index.clear()
-        self.next_room_invite_id = 1
-
-        await self.setup_room_invites_db()
-        async with self.db.execute(
-            """
-            SELECT id, room_jid, inviter, reason, created_at
-            FROM room_invites
-            ORDER BY id ASC
-            """
-        ) as cursor:
-            rows = await cursor.fetchall()
-
-        max_id = 0
-        expired_ids: list[int] = []
-        now = int(time.time())
-        for invite_id, room_jid, inviter, reason, created_at in rows:
-            invite_id = int(invite_id)
-            room_jid = str(room_jid).lower()
-            inviter = str(inviter).lower()
-            invite = {
-                "id": invite_id,
-                "room_jid": room_jid,
-                "inviter": inviter,
-                "reason": reason or "",
-                "created_at": int(created_at or 0),
-            }
-            if self._room_invite_is_expired(invite, now=now):
-                expired_ids.append(invite_id)
-                continue
-            self.pending_room_invites[invite_id] = invite
-            self.pending_room_invite_index[(room_jid, inviter)] = invite_id
-            max_id = max(max_id, invite_id)
-
-        if expired_ids:
-            placeholders = ",".join("?" for _ in expired_ids)
-            await self.db.execute(f"DELETE FROM room_invites WHERE id IN ({placeholders})", expired_ids)
-            await self.db.commit()
-            log.info("Expired %d pending room invite(s)", len(expired_ids))
-
-        self.next_room_invite_id = max_id + 1
-        if rows:
-            log.info("Loaded %d pending room invite(s)", len(self.pending_room_invites))
+        """Load persisted pending room invites into the shared runtime cache."""
+        store = _pending_invite_store(self)
+        result = await store.load(max_age_days=self._room_invite_max_age_days())
+        self.next_room_invite_id = store.next_id
+        if result.expired_count:
+            log.info("Expired %d pending room invite(s)", result.expired_count)
+        if result.active_count:
+            log.info("Loaded %d pending room invite(s)", result.active_count)
 
     async def _store_pending_room_invite(
         self,
         room_jid: str,
         inviter: str,
         reason: str = "",
-    ) -> dict[str, object] | None:
-        """Persist a pending invite and add it to runtime cache."""
-        key = (room_jid, inviter)
-        existing_id = self.pending_room_invite_index.get(key)
-        if existing_id is not None and existing_id in self.pending_room_invites:
-            existing = self.pending_room_invites[existing_id]
-            if not self._room_invite_is_expired(existing):
-                return existing
-            await self._delete_pending_room_invite(existing_id)
+    ) -> PendingRoomInviteStoreResult:
+        """Persist one pending invite and report whether it was newly created."""
+        store = _pending_invite_store(self)
+        result = await store.store(
+            room_jid,
+            inviter,
+            reason,
+            max_age_days=self._room_invite_max_age_days(),
+        )
+        self.next_room_invite_id = store.next_id
+        return result
 
-        created_at = int(time.time())
-
-        if not getattr(self, "db", None):
-            invite_id = int(self.next_room_invite_id)
-            self.next_room_invite_id += 1
-            invite = {
-                "id": invite_id,
-                "room_jid": room_jid,
-                "inviter": inviter,
-                "reason": reason or "",
-                "created_at": created_at,
-            }
-            self.pending_room_invites[invite_id] = invite
-            self.pending_room_invite_index[key] = invite_id
-            return invite
-
-        await self.setup_room_invites_db()
-        try:
-            cur = await self.db.execute(
-                """
-                INSERT INTO room_invites (room_jid, inviter, reason, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (room_jid, inviter, reason or "", created_at),
-            )
-            await self.db.commit()
-            invite_id = int(cur.lastrowid)
-        except Exception:
-            # The UNIQUE(room_jid, inviter) constraint means this is most likely
-            # a duplicate invite that was persisted before a restart. Load it
-            # and reuse the existing pending id.
-            async with self.db.execute(
-                """
-                SELECT id, reason, created_at
-                FROM room_invites
-                WHERE room_jid = ? AND inviter = ?
-                """,
-                (room_jid, inviter),
-            ) as cursor:
-                row = await cursor.fetchone()
-            if not row:
-                raise
-            invite_id, stored_reason, stored_created_at = row
-            invite_id = int(invite_id)
-            reason = stored_reason or reason or ""
-            created_at = int(stored_created_at or created_at)
-
-        invite = {
-            "id": invite_id,
-            "room_jid": room_jid,
-            "inviter": inviter,
-            "reason": reason or "",
-            "created_at": created_at,
-        }
-        self.pending_room_invites[invite_id] = invite
-        self.pending_room_invite_index[key] = invite_id
-        self.next_room_invite_id = max(int(getattr(self, "next_room_invite_id", 1)), invite_id + 1)
-        return invite
-
-    async def _delete_pending_room_invite(self, invite_id: int) -> dict[str, object] | None:
+    async def _delete_pending_room_invite(self, invite_id: int) -> PendingRoomInvite | None:
         """Delete a pending invite from DB and runtime cache."""
-        invite = self.pending_room_invites.pop(invite_id, None)
-
-        if getattr(self, "db", None):
-            await self.setup_room_invites_db()
-            if invite is None:
-                async with self.db.execute(
-                    """
-                    SELECT id, room_jid, inviter, reason, created_at
-                    FROM room_invites
-                    WHERE id = ?
-                    """,
-                    (invite_id,),
-                ) as cursor:
-                    row = await cursor.fetchone()
-                if row:
-                    _id, room_jid, inviter, reason, created_at = row
-                    invite = {
-                        "id": int(_id),
-                        "room_jid": str(room_jid).lower(),
-                        "inviter": str(inviter).lower(),
-                        "reason": reason or "",
-                        "created_at": int(created_at or 0),
-                    }
-
-            await self.db.execute("DELETE FROM room_invites WHERE id = ?", (invite_id,))
-            await self.db.commit()
-
-        if invite:
-            key = (str(invite["room_jid"]), str(invite["inviter"]))
-            self.pending_room_invite_index.pop(key, None)
+        store = _pending_invite_store(self)
+        invite = await store.delete(invite_id)
+        self.next_room_invite_id = store.next_id
         return invite
 
     async def cleanup_pending_room_invites(self, room: str) -> None:
         """Delete all pending room invites from DB and runtime cache."""
-        count = len(self.pending_room_invites)
-        if getattr(self, "db", None):
-            await self.setup_room_invites_db()
-            cur = await self.db.execute("DELETE FROM room_invites")
-            await self.db.commit()
-            count = cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else count
-
-        self.pending_room_invites.clear()
-        self.pending_room_invite_index.clear()
-        self.next_room_invite_id = 1
-
+        store = _pending_invite_store(self)
+        count = await store.clear()
+        self.next_room_invite_id = store.next_id
         await self.bot_send_message(
             mto=room,
             mbody=(
@@ -462,19 +431,11 @@ class RoomInviteMixin:
             log.info("Ignoring invite for already protected room %s from %s", room_jid, inviter)
             return
 
-        key = (room_jid, inviter)
-        existing_id = self.pending_room_invite_index.get(key)
-        if existing_id is not None and existing_id in self.pending_room_invites:
-            if self._room_invite_is_expired(self.pending_room_invites[existing_id]):
-                await self._delete_pending_room_invite(existing_id)
-            else:
-                log.info("Ignoring duplicate room invite for %s from %s", room_jid, inviter)
-                return
-
-        invite = await self._store_pending_room_invite(room_jid, inviter, reason)
-        if not invite:
+        stored_result = await self._store_pending_room_invite(room_jid, inviter, reason)
+        if not stored_result.created:
             log.info("Ignoring duplicate room invite for %s from %s", room_jid, inviter)
             return
+        invite = stored_result.invite
 
         reason_line = f"\nReason: {reason}" if reason else ""
         p = self.command_prefix
@@ -492,7 +453,7 @@ class RoomInviteMixin:
             mtype="groupchat",
         )
 
-    async def _remove_pending_room_invite(self, invite_id: int) -> dict[str, object] | None:
+    async def _remove_pending_room_invite(self, invite_id: int) -> PendingRoomInvite | None:
         """Remove and return a pending invite by id."""
         return await self._delete_pending_room_invite(invite_id)
 
