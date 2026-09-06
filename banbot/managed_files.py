@@ -7,6 +7,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
+from envs_xmpp_core.formatting import format_bytes
+
 
 @dataclass(frozen=True)
 class ManagedFile:
@@ -27,11 +29,7 @@ class ManagedFile:
 
 def format_file_size(size: int) -> str:
     """Return a human-readable file size."""
-    if size >= 1024 * 1024:
-        return f"{size / (1024 * 1024):.1f} MiB"
-    if size >= 1024:
-        return f"{size / 1024:.1f} KiB"
-    return f"{size} B"
+    return format_bytes(size, negative_label=None, max_unit="MiB")
 
 
 def is_relative_to(path: pathlib.Path, directory: pathlib.Path) -> bool:

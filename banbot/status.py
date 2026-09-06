@@ -7,6 +7,8 @@ import time
 
 import psutil
 
+from envs_xmpp_core.formatting import format_bytes
+
 import config
 
 from ._version import __version__
@@ -21,21 +23,7 @@ log = logging.getLogger(__name__)
 class StatusMixin:
     @staticmethod
     def human_size(num_bytes: int) -> str:
-        size = float(num_bytes)
-
-        if size < 1024:
-            return f"{int(size)} B"
-
-        size /= 1024
-        if size < 1024:
-            return f"{size:.1f} KiB"
-
-        size /= 1024
-        if size < 1024:
-            return f"{size:.1f} MiB"
-
-        size /= 1024
-        return f"{size:.1f} GiB"
+        return format_bytes(num_bytes, negative_label=None, max_unit="GiB")
 
     async def _cmd_status(self, room: str) -> None:
         now = int(time.time())

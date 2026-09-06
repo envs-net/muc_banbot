@@ -4,6 +4,7 @@ import asyncio
 import logging
 import urllib.request
 
+from envs_xmpp_core.release.checks import check_latest_release
 from envs_xmpp_core.release.github import (
     fetch_latest_release_version_via_github_api_sync as core_fetch_api,
 )
@@ -18,6 +19,7 @@ from envs_xmpp_core.release.versions import compare_versions, parse_version_tupl
 from config import ADMIN_ROOM
 
 from ._version import __version__
+from .task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
 
@@ -158,39 +160,39 @@ class UpdateMixin:
         if not self.version_check_enabled or not self.version_check_url:
             return False, None, "Version check is disabled or URL is missing"
 
-        try:
-            remote_version = await asyncio.to_thread(self._fetch_latest_release_version_sync)
-            self.last_version_check_result = remote_version
+        current_version = __version__.lstrip("v").strip()
+        result = await check_latest_release(
+            current_version,
+            self._fetch_latest_release_version_sync,
+        )
+        if result.error:
+            log.warning("Version check failed: %s", result.error)
+            return result.as_tuple()
 
-            current_version = __version__.lstrip("v").strip()
+        remote_version = result.remote_version
+        self.last_version_check_result = remote_version
 
-            if self._is_remote_version_newer(remote_version, current_version):
-                log.info(
-                    "⬆️ New bot version available: remote=%s local=%s url=%s",
-                    remote_version,
-                    current_version,
-                    self.version_check_url,
+        if result.update_available and remote_version is not None:
+            log.info(
+                "⬆️ New bot version available: remote=%s local=%s url=%s",
+                remote_version,
+                current_version,
+                self.version_check_url,
+            )
+
+            if announce and self.last_update_notified_version != remote_version:
+                await self.bot_send_message(
+                    mto=ADMIN_ROOM,
+                    mbody=(
+                        f"⬆️ New bot version available: {remote_version}\n"
+                        f"Current version: {current_version}\n"
+                        f"Release page: {self.version_check_url}"
+                    ),
+                    mtype="groupchat",
                 )
+                self.last_update_notified_version = remote_version
 
-                if announce and self.last_update_notified_version != remote_version:
-                    await self.bot_send_message(
-                        mto=ADMIN_ROOM,
-                        mbody=(
-                            f"⬆️ New bot version available: {remote_version}\n"
-                            f"Current version: {current_version}\n"
-                            f"Release page: {self.version_check_url}"
-                        ),
-                        mtype="groupchat",
-                    )
-                    self.last_update_notified_version = remote_version
-
-                return True, remote_version, None
-
-            return False, remote_version, None
-
-        except Exception as e:
-            log.warning("Version check failed: %s", e)
-            return False, None, str(e)
+        return result.as_tuple()
 
     async def version_check_worker(self) -> None:
         """
@@ -205,4 +207,9 @@ class UpdateMixin:
             except Exception as e:
                 log.warning("Error in version_check_worker: %s", e)
 
-            await asyncio.sleep(self.version_check_interval)
+            await sleep_with_heartbeat(
+                self,
+                "version-check-worker",
+                self.version_check_interval,
+                sleep_func=asyncio.sleep,
+            )

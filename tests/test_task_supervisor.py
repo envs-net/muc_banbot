@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from banbot.task_supervisor import TaskSupervisor
+from banbot.task_supervisor import TaskSupervisor, sleep_with_heartbeat
 
 
 @pytest.mark.asyncio
@@ -100,3 +100,48 @@ async def test_resilient_service_reports_restart_backoff(monkeypatch):
     release.set()
     with pytest.raises(RuntimeError, match="exceeded restart limit"):
         await asyncio.wait_for(task, timeout=1.0)
+
+@pytest.mark.asyncio
+async def test_sleep_with_heartbeat_splits_long_service_wait(monkeypatch):
+    sleeps: list[float] = []
+    beats: list[tuple[str, str]] = []
+
+    class Tasks:
+        options = type("Options", (), {"stale_after": 3600.0})()
+
+        def heartbeat(self, group: str, name: str) -> bool:
+            beats.append((group, name))
+            return True
+
+    owner = type("Owner", (), {"tasks": Tasks()})()
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    await sleep_with_heartbeat(
+        owner,
+        "long-worker",
+        3600,
+        sleep_func=fake_sleep,
+    )
+
+    assert sleeps == [1800.0, 1800.0]
+    assert beats == [("_core", "long-worker"), ("_core", "long-worker")]
+
+
+@pytest.mark.asyncio
+async def test_service_can_be_stale_before_first_heartbeat():
+    supervisor = TaskSupervisor()
+
+    async def worker() -> None:
+        await asyncio.Event().wait()
+
+    task = supervisor.create("_core", worker(), name="silent-worker", kind="service")
+    supervisor._tasks[task]["created_at"] = "2000-01-01T00:00:00+00:00"
+    supervisor._tasks[task]["heartbeat_at"] = None
+
+    stale = supervisor.stale_services(1)
+    assert [item.name for item in stale] == ["silent-worker"]
+
+    await supervisor.cancel_group("_core")
+

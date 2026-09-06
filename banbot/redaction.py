@@ -12,6 +12,7 @@ from xml.etree import ElementTree as ET
 from config import ADMIN_ROOM
 
 from .utils import bare_jid, safe_jid, validate_jid_format
+from .task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
 
@@ -1320,7 +1321,12 @@ class RedactionMixin:
     async def redaction_cleanup_worker(self) -> None:
         """Run redaction index cleanup every 24 hours."""
         while True:
-            await asyncio.sleep(REDACTION_CLEANUP_INTERVAL_SECONDS)
+            await sleep_with_heartbeat(
+                self,
+                "redaction-cleanup-worker",
+                REDACTION_CLEANUP_INTERVAL_SECONDS,
+                sleep_func=asyncio.sleep,
+            )
             await self.run_redaction_cleanup_automatic(actor="system")
 
 

@@ -1057,7 +1057,9 @@ async def test_redaction_cleanup_worker_runs_after_daily_interval(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await bot.redaction_cleanup_worker()
 
-    assert sleeps == [REDACTION_CLEANUP_INTERVAL_SECONDS]
+    assert sum(sleeps) == REDACTION_CLEANUP_INTERVAL_SECONDS
+    assert sleeps
+    assert max(sleeps) <= 1800
     assert cleanup_calls == ["system"]
 
 
@@ -1082,11 +1084,9 @@ async def test_redaction_cleanup_worker_continues_after_successful_iterations(mo
     with pytest.raises(asyncio.CancelledError):
         await bot.redaction_cleanup_worker()
 
-    assert sleeps == [
-        REDACTION_CLEANUP_INTERVAL_SECONDS,
-        REDACTION_CLEANUP_INTERVAL_SECONDS,
-        REDACTION_CLEANUP_INTERVAL_SECONDS,
-    ]
+    assert sum(sleeps) == REDACTION_CLEANUP_INTERVAL_SECONDS * 3
+    assert sleeps
+    assert max(sleeps) <= 1800
     assert cleanup_calls == ["system", "system", "system"]
 
 

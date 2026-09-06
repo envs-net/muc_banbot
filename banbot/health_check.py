@@ -7,6 +7,7 @@ import time
 from config import ADMIN_ROOM, NICK
 
 from .locks import is_maintenance_mode
+from .task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
 
@@ -230,7 +231,12 @@ class HealthCheckMixin:
                     consecutive_rejoin_failures = 0
                     delay = self.health_check_interval
 
-                await asyncio.sleep(delay)
+                await sleep_with_heartbeat(
+                    self,
+                    "health-check-worker",
+                    delay,
+                    sleep_func=asyncio.sleep,
+                )
 
             except asyncio.CancelledError:
                 log.info("health_check_worker cancelled")

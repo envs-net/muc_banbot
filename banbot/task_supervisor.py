@@ -8,6 +8,7 @@ from typing import Any
 
 from envs_xmpp_core.runtime.tasks import SupervisorOptions
 from envs_xmpp_core.runtime.tasks import TaskSupervisor as CoreTaskSupervisor
+from envs_xmpp_core.runtime.tasks import sleep_with_heartbeat as _core_sleep_with_heartbeat
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,43 @@ def _timestamp(value: str | None) -> float | None:
     if not value:
         return None
     return datetime.fromisoformat(value).timestamp()
+
+
+def _stale_after(owner: Any) -> float:
+    supervisor = getattr(owner, "tasks", None)
+    options = getattr(supervisor, "options", None)
+    try:
+        return float(getattr(options, "stale_after", 3600.0) or 3600.0)
+    except (TypeError, ValueError):
+        return 3600.0
+
+
+async def sleep_with_heartbeat(
+    owner: Any,
+    name: str,
+    delay: float,
+    *,
+    group: str = "_core",
+    interval: float = 3600.0,
+    sleep_func=None,
+) -> None:
+    """Sleep while keeping one supervised BanBot service heartbeat fresh."""
+    sleeper = sleep_func or asyncio.sleep
+    if float(delay) <= 0:
+        await sleeper(0)
+        return
+    supervisor = getattr(owner, "tasks", None)
+    heartbeat = getattr(supervisor, "heartbeat", None)
+    callback = None
+    if callable(heartbeat):
+        callback = lambda: heartbeat(group, name)
+    await _core_sleep_with_heartbeat(
+        delay,
+        heartbeat=callback,
+        stale_after=_stale_after(owner),
+        interval=interval,
+        sleep_func=sleeper,
+    )
 
 
 class TaskSupervisor(CoreTaskSupervisor):
@@ -110,12 +148,12 @@ class TaskSupervisor(CoreTaskSupervisor):
         return sorted(result, key=lambda info: (info.group, info.name))
 
     def stale_services(self, max_age_seconds: float) -> list[TaskInfo]:
-        now = datetime.now().timestamp()
+        stale = {
+            (item.scope, item.name)
+            for item in super().stale_tasks(max_age_seconds=max_age_seconds)
+        }
         return [
             info
             for info in self.snapshot(include_done=False)
-            if info.kind == "service"
-            and info.status == "running"
-            and info.heartbeat_at is not None
-            and now - info.heartbeat_at > max_age_seconds
+            if info.status == "running" and (info.group, info.name) in stale
         ]

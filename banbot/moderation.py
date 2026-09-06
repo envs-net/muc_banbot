@@ -18,6 +18,7 @@ from .utils import (
     validate_domain_ban,
     validate_jid_format,
 )
+from .task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
 
@@ -630,7 +631,12 @@ class ModerationMixin:
             try:
                 if is_maintenance_mode(self):
                     log.debug("unban_worker skipped while maintenance operation is active")
-                    await asyncio.sleep(self.unban_check_interval)
+                    await sleep_with_heartbeat(
+                        self,
+                        "unban-worker",
+                        self.unban_check_interval,
+                        sleep_func=asyncio.sleep,
+                    )
                     continue
                 if getattr(self, "reconnecting", False):
                     # Keep the expired DB row until XMPP is usable again. The
@@ -638,7 +644,12 @@ class ModerationMixin:
                     # MUC outcast as an expired tempban instead of recovering it
                     # as a permanent manual ban.
                     log.debug("unban_worker skipped while reconnecting")
-                    await asyncio.sleep(self.unban_check_interval)
+                    await sleep_with_heartbeat(
+                        self,
+                        "unban-worker",
+                        self.unban_check_interval,
+                        sleep_func=asyncio.sleep,
+                    )
                     continue
                 # --- Fetch expired bans (limited to 100 per check) ---
                 async with self.db.execute(
@@ -683,7 +694,12 @@ class ModerationMixin:
 
             # Configurable check interval (reloadable via !reloadconfig)
             check_interval = self.unban_check_interval
-            await asyncio.sleep(check_interval)
+            await sleep_with_heartbeat(
+                self,
+                "unban-worker",
+                check_interval,
+                sleep_func=asyncio.sleep,
+            )
 
 
     async def apply_unban_to_room(

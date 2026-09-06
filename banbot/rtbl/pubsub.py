@@ -8,6 +8,7 @@ from slixmpp.exceptions import IqError, IqTimeout
 
 from ..locks import is_maintenance_mode
 from .utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _is_domain, _is_sha256
+from ..task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
 
@@ -646,10 +647,20 @@ class RtblPubSubMixin:
         while True:
             interval = getattr(self, "rtbl_refresh_interval", 3600)
             if interval <= 0:
-                await asyncio.sleep(60)  # check again in 60s in case config changes
+                await sleep_with_heartbeat(
+                    self,
+                    "rtbl-refresh-worker",
+                    60,
+                    sleep_func=asyncio.sleep,
+                )  # check again in 60s in case config changes
                 continue
 
-            await asyncio.sleep(interval)
+            await sleep_with_heartbeat(
+                self,
+                "rtbl-refresh-worker",
+                interval,
+                sleep_func=asyncio.sleep,
+            )
 
             if is_maintenance_mode(self):
                 log.debug("RTBL: periodic refresh skipped while maintenance operation is active")

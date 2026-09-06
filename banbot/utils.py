@@ -1,5 +1,6 @@
 """Pure helper functions for time formatting, JID handling, domains, and pagination."""
 
+from envs_xmpp_core.formatting import format_duration
 from envs_xmpp_core.pagination import paginate
 from envs_xmpp_core.pagination import resolve_page as _core_resolve_page
 from envs_xmpp_core.xmpp.jid import bare_jid
@@ -28,22 +29,7 @@ def human_time(seconds: int) -> str:
     Convert seconds to human-readable string.
     Example: 3661 -> '1h 1m 1s'
     """
-    seconds = int(seconds)
-    if seconds <= 0:
-        return "permanent"
-    m, s = divmod(seconds, 60)
-    h, m = divmod(m, 60)
-    d, h = divmod(h, 24)
-    parts = []
-    if d:
-        parts.append(f"{d}d")
-    if h:
-        parts.append(f"{h}h")
-    if m:
-        parts.append(f"{m}m")
-    if s:
-        parts.append(f"{s}s")
-    return " ".join(parts)
+    return format_duration(seconds, zero_label="permanent")
 
 
 def normalize_actor(actor: str | None) -> str | None:
