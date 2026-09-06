@@ -7,9 +7,12 @@ import logging
 import pathlib
 from typing import Any
 
+from envs_xmpp_core.config.schema import MISSING
+
 import config
 
 from .imports import get_config_resource
+from .spec import CONFIG_FIELDS
 
 log = logging.getLogger(__name__)
 
@@ -55,25 +58,12 @@ class ConfigDisplayMixin:
         return keys
 
     def _config_default_values_from_sample(self) -> dict[str, Any]:
+        """Return documented defaults from the declarative config schema."""
         defaults: dict[str, Any] = {}
-        try:
-            tree = ast.parse(self._config_sample_path().read_text(encoding="utf8"))
-        except Exception:
-            return defaults
-        for node in tree.body:
-            if isinstance(node, ast.Assign):
-                try:
-                    value = ast.literal_eval(node.value)
-                except Exception:
-                    continue
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id.isupper():
-                        defaults[target.id] = value
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                try:
-                    defaults[node.target.id] = ast.literal_eval(node.value)
-                except Exception:
-                    continue
+        for field in CONFIG_FIELDS.values():
+            value = field.sample if field.sample is not MISSING else field.default
+            if value is not MISSING:
+                defaults[field.python_key] = value
         return defaults
 
     def get_ordered_config_items(self) -> list[tuple[str, Any, bool]]:

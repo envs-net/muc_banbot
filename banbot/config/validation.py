@@ -6,10 +6,14 @@ import importlib.util
 import logging
 import os
 import pathlib
+from typing import cast
+
+from envs_xmpp_core.config.schema import MISSING, matches_expected_type
 
 import config
 
 from ..utils import validate_jid_format
+from .spec import CONFIG_FIELDS
 
 log = logging.getLogger(__name__)
 
@@ -56,18 +60,21 @@ class ConfigValidationMixin:
         if admin_room.lower() == "admin@muc.domain.tld":
             errors.append("ADMIN_ROOM still looks like the sample config value")
 
+        resource = getattr(config, "RESOURCE", None)
+        legacy_resource = getattr(config, "RESSOURCE", None)
         if (
-            hasattr(config, "RESOURCE")
-            and config.RESOURCE is not None
-            and hasattr(config, "RESSOURCE")
-            and config.RESSOURCE is not None
-            and config.RESOURCE != config.RESSOURCE
+            resource is not None
+            and legacy_resource is not None
+            and resource != legacy_resource
         ):
             warnings.append("Both RESOURCE and legacy RESSOURCE are set; RESOURCE will be used")
 
         log_level = str(config_value("LOG_LEVEL", "INFO")).upper().strip()
-        if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
-            errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
+        log_level_choices = CONFIG_FIELDS["LOG_LEVEL"].choices
+        if log_level not in log_level_choices:
+            errors.append(
+                "LOG_LEVEL must be one of " + ", ".join(log_level_choices)
+            )
 
         command_prefix = str(config_value("COMMAND_PREFIX", "!")).strip()
         if not command_prefix:
@@ -76,114 +83,72 @@ class ConfigValidationMixin:
             errors.append("COMMAND_PREFIX must not contain whitespace")
 
         for key in ("CONFIG_OUTPUT_MODE", "HELP_OUTPUT_MODE"):
-            mode = str(config_value(key, "all")).lower().strip()
-            if mode not in {"all", "paginate"}:
-                errors.append(f"{key} must be one of all, paginate")
+            field = CONFIG_FIELDS[key]
+            mode = str(config_value(key, field.default)).lower().strip()
+            if mode not in field.choices:
+                errors.append(f"{key} must be one of {', '.join(field.choices)}")
 
-        int_ranges = {
-            "AUDIT_LOG_RETENTION_DAYS": (1, 365),
-            "HEALTH_CHECK_INTERVAL": (60, 86400),
-            "MUC_JOIN_TIMEOUT_SECONDS": (5, 300),
-            "MUC_JOIN_RETRIES": (1, 10),
-            "UNBAN_CHECK_INTERVAL": (10, 86400),
-            "MAX_TEMPBAN_DAYS": (1, 365),
-            "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": (1, 3600),
-            "PUBLIC_COMMAND_RATE_LIMIT_MAX": (1, 100),
-            "LIST_PAGE_SIZE": (1, 100),
-            "ROOM_INVITE_MAX_AGE_DAYS": (0, 3650),
-            "MUC_WRITE_SEMAPHORE": (1, 100),
-            "SYNC_BATCH_SIZE": (1, 100),
-            "VERSION_CHECK_INTERVAL": (300, 86400),
-            "ALERT_ON_DB_SIZE_MB": (0, 1048576),
-            "ALERT_ON_RTBL_REFRESH_FAILURES": (0, 1000),
-            "ALERT_DEDUP_WINDOW": (0, 86400),
-            "DB_BACKUP_KEEP": (1, 1000),
-            "EXPORT_KEEP": (1, 1000),
+        # Type/lifecycle metadata is declared once in banbot.config.spec.  Keep
+        # bot-specific wording here while deriving the validated keys/defaults
+        # from that shared schema instead of maintaining parallel lists.
+        special_int_validation = {
+            "CONNECT_PORT",
+            "REDACTION_INDEX_RETENTION_DAYS",
+            "REDACTION_RETRACT_CONCURRENCY",
+            "RTBL_REFRESH_INTERVAL",
         }
-        int_defaults = {
-            "AUDIT_LOG_RETENTION_DAYS": 365,
-            "HEALTH_CHECK_INTERVAL": 300,
-            "MUC_JOIN_TIMEOUT_SECONDS": 20,
-            "MUC_JOIN_RETRIES": 2,
-            "UNBAN_CHECK_INTERVAL": 60,
-            "MAX_TEMPBAN_DAYS": 30,
-            "PUBLIC_COMMAND_RATE_LIMIT_WINDOW": 10,
-            "PUBLIC_COMMAND_RATE_LIMIT_MAX": 3,
-            "LIST_PAGE_SIZE": 10,
-            "ROOM_INVITE_MAX_AGE_DAYS": 30,
-            "MUC_WRITE_SEMAPHORE": 5,
-            "SYNC_BATCH_SIZE": 10,
-            "VERSION_CHECK_INTERVAL": 3600,
-            "ALERT_ON_DB_SIZE_MB": 0,
-            "ALERT_ON_RTBL_REFRESH_FAILURES": 3,
-            "ALERT_DEDUP_WINDOW": 300,
-            "DB_BACKUP_KEEP": 15,
-            "EXPORT_KEEP": 15,
-        }
-        for name, (minimum, maximum) in int_ranges.items():
-            value = config_value(name, int_defaults.get(name))
-            if not isinstance(value, int):
-                errors.append(f"{name} must be an integer")
+        for name, field in CONFIG_FIELDS.items():
+            default = field.default
+            if default is MISSING:
                 continue
-            if value < minimum or value > maximum:
-                errors.append(f"{name} must be between {minimum} and {maximum} (got {value})")
-
-        bool_names = (
-            "ANNOUNCE_STARTUP",
-            "ANNOUNCE_SYNC_DETAILS",
-            "STRUCTURED_EVENT_LOGS",
-            "AUDIT_LOG_ENABLED",
-            "SHOW_BAN_IN_MUC",
-            "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS",
-            "ALLOW_ADMIN_COMMANDS_IN_DMS",
-            "ROOM_INVITES_ENABLED",
-            "VERSION_CHECK_ENABLED",
-            "REDACTION_ENABLED",
-            "CONNECT_DIRECT_TLS",
-            "DB_BACKUP_ON_START",
-            "DB_BACKUP_INCLUDE_OMEMO",
-            "WATCHDOG_ENABLED",
-            "ALERT_ON_RECONNECT",
-            "ALERT_ON_ADMIN_RIGHTS_LOST",
-            "ALERT_ON_HEALTH_CHECK_FAILURE",
-            "ALERT_ON_DB_STATS_FAILURE",
-            "ALERT_ON_REDACTION_FAILURE",
-        )
-        bool_defaults = {
-            "ANNOUNCE_STARTUP": True,
-            "ANNOUNCE_SYNC_DETAILS": True,
-            "STRUCTURED_EVENT_LOGS": True,
-            "AUDIT_LOG_ENABLED": True,
-            "SHOW_BAN_IN_MUC": False,
-            "ALLOW_USER_COMMANDS_IN_PROTECTED_ROOMS": True,
-            "ALLOW_ADMIN_COMMANDS_IN_DMS": True,
-            "ROOM_INVITES_ENABLED": False,
-            "VERSION_CHECK_ENABLED": False,
-            "REDACTION_ENABLED": False,
-            "CONNECT_DIRECT_TLS": False,
-            "DB_BACKUP_ON_START": True,
-            "DB_BACKUP_INCLUDE_OMEMO": True,
-            "WATCHDOG_ENABLED": True,
-            "ALERT_ON_RECONNECT": True,
-            "ALERT_ON_ADMIN_RIGHTS_LOST": True,
-            "ALERT_ON_HEALTH_CHECK_FAILURE": True,
-            "ALERT_ON_DB_STATS_FAILURE": True,
-            "ALERT_ON_REDACTION_FAILURE": True,
-        }
-        for name in bool_names:
-            if not isinstance(config_value(name, bool_defaults.get(name)), bool):
-                errors.append(f"{name} must be True or False")
-
-        for name, default, minimum, maximum in (
-            ("WATCHDOG_INTERVAL_SECONDS", 20, 1.0, 300.0),
-            ("WATCHDOG_LAG_WARNING_SECONDS", 2.0, 0.1, 300.0),
-            ("WATCHDOG_LAG_FAILURE_SECONDS", 30.0, 0.1, 600.0),
-        ):
             value = config_value(name, default)
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
+
+            if field.accepted_type is bool:
+                if not matches_expected_type(value, bool):
+                    errors.append(f"{name} must be True or False")
+                continue
+
+            if (
+                field.accepted_type is int
+                and name not in special_int_validation
+                and (field.minimum is not None or field.maximum is not None)
+            ):
+                if not matches_expected_type(value, int):
+                    errors.append(f"{name} must be an integer")
+                    continue
+                if field.minimum is not None and value < field.minimum:
+                    if field.maximum is not None:
+                        errors.append(
+                            f"{name} must be between {field.minimum} and {field.maximum} (got {value})"
+                        )
+                    else:
+                        errors.append(f"{name} must be at least {field.minimum} (got {value})")
+                    continue
+                if field.maximum is not None and value > field.maximum:
+                    if field.minimum is not None:
+                        errors.append(
+                            f"{name} must be between {field.minimum} and {field.maximum} (got {value})"
+                        )
+                    else:
+                        errors.append(f"{name} must be at most {field.maximum} (got {value})")
+
+        for name in (
+            "WATCHDOG_INTERVAL_SECONDS",
+            "WATCHDOG_LAG_WARNING_SECONDS",
+            "WATCHDOG_LAG_FAILURE_SECONDS",
+        ):
+            field = CONFIG_FIELDS[name]
+            value = config_value(name, field.default)
+            if not matches_expected_type(value, field.accepted_type):
                 errors.append(f"{name} must be a number")
-            elif not minimum <= float(value) <= maximum:
-                errors.append(f"{name} must be between {minimum:g} and {maximum:g}")
+            elif (
+                field.minimum is not None
+                and field.maximum is not None
+                and not field.minimum <= float(cast(int | float, value)) <= field.maximum
+            ):
+                errors.append(
+                    f"{name} must be between {field.minimum:g} and {field.maximum:g}"
+                )
 
         watchdog_warning = config_value("WATCHDOG_LAG_WARNING_SECONDS", 2.0)
         watchdog_failure = config_value("WATCHDOG_LAG_FAILURE_SECONDS", 30.0)
@@ -257,11 +222,6 @@ class ConfigValidationMixin:
             errors.append("CONNECT_PORT must be an integer between 1 and 65535")
 
         # --- RTBL ---
-        if not isinstance(config_value("RTBL_ENABLED", False), bool):
-            errors.append("RTBL_ENABLED must be True or False")
-        if not isinstance(config_value("RTBL_ANNOUNCE", True), bool):
-            errors.append("RTBL_ANNOUNCE must be True or False")
-
         rtbl_refresh = config_value("RTBL_REFRESH_INTERVAL", 3600)
         if not isinstance(rtbl_refresh, int) or rtbl_refresh < 0:
             errors.append("RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)")
@@ -276,19 +236,12 @@ class ConfigValidationMixin:
         redaction_timeout = config_value("REDACTION_IQ_TIMEOUT_SECONDS", 5)
         if not isinstance(redaction_timeout, (int, float)) or isinstance(redaction_timeout, bool) or not 1 <= redaction_timeout <= 30:
             errors.append("REDACTION_IQ_TIMEOUT_SECONDS must be a number between 1 and 30")
-        if not isinstance(config_value("AUTO_REDACT_ON_IMPORTED_BAN_REASON", False), bool):
-            errors.append("AUTO_REDACT_ON_IMPORTED_BAN_REASON must be True or False")
-        if not isinstance(config_value("AUTO_REDACT_ON_MANUAL_MUC_BAN", True), bool):
-            errors.append("AUTO_REDACT_ON_MANUAL_MUC_BAN must be True or False")
         redaction_reasons = config_value("REDACTION_AUTO_REASONS", [])
         if not isinstance(redaction_reasons, (list, tuple)) or not all(isinstance(item, str) for item in redaction_reasons):
             errors.append("REDACTION_AUTO_REASONS must be a list of strings")
 
         # --- RTBL Publish ---
         rtbl_pub = config_value("RTBL_PUBLISH_ENABLED", False)
-        if not isinstance(rtbl_pub, bool):
-            errors.append("RTBL_PUBLISH_ENABLED must be True or False")
-
         if rtbl_pub:
             pub_service = str(config_value("RTBL_PUBLISH_SERVICE", "")).strip()
             pub_jid_node = str(config_value("RTBL_PUBLISH_JID_NODE", "")).strip()
@@ -304,17 +257,6 @@ class ConfigValidationMixin:
 
         # --- OMEMO ---
         omemo_enabled = config_value("OMEMO_ENABLED", False)
-        if not isinstance(omemo_enabled, bool):
-            errors.append("OMEMO_ENABLED must be True or False")
-
-        for name, default in (
-            ("OMEMO_AUTO_ENCRYPT_ADMIN_ROOM", True),
-            ("OMEMO_PLAINTEXT_FALLBACK", False),
-            ("OMEMO_RESET_ON_IDENTITY_CHANGE", True),
-        ):
-            if not isinstance(config_value(name, default), bool):
-                errors.append(f"{name} must be True or False")
-
         if omemo_enabled:
             if importlib.util.find_spec("slixmpp_omemo") is None or importlib.util.find_spec("omemo") is None:
                 warnings.append(
