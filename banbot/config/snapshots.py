@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from envs_xmpp_core.config.changes import config_value_changes
+
 import config
 
 from .imports import get_config_resource
@@ -100,34 +102,14 @@ class ConfigSnapshotMixin:
         }
 
     def _format_startup_only_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
-        changes = []
-        for key in (
-            "JID",
-            "PASSWORD",
-            "RESOURCE",
-            "ADMIN_ROOM",
-            "NICK",
-            "DB_FILE",
-            "WATCHDOG_ENABLED",
-            "WATCHDOG_INTERVAL_SECONDS",
-            "WATCHDOG_LAG_WARNING_SECONDS",
-            "WATCHDOG_LAG_FAILURE_SECONDS",
-            "RTBL_ENABLED",
-            "RTBL_PUBLISH_ENABLED",
-            "RTBL_PUBLISH_SERVICE",
-            "RTBL_PUBLISH_JID_NODE",
-            "RTBL_PUBLISH_DOMAIN_NODE",
-            "OMEMO_ENABLED",
-            "OMEMO_STORAGE_FILE",
-            "OMEMO_AUTO_ENCRYPT_ADMIN_ROOM",
-            "OMEMO_PLAINTEXT_FALLBACK",
-            "OMEMO_RESET_ON_IDENTITY_CHANGE",
-        ):
-            old = before.get(key)
-            new = after.get(key)
-            if old != new:
-                changes.append(f"- {key}: {old!r} → {new!r}")
-        return changes
+        return [
+            f"- {change.key}: {change.before!r} → {change.after!r}"
+            for change in config_value_changes(
+                before,
+                after,
+                keys=self.STARTUP_ONLY_CONFIG_KEYS,
+            )
+        ]
 
     def _restore_config_values(self, values: dict[str, object]) -> None:
         """Restore selected config module values to the last known good values."""

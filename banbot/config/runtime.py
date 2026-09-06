@@ -7,6 +7,7 @@ import logging
 import pprint
 from typing import Any
 
+from envs_xmpp_core.config.changes import config_value_changes
 from envs_xmpp_core.config.literals import parse_literal
 from envs_xmpp_core.config.python_file import replace_or_append_assignment_text
 from envs_xmpp_core.storage.files import atomic_write_text
@@ -21,13 +22,10 @@ log = logging.getLogger(__name__)
 class ConfigRuntimeMixin:
 
     def _format_config_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
-        changes = []
-        for key in self.CONFIG_KEYS:
-            old = before.get(key)
-            new = after.get(key)
-            if old != new:
-                changes.append(f"- {key}: {old!r} → {new!r}")
-        return changes
+        return [
+            f"- {change.key}: {change.before!r} → {change.after!r}"
+            for change in config_value_changes(before, after, keys=self.CONFIG_KEYS)
+        ]
 
     def apply_log_level(self, level_name: str | None = None) -> str:
         """

@@ -6,9 +6,12 @@ import importlib.util
 import logging
 import os
 import pathlib
-from typing import cast
 
-from envs_xmpp_core.config.schema import MISSING, matches_expected_type
+from envs_xmpp_core.config.schema import (
+    MISSING,
+    matches_expected_type,
+    schema_value_violation,
+)
 
 import config
 
@@ -103,8 +106,10 @@ class ConfigValidationMixin:
                 continue
             value = config_value(name, default)
 
+            violation = schema_value_violation(value, field, none_is_valid=False)
+
             if field.accepted_type is bool:
-                if not matches_expected_type(value, bool):
+                if violation == "type":
                     errors.append(f"{name} must be True or False")
                 continue
 
@@ -113,10 +118,10 @@ class ConfigValidationMixin:
                 and name not in special_int_validation
                 and (field.minimum is not None or field.maximum is not None)
             ):
-                if not matches_expected_type(value, int):
+                if violation == "type":
                     errors.append(f"{name} must be an integer")
                     continue
-                if field.minimum is not None and value < field.minimum:
+                if violation in {"minimum", "minimum_exclusive"}:
                     if field.maximum is not None:
                         errors.append(
                             f"{name} must be between {field.minimum} and {field.maximum} (got {value})"
@@ -124,7 +129,7 @@ class ConfigValidationMixin:
                     else:
                         errors.append(f"{name} must be at least {field.minimum} (got {value})")
                     continue
-                if field.maximum is not None and value > field.maximum:
+                if violation == "maximum":
                     if field.minimum is not None:
                         errors.append(
                             f"{name} must be between {field.minimum} and {field.maximum} (got {value})"
@@ -139,13 +144,10 @@ class ConfigValidationMixin:
         ):
             field = CONFIG_FIELDS[name]
             value = config_value(name, field.default)
-            if not matches_expected_type(value, field.accepted_type):
+            violation = schema_value_violation(value, field, none_is_valid=False)
+            if violation == "type":
                 errors.append(f"{name} must be a number")
-            elif (
-                field.minimum is not None
-                and field.maximum is not None
-                and not field.minimum <= float(cast(int | float, value)) <= field.maximum
-            ):
+            elif violation in {"minimum", "minimum_exclusive", "maximum"}:
                 errors.append(
                     f"{name} must be between {field.minimum:g} and {field.maximum:g}"
                 )

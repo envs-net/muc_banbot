@@ -7,6 +7,8 @@ import pathlib
 import re
 from typing import Any
 
+from envs_xmpp_core.config.changes import config_value_changes
+
 from .._version import __version__
 from ..config import ConfigMixin
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
@@ -277,17 +279,20 @@ class ConfigCommandMixin(ConfigMixin):
         entries: list[str] = []
 
         for _title, keys in self._config_sample_sections():
-            for key in keys:
-                if key not in defaults or self.is_secret_config_key(key):
-                    continue
-                current = current_items.get(key, None)
-                default = defaults[key]
-                if current == default:
-                    continue
+            visible_keys = tuple(
+                key
+                for key in keys
+                if key in defaults and not self.is_secret_config_key(key)
+            )
+            for change in config_value_changes(
+                defaults,
+                current_items,
+                keys=visible_keys,
+            ):
                 entries.extend([
-                    f"• {key}",
-                    f"  current: {self._format_config_display_value(key, current)}",
-                    f"  default: {self._format_config_display_value(key, default)}",
+                    f"• {change.key}",
+                    f"  current: {self._format_config_display_value(change.key, change.after)}",
+                    f"  default: {self._format_config_display_value(change.key, change.before)}",
                     "",
                 ])
 

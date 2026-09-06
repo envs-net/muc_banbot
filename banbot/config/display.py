@@ -7,7 +7,7 @@ import logging
 import pathlib
 from typing import Any
 
-from envs_xmpp_core.config.schema import MISSING
+from envs_xmpp_core.config.schema import schema_python_sample_defaults
 
 import config
 
@@ -59,12 +59,7 @@ class ConfigDisplayMixin:
 
     def _config_default_values_from_sample(self) -> dict[str, Any]:
         """Return documented defaults from the declarative config schema."""
-        defaults: dict[str, Any] = {}
-        for field in CONFIG_FIELDS.values():
-            value = field.sample if field.sample is not MISSING else field.default
-            if value is not MISSING:
-                defaults[field.python_key] = value
-        return defaults
+        return schema_python_sample_defaults(CONFIG_FIELDS)
 
     def get_ordered_config_items(self) -> list[tuple[str, Any, bool]]:
         """Return config values in config_sample.py order as (key, value, writable)."""
