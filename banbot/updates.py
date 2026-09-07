@@ -4,7 +4,7 @@ import asyncio
 import logging
 import urllib.request
 
-from envs_xmpp_core.release.checks import check_latest_release
+from envs_xmpp_core.release.checks import evaluate_release_check
 from envs_xmpp_core.release.github import (
     fetch_latest_release_version_via_github_api_sync as core_fetch_api,
 )
@@ -15,6 +15,7 @@ from envs_xmpp_core.release.github import (
     github_api_url_from_release_url,
 )
 from envs_xmpp_core.release.versions import compare_versions, parse_version_tuple
+from envs_xmpp_core.release.transitions import version_transition
 
 from config import ADMIN_ROOM
 
@@ -64,10 +65,8 @@ class UpdateMixin:
 
         current_version = __version__.lstrip("v").strip()
         previous_version = getattr(self, "previous_startup_version", None)
-        was_updated = bool(
-            previous_version
-            and self._is_remote_version_newer(current_version, previous_version)
-        )
+        transition = version_transition(previous_version, current_version)
+        was_updated = transition.is_upgrade
 
         if was_updated and bool(getattr(self, "announce_startup", True)):
             try:
@@ -161,10 +160,13 @@ class UpdateMixin:
             return False, None, "Version check is disabled or URL is missing"
 
         current_version = __version__.lstrip("v").strip()
-        result = await check_latest_release(
+        decision = await evaluate_release_check(
             current_version,
             self._fetch_latest_release_version_sync,
+            announce=announce,
+            last_notified_version=self.last_update_notified_version,
         )
+        result = decision.result
         if result.error:
             log.warning("Version check failed: %s", result.error)
             return result.as_tuple()
@@ -180,7 +182,7 @@ class UpdateMixin:
                 self.version_check_url,
             )
 
-            if announce and self.last_update_notified_version != remote_version:
+            if decision.notification_version is not None:
                 await self.bot_send_message(
                     mto=ADMIN_ROOM,
                     mbody=(
