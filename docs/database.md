@@ -104,15 +104,31 @@ Protection defaults live in code. This table stores only the current enabled sta
 | `text` | TEXT | Policy text |
 | `updated_at` | INTEGER | Last update timestamp |
 
+### `release_state`
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | INTEGER | Single-row id, always `1` |
+| `version` | TEXT | Last successfully started BanBot version |
+| `pending_from` | TEXT | Earliest version of an undelivered upgrade announcement |
+| `pending_to` | TEXT | Latest version of an undelivered upgrade announcement |
+| `updated_at` | INTEGER | Last update timestamp |
+
+This table uses the same release-state schema as envsbot. Completed upgrades are recorded only
+after startup, room joins, and synchronization have finished successfully. If the announcement
+cannot be delivered, the pending transition stays in the database and is retried on the next
+successful process start.
+
 ### `bot_metadata`
 
 | Column | Type | Description |
 | --- | --- | --- |
-| `key` | TEXT | Metadata key |
+| `key` | TEXT | Legacy metadata key |
 | `value` | TEXT | Stored metadata value |
 | `updated_at` | INTEGER | Last update timestamp |
 
-The table currently stores the last successfully started BanBot version. It allows completed upgrades to be announced only after startup, room joins, and synchronization have finished successfully.
+Older releases stored `last_successful_start_version` here. The value is migrated automatically
+to `release_state` on first use and the legacy row is removed afterwards.
 
 ## RTBL Tables
 

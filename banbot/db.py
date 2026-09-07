@@ -4,6 +4,7 @@ import logging
 import time
 
 import aiosqlite
+from envs_xmpp_core.release.state import RELEASE_STATE_TABLE_SQL
 
 from config import DB_FILE
 
@@ -208,6 +209,8 @@ class DatabaseMixin:
                 updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
             )
         """)
+
+        await self.db.execute(RELEASE_STATE_TABLE_SQL)
 
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS bot_metadata (

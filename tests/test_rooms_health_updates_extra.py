@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import importlib
 import asyncio
+import importlib
 import time
 from xml.etree import ElementTree as ET
 
@@ -15,8 +15,8 @@ from banbot.db import DatabaseMixin
 from banbot.health_check import HealthCheckMixin
 from banbot.rooms import RoomMixin
 from banbot.rooms.invites import RoomInviteMixin
-from banbot.utils import bare_jid
 from banbot.updates import UpdateMixin
+from banbot.utils import bare_jid
 
 
 class FakeDisco:
@@ -884,8 +884,9 @@ async def test_startup_version_notice_is_persisted_and_announced_after_upgrade(
         assert bot.sent == []
 
         await bot.db.execute(
-            "UPDATE bot_metadata SET value = ? WHERE key = ?",
-            ("2.5.9", "last_successful_start_version"),
+            "UPDATE release_state SET version = ?, pending_from = NULL, pending_to = NULL "
+            "WHERE id = 1",
+            ("2.5.9",),
         )
         await bot.db.commit()
         monkeypatch.setattr(updates_module, "__version__", "2.6.1")
@@ -895,11 +896,42 @@ async def test_startup_version_notice_is_persisted_and_announced_after_upgrade(
         assert "BanBot updated successfully: 2.5.9 → 2.6.1" in bot.sent[-1]["mbody"]
 
         async with bot.db.execute(
+            "SELECT version, pending_from, pending_to FROM release_state WHERE id = 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == ("2.6.1", None, None)
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_startup_version_notice_migrates_legacy_metadata(
+    temp_db_path, monkeypatch
+):
+    updates_module = importlib.import_module("banbot.updates")
+    bot = RoomHealthBot()
+    bot.announce_startup = True
+    await bot.setup_db()
+    try:
+        await bot.db.execute(
+            "INSERT INTO bot_metadata (key, value) VALUES (?, ?)",
+            ("last_successful_start_version", "2.5.9"),
+        )
+        await bot.db.commit()
+        monkeypatch.setattr(updates_module, "__version__", "2.6.1")
+
+        assert await bot.prepare_startup_version_notice(reconnecting=False) == "2.5.9"
+        assert await bot.finalize_startup_version_notice(reconnecting=False) is True
+
+        async with bot.db.execute(
             "SELECT value FROM bot_metadata WHERE key = ?",
             ("last_successful_start_version",),
         ) as cursor:
-            row = await cursor.fetchone()
-        assert row == ("2.6.1",)
+            assert await cursor.fetchone() is None
+        async with bot.db.execute(
+            "SELECT version, pending_from, pending_to FROM release_state WHERE id = 1"
+        ) as cursor:
+            assert await cursor.fetchone() == ("2.6.1", None, None)
     finally:
         await bot.db.close()
 

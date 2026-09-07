@@ -11,20 +11,24 @@ from envs_xmpp_core.release.github import (
 from envs_xmpp_core.release.github import (
     fetch_latest_release_version_via_redirect_sync as core_fetch_redirect,
 )
-from envs_xmpp_core.release.github import (
-    github_api_url_from_release_url,
+from envs_xmpp_core.release.github import github_api_url_from_release_url
+from envs_xmpp_core.release.state import ReleaseState
+from envs_xmpp_core.release.transitions import (
+    merge_pending_version_transition,
+    version_transition,
 )
 from envs_xmpp_core.release.versions import compare_versions, parse_version_tuple
-from envs_xmpp_core.release.transitions import version_transition
 
 from config import ADMIN_ROOM
 
 from ._version import __version__
+from .release_state import (
+    load_release_state_with_legacy_migration,
+    release_state_repository,
+)
 from .task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
-
-_LAST_STARTED_VERSION_KEY = "last_successful_start_version"
 
 
 class UpdateMixin:
@@ -39,69 +43,100 @@ class UpdateMixin:
 
 
     async def prepare_startup_version_notice(self, *, reconnecting: bool) -> str | None:
-        """Load the last successfully started version before startup completes."""
+        """Load the shared release state before startup completes."""
         self.previous_startup_version = None
+        self._startup_release_state = ReleaseState()
         if reconnecting or not getattr(self, "db", None):
             return None
 
+        repository = release_state_repository(self)
         try:
-            async with self.db.execute(
-                "SELECT value FROM bot_metadata WHERE key = ?",
-                (_LAST_STARTED_VERSION_KEY,),
-            ) as cursor:
-                row = await cursor.fetchone()
+            await repository.setup()
+            state = await load_release_state_with_legacy_migration(self, repository)
         except Exception as exc:
             log.warning("Could not read previous startup version: %s", exc)
             return None
 
-        if row and row[0]:
-            self.previous_startup_version = str(row[0]).lstrip("v").strip()
-        return self.previous_startup_version
+        self._startup_release_state = state
+        self.previous_startup_version = state.version
+        return state.version
 
     async def finalize_startup_version_notice(self, *, reconnecting: bool) -> bool:
-        """Announce a completed upgrade and persist the successfully started version."""
+        """Persist one successful startup and deliver any pending upgrade notice."""
         if reconnecting or not getattr(self, "db", None):
             return False
 
+        repository = release_state_repository(self)
         current_version = __version__.lstrip("v").strip()
-        previous_version = getattr(self, "previous_startup_version", None)
-        transition = version_transition(previous_version, current_version)
-        was_updated = transition.is_upgrade
-
-        if was_updated and bool(getattr(self, "announce_startup", True)):
+        state = getattr(self, "_startup_release_state", None)
+        if not isinstance(state, ReleaseState):
             try:
-                await self.bot_send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=(
-                        f"⬆️ BanBot updated successfully: {previous_version} → {current_version}\n"
-                        "The restart completed and all configured rooms and bans were synchronized."
-                    ),
-                    mtype="groupchat",
-                )
+                state = await load_release_state_with_legacy_migration(self, repository)
             except Exception as exc:
-                # Do not fail an otherwise healthy startup because the optional
-                # notification could not be delivered. Keep the old DB value so
-                # the message can be retried after the next restart.
-                log.warning("Could not announce completed bot update: %s", exc)
-                return False
+                log.warning("Could not load startup release state: %s", exc)
+                state = ReleaseState()
 
+        previous_version = state.version
+        current_transition = version_transition(previous_version, current_version)
+        pending = merge_pending_version_transition(
+            previous_version,
+            current_version,
+            state.pending_announcement,
+        )
+        if isinstance(pending, dict):
+            pending_transition = version_transition(pending["from"], pending["to"])
+            if not pending_transition.is_upgrade:
+                pending = None
+
+        announce = bool(getattr(self, "announce_startup", True))
+        persisted_pending = pending if announce else None
+        next_state = ReleaseState(
+            version=current_version,
+            pending_from=(
+                persisted_pending.get("from")
+                if isinstance(persisted_pending, dict)
+                else None
+            ),
+            pending_to=(
+                persisted_pending.get("to")
+                if isinstance(persisted_pending, dict)
+                else None
+            ),
+        )
         try:
-            await self.db.execute(
-                """
-                INSERT INTO bot_metadata (key, value, updated_at)
-                VALUES (?, ?, strftime('%s','now'))
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_at = excluded.updated_at
-                """,
-                (_LAST_STARTED_VERSION_KEY, current_version),
-            )
-            await self.db.commit()
+            await repository.save(next_state)
         except Exception as exc:
             log.warning("Could not persist successful startup version: %s", exc)
             return False
 
-        return was_updated
+        self._startup_release_state = next_state
+        if not isinstance(persisted_pending, dict):
+            return current_transition.is_upgrade
+
+        notice_from = str(persisted_pending["from"])
+        notice_to = str(persisted_pending["to"])
+        try:
+            await self.bot_send_message(
+                mto=ADMIN_ROOM,
+                mbody=(
+                    f"⬆️ BanBot updated successfully: {notice_from} → {notice_to}\n"
+                    "The restart completed and all configured rooms and bans were synchronized."
+                ),
+                mtype="groupchat",
+            )
+        except Exception as exc:
+            # The shared state already records the successful version and keeps
+            # the pending transition so the message can be retried next start.
+            log.warning("Could not announce completed bot update: %s", exc)
+            return False
+
+        try:
+            await repository.clear_pending_if_matches(notice_from, notice_to)
+        except Exception as exc:
+            log.warning("Could not clear delivered startup update state: %s", exc)
+            return False
+        self._startup_release_state = ReleaseState(version=current_version)
+        return True
 
     def _fetch_latest_release_version_via_github_api_sync(self) -> str:
         try:
