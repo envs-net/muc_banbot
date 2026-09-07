@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from envs_xmpp_ops.deploy import ProtectedFileBackup
+    from envs_xmpp_ops.deploy import InstallApplyResult, ProtectedFileBackup
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -886,50 +886,64 @@ def _install_plan(deployment: Deployment) -> None:
     print("  - ask separately before starting the service")
 
 
+def _finish_install(deployment: Deployment, *, stopped: bool) -> InstallApplyResult:
+    from envs_xmpp_ops.deploy import InstallApplyResult
+
+    if not deployment.legacy_layout:
+        _ensure_dir(deployment.data_dir, deployment, mode=0o700)
+    _create_venv_if_missing(deployment)
+    _install_dependencies(deployment)
+    created_config = _write_config_from_sample(deployment)
+    if created_config:
+        print(
+            "\nA hardened config was created with runtime paths under "
+            f"{deployment.data_dir}, but credentials were not guessed.\n"
+            f"Edit {deployment.config} and rerun './scripts/deploy.sh install'."
+        )
+        if stopped:
+            print(f"LEAVE {deployment.service} stopped until the config has been reviewed.")
+        return InstallApplyResult(ready_for_start=False)
+
+    _validate_config(deployment)
+    runtime = _runtime_paths(deployment)
+    _validate_hardened_runtime_paths(deployment, runtime)
+    _check_hardened_permissions(deployment)
+    _check_hardened_runtime_permissions(deployment, runtime)
+    _print_paths(deployment, runtime=runtime)
+    _install_unit_if_missing(deployment)
+    return InstallApplyResult()
+
+
 def install(deployment: Deployment) -> int:
+    from envs_xmpp_ops.deploy import run_install_transaction
+
     _require_source_tree(deployment)
     _install_plan(deployment)
     if deployment.dry_run:
         print("\nDRY RUN: no files, packages or services were changed.")
         return 0
-    _require_confirmation("Proceed with the muc_banbot installation shown above?")
-    if not _account_exists(deployment.service_user):
-        raise DeployError(
-            f"service user {deployment.service_user!r} does not exist; create it manually or use --user"
-        )
-    stopped = _stop_active_service(
-        deployment, reason="before installing dependencies and deployment files"
+
+    def validate_preconditions() -> None:
+        if not _account_exists(deployment.service_user):
+            raise DeployError(
+                f"service user {deployment.service_user!r} does not exist; "
+                "create it manually or use --user"
+            )
+
+    run_install_transaction(
+        confirm_install=lambda: _require_confirmation(
+            "Proceed with the muc_banbot installation shown above?"
+        ),
+        validate_preconditions=validate_preconditions,
+        stop_service=lambda: _stop_active_service(
+            deployment, reason="before installing dependencies and deployment files"
+        ),
+        apply_install=lambda stopped: _finish_install(deployment, stopped=stopped),
+        ask_start=lambda: _ask_start(deployment),
+        failure_message=(
+            f"INSTALL FAILED: {deployment.service} was stopped and will remain stopped."
+        ),
     )
-    try:
-        if not deployment.legacy_layout:
-            _ensure_dir(deployment.data_dir, deployment, mode=0o700)
-        _create_venv_if_missing(deployment)
-        _install_dependencies(deployment)
-        created_config = _write_config_from_sample(deployment)
-        if created_config:
-            print(
-                "\nA hardened config was created with runtime paths under "
-                f"{deployment.data_dir}, but credentials were not guessed.\n"
-                f"Edit {deployment.config} and rerun './scripts/deploy.sh install'."
-            )
-            if stopped:
-                print(f"LEAVE {deployment.service} stopped until the config has been reviewed.")
-            return 0
-        _validate_config(deployment)
-        runtime = _runtime_paths(deployment)
-        _validate_hardened_runtime_paths(deployment, runtime)
-        _check_hardened_permissions(deployment)
-        _check_hardened_runtime_permissions(deployment, runtime)
-        _print_paths(deployment, runtime=runtime)
-        _install_unit_if_missing(deployment)
-    except Exception:
-        if stopped:
-            print(
-                f"\nINSTALL FAILED: {deployment.service} was stopped and will remain stopped.",
-                file=sys.stderr,
-            )
-        raise
-    _ask_start(deployment)
     return 0
 
 
