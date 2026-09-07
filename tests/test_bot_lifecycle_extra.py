@@ -865,6 +865,16 @@ async def test_shutdown_cancels_pending_reconnect_before_disconnect(monkeypatch)
     assert bot._shutdown_in_progress is True
     assert bot._shutdown_complete is True
     assert bot.reconnect_task is None
+    assert [phase.name for phase in bot._last_shutdown_phases] == [
+        "reconnect",
+        "redaction",
+        "background_tasks",
+        "watchdog",
+        "supervised_tasks",
+        "database",
+        "xmpp",
+    ]
+    assert all(phase.healthy for phase in bot._last_shutdown_phases)
 
 
 @pytest.mark.asyncio

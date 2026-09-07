@@ -17,6 +17,7 @@ except Exception as exc:
     raise SystemExit(1) from None
 
 import aiosqlite
+from envs_xmpp_core.runtime.lifecycle import LifecyclePhaseResult, LifecyclePhaseRunner
 from envs_xmpp_core.xmpp.connection import connect_kwargs as _core_connect_kwargs
 from envs_xmpp_core.xmpp.jid import boundjid_domain
 from slixmpp import ClientXMPP
@@ -208,6 +209,7 @@ class BanBot(
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_in_progress = False
         self._shutdown_complete = False
+        self._last_shutdown_phases: tuple[LifecyclePhaseResult, ...] = ()
         self.init_alert_state()
 
         # --- Concurrency limit for MUC write operations ---
@@ -449,6 +451,95 @@ class BanBot(
             except asyncio.CancelledError:
                 log.debug("Background task cancelled during shutdown")
 
+    def _observe_shutdown_phase(
+        self,
+        result: LifecyclePhaseResult,
+        error: Exception | None,
+    ) -> None:
+        """Log one shared shutdown phase without changing shutdown policy."""
+        if error is not None:
+            log.warning("Shutdown: %s phase failed: %s", result.name, error)
+            return
+        if not result.healthy:
+            detail = result.details.get("detail")
+            if detail:
+                log.warning("Shutdown: %s phase %s: %s", result.name, result.status, detail)
+            else:
+                log.warning("Shutdown: %s phase completed with status %s", result.name, result.status)
+
+    async def _shutdown_reconnect_phase(self) -> tuple[str, dict[str, object]]:
+        reconnect_task = getattr(self, "reconnect_task", None)
+        if (
+            reconnect_task is None
+            or reconnect_task.done()
+            or reconnect_task is asyncio.current_task()
+        ):
+            return "skipped", {}
+
+        reconnect_task.cancel()
+        done, pending = await asyncio.wait({reconnect_task}, timeout=5.0)
+        status = "ok"
+        details: dict[str, object] = {}
+        if pending:
+            status = "partial"
+            details["detail"] = "reconnect task did not stop within 5.0s"
+        elif done:
+            try:
+                reconnect_task.result()
+            except asyncio.CancelledError:
+                log.debug("Reconnect task cancelled during shutdown")
+            except Exception as exc:  # noqa: BLE001 - shutdown boundary
+                log.debug("Reconnect task raised during shutdown", exc_info=exc)
+                status = "partial"
+                details["detail"] = f"reconnect task raised {type(exc).__name__}"
+        if getattr(self, "reconnect_task", None) is reconnect_task:
+            self.reconnect_task = None
+        return status, details
+
+    async def _shutdown_redaction_phase(self) -> tuple[str, dict[str, object]]:
+        flush_redaction_index = getattr(self, "flush_redaction_index", None)
+        if not callable(flush_redaction_index):
+            return "skipped", {}
+        await flush_redaction_index()
+        return "ok", {}
+
+    async def _shutdown_background_phase(self) -> tuple[str, dict[str, object]]:
+        await self.stop_background_tasks()
+        return "ok", {}
+
+    async def _shutdown_watchdog_phase(self) -> tuple[str, dict[str, object]]:
+        watchdog = getattr(self, "runtime_watchdog", None)
+        stop = getattr(watchdog, "stop", None)
+        if not callable(stop):
+            return "skipped", {}
+        await stop()
+        return "ok", {}
+
+    async def _shutdown_supervised_tasks_phase(self) -> tuple[str, dict[str, object]]:
+        tasks = getattr(self, "tasks", None)
+        cancel_all = getattr(tasks, "cancel_all", None)
+        if not callable(cancel_all):
+            return "skipped", {}
+        cancelled = await cancel_all()
+        return "ok", {"cancelled": int(cancelled or 0)}
+
+    async def _shutdown_database_phase(self) -> tuple[str, dict[str, object]]:
+        db = getattr(self, "db", None)
+        if db is None:
+            return "skipped", {}
+        await db.close()
+        self.db = None
+        return "ok", {}
+
+    async def _shutdown_xmpp_phase(self) -> tuple[str, dict[str, object]]:
+        try:
+            result = self.disconnect(wait=False)
+        except TypeError:
+            result = self.disconnect()
+        if inspect.isawaitable(result):
+            await result
+        return "ok", {}
+
     async def shutdown(self) -> None:
         """Flush state and stop process-scoped resources exactly once."""
         if self._shutdown_complete:
@@ -463,66 +554,18 @@ class BanBot(
             if self._shutdown_complete:
                 return
 
-            reconnect_task = getattr(self, "reconnect_task", None)
-            if (
-                reconnect_task is not None
-                and not reconnect_task.done()
-                and reconnect_task is not asyncio.current_task()
-            ):
-                reconnect_task.cancel()
-                done, pending = await asyncio.wait({reconnect_task}, timeout=5.0)
-                if pending:
-                    log.warning("Reconnect task did not stop within 5.0s during shutdown")
-                elif done:
-                    try:
-                        reconnect_task.result()
-                    except asyncio.CancelledError:
-                        log.debug("Reconnect task cancelled during shutdown")
-                    except Exception as exc:  # noqa: BLE001 - shutdown boundary
-                        log.debug("Reconnect task raised during shutdown", exc_info=exc)
-                if getattr(self, "reconnect_task", None) is reconnect_task:
-                    self.reconnect_task = None
-
-            try:
-                flush_redaction_index = getattr(self, "flush_redaction_index", None)
-                if callable(flush_redaction_index):
-                    await flush_redaction_index()
-            except Exception as exc:
-                log.warning("Shutdown: failed to flush redaction index: %s", exc)
-
-            try:
-                await self.stop_background_tasks()
-            except Exception as exc:
-                log.warning("Shutdown: failed to stop background tasks cleanly: %s", exc)
-
-            try:
-                await self.runtime_watchdog.stop()
-            except Exception as exc:
-                log.warning("Shutdown: failed to stop runtime watchdog cleanly: %s", exc)
-
-            try:
-                await self.tasks.cancel_all()
-            except Exception as exc:
-                log.warning("Shutdown: failed to cancel supervised tasks cleanly: %s", exc)
-
-            db = getattr(self, "db", None)
-            if db is not None:
-                try:
-                    await db.close()
-                    self.db = None
-                except Exception as exc:
-                    log.warning("Shutdown: failed to close database cleanly: %s", exc)
-
-            try:
-                try:
-                    result = self.disconnect(wait=False)
-                except TypeError:
-                    result = self.disconnect()
-                if inspect.isawaitable(result):
-                    await result
-            except Exception as exc:
-                log.warning("Shutdown: failed to disconnect XMPP cleanly: %s", exc)
-
+            runner = LifecyclePhaseRunner(observer=self._observe_shutdown_phase)
+            phases = (
+                ("reconnect", self._shutdown_reconnect_phase),
+                ("redaction", self._shutdown_redaction_phase),
+                ("background_tasks", self._shutdown_background_phase),
+                ("watchdog", self._shutdown_watchdog_phase),
+                ("supervised_tasks", self._shutdown_supervised_tasks_phase),
+                ("database", self._shutdown_database_phase),
+                ("xmpp", self._shutdown_xmpp_phase),
+            )
+            await runner.run_all(phases, continue_on_error=True)
+            self._last_shutdown_phases = runner.results
             self._shutdown_complete = True
 
     def _start_core_service(self, factory, *, name: str) -> asyncio.Task:
