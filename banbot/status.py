@@ -6,7 +6,6 @@ import os
 import time
 
 import psutil
-
 from envs_xmpp_core.formatting import format_bytes
 
 import config

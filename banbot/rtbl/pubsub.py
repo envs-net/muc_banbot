@@ -7,8 +7,8 @@ import time
 from slixmpp.exceptions import IqError, IqTimeout
 
 from ..locks import is_maintenance_mode
-from .utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _is_domain, _is_sha256
 from ..task_supervisor import sleep_with_heartbeat
+from .utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _is_domain, _is_sha256
 
 log = logging.getLogger(__name__)
 

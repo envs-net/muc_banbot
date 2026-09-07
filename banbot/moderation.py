@@ -9,6 +9,7 @@ from slixmpp.exceptions import IqError, IqTimeout
 from config import ADMIN_ROOM
 
 from .locks import ban_state_lock, is_maintenance_mode
+from .task_supervisor import sleep_with_heartbeat
 from .utils import (
     domain_matches,
     human_time,
@@ -18,7 +19,6 @@ from .utils import (
     validate_domain_ban,
     validate_jid_format,
 )
-from .task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
 

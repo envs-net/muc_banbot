@@ -11,8 +11,8 @@ from xml.etree import ElementTree as ET
 
 from config import ADMIN_ROOM
 
-from .utils import bare_jid, safe_jid, validate_jid_format
 from .task_supervisor import sleep_with_heartbeat
+from .utils import bare_jid, safe_jid, validate_jid_format
 
 log = logging.getLogger(__name__)
 
