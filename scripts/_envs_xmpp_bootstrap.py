@@ -8,7 +8,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-_REQUIRED_VERSION = "0.7.0"
+_REQUIRED_VERSION = "0.7.1"
 _REQUIRED_SPEC = f"envs-xmpp=={_REQUIRED_VERSION}"
 
 
@@ -28,9 +28,7 @@ def ensure_envs_xmpp() -> None:
     if _installed_version() == _REQUIRED_VERSION:
         return
 
-    cache_base = Path(
-        os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")
-    ).expanduser()
+    cache_base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")).expanduser()
     deploy_venv = cache_base / "envs-xmpp" / "deploy" / _REQUIRED_VERSION
     deploy_python = deploy_venv / "bin" / "python"
 
