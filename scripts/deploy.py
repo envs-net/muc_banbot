@@ -824,28 +824,16 @@ def _ask_start(deployment: Deployment) -> None:
 
 
 def _install_unit_if_missing(deployment: Deployment) -> None:
-    if deployment.unit.exists() or _systemctl_exists(deployment):
-        print(f"KEEP existing systemd service for {deployment.service}; it will not be replaced.")
-        return
-    if not _confirm(f"Install a new hardened systemd unit at {deployment.unit}?"):
-        print("SKIP systemd unit installation (operator choice)")
-        return
-    deployment.unit.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with deployment.unit.open("x", encoding="utf-8") as handle:
-            handle.write(_render_systemd_unit(deployment))
-    except FileExistsError:
-        print(f"KEEP existing {deployment.unit}")
-        return
-    deployment.unit.chmod(0o644)
-    print(f"CREATE {deployment.unit}")
-    if shutil.which("systemd-analyze"):
-        try:
-            _run(["systemd-analyze", "verify", deployment.unit])
-        except DeployError:
-            deployment.unit.unlink(missing_ok=True)
-            raise
-    _run(["systemctl", "daemon-reload"])
+    from envs_xmpp_ops.systemd import install_unit_if_missing
+
+    install_unit_if_missing(
+        unit=deployment.unit,
+        service=deployment.service,
+        render_unit=lambda: _render_systemd_unit(deployment),
+        service_exists=lambda: _systemctl_exists(deployment),
+        confirm=_confirm,
+        run_command=_run,
+    )
 
 
 def _print_paths(

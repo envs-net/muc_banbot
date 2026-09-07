@@ -1,4 +1,4 @@
-envs-xmpp>=0.9.2,<0.10
+envs-xmpp>=0.9.3,<0.10
 slixmpp>=1.8,<2
 aiosqlite>=0.20,<1
 psutil>=5.9,<8
