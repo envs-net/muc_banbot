@@ -15,6 +15,7 @@ from ._version import __version__
 from .occupants import bot_room_status_line
 from .protections.definitions import PROTECTION_DEFAULTS, PROTECTION_ORDER
 from .protections.presentation import protection_status_line
+from .status_health import collect_status_health_snapshot, status_health_messages
 from .utils import human_time
 
 log = logging.getLogger(__name__)
@@ -28,144 +29,16 @@ class StatusMixin:
     async def _cmd_status(self, room: str) -> None:
         now = int(time.time())
 
-        # Collect dynamic health signals for the headline.
-        problems: list[str] = []
-        warnings: list[str] = []
-        notes: list[str] = []
-
-        if getattr(self, "reconnecting", False):
-            warnings.append("Reconnect/resync is currently in progress")
-
+        # Collect passive health signals through the shared snapshot model.
+        health = await collect_status_health_snapshot(self)
+        problems, warnings, notes = status_health_messages(health)
         last_reconnect_time = getattr(self, "last_reconnect_time", None)
 
-        if not getattr(self, "db", None):
-            problems.append("Database connection is not available")
-
-        task_checks = [
-            ("unban worker", getattr(self, "unban_task", None), True),
-            ("health check worker", getattr(self, "health_check_task", None), True),
-            (
-                "version check worker",
-                getattr(self, "version_check_task", None),
-                bool(getattr(self, "version_check_enabled", False) and getattr(self, "version_check_url", None)),
-            ),
-            (
-                "RTBL refresh worker",
-                getattr(self, "_rtbl_refresh_task", None),
-                bool(
-                    getattr(self, "rtbl_enabled", False)
-                    and getattr(self, "rtbl_refresh_interval", 0) > 0
-                ),
-            ),
-        ]
-        for task_name, task, should_run in task_checks:
-            if should_run and task is not None and task.done():
-                problems.append(f"{task_name} stopped unexpectedly")
-
-        supervisor = getattr(self, "tasks", None)
-        if supervisor is not None:
-            supervised = supervisor.snapshot(include_done=False)
-            failed_tasks = [info for info in supervised if info.status == "failed"]
-            if failed_tasks:
-                preview = ", ".join(info.name for info in failed_tasks[:5])
-                problems.append(f"Supervised background task failure(s): {preview}")
-            restarting_tasks = [info for info in supervised if info.status == "restarting"]
-            if restarting_tasks:
-                preview = ", ".join(info.name for info in restarting_tasks[:5])
-                warnings.append(f"Background worker restart/backoff in progress: {preview}")
-            restarted = [
-                info
-                for info in supervised
-                if info.restart_count > 0 and info.status != "restarting"
-            ]
-            if restarted:
-                preview = ", ".join(
-                    f"{info.name}×{info.restart_count}" for info in restarted[:5]
-                )
-                warnings.append(f"Background worker restart(s) observed: {preview}")
-
-        watchdog = getattr(self, "runtime_watchdog", None)
-        watchdog_state = getattr(watchdog, "state", None)
-        if watchdog_state is not None and getattr(watchdog_state, "enabled", False):
-            if not getattr(watchdog_state, "worker_running", False):
-                problems.append("Runtime watchdog is enabled but not running")
-            elif getattr(watchdog_state, "heartbeat_suppressed", 0):
-                warnings.append(
-                    "Runtime watchdog suppressed "
-                    f"{watchdog_state.heartbeat_suppressed} heartbeat(s) because of event-loop lag"
-                )
-            elif getattr(watchdog_state, "lag_warnings", 0):
-                notes.append(
-                    "Runtime watchdog observed event-loop lag; "
-                    f"max {watchdog_state.max_lag_seconds:.3f}s"
-                )
-
-        protected_rooms = sorted(getattr(self, "protected_rooms", set()))
-        if not protected_rooms:
-            warnings.append(
-                "No protected rooms configured\n"
-                "   The bot is running but has no rooms to protect."
-            )
-
-        missing_admin_rooms = sorted(
-            room_name
-            for room_name in protected_rooms
-            if getattr(self, "bot_admin_state", {}).get(room_name) is False
-        )
-        if missing_admin_rooms:
-            preview = ", ".join(missing_admin_rooms[:5])
-            if len(missing_admin_rooms) > 5:
-                preview += f", … +{len(missing_admin_rooms) - 5} more"
-            problems.append(f"Missing admin/owner rights in: {preview}")
-
-        unconfirmed_admin_rooms = sorted(
-            room_name
-            for room_name in protected_rooms
-            if room_name not in getattr(self, "bot_admin_state", {})
-        )
-        if unconfirmed_admin_rooms:
-            warnings.append(
-                f"Admin/owner rights not confirmed yet in {len(unconfirmed_admin_rooms)} room(s)\n"
-                "   The bot may still be waiting for room presence/state."
-            )
-
-        admin_infos = self.occupants.get(config.ADMIN_ROOM, {})
-        admins = sorted(set(
-            self.safe_jid(self.bare_jid(info.get("jid")) or "unknown")
-            for info in admin_infos.values()
-            if info.get("affiliation") in ("owner", "admin")
-        ))
-        if not admins:
-            warnings.append(
-                "No admins/owners detected in the admin room\n"
-                "   Admin authorization may fail until occupants are synced."
-            )
-
-        if getattr(self, "admin_affiliation_query_forbidden_rooms", set()):
-            notes.append(
-                f"Admin protection fallback active in "
-                f"{len(self.admin_affiliation_query_forbidden_rooms)} room(s)\n"
-                "   Bot is admin, but not owner there; using live occupant cache "
-                "because affiliation queries are owner-only."
-            )
-
-        if getattr(self, "rtbl_enabled", False) and not getattr(self, "rtbl_subscriptions", []):
-            warnings.append("RTBL is enabled but no subscriptions are configured")
-
-        # database stats
-        try:
-            db_stats = await self.get_db_stats()
-        except Exception as e:
-            db_stats = {}
-            problems.append(f"Database stats failed: {e}")
-            log.warning("Could not get database stats: %s", e)
-
+        rooms_health = health.check("rooms")
+        protected_rooms = list(rooms_health.data.get("protected_rooms", ()))
+        admins = list(rooms_health.data.get("admins", ()))
+        db_stats = dict(health.check("database_stats").data.get("stats", {}))
         expired_ban_rows = int(db_stats.get("expired_ban_rows", 0) or 0)
-        if expired_ban_rows > 0:
-            warnings.append(
-                f"{expired_ban_rows} expired tempban(s) pending auto-unban\n"
-                "   The unban worker should clear them on the next cycle."
-            )
 
         if problems:
             status_lines = ["❌ Bot is online, but problems were detected."]
