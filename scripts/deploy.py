@@ -230,12 +230,7 @@ def _deployment(options: argparse.Namespace) -> Deployment:
     root = (options.root or _project_root()).expanduser().resolve()
     service = options.service
     discovered_venv = _systemd_venv(service)
-    venv = Path(
-        options.venv
-        or os.environ.get("MUC_BANBOT_VENV")
-        or discovered_venv
-        or root / PROFILE.venv_name
-    )
+    venv = Path(options.venv or os.environ.get("MUC_BANBOT_VENV") or discovered_venv or root / PROFILE.venv_name)
     venv = venv.expanduser().resolve()
     config = Path(options.config or _default_config(root, service)).expanduser().resolve()
     explicit_data_dir = options.data_dir or os.environ.get("MUC_BANBOT_DATA_DIR")
@@ -269,10 +264,6 @@ def _deployment(options: argparse.Namespace) -> Deployment:
     )
 
 
-def _quote(command: Sequence[object]) -> str:
-    return " ".join(shlex.quote(str(part)) for part in command)
-
-
 def _account_exists(user: str) -> bool:
     from envs_xmpp_ops.accounts import account_exists
 
@@ -289,37 +280,19 @@ def _run(
     check: bool = True,
     announce: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    argv = [str(part) for part in command]
-    env = deployment.environment if deployment is not None else os.environ.copy()
-    if as_service_user and deployment is not None and os.geteuid() == 0:
-        if not _account_exists(deployment.service_user):
-            raise DeployError(f"service user does not exist: {deployment.service_user}")
-        prefix: list[str]
-        if shutil.which("runuser"):
-            prefix = ["runuser", "-u", deployment.service_user, "--"]
-        elif shutil.which("sudo"):
-            prefix = ["sudo", "-u", deployment.service_user, "--"]
-        else:
-            raise DeployError("running as root requires runuser or sudo for service-user commands")
-        argv = [*prefix, *argv]
-    if announce:
-        print(f"$ {_quote(argv)}")
-    result = subprocess.run(
-        argv,
-        cwd=str(cwd or (deployment.root if deployment else Path.cwd())),
-        env=env,
-        check=False,
-        capture_output=capture,
-        text=True,
+    from envs_xmpp_ops.process import run_deploy_command
+
+    return run_deploy_command(
+        command,
+        cwd=cwd or (deployment.root if deployment else Path.cwd()),
+        env=deployment.environment if deployment is not None else os.environ.copy(),
+        service_user=(deployment.service_user if as_service_user and deployment is not None else None),
+        capture=capture,
+        check=check,
+        announce=announce,
+        announce_prefix="$",
+        error_factory=DeployError,
     )
-    if check and result.returncode != 0:
-        if capture:
-            if result.stdout:
-                print(result.stdout.rstrip(), file=sys.stderr)
-            if result.stderr:
-                print(result.stderr.rstrip(), file=sys.stderr)
-        raise DeployError(f"command failed with exit code {result.returncode}: {_quote(argv)}")
-    return result
 
 
 def _confirm(prompt: str) -> bool:
@@ -329,17 +302,24 @@ def _confirm(prompt: str) -> bool:
 
 
 def _require_confirmation(prompt: str) -> None:
-    if not _confirm(prompt):
-        raise UserCancelled("cancelled by operator")
+    from envs_xmpp_ops.interaction import require_confirmation
+
+    require_confirmation(
+        prompt,
+        confirm_func=_confirm,
+        error_factory=UserCancelled,
+    )
 
 
 def _require_source_tree(deployment: Deployment) -> None:
-    required = ("pyproject.toml", "config_sample.py", "scripts/deploy.sh")
-    missing = [name for name in required if not (deployment.root / name).is_file()]
-    if missing:
-        raise DeployError(
-            f"not a muc_banbot source checkout: {deployment.root} (missing: {', '.join(missing)})"
-        )
+    from envs_xmpp_ops.paths import require_source_tree
+
+    require_source_tree(
+        deployment.root,
+        ("pyproject.toml", "config_sample.py", "scripts/deploy.sh"),
+        project_name="muc_banbot",
+        error_factory=DeployError,
+    )
 
 
 def _ensure_dir(path: Path, deployment: Deployment, *, mode: int = 0o750) -> None:
@@ -408,17 +388,20 @@ def _create_venv_if_missing(deployment: Deployment) -> None:
 
 
 def _install_dependencies(deployment: Deployment) -> None:
-    _run(
-        [deployment.pip, "install", "-e", deployment.root],
+    from envs_xmpp_ops.venv import install_editable_checkout
+
+    install_editable_checkout(
+        pip=deployment.pip,
+        root=deployment.root,
+        run_command=_run,
         deployment=deployment,
-        as_service_user=True,
     )
 
 
 def _runtime_paths(deployment: Deployment) -> dict[str, Path | None]:
     if not deployment.venv_python.is_file():
         raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
-    code = r'''
+    code = r"""
 import json
 from pathlib import Path
 from banbot.config_loader import load_config_module
@@ -441,11 +424,11 @@ print(json.dumps({
     "omemo_storage": path("OMEMO_STORAGE_FILE", "data/omemo.json"),
     "avatar": path("AVATAR_PATH", "avatar.png"),
 }))
-'''
+"""
     result = _run(
         [deployment.venv_python, "-c", code],
         deployment=deployment,
-        as_service_user=os.geteuid() == 0 and _account_exists(deployment.service_user),
+        as_service_user=True,
         cwd=deployment.root,
         capture=True,
         announce=False,
@@ -454,11 +437,7 @@ print(json.dumps({
         data = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise DeployError("could not resolve runtime paths from config.py") from exc
-    return {
-        name: (Path(value).resolve() if value else None)
-        for name, value in data.items()
-    }
-
+    return {name: (Path(value).resolve() if value else None) for name, value in data.items()}
 
 
 def _path_is_within(path: Path, parent: Path) -> bool:
@@ -576,9 +555,7 @@ def _check_hardened_permissions(deployment: Deployment) -> None:
             f"config directory mode is {config_dir_mode:04o}; expected 0750 so runtime config edits remain possible"
         )
     if config_mode != 0o600:
-        problems.append(
-            f"config file mode is {config_mode:04o}; expected 0600 because it contains credentials"
-        )
+        problems.append(f"config file mode is {config_mode:04o}; expected 0600 because it contains credentials")
     if data_mode != 0o700:
         problems.append(
             f"data directory mode is {data_mode:04o}; expected 0700 because it contains private runtime state/backups"
@@ -587,8 +564,7 @@ def _check_hardened_permissions(deployment: Deployment) -> None:
     if problems:
         details = "\n  - ".join(problems)
         raise DeployError(
-            f"hardened deployment permissions are unsafe or unusable:\n  - {details}\n"
-            + _permission_hint(deployment)
+            f"hardened deployment permissions are unsafe or unusable:\n  - {details}\n" + _permission_hint(deployment)
         )
 
     print(
@@ -690,16 +666,13 @@ def _check_hardened_runtime_permissions(
             f"  sudo find {shlex.quote(str(deployment.data_dir))} -type f -exec chmod 0600 {{}} +"
         )
 
-    print(
-        "OK  existing mutable runtime files/directories are private and usable "
-        "by the service account"
-    )
+    print("OK  existing mutable runtime files/directories are private and usable by the service account")
 
 
 def _validate_config(deployment: Deployment) -> None:
     if not deployment.config.is_file():
         raise DeployError(f"runtime config not found: {deployment.config}")
-    code = r'''
+    code = r"""
 from banbot.config_loader import load_config_module
 config = load_config_module()
 required = ("JID", "PASSWORD", "ADMIN_ROOM", "NICK", "DB_FILE")
@@ -716,7 +689,7 @@ if missing:
 if placeholders:
     raise SystemExit("sample placeholders still configured: " + ", ".join(placeholders))
 print("config import and required settings: OK")
-'''
+"""
     result = _run(
         [deployment.venv_python, "-c", code],
         deployment=deployment,
@@ -914,23 +887,18 @@ def install(deployment: Deployment) -> int:
     def validate_preconditions() -> None:
         if not _account_exists(deployment.service_user):
             raise DeployError(
-                f"service user {deployment.service_user!r} does not exist; "
-                "create it manually or use --user"
+                f"service user {deployment.service_user!r} does not exist; create it manually or use --user"
             )
 
     run_install_transaction(
-        confirm_install=lambda: _require_confirmation(
-            "Proceed with the muc_banbot installation shown above?"
-        ),
+        confirm_install=lambda: _require_confirmation("Proceed with the muc_banbot installation shown above?"),
         validate_preconditions=validate_preconditions,
         stop_service=lambda: _stop_active_service(
             deployment, reason="before installing dependencies and deployment files"
         ),
         apply_install=lambda stopped: _finish_install(deployment, stopped=stopped),
         ask_start=lambda: _ask_start(deployment),
-        failure_message=(
-            f"INSTALL FAILED: {deployment.service} was stopped and will remain stopped."
-        ),
+        failure_message=(f"INSTALL FAILED: {deployment.service} was stopped and will remain stopped."),
     )
     return 0
 
@@ -945,7 +913,7 @@ def _git(
     return _run(
         ["git", *args],
         deployment=deployment,
-        as_service_user=os.geteuid() == 0 and _account_exists(deployment.service_user),
+        as_service_user=True,
         cwd=deployment.root,
         capture=capture,
         check=check,
@@ -971,14 +939,9 @@ def _is_stable_release_tag(tag: str) -> bool:
     return is_stable_release_tag(tag)
 
 
-
 def _stable_tags(deployment: Deployment) -> list[str]:
     result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
-    return [
-        tag
-        for tag in (line.strip() for line in result.stdout.splitlines())
-        if _is_stable_release_tag(tag)
-    ]
+    return [tag for tag in (line.strip() for line in result.stdout.splitlines()) if _is_stable_release_tag(tag)]
 
 
 def _prepare_release_target(deployment: Deployment, requested: str | None) -> tuple[str, str]:
@@ -1187,17 +1150,13 @@ def update(
             allow_downgrade=allow_downgrade,
         ),
         protected_paths=lambda: _protected_paths(deployment),
-        stop_service=lambda: _stop_active_service(
-            deployment, reason="before changing code and dependencies"
-        ),
+        stop_service=lambda: _stop_active_service(deployment, reason="before changing code and dependencies"),
         before_checkout=lambda: _backup_database_before_update(deployment),
         checkout_target=lambda target: _git(deployment, "checkout", target),
         apply_target=apply_target,
         ask_start=lambda: _ask_start(deployment),
         temp_prefix="muc-banbot-deploy-",
-        failure_message=(
-            f"UPDATE FAILED: {deployment.service} was stopped and will remain stopped."
-        ),
+        failure_message=(f"UPDATE FAILED: {deployment.service} was stopped and will remain stopped."),
     )
     return 0
 
@@ -1245,10 +1204,7 @@ def _check_installed_systemd(deployment: Deployment) -> bool:
 
     bytecode_value = _systemd_environment(deployment.service, "PYTHONDONTWRITEBYTECODE")
     bytecode_ok = bytecode_value == "1"
-    print(
-        f"  {'OK' if bytecode_ok else 'FAIL':<4}  "
-        f"PYTHONDONTWRITEBYTECODE: {bytecode_value or '-'}"
-    )
+    print(f"  {'OK' if bytecode_ok else 'FAIL':<4}  PYTHONDONTWRITEBYTECODE: {bytecode_value or '-'}")
     ok = ok and bytecode_ok
 
     exec_start = _systemd_property(deployment.service, "ExecStart")
