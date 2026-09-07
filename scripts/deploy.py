@@ -14,7 +14,6 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -1149,6 +1148,8 @@ def update(
     *,
     allow_downgrade: bool = False,
 ) -> int:
+    from envs_xmpp_ops.deploy import run_release_update_transaction
+
     _require_source_tree(deployment)
     if not (deployment.root / ".git").exists():
         raise DeployError(f"update requires a Git checkout: {deployment.root}")
@@ -1165,43 +1166,37 @@ def update(
         print("\nDRY RUN: no Git refs, files, packages, database or services were changed.")
         return 0
     _require_confirmation("Proceed with the muc_banbot update plan shown above?")
-    remote, target = _prepare_release_target(deployment, requested_tag)
-    print(f"Selected release: {target} (remote: {remote})")
-    if not _approve_target(
-        deployment,
-        target,
-        requested=requested_tag,
-        allow_downgrade=allow_downgrade,
-    ):
-        return 0
-    stopped = _stop_active_service(deployment, reason="before changing code and dependencies")
-    try:
-        _backup_database_before_update(deployment)
-        with tempfile.TemporaryDirectory(prefix="muc-banbot-deploy-") as tmp:
-            protected = _backup_project_protected_paths(
-                deployment,
-                _protected_paths(deployment),
-                Path(tmp),
-            )
-            try:
-                _git(deployment, "checkout", target)
-            finally:
-                _restore_project_protected_paths(protected)
+
+    def apply_target(_target: str) -> None:
         _install_dependencies(deployment)
         _validate_config(deployment)
-        runtime = _runtime_paths(deployment)
-        _validate_hardened_runtime_paths(deployment, runtime)
+        updated_runtime = _runtime_paths(deployment)
+        _validate_hardened_runtime_paths(deployment, updated_runtime)
         _check_hardened_permissions(deployment)
-        _check_hardened_runtime_permissions(deployment, runtime)
-    except Exception:
-        if stopped:
-            print(
-                f"\nUPDATE FAILED: {deployment.service} was stopped and will remain stopped.",
-                file=sys.stderr,
-            )
-        raise
-    _ask_start(deployment)
-    print(f"Update to {target} completed.")
+        _check_hardened_runtime_permissions(deployment, updated_runtime)
+
+    run_release_update_transaction(
+        root=deployment.root,
+        prepare_target=lambda: _prepare_release_target(deployment, requested_tag),
+        approve_target=lambda target: _approve_target(
+            deployment,
+            target,
+            requested=requested_tag,
+            allow_downgrade=allow_downgrade,
+        ),
+        protected_paths=lambda: _protected_paths(deployment),
+        stop_service=lambda: _stop_active_service(
+            deployment, reason="before changing code and dependencies"
+        ),
+        before_checkout=lambda: _backup_database_before_update(deployment),
+        checkout_target=lambda target: _git(deployment, "checkout", target),
+        apply_target=apply_target,
+        ask_start=lambda: _ask_start(deployment),
+        temp_prefix="muc-banbot-deploy-",
+        failure_message=(
+            f"UPDATE FAILED: {deployment.service} was stopped and will remain stopped."
+        ),
+    )
     return 0
 
 
