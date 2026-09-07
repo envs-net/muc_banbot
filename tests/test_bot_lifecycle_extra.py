@@ -281,6 +281,18 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
     assert bot.reconnecting is False
     assert bot.sent
     assert "Bot has restarted" in bot.sent[-1]["mbody"]
+    assert [phase.name for phase in bot._last_startup_phases] == [
+        "session",
+        "storage",
+        "state",
+        "transport",
+        "rooms",
+        "synchronization",
+        "services",
+        "identity",
+        "readiness",
+    ]
+    assert all(phase.status == "ok" for phase in bot._last_startup_phases)
 
 
 @pytest.mark.asyncio
@@ -942,3 +954,12 @@ async def test_reconnect_success_is_not_signalled_when_late_startup_stage_fails(
     assert reconnect_event.is_set() is False
     assert bot.reconnecting is True
     assert bot.last_reconnect_time is None
+    assert [phase.name for phase in bot._last_startup_phases] == [
+        "session",
+        "storage",
+        "state",
+        "transport",
+        "rooms",
+        "synchronization",
+    ]
+    assert bot._last_startup_phases[-1].status == "failed"

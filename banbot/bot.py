@@ -6,6 +6,7 @@ import logging
 import signal
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
 from .config_loader import format_config_import_error, load_config_module
@@ -156,6 +157,16 @@ def connect_xmpp(xmpp) -> bool:
     return xmpp.connect(**kwargs)
 
 
+@dataclass(slots=True)
+class _StartupContext:
+    """Mutable state shared by the ordered startup lifecycle phases."""
+
+    reconnect_waiter_active: bool = False
+    was_reconnecting: bool = False
+    managed_rooms: tuple[str, ...] = ()
+    missing_rooms: tuple[str, ...] = ()
+
+
 class BanBot(
     ClientXMPP,
     MessagingMixin,
@@ -209,6 +220,7 @@ class BanBot(
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_in_progress = False
         self._shutdown_complete = False
+        self._last_startup_phases: tuple[LifecyclePhaseResult, ...] = ()
         self._last_shutdown_phases: tuple[LifecyclePhaseResult, ...] = ()
         self.init_alert_state()
 
@@ -578,43 +590,60 @@ class BanBot(
         )
 
 
-    async def start(self, _) -> None:
-        """
-        Called when the XMPP session starts.
-        - Initializes DB
-        - Joins admin and protected rooms
-        - Waits for occupants
-        - Syncs admins
-        - Applies all bans in parallel
-        - Starts unban worker
-        """
-        if getattr(self, "_shutdown_in_progress", False):
-            log.info("Ignoring session_start while shutdown is in progress")
+    def _observe_startup_phase(
+        self,
+        result: LifecyclePhaseResult,
+        error: Exception | None,
+    ) -> None:
+        """Log one shared startup phase without changing startup policy."""
+        duration_ms = round(result.duration_seconds * 1000, 1)
+        if error is not None:
+            log.error(
+                "Startup: %s phase failed after %.1fms: %s",
+                result.name,
+                duration_ms,
+                error,
+            )
             return
-
-        # Mark the XMPP session as established immediately. The systemd startup
-        # timeout extender only runs while we are still waiting for
-        # ``session_start``; once this point is reached the normal
-        # TimeoutStartSec safety net should apply to the remaining startup path.
-        self._session_start_received = True
-
-        await self.stop_background_tasks()
-
-        # A reconnect loop may already be active even though this process has
-        # never completed an XMPP session.  This happens when the initial
-        # connection emits a disconnect/connection_failed event immediately
-        # before a queued session_start wins the race.  Keep that first
-        # successful session classified as normal startup, while still
-        # remembering that a reconnect waiter must be released at the end.
-        reconnect_waiter_active = bool(self.reconnecting)
-        was_reconnecting = bool(
-            reconnect_waiter_active
-            and getattr(self, "_startup_completed_once", False)
+        log.debug(
+            "Startup: %s phase completed with status %s in %.1fms",
+            result.name,
+            result.status,
+            duration_ms,
         )
 
-        await self.setup_db(create_startup_backup=not was_reconnecting)
-        await self.prepare_startup_version_notice(reconnecting=was_reconnecting)
-        if self.redaction_enabled and hasattr(self, "run_redaction_cleanup_automatic"):
+    async def _startup_session_phase(
+        self,
+        context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Reset reconnect-scoped workers and classify this XMPP session."""
+        await self.stop_background_tasks()
+        context.reconnect_waiter_active = bool(self.reconnecting)
+        context.was_reconnecting = bool(
+            context.reconnect_waiter_active
+            and getattr(self, "_startup_completed_once", False)
+        )
+        return "ok", {"reconnecting": context.was_reconnecting}
+
+    async def _startup_storage_phase(
+        self,
+        context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Open persistent storage and prepare version-change state."""
+        await self.setup_db(create_startup_backup=not context.was_reconnecting)
+        await self.prepare_startup_version_notice(
+            reconnecting=context.was_reconnecting
+        )
+        return "ok", {"startup_backup": not context.was_reconnecting}
+
+    async def _startup_state_phase(
+        self,
+        context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Load persisted moderation, invite, ignore and protection state."""
+        if self.redaction_enabled and hasattr(
+            self, "run_redaction_cleanup_automatic"
+        ):
             await self.run_redaction_cleanup_automatic(actor="system")
         await self.load_pending_room_invites()
         await self.load_bans_from_db()
@@ -622,151 +651,158 @@ class BanBot(
         await self.setup_ignorelist()
         await self.load_protections()
 
-        if not was_reconnecting:
-            # First connection only
+        if not context.was_reconnecting:
+            # Preserve the historic startup-time semantics: this timestamp is
+            # established only after persistent state loaded successfully.
             self.bot_start_time = time.time()
+        return "ok", {}
 
+    async def _startup_transport_phase(
+        self,
+        _context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Publish presence, fetch the roster and settle the XMPP session."""
         self.send_presence()
         await self.get_roster()
-
         await asyncio.sleep(3)
-
-        # --- Record server connection time ---
         self.server_connect_time = time.time()
+        return "ok", {}
 
-        # Register room handlers before sending join presence.  Awaited joins can
-        # otherwise receive self-presence before the BanBot handlers exist.
-        managed_rooms = [ADMIN_ROOM, *sorted(self.protected_rooms - {ADMIN_ROOM})]
-        for room in managed_rooms:
+    async def _startup_rooms_phase(
+        self,
+        context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Register MUC handlers, join managed rooms and populate occupants."""
+        context.managed_rooms = tuple(
+            [ADMIN_ROOM, *sorted(self.protected_rooms - {ADMIN_ROOM})]
+        )
+        for room in context.managed_rooms:
             if room not in self.registered_rooms:
                 self.add_event_handler(f"muc::{room}::got_online", self.muc_online)
                 self.add_event_handler(f"muc::{room}::got_offline", self.muc_offline)
                 self.registered_rooms.add(room)
 
-        # Explicitly await/consume all Slixmpp join Futures.  Rooms are joined in
-        # parallel so one slow remote MUC does not block all other rooms.
         join_results = await asyncio.gather(
-            *(
-                self.ensure_muc_joined(room)
-                for room in managed_rooms
-            )
+            *(self.ensure_muc_joined(room) for room in context.managed_rooms)
         )
-        failed_joins = [room for room, joined in zip(managed_rooms, join_results, strict=True) if not joined]
+        failed_joins = [
+            room
+            for room, joined in zip(
+                context.managed_rooms, join_results, strict=True
+            )
+            if not joined
+        ]
         if failed_joins:
             log.warning("MUC joins failed for: %s", ", ".join(failed_joins))
 
-        # --- Wait briefly for remaining occupant presences to populate ---
         await self.wait_for_occupants(timeout=6)
+        status = "partial" if failed_joins else "ok"
+        return status, {"failed_joins": tuple(failed_joins)}
 
-        # --- Check admin rights in all protected rooms ---
+    async def _startup_synchronization_phase(
+        self,
+        _context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Synchronize room privileges, bans and RTBL configuration."""
         await self.check_bot_admin_rights()
-
-        # --- Sync Admins ---
         await self.sync_admins(announce=False)
-
-        # --- Apply all bans in parallel at startup ---
         await self.sync_bans_startup()
-
-        # --- Setup RTBL subscriptions ---
         await self.setup_rtbl()
-
-        # --- Setup RTBL Publish-Node ---
         await self.setup_rtbl_publish()
+        return "ok", {}
 
-        # --- Start RTBL periodic refresh worker ---
+    async def _startup_services_phase(
+        self,
+        _context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Start reconnect-scoped workers after synchronization succeeds."""
         self._rtbl_refresh_task = self._start_core_service(
             self._rtbl_refresh_worker,
             name="rtbl-refresh-worker",
         )
-
-        # --- Start unban worker ---
         self.unban_task = self._start_core_service(
             self.unban_worker,
             name="unban-worker",
         )
 
-        # The health worker is started after reconnect state is cleared below,
-        # allowing its immediate first cycle to retry any failed room joins.
-
-        # --- Start redaction cleanup worker ---
         if self.redaction_enabled and hasattr(self, "redaction_cleanup_worker"):
             self.redaction_cleanup_task = self._start_core_service(
                 self.redaction_cleanup_worker,
                 name="redaction-cleanup-worker",
             )
 
-        # --- Start version check worker ---
         if self.version_check_enabled and self.version_check_url:
             self.version_check_task = self._start_core_service(
                 self.version_check_worker,
                 name="version-check-worker",
             )
 
-        # Flush batched redaction-index writes from startup room history before
-        # moving on to vCard/startup announcements.
         if hasattr(self, "flush_redaction_index"):
             await self.flush_redaction_index()
+        return "ok", {}
 
-        # --- Set Bot vCard ---
+    async def _startup_identity_phase(
+        self,
+        context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Publish identity and lifecycle notifications after room setup."""
         await self.update_vcard()
 
-        missing_rooms = sorted(
-            room
-            for room in managed_rooms
-            if self._bot_occupant_entry(room)[1] is None
+        context.missing_rooms = tuple(
+            sorted(
+                room
+                for room in context.managed_rooms
+                if self._bot_occupant_entry(room)[1] is None
+            )
         )
 
-        # Send lifecycle notification if enabled. Do not claim that every room
-        # joined when automatic recovery is still working on failed joins.
         if self.announce_startup:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            action = "reconnected" if was_reconnecting else "restarted"
-            if missing_rooms:
+            action = "reconnected" if context.was_reconnecting else "restarted"
+            if context.missing_rooms:
                 lifecycle_body = (
                     f"⚠️ Bot has {action}; automatic rejoin is active for "
-                    f"{len(missing_rooms)} room(s): {', '.join(missing_rooms)}. "
-                    f"({timestamp})"
+                    f"{len(context.missing_rooms)} room(s): "
+                    f"{', '.join(context.missing_rooms)}. ({timestamp})"
                 )
             else:
-                lifecycle_body = f"✅ Bot has {action} and synced all bans. ({timestamp})"
+                lifecycle_body = (
+                    f"✅ Bot has {action} and synced all bans. ({timestamp})"
+                )
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
                 mbody=lifecycle_body,
-                mtype="groupchat"
+                mtype="groupchat",
             )
 
-        await self.finalize_startup_version_notice(reconnecting=was_reconnecting)
+        await self.finalize_startup_version_notice(
+            reconnecting=context.was_reconnecting
+        )
+        status = "partial" if context.missing_rooms else "ok"
+        return status, {"missing_rooms": context.missing_rooms}
 
-        # Type=notify units become ready only after the complete room/database
-        # startup path succeeded. The watchdog task itself is process-scoped and
-        # remains active across XMPP reconnects.
+    async def _startup_readiness_phase(
+        self,
+        context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        """Publish readiness and release any successful reconnect waiter."""
         await self.runtime_watchdog.start()
         self.runtime_watchdog.notify_ready()
 
-        # Start the health worker only after all awaited startup stages have
-        # completed. There is deliberately no await between creating the task
-        # and clearing reconnecting, so its immediate first cycle sees the
-        # connection as healthy and can retry any failed room joins.
         self.health_check_task = self._start_core_service(
             self.health_check_worker,
             name="health-check-worker",
         )
         self.reconnecting = False
-        # Set this only after every critical startup stage and core worker
-        # creation succeeded.  A failed first startup may already have a
-        # server_connect_time, but must still be treated as initial startup on
-        # the next successful attempt.
         self._startup_completed_once = True
 
-        # The reconnect loop must only stop after the entire critical startup
-        # path succeeded (DB, rooms, sync, RTBL, workers and watchdog).  A
-        # pre-session disconnect can also create that waiter during the first
-        # process startup, so release it independently from the semantic
-        # reconnect classification.
-        if reconnect_waiter_active and self.reconnect_success_event is not None:
+        if (
+            context.reconnect_waiter_active
+            and self.reconnect_success_event is not None
+        ):
             self.reconnect_success_event.set()
 
-        if was_reconnecting:
+        if context.was_reconnecting:
             self.last_reconnect_time = time.time()
             log.info("🔄 Reconnected successfully")
             await self.send_operational_alert(
@@ -776,13 +812,48 @@ class BanBot(
                 enabled=getattr(self, "alert_on_reconnect", True),
             )
 
-        if missing_rooms:
+        if context.missing_rooms:
             log.warning(
                 "Bot started; automatic rejoin pending for: %s",
-                ", ".join(missing_rooms),
+                ", ".join(context.missing_rooms),
             )
         else:
             log.info("✅ Bot started, all rooms joined and bans applied")
+        return "ok", {}
+
+    async def start(self, _) -> None:
+        """Run the ordered XMPP-session startup lifecycle."""
+        if getattr(self, "_shutdown_in_progress", False):
+            log.info("Ignoring session_start while shutdown is in progress")
+            return
+
+        # Mark the XMPP session as established immediately. The systemd startup
+        # timeout extender only runs while waiting for ``session_start``.
+        self._session_start_received = True
+
+        context = _StartupContext()
+        runner = LifecyclePhaseRunner(observer=self._observe_startup_phase)
+        self._last_startup_phases = runner.results
+        phases = (
+            ("session", lambda: self._startup_session_phase(context)),
+            ("storage", lambda: self._startup_storage_phase(context)),
+            ("state", lambda: self._startup_state_phase(context)),
+            ("transport", lambda: self._startup_transport_phase(context)),
+            ("rooms", lambda: self._startup_rooms_phase(context)),
+            (
+                "synchronization",
+                lambda: self._startup_synchronization_phase(context),
+            ),
+            ("services", lambda: self._startup_services_phase(context)),
+            ("identity", lambda: self._startup_identity_phase(context)),
+            ("readiness", lambda: self._startup_readiness_phase(context)),
+        )
+        try:
+            await runner.run_all(phases)
+        finally:
+            # Preserve all completed/failed phases for status and diagnostics,
+            # including when startup aborts before readiness.
+            self._last_startup_phases = runner.results
 
 
 def main() -> None:
