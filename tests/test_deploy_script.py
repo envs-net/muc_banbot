@@ -246,7 +246,7 @@ def test_project_protected_files_are_restored_after_checkout_changes(tmp_path):
         {"config": config, "database": database, "external": outside},
         backup_dir,
     )
-    assert set(backups) == {"config", "database"}
+    assert {item.label for item in backups} == {"config", "database"}
 
     config.unlink()
     database.write_bytes(b"replacement")

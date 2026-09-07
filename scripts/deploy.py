@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import filecmp
 import grp
 import json
 import os
@@ -21,6 +20,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from envs_xmpp_ops.deploy import ProtectedFileBackup
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -968,21 +971,6 @@ def _is_stable_release_tag(tag: str) -> bool:
 
 
 
-def _git_remote(deployment: Deployment) -> str:
-    configured = os.environ.get("MUC_BANBOT_DEPLOY_REMOTE")
-    result = _git(deployment, "remote", capture=True, announce=False)
-    remotes = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    if configured:
-        if configured not in remotes:
-            raise DeployError(f"configured Git remote does not exist: {configured}")
-        return configured
-    if "origin" in remotes:
-        return "origin"
-    if len(remotes) == 1:
-        return remotes[0]
-    raise DeployError("could not choose Git remote; set MUC_BANBOT_DEPLOY_REMOTE")
-
-
 def _stable_tags(deployment: Deployment) -> list[str]:
     result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
     return [
@@ -992,95 +980,25 @@ def _stable_tags(deployment: Deployment) -> list[str]:
     ]
 
 
-def _remote_tags(deployment: Deployment, remote: str) -> list[str]:
-    from envs_xmpp_ops.git import remote_tags
-
-    return remote_tags(partial(_git, deployment), remote)
-
-
-def _latest_remote_tag(deployment: Deployment, remote: str) -> str:
-    tags = [tag for tag in _remote_tags(deployment, remote) if _is_stable_release_tag(tag)]
-    if not tags:
-        raise DeployError(f"no stable vX.Y.Z release tags found on remote {remote!r}")
-    return tags[0]
-
-
-def _remote_tag_object(deployment: Deployment, remote: str, tag: str) -> str:
-    from envs_xmpp_ops.git import remote_tag_object
-
-    return remote_tag_object(
-        partial(_git, deployment),
-        remote,
-        tag,
-        error_factory=DeployError,
-    )
-
-
-def _local_tag_object(deployment: Deployment, tag: str) -> str | None:
-    from envs_xmpp_ops.git import local_tag_object
-
-    return local_tag_object(partial(_git, deployment), tag, error_factory=DeployError)
-
-
-def _sync_release_tag(deployment: Deployment, remote: str, tag: str) -> None:
-    """Fetch only the selected release tag without overwriting conflicts."""
-    remote_object = _remote_tag_object(deployment, remote, tag)
-    local_object = _local_tag_object(deployment, tag)
-    if local_object is not None:
-        if local_object != remote_object:
-            raise DeployError(
-                f"local release tag {tag!r} conflicts with remote {remote!r}; "
-                "refusing to overwrite it. Verify the tag manually first."
-            )
-        return
-    _git(
-        deployment,
-        "fetch",
-        "--no-tags",
-        remote,
-        f"refs/tags/{tag}:refs/tags/{tag}",
-    )
-
-
-def _validate_tag(deployment: Deployment, tag: str) -> None:
-    from envs_xmpp_ops.git import validate_tag
-
-    validate_tag(partial(_git, deployment), tag, error_factory=DeployError)
-
-
 def _prepare_release_target(deployment: Deployment, requested: str | None) -> tuple[str, str]:
-    """Refresh branches without importing every tag, then sync one release."""
-    remote = _git_remote(deployment)
-    _git(deployment, "fetch", "--prune", "--no-tags", remote)
-    if requested is not None and not _is_stable_release_tag(requested):
-        raise DeployError("--to must name a stable vX.Y.Z release tag")
-    target = requested or _latest_remote_tag(deployment, remote)
-    _sync_release_tag(deployment, remote, target)
-    _validate_tag(deployment, target)
-    return remote, target
+    from envs_xmpp_ops.git import prepare_release_target
 
-
-def _git_is_ancestor(deployment: Deployment, older: str, newer: str) -> bool:
-    from envs_xmpp_ops.git import git_is_ancestor
-
-    return git_is_ancestor(
+    return prepare_release_target(
         partial(_git, deployment),
-        older,
-        newer,
+        requested,
+        configured_remote=os.environ.get("MUC_BANBOT_DEPLOY_REMOTE"),
         error_factory=DeployError,
     )
 
 
 def _target_relation(deployment: Deployment, target: str) -> str:
-    head_before_target = _git_is_ancestor(deployment, "HEAD", target)
-    target_before_head = _git_is_ancestor(deployment, target, "HEAD")
-    if head_before_target and target_before_head:
-        return "same"
-    if head_before_target:
-        return "upgrade"
-    if target_before_head:
-        return "downgrade"
-    return "diverged"
+    from envs_xmpp_ops.git import release_target_relation
+
+    return release_target_relation(
+        partial(_git, deployment),
+        target,
+        error_factory=DeployError,
+    )
 
 
 def _head_is_detached(deployment: Deployment) -> bool:
@@ -1096,38 +1014,19 @@ def _approve_target(
     requested: str | None,
     allow_downgrade: bool,
 ) -> bool:
+    from envs_xmpp_ops.git import approve_release_target
+
     current = _current_revision(deployment)
     relation = _target_relation(deployment, target)
-    if relation == "upgrade":
-        _require_confirmation(f"Update {current} to {target}?")
-        return True
-    if relation == "same":
-        if _head_is_detached(deployment):
-            print(f"Already at release {target}; nothing to update.")
-            return False
-        _require_confirmation(
-            f"Current HEAD already matches {target}. Pin this checkout to the release tag?"
-        )
-        return True
-    if relation == "downgrade":
-        if requested is None:
-            print(f"No newer release is available (latest release: {target}).")
-            print(f"The current checkout {current} contains commits newer than {target}.")
-            print("Nothing to update; the development branch is never deployed automatically.")
-            return False
-        if not allow_downgrade:
-            raise DeployError(
-                f"requested release {target} is older than the current checkout {current}; "
-                "refusing downgrade (use --allow-downgrade only for an intentional rollback)"
-            )
-        print(
-            "WARNING: this is an explicit code downgrade. The helper does not downgrade the "
-            "database schema; a matching database backup may be required."
-        )
-        _require_confirmation(f"Downgrade {current} to {target}?")
-        return True
-    raise DeployError(
-        f"release {target} is not on the current HEAD history; refusing a non-fast-forward deployment"
+    return approve_release_target(
+        current=current,
+        target=target,
+        relation=relation,
+        requested_tag=requested,
+        allow_downgrade=allow_downgrade,
+        head_is_detached=_head_is_detached(deployment) if relation == "same" else False,
+        require_confirmation=_require_confirmation,
+        error_factory=DeployError,
     )
 
 
@@ -1174,25 +1073,20 @@ def _backup_project_protected_paths(
     deployment: Deployment,
     protected: dict[str, Path],
     backup_dir: Path,
-) -> dict[str, tuple[Path, Path]]:
-    backups: dict[str, tuple[Path, Path]] = {}
-    for label, path in protected.items():
-        if not path.is_file() or not _relative_to_root(path, deployment.root):
-            continue
-        target = backup_dir / f"{len(backups):02d}-{path.name}"
-        shutil.copy2(path, target)
-        backups[label] = (path, target)
-        print(f"PROTECT {label}: {path}")
-    return backups
+) -> list[ProtectedFileBackup]:
+    from envs_xmpp_ops.deploy import backup_checkout_files
+
+    return backup_checkout_files(
+        protected,
+        root=deployment.root,
+        backup_dir=backup_dir,
+    )
 
 
-def _restore_project_protected_paths(backups: dict[str, tuple[Path, Path]]) -> None:
-    for label, (path, backup) in backups.items():
-        if path.is_file() and filecmp.cmp(path, backup, shallow=False):
-            continue
-        path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(backup, path)
-        print(f"RESTORE protected {label}: {path}")
+def _restore_project_protected_paths(backups: list[ProtectedFileBackup]) -> None:
+    from envs_xmpp_ops.deploy import restore_checkout_files
+
+    restore_checkout_files(backups)
 
 
 def _backup_database_before_update(deployment: Deployment) -> Path | None:
