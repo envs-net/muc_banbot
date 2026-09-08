@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
-import zipfile
 from typing import Any
 
-from envs_xmpp_core.storage.archive import extract_zip_member
 from envs_xmpp_core.storage.backup import (
+    BackupArchiveEntrySpec,
+    BackupArchiveError,
     BackupArchiveSource,
     build_backup_archive,
-    verify_backup_archive,
+    stage_backup_archive,
 )
 
 from .common import (
@@ -68,47 +68,28 @@ class BackupArchiveMixin:
         *,
         verify_checksums: bool = True,
     ) -> dict[str, pathlib.Path | None]:
-        """Verify and extract known backup archive entries into target_dir."""
-        verification = verify_backup_archive(
-            archive_path,
-            manifest_name=_BACKUP_MANIFEST_ENTRY,
-            expected_fields={"format": _BACKUP_FORMAT},
-            required_members=[_BACKUP_DATABASE_ENTRY],
-            allow_legacy_without_files=True,
-            verify_checksums=verify_checksums,
-        )
-        if not verification.ok:
-            raise ValueError("Invalid backup archive: " + "; ".join(verification.errors))
-
-        with zipfile.ZipFile(archive_path, "r") as archive:
-            names = set(verification.members)
-            database_path = extract_zip_member(
-                archive,
-                _BACKUP_DATABASE_ENTRY,
-                target_dir / _BACKUP_DATABASE_ENTRY,
+        """Verify and stage known backup members through the shared archive core."""
+        try:
+            staged = stage_backup_archive(
+                archive_path,
+                target_dir,
+                entries=[
+                    BackupArchiveEntrySpec(
+                        "database",
+                        _BACKUP_DATABASE_ENTRY,
+                        required=True,
+                    ),
+                    BackupArchiveEntrySpec("config", _BACKUP_CONFIG_ENTRY),
+                    BackupArchiveEntrySpec("omemo", _BACKUP_OMEMO_ENTRY),
+                ],
+                manifest_name=_BACKUP_MANIFEST_ENTRY,
+                expected_fields={"format": _BACKUP_FORMAT},
+                allow_legacy_without_files=True,
+                verify_checksums=verify_checksums,
             )
-
-            config_path: pathlib.Path | None = None
-            if _BACKUP_CONFIG_ENTRY in names:
-                config_path = extract_zip_member(
-                    archive,
-                    _BACKUP_CONFIG_ENTRY,
-                    target_dir / _BACKUP_CONFIG_ENTRY,
-                )
-
-            omemo_path: pathlib.Path | None = None
-            if _BACKUP_OMEMO_ENTRY in names:
-                omemo_path = extract_zip_member(
-                    archive,
-                    _BACKUP_OMEMO_ENTRY,
-                    target_dir / _BACKUP_OMEMO_ENTRY,
-                )
-
-        return {
-            "database": database_path,
-            "config": config_path,
-            "omemo": omemo_path,
-        }
+        except BackupArchiveError as exc:
+            raise ValueError(f"Invalid backup archive: {exc}") from exc
+        return dict(staged.entries)
 
     async def _extract_backup_archive(
         self,
