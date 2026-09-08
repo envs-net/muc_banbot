@@ -569,3 +569,63 @@ async def test_failed_restore_rolls_back_database_config_and_omemo(
     finally:
         if bot.db:
             await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_restore_rollback_uses_exact_state_after_safety_backup(
+    backup_config,
+    monkeypatch,
+):
+    """Rollback must preserve writes made after the operator safety archive."""
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        await bot.db.execute("INSERT INTO rooms(room) VALUES ('backup@conference.example.org')")
+        await bot.db.commit()
+        ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
+        assert ok is True
+
+        await bot.db.execute("DELETE FROM rooms")
+        await bot.db.execute("INSERT INTO rooms(room) VALUES ('current-before-safety@conference.example.org')")
+        await bot.db.commit()
+
+        real_create = bot.create_database_backup
+
+        async def create_safety_then_change_live_state(*args, **kwargs):
+            result = await real_create(*args, **kwargs)
+            if args and args[0] == "before-restore":
+                await bot.db.execute("DELETE FROM rooms")
+                await bot.db.execute(
+                    "INSERT INTO rooms(room) VALUES ('current-after-safety@conference.example.org')"
+                )
+                await bot.db.commit()
+            return result
+
+        monkeypatch.setattr(bot, "create_database_backup", create_safety_then_change_live_state)
+
+        real_reload = bot._reload_database_runtime_after_restore
+        reload_calls = 0
+
+        async def fail_first_runtime_reload():
+            nonlocal reload_calls
+            reload_calls += 1
+            if reload_calls == 1:
+                raise RuntimeError("forced runtime reload failure")
+            await real_reload()
+
+        monkeypatch.setattr(bot, "_reload_database_runtime_after_restore", fail_first_runtime_reload)
+
+        ok, message = await bot.restore_database_backup(
+            pathlib.Path(backup_path).name,
+            actor="admin@example.org",
+        )
+
+        assert ok is False
+        assert "Previous files were restored" in message
+        async with bot.db.execute("SELECT room FROM rooms") as cursor:
+            assert await cursor.fetchall() == [
+                ("current-after-safety@conference.example.org",)
+            ]
+    finally:
+        if bot.db:
+            await bot.db.close()
