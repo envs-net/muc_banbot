@@ -12,6 +12,7 @@ import tempfile
 from datetime import datetime
 from typing import Any
 
+from .._version import __version__
 from ..locks import database_file_lock
 from ..managed_files import prune_managed_files
 from .common import _BACKUP_CONFIG_ENTRY, _BACKUP_DATABASE_ENTRY, _BACKUP_FORMAT, _BACKUP_OMEMO_ENTRY
@@ -156,6 +157,8 @@ class BackupCreateMixin:
 
                 manifest = {
                     "format": _BACKUP_FORMAT,
+                    "app": "muc_banbot",
+                    "version": __version__,
                     "created_at": int(datetime.now().timestamp()),
                     "created_at_text": datetime.now().isoformat(timespec="seconds"),
                     "reason": reason_slug,
@@ -183,11 +186,6 @@ class BackupCreateMixin:
                     omemo_path=omemo_source,
                     manifest=manifest,
                 )
-
-            try:
-                os.chmod(backup_path, 0o600)
-            except OSError as exc:
-                log.debug("Failed to restrict backup archive permissions for %s: %s", backup_path, exc)
 
             self.last_database_backup_file = str(backup_path)
             if prune:

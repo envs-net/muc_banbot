@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import importlib
 import asyncio
+import importlib
+import json
 import os
 import pathlib
 import zipfile
@@ -104,6 +105,14 @@ async def test_manual_backup_creates_managed_snapshot(backup_config):
             assert "manifest.json" in archive.namelist()
             assert "database.sqlite3" in archive.namelist()
             assert "config.py" in archive.namelist()
+            manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["app"] == "muc_banbot"
+        assert manifest["version"]
+        assert {item["name"] for item in manifest["files"]} == {
+            "database.sqlite3",
+            "config.py",
+        }
+        assert all(len(item["sha256"]) == 64 for item in manifest["files"])
         assert bot.audit_events[-1][0] == "db_backup_created"
         assert bot.audit_events[-1][1]["actor"] == "admin@example.org"
         assert bot.audit_events[-1][1]["details"]["config_backup"] == "config.py"
@@ -144,6 +153,48 @@ async def test_backup_verify_latest_reports_integrity_ok(backup_config):
         assert "Backup verified" in body
         assert "SQLite integrity_check: ok" in body
         assert "config.py companion" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_backup_verify_rejects_checksum_mismatch_for_valid_companion(backup_config):
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
+        assert ok is True
+        archive_path = pathlib.Path(backup_path)
+        rewrite_zip_entry(archive_path, "config.py", "VALID_SETTING = True\n")
+
+        await bot.cmd_backup(["verify", "latest"], "admin@conference.example.org")
+
+        body = bot.sent[-1]["mbody"]
+        assert "Backup verification failed" in body
+        assert "checksum mismatch: config.py" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_backup_verify_accepts_legacy_v1_manifest_without_checksums(backup_config):
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
+        assert ok is True
+        archive_path = pathlib.Path(backup_path)
+        with zipfile.ZipFile(archive_path) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+        manifest.pop("files", None)
+        manifest.pop("missing", None)
+        rewrite_zip_entry(archive_path, "manifest.json", json.dumps(manifest))
+
+        await bot.cmd_backup(["verify", "latest"], "admin@conference.example.org")
+
+        body = bot.sent[-1]["mbody"]
+        assert "Backup verified" in body
+        assert "SQLite integrity_check: ok" in body
     finally:
         await bot.db.close()
 

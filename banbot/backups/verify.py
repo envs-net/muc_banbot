@@ -8,7 +8,10 @@ import logging
 import pathlib
 import tempfile
 
+from envs_xmpp_core.storage.backup import verify_backup_archive
 from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
+
+from .common import _BACKUP_DATABASE_ENTRY, _BACKUP_FORMAT, _BACKUP_MANIFEST_ENTRY
 
 log = logging.getLogger(__name__)
 
@@ -39,13 +42,18 @@ class BackupVerifyMixin:
             with tempfile.TemporaryDirectory(prefix="banbot-backup-verify-") as tmp_name:
                 tmp_dir = pathlib.Path(tmp_name)
                 try:
-                    sources = await self._extract_backup_archive(backup.path, tmp_dir)
+                    sources = await self._extract_backup_archive(
+                        backup.path, tmp_dir, verify_checksums=False
+                    )
                 except Exception as exc:
                     lines.append(f"❌ Backup archive check failed: {exc}")
                     return False, "\n".join(lines)
 
                 database_source = sources.get("database")
-                ok, message = await self._check_sqlite_integrity(database_source)  # type: ignore[arg-type]
+                if database_source is None:
+                    lines.append("❌ Backup archive check failed: database.sqlite3 is missing")
+                    return False, "\n".join(lines)
+                ok, message = await self._check_sqlite_integrity(database_source)
                 if ok:
                     lines.append("✅ SQLite integrity_check: ok")
                 else:
@@ -76,6 +84,23 @@ class BackupVerifyMixin:
                         return False, "\n".join(lines)
                 else:
                     lines.append("ℹ️ OMEMO companion: not present")
+
+                archive_verification = await asyncio.to_thread(
+                    verify_backup_archive,
+                    backup.path,
+                    manifest_name=_BACKUP_MANIFEST_ENTRY,
+                    expected_fields={"format": _BACKUP_FORMAT},
+                    required_members=[_BACKUP_DATABASE_ENTRY],
+                    allow_legacy_without_files=True,
+                )
+                if not archive_verification.ok:
+                    lines.append(
+                        "❌ Backup archive checksum check failed: "
+                        + "; ".join(archive_verification.errors)
+                    )
+                    return False, "\n".join(lines)
+                if archive_verification.files:
+                    lines.append("✅ Archive manifest/checksums: ok")
             return True, "\n".join(lines)
 
         ok, message = await self._check_sqlite_integrity(backup.path)

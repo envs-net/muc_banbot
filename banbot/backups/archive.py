@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import pathlib
 import zipfile
 from typing import Any
 
-from envs_xmpp_core.storage.archive import (
-    UnsafeArchiveMember,
-    extract_zip_member,
-    safe_zip_members,
+from envs_xmpp_core.storage.archive import extract_zip_member
+from envs_xmpp_core.storage.backup import (
+    BackupArchiveSource,
+    build_backup_archive,
+    verify_backup_archive,
 )
 
 from .common import (
@@ -36,41 +36,52 @@ class BackupArchiveMixin:
         omemo_path: pathlib.Path | None,
         manifest: dict[str, Any],
     ) -> None:
-        """Write one self-contained ZIP backup archive."""
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(
-                _BACKUP_MANIFEST_ENTRY,
-                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        """Write one self-contained ZIP backup archive atomically."""
+        sources = [
+            BackupArchiveSource(
+                _BACKUP_DATABASE_ENTRY,
+                database_path,
+                source=manifest.get("database", {}).get("source", database_path),
+                required=True,
             )
-            archive.write(database_path, _BACKUP_DATABASE_ENTRY)
-            if config_path is not None:
-                archive.write(config_path, _BACKUP_CONFIG_ENTRY)
-            if omemo_path is not None:
-                archive.write(omemo_path, _BACKUP_OMEMO_ENTRY)
+        ]
+        if config_path is not None:
+            sources.append(
+                BackupArchiveSource(_BACKUP_CONFIG_ENTRY, config_path, source=config_path)
+            )
+        if omemo_path is not None:
+            sources.append(
+                BackupArchiveSource(_BACKUP_OMEMO_ENTRY, omemo_path, source=omemo_path)
+            )
+        build_backup_archive(
+            archive_path,
+            sources=sources,
+            manifest=manifest,
+            manifest_name=_BACKUP_MANIFEST_ENTRY,
+            json_newline=True,
+        )
 
     @staticmethod
-    def _extract_backup_archive_sync(archive_path: pathlib.Path, target_dir: pathlib.Path) -> dict[str, pathlib.Path | None]:
-        """Extract known backup archive entries into target_dir."""
-        try:
-            archive = zipfile.ZipFile(archive_path, "r")
-        except zipfile.BadZipFile as exc:
-            raise ValueError(f"Invalid backup archive: {exc}") from exc
+    def _extract_backup_archive_sync(
+        archive_path: pathlib.Path,
+        target_dir: pathlib.Path,
+        *,
+        verify_checksums: bool = True,
+    ) -> dict[str, pathlib.Path | None]:
+        """Verify and extract known backup archive entries into target_dir."""
+        verification = verify_backup_archive(
+            archive_path,
+            manifest_name=_BACKUP_MANIFEST_ENTRY,
+            expected_fields={"format": _BACKUP_FORMAT},
+            required_members=[_BACKUP_DATABASE_ENTRY],
+            allow_legacy_without_files=True,
+            verify_checksums=verify_checksums,
+        )
+        if not verification.ok:
+            raise ValueError("Invalid backup archive: " + "; ".join(verification.errors))
 
-        with archive:
-            try:
-                names = safe_zip_members(archive)
-            except UnsafeArchiveMember as exc:
-                raise ValueError(str(exc)) from exc
-            if _BACKUP_MANIFEST_ENTRY not in names:
-                raise ValueError("Backup archive is missing manifest.json")
-            if _BACKUP_DATABASE_ENTRY not in names:
-                raise ValueError("Backup archive is missing database.sqlite3")
-
-            manifest_text = archive.read(_BACKUP_MANIFEST_ENTRY).decode("utf-8")
-            manifest = json.loads(manifest_text)
-            if manifest.get("format") != _BACKUP_FORMAT:
-                raise ValueError(f"Unsupported backup format: {manifest.get('format')!r}")
-
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            names = set(verification.members)
             database_path = extract_zip_member(
                 archive,
                 _BACKUP_DATABASE_ENTRY,
@@ -99,9 +110,20 @@ class BackupArchiveMixin:
             "omemo": omemo_path,
         }
 
-    async def _extract_backup_archive(self, archive_path: pathlib.Path, target_dir: pathlib.Path) -> dict[str, pathlib.Path | None]:
+    async def _extract_backup_archive(
+        self,
+        archive_path: pathlib.Path,
+        target_dir: pathlib.Path,
+        *,
+        verify_checksums: bool = True,
+    ) -> dict[str, pathlib.Path | None]:
         """Extract a ZIP backup archive without blocking the event loop."""
-        return await asyncio.to_thread(self._extract_backup_archive_sync, archive_path, target_dir)
+        return await asyncio.to_thread(
+            self._extract_backup_archive_sync,
+            archive_path,
+            target_dir,
+            verify_checksums=verify_checksums,
+        )
 
     async def _backup_restore_sources(
         self, backup_path: pathlib.Path, target_dir: pathlib.Path
