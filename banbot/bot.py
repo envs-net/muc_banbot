@@ -362,6 +362,7 @@ class BanBot(
         self.register_plugin("xep_0045")  # Multi-User Chat
         self.register_plugin('xep_0054')  # vCard
         self.register_plugin("xep_0060")  # PubSub (RTBL)
+        self.register_plugin("xep_0163")  # Personal Eventing Protocol
         self.register_plugin('xep_0084')  # Modern Avatar
         self.register_plugin('xep_0153')  # vCard Avatar compatibility
         self.register_plugin("xep_0249")  # Direct MUC invites

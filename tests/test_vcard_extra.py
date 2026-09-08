@@ -42,27 +42,93 @@ class FakeXep0054:
 class FakeXep0084:
     def __init__(self):
         self.avatars = []
+        self.metadata = []
 
     async def publish_avatar(self, data):
         self.avatars.append(data)
+
+    async def publish_avatar_metadata(self, metadata):
+        self.metadata.append(metadata)
+
+
+class FakeXep0153:
+    def __init__(self):
+        self.hashes = []
+        self.api = {"set_hash": self.set_hash}
+
+    async def set_hash(self, jid, *, args):
+        self.hashes.append((jid, args))
+
+
+class FakeAvatarUpdate:
+    def __init__(self, presence):
+        self.presence = presence
+
+    def __setitem__(self, key, value):
+        assert key == "photo"
+        x = self.presence.xml.find("{vcard-temp:x:update}x")
+        if x is None:
+            x = __import__("xml.etree.ElementTree", fromlist=["ElementTree"]).SubElement(
+                self.presence.xml, "{vcard-temp:x:update}x"
+            )
+        photo = x.find("photo")
+        if photo is None:
+            photo = __import__("xml.etree.ElementTree", fromlist=["ElementTree"]).SubElement(
+                x, "photo"
+            )
+        photo.text = value
+
+
+class FakePresence:
+    def __init__(self, bot, kwargs):
+        from xml.etree import ElementTree as ET
+
+        self.bot = bot
+        self.stream = bot
+        self.kwargs = dict(kwargs)
+        self.xml = ET.Element("presence")
+        if kwargs.get("pto") is not None:
+            self.xml.set("to", str(kwargs["pto"]))
+
+    def __getitem__(self, key):
+        if key == "vcard_temp_update":
+            return FakeAvatarUpdate(self)
+        if key == "to":
+            return self.xml.get("to", "")
+        return self.kwargs.get(key, "")
+
+    def send(self):
+        self.bot.sent.append(self)
 
 
 class VCardBot(VCardMixin):
     def __init__(self, connected=True):
         self.xep0054 = FakeXep0054()
         self.xep0084 = FakeXep0084()
+        self.xep0153 = FakeXep0153()
         self.sent = []
         self.connected = connected
+        self.boundjid = type(
+            "BoundJID",
+            (),
+            {
+                "bare": "bot@example.org",
+                "full": "bot@example.org/tests",
+            },
+        )()
+        self.room_bot_nicks = {}
 
     def __getitem__(self, key):
         if key == "xep_0054":
             return self.xep0054
         if key == "xep_0084":
             return self.xep0084
+        if key == "xep_0153":
+            return self.xep0153
         raise KeyError(key)
 
-    def send(self, stanza):
-        self.sent.append(stanza)
+    def make_presence(self, **kwargs):
+        return FakePresence(self, kwargs)
 
     def is_connected(self):
         return self.connected
@@ -141,14 +207,54 @@ async def test_update_vcard_with_complete_profile_and_avatar(
     assert vcard["ROLE"] == "moderator"
     assert vcard["URL"] == "https://envs.net"
     assert vcard["NOTE"] == "test note"
-    assert bot.xep0084.avatars == [avatar_data]
-
-    assert len(bot.sent) > 0
-    presence_xml = bot.sent[0].xml
     expected_hash = hashlib.sha1(avatar_data).hexdigest()
+    assert bot.xep0084.avatars == [avatar_data]
+    assert bot.xep0084.metadata == [[{
+        "id": expected_hash,
+        "type": "image/png",
+        "bytes": len(avatar_data),
+    }]]
+    assert bot.xep0153.hashes == [(bot.boundjid, expected_hash)]
+
+    assert len(bot.sent) == 1
+    presence_xml = bot.sent[0].xml
     photo_element = presence_xml.find(".//{vcard-temp:x:update}x/photo")
     assert photo_element is not None
     assert photo_element.text == expected_hash
+    assert bot.sent[0].kwargs["pfrom"] == "bot@example.org/tests"
+
+
+@pytest.mark.asyncio
+async def test_update_vcard_broadcasts_avatar_hash_to_joined_mucs(
+    tmp_path,
+    monkeypatch,
+    cleared_vcard_config,
+):
+    import config
+
+    avatar = tmp_path / "avatar.jpg"
+    avatar_data = b"fake-jpeg-data"
+    avatar.write_bytes(avatar_data)
+    monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
+
+    bot = VCardBot()
+    bot.room_bot_nicks = {
+        "room-a@example.org": "BanBot",
+        "room-b@example.org": "OtherNick",
+    }
+
+    assert await bot.update_vcard() is True
+
+    expected_hash = hashlib.sha1(avatar_data).hexdigest()
+    assert [presence.kwargs.get("pto") for presence in bot.sent] == [
+        None,
+        "room-a@example.org/BanBot",
+        "room-b@example.org/OtherNick",
+    ]
+    for presence in bot.sent:
+        photo = presence.xml.find(".//{vcard-temp:x:update}x/photo")
+        assert photo is not None
+        assert photo.text == expected_hash
 
 
 @pytest.mark.asyncio
@@ -162,7 +268,10 @@ async def test_update_vcard_without_avatar_publishes_only_vcard(cleared_vcard_co
     # No avatar configured: keep PHOTO empty and do not publish XEP-0084/avatar-hash presence.
     assert vcard["PHOTO"] == {}
     assert bot.xep0084.avatars == []
+    assert bot.xep0084.metadata == []
+    assert bot.xep0153.hashes == []
     assert bot.sent == []
+    assert bot.avatar_hash is None
 
     # No profile fields configured: values should remain absent/empty.
     for field in ("NICKNAME", "FN", "ROLE", "URL", "NOTE"):
