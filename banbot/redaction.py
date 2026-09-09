@@ -9,6 +9,8 @@ import time
 from datetime import UTC, datetime
 from xml.etree import ElementTree as ET
 
+from envs_xmpp_core.runtime.diagnostics import exception_summary
+
 from config import ADMIN_ROOM
 
 from .task_supervisor import sleep_with_heartbeat
@@ -54,17 +56,13 @@ def _redaction_exception_summary(exc: Exception) -> str:
         return "redaction request timed out"
 
     text = str(exc).strip()
-    if not text:
-        return exc.__class__.__name__
 
     # slixmpp may render a full IQ stanza for some failures. That is noisy in
     # admin-room alerts and logs, so keep the user-facing text compact.
     if text.startswith("<iq ") or "<moderate " in text or "<retract " in text:
         return "server rejected the redaction request"
 
-    if len(text) > 300:
-        return f"{text[:297]}..."
-    return text
+    return exception_summary(exc, max_length=300)
 
 
 def _redaction_exception_condition(exc: Exception) -> str | None:
@@ -85,14 +83,14 @@ def _redaction_exception_condition(exc: Exception) -> str | None:
             if condition:
                 return str(condition).strip().lower()
         except Exception as exc:
-            log.debug("Could not inspect redaction error stanza condition: %s", exc)
+            log.debug("Could not inspect redaction error stanza condition: %s", exception_summary(exc))
 
         try:
             error = stanza.get("error")
             if isinstance(error, dict) and error.get("condition"):
                 return str(error["condition"]).strip().lower()
         except Exception as exc:
-            log.debug("Could not inspect redaction error stanza mapping: %s", exc)
+            log.debug("Could not inspect redaction error stanza mapping: %s", exception_summary(exc))
 
     return None
 
@@ -187,7 +185,7 @@ class RedactionMixin:
             if muc_jid:
                 return bare_jid(str(muc_jid))
         except Exception as exc:
-            log.debug("Redaction: MUC plugin JID lookup failed: %s", exc)
+            log.debug("Redaction: MUC plugin JID lookup failed: %s", exception_summary(exc))
 
         return None
 
@@ -389,7 +387,7 @@ class RedactionMixin:
                 getattr(sender, "bare", None) or bare_jid(str(sender))
             ).lower()
         except Exception as exc:
-            log.debug("Could not resolve room for redaction confirmation: %s", exc)
+            log.debug("Could not resolve room for redaction confirmation: %s", exception_summary(exc))
             return 0
 
         confirmed = 0
@@ -557,7 +555,7 @@ class RedactionMixin:
             )
             self.register_handler(collector)
         except Exception as exc:
-            log.debug("Could not prepare MAM ID verification for %s: %s", room_jid, exc)
+            log.debug("Could not prepare MAM ID verification for %s: %s", room_jid, exception_summary(exc))
             return [], exc
 
         send_error: Exception | None = None
@@ -1301,16 +1299,16 @@ class RedactionMixin:
         try:
             result = await self._redaction_cleanup_old_entries(actor=actor, audit=True, audit_noop=False)
         except Exception as exc:
-            log.warning("Automatic redaction index cleanup failed: %s", exc)
+            log.warning("Automatic redaction index cleanup failed: %s", exception_summary(exc))
             if hasattr(self, "send_operational_alert"):
                 await self.send_operational_alert(
                     "redaction_cleanup_failed",
                     "Redaction cleanup failed",
-                    f"Automatic redaction index cleanup failed: {exc}",
+                    f"Automatic redaction index cleanup failed: {exception_summary(exc)}",
                     enabled=getattr(self, "alert_on_redaction_failure", True),
-                    details={"error": str(exc)},
+                    details={"error": exception_summary(exc)},
                 )
-            return {"enabled": bool(getattr(self, "redaction_enabled", False)), "deleted": 0, "error": str(exc)}
+            return {"enabled": bool(getattr(self, "redaction_enabled", False)), "deleted": 0, "error": exception_summary(exc)}
 
         deleted = int(result.get("deleted", 0) or 0)
         if deleted > 0:

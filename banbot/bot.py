@@ -46,6 +46,7 @@ from .messaging import MessagingMixin
 from .moderation import ModerationMixin
 from .muc import MucMixin
 from .omemo import OmemoMixin
+from .outbox import OutboxMixin
 from .protections import ProtectionMixin
 from .redaction import RedactionMixin
 from .rooms import RoomInviteMixin, RoomMixin
@@ -172,6 +173,7 @@ class BanBot(
     MessagingMixin,
     OmemoMixin,
     AlertMixin,
+    OutboxMixin,
     BackupMixin,
     ProtectionMixin,
     AuditMixin,
@@ -223,6 +225,7 @@ class BanBot(
         self._last_startup_phases: tuple[LifecyclePhaseResult, ...] = ()
         self._last_shutdown_phases: tuple[LifecyclePhaseResult, ...] = ()
         self.init_alert_state()
+        self.init_outbox_state()
 
         # --- Concurrency limit for MUC write operations ---
         # Prevents flooding the XMPP server with too many IQ stanzas at once
@@ -417,6 +420,7 @@ class BanBot(
         unmanaged_tasks = []
         seen_task_ids: set[int] = set()
         for task in (
+            getattr(self, "outbox_task", None),
             self._rtbl_refresh_task,
             self.unban_task,
             self.health_check_task,
@@ -537,6 +541,7 @@ class BanBot(
         return "ok", {"cancelled": int(cancelled or 0)}
 
     async def _shutdown_database_phase(self) -> tuple[str, dict[str, object]]:
+        await self.close_outbox_storage()
         db = getattr(self, "db", None)
         if db is None:
             return "skipped", {}
@@ -717,6 +722,12 @@ class BanBot(
         _context: _StartupContext,
     ) -> tuple[str, dict[str, object]]:
         """Start reconnect-scoped workers after synchronization succeeds."""
+        if bool(getattr(self, "outbox_enabled", True)) and getattr(self, "outbox_store", None) is not None:
+            self.outbox_task = self._start_core_service(
+                self.outbox_worker,
+                name="outbox-worker",
+            )
+
         self._rtbl_refresh_task = self._start_core_service(
             self._rtbl_refresh_worker,
             name="rtbl-refresh-worker",
@@ -774,6 +785,9 @@ class BanBot(
                 mto=ADMIN_ROOM,
                 mbody=lifecycle_body,
                 mtype="groupchat",
+                durable=True,
+                category="lifecycle",
+                dedupe_key=f"lifecycle:{action}",
             )
 
         await self.finalize_startup_version_notice(

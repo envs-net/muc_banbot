@@ -3,6 +3,13 @@
 import inspect
 from contextlib import asynccontextmanager
 
+from envs_xmpp_core.xmpp.messaging import is_muc_private_message
+from envs_xmpp_core.xmpp.occupants import (
+    find_occupant_by_jid,
+    find_occupant_by_nick,
+    occupant_is_admin_or_owner,
+)
+
 from config import ADMIN_ROOM
 
 from ._version import __version__
@@ -21,8 +28,13 @@ class DirectMessageMixin:
 
         known_rooms = self.protected_rooms | {ADMIN_ROOM}
 
-        # A real MUC PM looks like: room@conference.example/Nick
-        is_muc_pm = sender in known_rooms and sender_resource is not None
+        # A real MUC PM looks like: room@conference.example/Nick.
+        is_muc_pm = is_muc_private_message(
+            msg["type"],
+            sender,
+            sender_resource,
+            known_rooms,
+        )
         reply_to = sender_full if is_muc_pm else sender
         sender_bare = sender
         is_admin = False
@@ -30,43 +42,40 @@ class DirectMessageMixin:
         if is_muc_pm:
             room = sender
             nick = sender_resource
-            info = self.occupants.get(room, {}).get(nick)
-
-            if info and info.get("affiliation") in ("owner", "admin"):
-                is_admin = True
+            occupant = find_occupant_by_nick(
+                self.occupants.get(room, {}),
+                nick,
+                room=room,
+            )
+            is_admin = bool(occupant and occupant_is_admin_or_owner(occupant))
 
             # Optional fallback: if the PM came from another known room,
             # also check whether this user's real JID is admin in ADMIN_ROOM.
-            real_jid = info.get("jid") if info else None
-            real_bare = self.bare_jid(real_jid) if real_jid else None
+            real_bare = occupant.jid if occupant is not None else None
 
             if real_bare:
                 sender_bare = real_bare
 
             if not is_admin and real_bare:
-                for admin_info in self.occupants.get(ADMIN_ROOM, {}).values():
-                    admin_jid = admin_info.get("jid")
-                    if (
-                        admin_jid
-                        and self.bare_jid(admin_jid) == real_bare
-                        and admin_info.get("affiliation") in ("owner", "admin")
-                    ):
-                        is_admin = True
-                        break
+                admin_occupant = find_occupant_by_jid(
+                    self.occupants.get(ADMIN_ROOM, {}),
+                    real_bare,
+                    room=ADMIN_ROOM,
+                )
+                is_admin = bool(
+                    admin_occupant and occupant_is_admin_or_owner(admin_occupant)
+                )
 
         else:
             # Regular direct DM: user@example/resource or user@example
             sender_bare = self.bare_jid(str(msg["from"]))
 
-            for admin_info in self.occupants.get(ADMIN_ROOM, {}).values():
-                admin_jid = admin_info.get("jid")
-                if (
-                    admin_jid
-                    and self.bare_jid(admin_jid) == sender_bare
-                    and admin_info.get("affiliation") in ("owner", "admin")
-                ):
-                    is_admin = True
-                    break
+            admin_occupant = find_occupant_by_jid(
+                self.occupants.get(ADMIN_ROOM, {}),
+                sender_bare,
+                room=ADMIN_ROOM,
+            )
+            is_admin = bool(admin_occupant and occupant_is_admin_or_owner(admin_occupant))
 
         return is_admin, reply_to, sender_bare
 

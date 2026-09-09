@@ -43,6 +43,9 @@ class DatabaseMixin:
         # session_start runs again after XMPP reconnects. Always close the
         # previous SQLite connection before replacing self.db so its worker
         # thread/file descriptors cannot accumulate across reconnect cycles.
+        if hasattr(self, "close_outbox_storage"):
+            await self.close_outbox_storage()
+
         existing_db = getattr(self, "db", None)
         if existing_db is not None:
             try:
@@ -239,6 +242,8 @@ class DatabaseMixin:
             WHERE redacted_at IS NULL
         """)
         await self.db.commit()
+        if hasattr(self, "setup_outbox_storage"):
+            await self.setup_outbox_storage(DB_FILE)
         log.info("✅ Database schema and indexes created/verified")
 
         if hasattr(self, "flush_pending_database_backup_audit_events"):

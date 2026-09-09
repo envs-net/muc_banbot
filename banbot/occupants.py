@@ -1,5 +1,10 @@
 """Shared helpers for identifying the bot's own live MUC occupant."""
 
+from envs_xmpp_core.xmpp.occupants import (
+    find_self_occupant,
+    occupant_is_admin_or_owner,
+)
+
 from config import NICK
 
 from .utils import bare_jid
@@ -11,40 +16,34 @@ class BotOccupantMixin:
     def _bot_occupant_entry(self, room: str) -> tuple[str | None, dict | None]:
         """Return the bot's live occupant entry without trusting one exact nick.
 
-        The MUC service may assign a different nickname or temporarily retain a
-        stale occupant after a reconnect. Prefer the nickname learned from an
-        actual self-presence, then match the authenticated bare JID. Only
-        lightweight users that do not track self-presence may fall back to the
-        configured nickname for compatibility.
+        The shared identity helper prefers the nickname learned from an actual
+        self-presence, then the authenticated bare JID. Only lightweight users
+        that do not track self-presence may fall back to the configured nick.
         """
         occupants = getattr(self, "occupants", {}).get(room, {})
         actual_nick = getattr(self, "room_bot_nicks", {}).get(room)
-
-        if actual_nick:
-            info = occupants.get(actual_nick)
-            if info is not None:
-                return actual_nick, info
-
         boundjid = getattr(self, "boundjid", None)
-        if boundjid is not None:
-            normalize = getattr(self, "bare_jid", bare_jid)
-            bot_bare = normalize(str(boundjid.bare))
-            for nick, info in occupants.items():
-                occupant_jid = info.get("jid")
-                if occupant_jid and normalize(str(occupant_jid)) == bot_bare:
-                    return nick, info
+        normalize = getattr(self, "bare_jid", bare_jid)
+        self_bare = normalize(str(boundjid.bare)) if boundjid is not None else None
+        fallback_nick = None if hasattr(self, "room_bot_nicks") else str(NICK)
 
-        # Production BanBot always has ``room_bot_nicks``. There an exact nick
-        # alone is not proof of identity because it may belong to a stale
-        # occupant from the previous connection. Keep the fallback only for
-        # standalone mixin users and compatibility tests.
-        if not hasattr(self, "room_bot_nicks"):
-            configured_nick = str(NICK).lower()
-            for nick, info in occupants.items():
-                if str(nick).lower() == configured_nick:
-                    return nick, info
-
-        return None, None
+        occupant = find_self_occupant(
+            room,
+            occupants,
+            self_bare_jid=self_bare,
+            preferred_nick=actual_nick,
+            fallback_nick=fallback_nick,
+        )
+        if occupant is None:
+            return None, None
+        info = occupants.get(occupant.nick)
+        if info is None:
+            # Case-insensitive lookup fallback for compatibility mappings.
+            for nick, candidate in occupants.items():
+                if str(nick).casefold() == occupant.nick.casefold():
+                    return str(nick), candidate
+            return occupant.nick, None
+        return occupant.nick, info
 
 
 def bot_room_status_line(bot, room: str) -> str:
@@ -54,7 +53,7 @@ def bot_room_status_line(bot, room: str) -> str:
         return f"🔴 {room} | not joined | bot affiliation: unknown"
 
     affiliation = str(info.get("affiliation") or "none").lower()
-    if affiliation in {"owner", "admin"}:
+    if occupant_is_admin_or_owner(info):
         icon = "🟢"
         rights = affiliation
     else:

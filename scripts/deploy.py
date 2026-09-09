@@ -57,23 +57,32 @@ class Deployment:
 
     @property
     def executable(self) -> Path:
-        return self.venv / "bin" / "muc_banbot"
+        from envs_xmpp_ops.layout import venv_binary
+
+        return venv_binary(self.venv, "muc_banbot")
 
     @property
     def pip(self) -> Path:
-        return self.venv / "bin" / "pip"
+        from envs_xmpp_ops.layout import venv_binary
+
+        return venv_binary(self.venv, "pip")
 
     @property
     def venv_python(self) -> Path:
-        return self.venv / "bin" / "python"
+        from envs_xmpp_ops.layout import venv_binary
+
+        return venv_binary(self.venv, "python")
 
     @property
     def environment(self) -> dict[str, str]:
-        env = os.environ.copy()
-        env["MUC_BANBOT_CONFIG"] = str(self.config)
+        from envs_xmpp_ops.layout import deployment_environment
+
         # Keep operator config directories clean when deploy/check imports config.py.
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        return env
+        return deployment_environment(
+            config_environment="MUC_BANBOT_CONFIG",
+            config=self.config,
+            disable_bytecode=True,
+        )
 
     @property
     def legacy_layout(self) -> bool:
@@ -91,47 +100,27 @@ def _systemd_property(service: str, prop: str) -> str:
 
 
 def _systemd_environment(service: str, key: str) -> str | None:
-    value = _systemd_property(service, "Environment")
-    if not value:
-        return None
-    try:
-        assignments = shlex.split(value)
-    except ValueError:
-        assignments = value.split()
-    prefix = f"{key}="
-    for assignment in assignments:
-        if assignment.startswith(prefix):
-            return assignment[len(prefix) :]
-    return None
+    from envs_xmpp_ops.layout import systemd_environment_value
+
+    return systemd_environment_value(_systemd_property(service, "Environment"), key)
 
 
 def _systemd_exec_path_from_value(exec_start: str) -> Path | None:
-    """Extract the executable path from systemctl show ExecStart output."""
-    marker = "path="
-    if marker not in exec_start:
-        return None
-    executable = exec_start.split(marker, 1)[1].split(";", 1)[0].strip()
-    if not executable:
-        return None
-    return Path(executable).expanduser()
+    from envs_xmpp_ops.layout import systemd_exec_path
+
+    return systemd_exec_path(exec_start)
 
 
 def _systemd_venv(service: str) -> Path | None:
-    path = _systemd_exec_path_from_value(_systemd_property(service, "ExecStart"))
-    if path is not None and path.name == "muc_banbot" and path.parent.name == "bin":
-        return path.parent.parent.resolve()
-    return None
+    from envs_xmpp_ops.layout import systemd_venv
+
+    return systemd_venv(_systemd_property(service, "ExecStart"), "muc_banbot")
 
 
 def _systemd_paths(value: str) -> set[str]:
-    """Normalize a systemd path-list property for exact comparisons."""
-    if not value:
-        return set()
-    try:
-        items = shlex.split(value)
-    except ValueError:
-        items = value.split()
-    return set(items)
+    from envs_xmpp_ops.layout import systemd_path_set
+
+    return systemd_path_set(value)
 
 
 def _default_config(root: Path, service: str) -> Path:
@@ -153,12 +142,14 @@ def _default_config(root: Path, service: str) -> Path:
 
 
 def _default_account(service: str, prop: str, fallback: str) -> str:
-    env_name = f"MUC_BANBOT_SERVICE_{prop.upper()}"
-    configured = os.environ.get(env_name)
-    if configured:
-        return configured
-    discovered = _systemd_property(service, prop)
-    return discovered or fallback
+    from envs_xmpp_ops.layout import service_account
+
+    return service_account(
+        environment=os.environ,
+        environment_name=f"MUC_BANBOT_SERVICE_{prop.upper()}",
+        discovered=_systemd_property(service, prop),
+        fallback=fallback,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:

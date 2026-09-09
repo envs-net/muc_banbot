@@ -6,17 +6,16 @@ transport-specific behavior, such as OMEMO encryption, can be added here
 without touching every command/mixin again.
 """
 
-import asyncio
 import logging
 from contextvars import ContextVar, Token
 from typing import Any
 
+from envs_xmpp_core.xmpp.messaging import ReplyRoute, TaskLocalReplyRoute
+
 log = logging.getLogger(__name__)
 
 _REPLY_ENCRYPTED: ContextVar[bool | None] = ContextVar("banbot_reply_encrypted", default=None)
-_REPLY_TARGET: ContextVar[tuple[object | None, str, str] | None] = ContextVar(
-    "banbot_reply_target", default=None
-)
+_REPLY_ROUTES = TaskLocalReplyRoute("banbot_reply_target")
 
 
 class MessagingMixin:
@@ -36,51 +35,32 @@ class MessagingMixin:
         self,
         mto: str,
         mtype: str,
-    ) -> Token[tuple[object | None, str, str] | None]:
+    ):
         """Route command output in only the current asyncio task to one target."""
-        return _REPLY_TARGET.set((asyncio.current_task(), mto, mtype))
+        return _REPLY_ROUTES.set(mto, mtype)
 
-    def _reset_reply_target_context(
-        self,
-        token: Token[tuple[object | None, str, str] | None],
-    ) -> None:
+    def _reset_reply_target_context(self, token) -> None:
         """Restore the previous task-local output target."""
-        _REPLY_TARGET.reset(token)
+        _REPLY_ROUTES.reset(token)
 
     def _get_reply_target_context(self) -> tuple[str, str] | None:
-        """Return the task-local output target without leaking it to child tasks."""
-        target = _REPLY_TARGET.get()
-        if target is None:
+        """Return the shared task-local output target."""
+        route: ReplyRoute | None = _REPLY_ROUTES.get()
+        if route is None:
             return None
-        owner_task, mto, mtype = target
-        if owner_task is not None and asyncio.current_task() is not owner_task:
-            return None
-        return mto, mtype
+        return route.target, route.message_type
 
-    async def bot_send_message(
+    async def _send_message_transport(
         self,
         *,
         mto: str,
         mbody: str,
-        mtype: str = "groupchat",
-        encrypted: bool | None = None,
+        mtype: str,
+        encrypted: bool | None,
+        raise_on_failure: bool = False,
         **kwargs: Any,
     ) -> Any:
-        """
-        Send a bot-generated message through the central output layer.
-
-        When ``encrypted`` is not specified, replies inherit the encryption mode
-        of the incoming command message via a task-local context.  This lets the
-        bot answer OMEMO commands with OMEMO and plaintext commands with
-        plaintext without every command handler having to know about OMEMO.
-        """
-        reply_target = self._get_reply_target_context()
-        if reply_target is not None:
-            mto, mtype = reply_target
-
-        if encrypted is None:
-            encrypted = self._get_reply_encryption_context()
-
+        """Send one already-routed message without durable requeueing."""
         should_encrypt = False
         if hasattr(self, "_should_encrypt_message"):
             should_encrypt = self._should_encrypt_message(
@@ -100,6 +80,8 @@ class MessagingMixin:
             except Exception as exc:
                 log.warning("Encrypted send to %s failed: %s", mto, exc)
                 if not getattr(self, "omemo_plaintext_fallback", False):
+                    if raise_on_failure:
+                        raise
                     return None
                 log.warning("Falling back to plaintext send for %s", mto)
 
@@ -107,5 +89,63 @@ class MessagingMixin:
             mto=mto,
             mbody=mbody,
             mtype=mtype,
+            **kwargs,
+        )
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        encrypted: bool | None = None,
+        durable: bool = False,
+        category: str = "message",
+        dedupe_key: str | None = None,
+        max_attempts: int | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Send through the central routing/encryption/durability layer.
+
+        Durable sends are queue-first and therefore at-least-once.  They are
+        intended for proactive operational messages; task-local encryption is
+        re-evaluated at delivery time so queue persistence never downgrades an
+        ADMIN_ROOM message from the configured OMEMO policy.
+        """
+        reply_target = self._get_reply_target_context()
+        if reply_target is not None:
+            mto, mtype = reply_target
+
+        if encrypted is None:
+            encrypted = self._get_reply_encryption_context()
+
+        if durable:
+            if kwargs:
+                raise ValueError("durable messages cannot persist transport-specific keyword arguments")
+            if encrypted is True:
+                raise ValueError("durable messages cannot persist task-local explicit encryption state")
+            enqueue = getattr(self, "enqueue_durable_message", None)
+            if not callable(enqueue):
+                return await self._send_message_transport(
+                    mto=mto,
+                    mbody=mbody,
+                    mtype=mtype,
+                    encrypted=encrypted,
+                )
+            message_id = await enqueue(
+                destination=mto,
+                body=mbody,
+                message_type=mtype,
+                category=category,
+                dedupe_key=dedupe_key,
+                max_attempts=max_attempts,
+            )
+            return message_id is not None
+
+        return await self._send_message_transport(
+            mto=mto,
+            mbody=mbody,
+            mtype=mtype,
+            encrypted=encrypted,
             **kwargs,
         )

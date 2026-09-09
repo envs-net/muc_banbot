@@ -155,6 +155,19 @@ ALERT_ON_RTBL_REFRESH_FAILURES = 3
 # Suppress duplicate alerts with the same key for this many seconds. 0 disables deduplication.
 ALERT_DEDUP_WINDOW = 300
 
+# Durable proactive messages (operational alerts and lifecycle notices) are
+# persisted in SQLite and retried with bounded exponential backoff.
+OUTBOX_ENABLED = True
+OUTBOX_RETRY_INITIAL_SECONDS = 30
+OUTBOX_RETRY_MAX_SECONDS = 1800
+OUTBOX_MAX_ATTEMPTS = 12
+OUTBOX_BATCH_SIZE = 20
+OUTBOX_POLL_SECONDS = 5
+OUTBOX_MAX_PENDING = 10000
+OUTBOX_MAX_BYTES = 52428800
+OUTBOX_MAX_PER_DESTINATION = 1000
+OUTBOX_MAX_PER_CATEGORY = 5000
+
 # ================= OMEMO ENCRYPTION =================
 
 # Enable OMEMO support for encrypted incoming commands and outgoing replies.

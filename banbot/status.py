@@ -158,6 +158,15 @@ class StatusMixin:
         audit_events = db_stats.get("audit_events", 0)
         status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
 
+        if hasattr(self, "outbox_runtime_state"):
+            outbox = await self.outbox_runtime_state()
+            status_lines.append(
+                "📤 Outbox: "
+                f"{int(outbox.get('pending', 0))} pending, "
+                f"{int(outbox.get('inflight', 0))} inflight, "
+                f"{int(outbox.get('dead', 0))} dead"
+            )
+
         # affiliation query
         if self.admin_affiliation_query_forbidden_rooms:
             status_lines.append(

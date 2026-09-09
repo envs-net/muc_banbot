@@ -115,6 +115,16 @@ CONFIG_FIELDS: dict[str, ConfigKeySpec] = {
         3, "ALERT_ON_RTBL_REFRESH_FAILURES", int, minimum=0, maximum=1000
     ),
     "ALERT_DEDUP_WINDOW": _runtime(300, "ALERT_DEDUP_WINDOW", int, minimum=0, maximum=86400),
+    "OUTBOX_ENABLED": _runtime(True, "OUTBOX_ENABLED", bool),
+    "OUTBOX_RETRY_INITIAL_SECONDS": _runtime(30, "OUTBOX_RETRY_INITIAL_SECONDS", int, minimum=1, maximum=86400),
+    "OUTBOX_RETRY_MAX_SECONDS": _runtime(1800, "OUTBOX_RETRY_MAX_SECONDS", int, minimum=1, maximum=604800),
+    "OUTBOX_MAX_ATTEMPTS": _runtime(12, "OUTBOX_MAX_ATTEMPTS", int, minimum=1, maximum=1000),
+    "OUTBOX_BATCH_SIZE": _runtime(20, "OUTBOX_BATCH_SIZE", int, minimum=1, maximum=200),
+    "OUTBOX_POLL_SECONDS": _runtime(5, "OUTBOX_POLL_SECONDS", (int, float), minimum=1, maximum=3600),
+    "OUTBOX_MAX_PENDING": _runtime(10000, "OUTBOX_MAX_PENDING", int, minimum=1, maximum=1000000),
+    "OUTBOX_MAX_BYTES": _runtime(50 * 1024 * 1024, "OUTBOX_MAX_BYTES", int, minimum=1024, maximum=1073741824),
+    "OUTBOX_MAX_PER_DESTINATION": _runtime(1000, "OUTBOX_MAX_PER_DESTINATION", int, minimum=1, maximum=1000000),
+    "OUTBOX_MAX_PER_CATEGORY": _runtime(5000, "OUTBOX_MAX_PER_CATEGORY", int, minimum=1, maximum=1000000),
     "HEALTH_CHECK_INTERVAL": _runtime(
         300, "HEALTH_CHECK_INTERVAL", int, minimum=60, maximum=86400
     ),

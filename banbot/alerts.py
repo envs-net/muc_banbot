@@ -6,6 +6,9 @@ import logging
 import time
 from typing import Any
 
+from envs_xmpp_core.runtime.alerts import AlertTracker
+from envs_xmpp_core.runtime.diagnostics import exception_summary
+
 from config import ADMIN_ROOM
 
 log = logging.getLogger(__name__)
@@ -15,8 +18,10 @@ class AlertMixin:
     """Small deduplicated ADMIN_ROOM alert layer."""
 
     def init_alert_state(self) -> None:
-        self.alert_last_sent: dict[str, float] = {}
-        self.alert_counters: dict[str, int] = {}
+        self.alert_tracker = AlertTracker()
+        # Compatibility aliases remain useful to diagnostics/tests.
+        self.alert_last_sent = self.alert_tracker.last_sent
+        self.alert_counters = self.alert_tracker.counters
 
     async def send_operational_alert(
         self,
@@ -34,19 +39,32 @@ class AlertMixin:
         if not enabled:
             return False
 
-        now = time.time()
         dedup_window = max(0, int(getattr(self, "alert_dedup_window", 300) or 0))
-        last_sent = self.alert_last_sent.get(key, 0.0)
-        if dedup_window and now - last_sent < dedup_window:
+        if not self.alert_tracker.should_emit(
+            key,
+            now=time.time(),
+            dedup_window_seconds=dedup_window,
+        ):
             log.debug("Alert %s suppressed by %ss dedup window", key, dedup_window)
             return False
 
-        self.alert_last_sent[key] = now
         body = f"⚠️ {title}\n{message}"
         try:
-            await self.bot_send_message(mto=ADMIN_ROOM, mbody=body, mtype="groupchat")
+            accepted = await self.bot_send_message(
+                mto=ADMIN_ROOM,
+                mbody=body,
+                mtype="groupchat",
+                durable=True,
+                category="operational_alert",
+                dedupe_key=f"operational-alert:{key}",
+            )
         except Exception as exc:
-            log.warning("Failed to send alert %s: %s", key, exc)
+            self.alert_tracker.forget_emission(key)
+            log.warning("Failed to queue alert %s: %s", key, exception_summary(exc))
+            return False
+        if accepted is False:
+            self.alert_tracker.forget_emission(key)
+            log.warning("Failed to queue alert %s", key)
             return False
 
         try:
@@ -57,13 +75,13 @@ class AlertMixin:
                 details={"key": key, "title": title, **(details or {})},
             )
         except Exception as exc:
-            log.debug("Failed to audit alert %s: %s", key, exc)
+            log.debug("Failed to audit alert %s: %s", key, exception_summary(exc))
 
         return True
 
     def record_alert_success(self, key: str) -> None:
         """Reset consecutive failure counters after a successful check."""
-        self.alert_counters.pop(key, None)
+        self.alert_tracker.record_success(key)
 
     async def record_alert_failure(
         self,
@@ -77,8 +95,7 @@ class AlertMixin:
     ) -> bool:
         """Increment a failure counter and alert when the threshold is reached."""
         threshold = max(1, int(threshold or 1))
-        count = self.alert_counters.get(key, 0) + 1
-        self.alert_counters[key] = count
+        count = self.alert_tracker.record_failure(key)
         if count < threshold:
             return False
         return await self.send_operational_alert(

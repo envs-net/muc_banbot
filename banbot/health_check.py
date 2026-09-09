@@ -4,6 +4,8 @@ import asyncio
 import logging
 import time
 
+from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
+
 from config import ADMIN_ROOM, NICK
 
 from .locks import is_maintenance_mode
@@ -84,7 +86,7 @@ class HealthCheckMixin:
                 return False
 
             _bot_nick, bot_info = self._health_bot_occupant_entry(room)
-            is_admin = bool(bot_info and bot_info.get("affiliation") in ("owner", "admin"))
+            is_admin = bool(bot_info and occupant_is_admin_or_owner(bot_info))
             admin_state = getattr(self, "bot_admin_state", None)
             if admin_state is None:
                 admin_state = {}

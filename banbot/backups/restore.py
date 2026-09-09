@@ -51,7 +51,10 @@ class BackupRestoreMixin:
             raise
 
     async def _prepare_runtime_for_restore(self) -> None:
-        """Commit and close the live DB before exact rollback snapshots are taken."""
+        """Commit and close live DB connections before exact rollback snapshots."""
+        close_outbox = getattr(self, "close_outbox_storage", None)
+        if callable(close_outbox):
+            await close_outbox()
         db = getattr(self, "db", None)
         if db is None:
             return
@@ -60,7 +63,10 @@ class BackupRestoreMixin:
         self.db = None
 
     async def _close_runtime_before_restore_rollback(self) -> None:
-        """Close any DB connection opened while validating restored state."""
+        """Close any DB connections opened while validating restored state."""
+        close_outbox = getattr(self, "close_outbox_storage", None)
+        if callable(close_outbox):
+            await close_outbox()
         db = getattr(self, "db", None)
         if db is None:
             return

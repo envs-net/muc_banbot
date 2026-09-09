@@ -6,11 +6,12 @@ import logging
 import re
 import sys
 
+from envs_xmpp_core.xmpp import await_muc_join_compat
+from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 from slixmpp.exceptions import IqError, IqTimeout
 
 from config import ADMIN_ROOM, NICK
 
-from ..muc_join import await_muc_join_compat
 from ..occupants import BotOccupantMixin, bot_room_status_line
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
@@ -172,7 +173,7 @@ class ProtectedRoomMixin:
                     continue
 
                 _bot_nick, info = BotOccupantMixin._bot_occupant_entry(self, target)
-                is_admin = bool(info and info.get("affiliation") in ("owner", "admin"))
+                is_admin = bool(info and occupant_is_admin_or_owner(info))
                 admin_state[target] = is_admin
 
                 if is_admin:

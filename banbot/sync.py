@@ -8,8 +8,9 @@ from config import ADMIN_ROOM, NICK
 
 log = logging.getLogger(__name__)
 
+from envs_xmpp_core.xmpp import await_muc_join_compat
+
 from .locks import ban_state_lock
-from .muc_join import await_muc_join_compat
 from .utils import looks_like_domain
 
 

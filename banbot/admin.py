@@ -3,6 +3,12 @@
 import asyncio
 import logging
 
+from envs_xmpp_core.xmpp.occupants import (
+    find_occupant_by_jid,
+    find_occupant_by_nick,
+    occupant_is_admin_or_owner,
+    occupant_is_moderator,
+)
 from slixmpp.exceptions import IqError, IqTimeout
 
 from config import ADMIN_ROOM
@@ -16,13 +22,13 @@ log = logging.getLogger(__name__)
 class AdminMixin(BotOccupantMixin):
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
         """Check if a user is admin or owner in a room using the live occupant cache."""
-        occ = self.occupants.get(room, {})
-        for n, info in occ.items():
-            if nick and n.lower() == nick.lower():
-                return info.get("affiliation") in ("owner", "admin")
-            if jid and info.get("jid") and self.bare_jid(info["jid"]) == self.bare_jid(jid):
-                return info.get("affiliation") in ("owner", "admin")
-        return False
+        occupants = self.occupants.get(room, {})
+        occupant = None
+        if nick:
+            occupant = find_occupant_by_nick(occupants, nick, room=room)
+        if occupant is None and jid:
+            occupant = find_occupant_by_jid(occupants, jid, room=room)
+        return bool(occupant and occupant_is_admin_or_owner(occupant))
 
 
     def is_bot_admin_or_owner(self, room: str, *, log_missing: bool = True) -> bool:
@@ -34,15 +40,19 @@ class AdminMixin(BotOccupantMixin):
                 log.warning("⚠️ Bot self-presence not found in occupants for room %s", room)
             return False
 
-        return bot_info.get("affiliation") in ("owner", "admin")
+        return occupant_is_admin_or_owner(bot_info)
 
 
     def is_authorized(self, msg) -> bool:
         """Check if a message sender is authorized to issue admin commands."""
         if msg["from"].bare != ADMIN_ROOM:
             return False
-        info = self.occupants.get(ADMIN_ROOM, {}).get(msg["mucnick"])
-        return info and info.get("affiliation") in ("owner", "admin")
+        occupant = find_occupant_by_nick(
+            self.occupants.get(ADMIN_ROOM, {}),
+            msg["mucnick"],
+            room=ADMIN_ROOM,
+        )
+        return bool(occupant and occupant_is_admin_or_owner(occupant))
 
 
     async def verify_admin_rights(self, room: str) -> bool:
@@ -191,16 +201,16 @@ class AdminMixin(BotOccupantMixin):
 
     async def _cmd_whoami(self, room: str, nick: str) -> None:
         """Show the caller's current MUC affiliation, role, JID, and permissions."""
-        info = self.occupants.get(room, {}).get(nick, {})
-        affiliation = info.get("affiliation", "none")
-        role = info.get("role", "none")
-        jid = info.get("jid", "unknown")
+        occupant = find_occupant_by_nick(self.occupants.get(room, {}), nick, room=room)
+        affiliation = occupant.affiliation if occupant is not None else "none"
+        role = occupant.role if occupant is not None else "none"
+        jid = occupant.jid if occupant is not None and occupant.jid else "unknown"
 
         permissions = []
-        if affiliation in ("owner", "admin"):
+        if occupant is not None and occupant_is_admin_or_owner(occupant):
             permissions.append("✅ Can ban/kick users")
             permissions.append("✅ Can manage room")
-        elif role == "moderator":
+        elif occupant is not None and occupant_is_moderator(occupant):
             permissions.append("✅ Can kick users")
         else:
             permissions.append("❌ Regular participant")
@@ -217,7 +227,7 @@ class AdminMixin(BotOccupantMixin):
                 f"**Permissions:**\n{perms_text}"
             )
         else:
-            emoji = "🔑" if affiliation in ("owner", "admin") else "👤"
+            emoji = "🔑" if occupant is not None and occupant_is_admin_or_owner(occupant) else "👤"
             message = (
                 f"{emoji} **Your Status:**\n"
                 f"  Affiliation: {affiliation}\n"
