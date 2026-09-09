@@ -17,6 +17,8 @@ from envs_xmpp_core.xmpp.avatar import (
 
 import config
 
+from .bundled_assets import resolve_bundled_asset
+
 log = logging.getLogger(__name__)
 
 
@@ -29,7 +31,8 @@ class VCardMixin:
             return None
 
         try:
-            payload = await asyncio.to_thread(load_avatar_payload, avatar_path)
+            resolved_avatar = resolve_bundled_asset(str(avatar_path))
+            payload = await asyncio.to_thread(load_avatar_payload, resolved_avatar)
         except FileNotFoundError:
             log.warning("⚠️ AVATAR_PATH does not exist: %s", avatar_path)
             return None
@@ -37,7 +40,7 @@ class VCardMixin:
             log.warning("⚠️ Failed to load avatar image: %s", exc)
             return None
 
-        log.info("✅ Avatar loaded from: %s", avatar_path)
+        log.info("✅ Avatar loaded from: %s", resolved_avatar)
         return payload
 
     def _make_avatar_hash_presence(

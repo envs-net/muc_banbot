@@ -1339,3 +1339,56 @@ async def test_auto_redaction_suppresses_failure_alerts_and_adds_all_failed_note
         assert bot.alerts == []
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_redaction_partial_batch_auto_flushes_and_releases_outbox_writer(
+    temp_db_path,
+) -> None:
+    """A quiet room must not leave the shared SQLite file write-locked."""
+    bot = RedactionBot()
+    bot.redaction_index_commit_interval = 0.05
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
+    try:
+        async with bot.db.execute("PRAGMA busy_timeout") as cursor:
+            assert await cursor.fetchone() == (5000,)
+
+        # The first indexed message establishes the last-commit timestamp.  A
+        # second message inside the batching interval remains pending and used
+        # to hold an implicit SQLite write transaction until another MUC
+        # message happened to arrive.
+        await bot._redaction_index_message(
+            FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
+        )
+        await bot._redaction_index_message(
+            FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_2)
+        )
+
+        assert bot._redaction_index_pending_writes == 1
+        assert bot._redaction_index_flush_task is not None
+        assert not bot._redaction_index_flush_task.done()
+
+        # The real outbox owns a second connection to the same DB.  Reproduce
+        # that writer here without depending on OutboxMixin in this lightweight
+        # redaction fixture.  Its write must become possible solely because the
+        # delayed redaction flush commits; no third MUC message is sent.
+        import aiosqlite
+
+        second = await aiosqlite.connect(str(temp_db_path))
+        try:
+            await second.execute("PRAGMA busy_timeout = 500")
+            await asyncio.wait_for(
+                second.execute(
+                    "INSERT OR REPLACE INTO rooms (room) VALUES (?)",
+                    ("lock-regression@conference.example.test",),
+                ),
+                timeout=1.0,
+            )
+            await second.commit()
+        finally:
+            await second.close()
+
+        assert bot._redaction_index_pending_writes == 0
+    finally:
+        await bot.flush_redaction_index()
+        await bot.db.close()

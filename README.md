@@ -94,6 +94,48 @@ and `/var/lib/muc_banbot`. See
 [docs/deployment.md](docs/deployment.md) for the complete deployment and
 migration notes.
 
+### PyPI installation
+
+BanBot is also published on PyPI as `muc-banbot`. For local testing, development
+environments, or non-systemd installs it can be installed directly into a
+virtualenv:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install muc-banbot
+
+# Optional OMEMO support:
+# pip install "muc-banbot[omemo]"
+
+python -m pip show muc-banbot
+```
+
+To run the wheel directly, create an operator `config.py` in the working
+directory (or point `MUC_BANBOT_CONFIG` at one). The installed sample can be
+copied without a source checkout:
+
+```bash
+python - <<'PY'
+from pathlib import Path
+import config_sample
+
+Path("config.py").write_bytes(Path(config_sample.__file__).read_bytes())
+PY
+chmod 600 config.py
+$EDITOR config.py
+muc_banbot
+```
+
+The wheel includes the default avatar as a packaged read-only asset, so the
+default `AVATAR_PATH = "avatar.png"` also works outside a source checkout. An
+existing working-directory `avatar.png` still takes precedence, and configured
+subpaths or absolute paths keep their historical operator-controlled semantics.
+The PyPI package does not create `/etc/muc_banbot`, `/var/lib/muc_banbot`, or a
+systemd unit; the tagged Git checkout plus `./scripts/deploy.sh` remains the
+recommended production deployment path.
+
 ### Legacy/source-tree installation (still supported)
 
 The historical installation layout remains supported for operators who prefer

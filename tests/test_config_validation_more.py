@@ -118,6 +118,26 @@ def test_validate_config_accepts_valid_values(monkeypatch):
     assert warnings == []
 
 
+def test_validate_config_accepts_packaged_default_avatar(monkeypatch, tmp_path):
+    from banbot import bundled_assets
+
+    set_valid_config(monkeypatch)
+    working = tmp_path / "working"
+    packaged = tmp_path / "packaged"
+    working.mkdir()
+    packaged.mkdir()
+    (packaged / "avatar.png").write_bytes(b"avatar")
+
+    monkeypatch.chdir(working)
+    monkeypatch.setattr(bundled_assets, "_BUNDLED_DIR", packaged)
+    monkeypatch.setattr(config, "AVATAR_PATH", "avatar.png", raising=False)
+
+    errors, warnings = ConfigValidationBot()._validate_config()
+
+    assert errors == []
+    assert not any("AVATAR_PATH does not exist" in warning for warning in warnings)
+
+
 def test_validate_config_reports_multiple_errors_and_placeholder_credentials(monkeypatch):
     set_valid_config(monkeypatch)
     monkeypatch.setattr(config, "JID", "not-a-jid", raising=False)

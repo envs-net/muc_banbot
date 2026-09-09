@@ -113,14 +113,36 @@ Before pushing, make sure generated local artifacts are not staged:
 
 Push and wait for Drone CI to pass.
 
-## 6. Tagging
+## 6. Tagging and PyPI
 
-Use the versioning style already used by the project, for example:
+Update `banbot/_version.py` before tagging. `pyproject.toml` reads the package
+version dynamically from that file, so the release has a single version source.
+Make sure the reviewed release candidate has been merged into `main`, then
+create the stable tag from that release commit:
 
 ```bash
-git tag -a v2.2.0 -m "Release v2.2.0"
-git push origin v2.2.0
+git checkout main
+git pull --ff-only
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin main
+git push origin vX.Y.Z
 ```
+
+Pushing a `vX.Y.Z` tag starts `.github/workflows/release.yml`. The workflow tests
+Python 3.12 and 3.13, rejects a tag that does not exactly match
+`banbot/_version.py`, builds sdist/wheel distributions, runs `twine check`,
+smoke-tests the installed wheel and bundled avatar, and publishes to PyPI through
+the `pypi` GitHub environment using Trusted Publishing/OIDC. No long-lived PyPI
+token should be stored in repository secrets.
+
+For the first PyPI release, configure a Pending Trusted Publisher for project
+`muc-banbot` with owner `envs-net`, repository `muc_banbot`, workflow
+`release.yml`, and environment `pypi` before pushing the tag. For later releases,
+verify that the existing Trusted Publisher still matches those values.
+
+After the tag push, wait for the GitHub release workflow and verify that the
+matching `muc-banbot` version is installable from PyPI before announcing the
+release.
 
 ## 7. Release Notes
 

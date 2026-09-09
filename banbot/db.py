@@ -57,6 +57,10 @@ class DatabaseMixin:
                     self.db = None
 
         self.db = await aiosqlite.connect(DB_FILE)
+        # BanBot's durable outbox deliberately uses a second SQLite connection.
+        # Give normal DB writes the same bounded lock-wait policy as the outbox
+        # connection so short writer overlap cannot fail immediately.
+        await self.db.execute("PRAGMA busy_timeout = 5000")
         await self.db.execute("PRAGMA foreign_keys = ON")
 
         async with self.db.execute(

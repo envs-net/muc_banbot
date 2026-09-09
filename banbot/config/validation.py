@@ -14,6 +14,7 @@ from envs_xmpp_core.config.schema import (
 
 import config
 
+from ..bundled_assets import resolve_bundled_asset
 from ..utils import validate_jid_format
 from .spec import CONFIG_FIELDS
 
@@ -187,7 +188,7 @@ class ConfigValidationMixin:
                     )
 
         avatar_path = config_value("AVATAR_PATH", None)
-        if avatar_path and not pathlib.Path(str(avatar_path)).exists():
+        if avatar_path and not resolve_bundled_asset(str(avatar_path)).exists():
             warnings.append(f"AVATAR_PATH does not exist: {avatar_path}")
 
         if db_file:

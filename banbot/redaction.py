@@ -235,8 +235,67 @@ class RedactionMixin:
         return True
 
 
-    async def _redaction_maybe_commit_index(self, force: bool = False) -> None:
-        """Batch redaction-index commits to avoid one SQLite commit per message."""
+    def _redaction_schedule_index_flush(self, delay: float) -> None:
+        """Guarantee that a partially filled redaction batch is committed.
+
+        SQLite starts an implicit write transaction on the first index insert.
+        Waiting only for the *next* MUC message to decide whether the batch is
+        old enough can therefore leave that write transaction open forever in
+        a quiet room.  BanBot's durable outbox uses a second connection to the
+        same database, so an abandoned batch also keeps the outbox writer
+        locked out.
+        """
+        task = getattr(self, "_redaction_index_flush_task", None)
+        if task is not None and not task.done():
+            return
+
+        async def _flush_after_delay() -> None:
+            try:
+                await asyncio.sleep(max(0.001, float(delay)))
+                if getattr(self, "_redaction_index_pending_writes", 0) > 0:
+                    await self._redaction_maybe_commit_index(
+                        force=True,
+                        _from_scheduled_flush=True,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning(
+                    "Redaction: delayed index commit failed: %s",
+                    exception_summary(exc),
+                )
+            finally:
+                current = asyncio.current_task()
+                if getattr(self, "_redaction_index_flush_task", None) is current:
+                    self._redaction_index_flush_task = None
+
+        flush_task = asyncio.create_task(
+            _flush_after_delay(),
+            name="redaction-index-flush",
+        )
+        self._redaction_index_flush_task = flush_task
+
+
+    async def _redaction_cancel_index_flush(self) -> None:
+        """Cancel an outstanding delayed commit without leaking its task."""
+        task = getattr(self, "_redaction_index_flush_task", None)
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        self._redaction_index_flush_task = None
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+    async def _redaction_maybe_commit_index(
+        self,
+        force: bool = False,
+        *,
+        _from_scheduled_flush: bool = False,
+    ) -> None:
+        """Batch redaction-index commits with a bounded transaction lifetime."""
         if not getattr(self, "db", None):
             return
 
@@ -250,20 +309,28 @@ class RedactionMixin:
 
         commit_every = int(getattr(self, "redaction_index_commit_every", 50) or 50)
         commit_interval = float(getattr(self, "redaction_index_commit_interval", 2.0) or 2.0)
-
-        if (
+        should_commit = (
             force
             or pending >= commit_every
             or last_commit <= 0
             or now - last_commit >= commit_interval
-        ):
+        )
+
+        if should_commit:
+            if not _from_scheduled_flush:
+                await self._redaction_cancel_index_flush()
             await self.db.commit()
             self._redaction_index_pending_writes = 0
-            self._redaction_index_last_commit = now
+            self._redaction_index_last_commit = time.monotonic()
+            return
+
+        remaining = commit_interval - max(0.0, now - last_commit)
+        self._redaction_schedule_index_flush(remaining)
 
 
     async def flush_redaction_index(self) -> None:
-        """Flush pending redaction-index writes."""
+        """Flush pending redaction-index writes and stop a delayed flush task."""
+        await self._redaction_cancel_index_flush()
         if getattr(self, "_redaction_index_pending_writes", 0) > 0:
             await self._redaction_maybe_commit_index(force=True)
 

@@ -182,6 +182,29 @@ def test_set_complete_vcard_config_sets_all_fields(set_complete_vcard_config):
 
 
 @pytest.mark.asyncio
+async def test_load_avatar_payload_falls_back_to_packaged_default(monkeypatch, tmp_path):
+    import config
+    from banbot import bundled_assets
+
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    avatar = packaged / "avatar.png"
+    avatar.write_bytes(b"packaged-avatar")
+
+    working = tmp_path / "working"
+    working.mkdir()
+    monkeypatch.chdir(working)
+    monkeypatch.setattr(bundled_assets, "_BUNDLED_DIR", packaged)
+    monkeypatch.setattr(config, "AVATAR_PATH", "avatar.png", raising=False)
+
+    payload = await VCardBot()._load_avatar_payload()
+
+    assert payload is not None
+    assert payload.data == b"packaged-avatar"
+    assert payload.media_type == "image/png"
+
+
+@pytest.mark.asyncio
 async def test_update_vcard_with_complete_profile_and_avatar(
     tmp_path,
     monkeypatch,
