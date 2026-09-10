@@ -3,6 +3,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+from banbot import cli as cli_module
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -12,11 +14,11 @@ def _pyproject() -> dict:
         return tomllib.load(handle)
 
 
-def test_console_entrypoint_targets_bot_main() -> None:
+def test_console_entrypoint_targets_lightweight_cli() -> None:
     config = _pyproject()
 
     assert config["project"]["scripts"] == {
-        "muc_banbot": "banbot.bot:main",
+        "muc_banbot": "banbot.cli:main",
     }
     assert config["project"]["dynamic"] == ["version"]
     assert config["tool"]["setuptools"]["dynamic"]["version"] == {
@@ -24,12 +26,40 @@ def test_console_entrypoint_targets_bot_main() -> None:
     }
 
 
-def test_legacy_launcher_still_delegates_to_bot_main() -> None:
+def test_legacy_launcher_still_delegates_to_lightweight_cli() -> None:
     launcher = (ROOT / "muc_banbot.py").read_text(encoding="utf-8")
 
-    assert "from banbot.bot import main" in launcher
+    assert "from banbot.cli import main" in launcher
     assert 'if __name__ == "__main__":' in launcher
     assert "    main()" in launcher
+
+
+def test_cli_version_does_not_start_runtime(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(cli_module, "_run_bot", lambda: calls.append("run"))
+
+    assert cli_module.main(["--version"]) == 0
+    output = capsys.readouterr().out.strip()
+    assert output.startswith("muc_banbot ")
+    assert "(envs-xmpp " in output
+    assert calls == []
+
+
+def test_cli_short_version_is_supported(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(cli_module, "_run_bot", lambda: calls.append("run"))
+
+    assert cli_module.main(["-V"]) == 0
+    assert capsys.readouterr().out.startswith("muc_banbot ")
+    assert calls == []
+
+
+def test_cli_delegates_normal_startup(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(cli_module, "_run_bot", lambda: calls.append("run"))
+
+    assert cli_module.main([]) == 0
+    assert calls == ["run"]
 
 
 def test_systemd_service_uses_hardened_runtime_layout() -> None:

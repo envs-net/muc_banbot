@@ -6,7 +6,7 @@
 
 """Command-line entry point for the BanBot XMPP bot."""
 
-from banbot.bot import main
+from banbot.cli import main
 
 if __name__ == "__main__":
     main()

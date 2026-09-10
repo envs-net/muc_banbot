@@ -31,11 +31,12 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/envs-net/muc_banbot"
+Documentation = "https://github.com/envs-net/muc_banbot/blob/main/docs/README.md"
 Repository = "https://github.com/envs-net/muc_banbot"
 Issues = "https://github.com/envs-net/muc_banbot/issues"
 
 [project.scripts]
-muc_banbot = "banbot.bot:main"
+muc_banbot = "banbot.cli:main"
 
 [project.optional-dependencies]
 omemo = ["slixmpp-omemo>=2,<3"]

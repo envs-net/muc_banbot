@@ -1,4 +1,11 @@
-# BanBot - XMPP Multi-Room Ban Management Bot - [![calver](https://img.shields.io/github/v/release/envs-net/muc_banbot)](https://github.com/envs-net/muc_banbot/releases/latest) / [![Build Status](https://drone.envs.net/api/badges/envs/muc_banbot/status.svg)](https://drone.envs.net/envs/muc_banbot)
+# BanBot - XMPP Multi-Room Ban Management Bot
+
+[![PyPI](https://img.shields.io/pypi/v/muc-banbot.svg)](https://pypi.org/project/muc-banbot/)
+[![Python](https://img.shields.io/pypi/pyversions/muc-banbot.svg)](https://pypi.org/project/muc-banbot/)
+[![GitHub Release](https://img.shields.io/github/v/release/envs-net/muc_banbot)](https://github.com/envs-net/muc_banbot/releases/latest)
+[![Release CI](https://github.com/envs-net/muc_banbot/actions/workflows/release.yml/badge.svg)](https://github.com/envs-net/muc_banbot/actions/workflows/release.yml)
+[![Drone](https://drone.envs.net/api/badges/envs/muc_banbot/status.svg)](https://drone.envs.net/envs/muc_banbot)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
 BanBot is an XMPP bot for centralized ban management across multiple MUC rooms (Multi-User Chat).
 
@@ -40,6 +47,16 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 ## Installation / Quickstart
 
 Requires **Python 3.12+**. The project is developed and tested with Python 3.13.
+
+Verify the installed application and shared core without connecting to XMPP:
+
+```bash
+muc_banbot --version
+# muc_banbot 3.0.0 (envs-xmpp 1.0.0)
+```
+
+For a structured 72-hour post-release observation checklist, see
+[`docs/production-observation.md`](docs/production-observation.md).
 
 ### Recommended hardened systemd deployment
 

@@ -40,6 +40,7 @@ New operators should read:
 * [Architecture](architecture.md) - runtime composition, startup, MUC joins, command routing, moderation, protections, RTBL, persistence, locks, and extension guidance
 * [Testing and CI](testing.md) - pytest, coverage, Drone CI, Hypothesis, mutmut, and opt-in live integration tests
 * [Release Checklist](release-checklist.md) - pre-release checks, smoke tests, docs review, CI, tagging, and release notes
+* [Production Observation](production-observation.md) - 0/24/48/72-hour post-release runtime observation and acceptance criteria
 
 ## Topic Map
 

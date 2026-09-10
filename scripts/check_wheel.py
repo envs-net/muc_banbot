@@ -49,7 +49,7 @@ def main() -> int:
             print("Wheel is missing entry_points.txt", file=sys.stderr)
             return 1
         entry_text = archive.read(entry_points).decode("utf-8")
-        if "muc_banbot = banbot.bot:main" not in entry_text:
+        if "muc_banbot = banbot.cli:main" not in entry_text:
             print("Wheel is missing the muc_banbot console entry point", file=sys.stderr)
             return 1
 
@@ -81,6 +81,18 @@ assert "banbot/bundled/avatar.png" in path.as_posix(), path
 print("Wheel asset smoke test passed.")
 """
         subprocess.run([str(python), "-c", code], cwd=temp, check=True)
+
+        executable = env_dir / ("Scripts/muc_banbot.exe" if os.name == "nt" else "bin/muc_banbot")
+        result = subprocess.run(
+            [str(executable), "--version"],
+            cwd=temp,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if not result.stdout.strip().startswith("muc_banbot ") or "(envs-xmpp " not in result.stdout:
+            print(f"Unexpected muc_banbot --version output: {result.stdout!r}", file=sys.stderr)
+            return 1
 
     print(f"Wheel smoke test passed: {wheel.name}")
     return 0

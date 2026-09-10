@@ -7,6 +7,7 @@ import logging
 import time
 
 import pytest
+from envs_xmpp_core import __version__ as envs_xmpp_version
 
 aiosqlite = pytest.importorskip("aiosqlite")
 
@@ -219,6 +220,7 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
         body = last_body(bot)
         assert "Bot is online" in body
         assert "Bot Version" in body
+        assert f"envs-xmpp: {envs_xmpp_version}" in body
         assert "RTBL Entries" in body
         assert "Protected Rooms" in body
         assert "🛡️ Protections:" in body

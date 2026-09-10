@@ -169,3 +169,6 @@ After deploying the release in a test or production-like environment:
 * If RTBL is enabled, run `!rtbl list [all|page|last]` and optionally `!rtbl refresh`.
 * If OMEMO is enabled, test one plaintext command and one encrypted command.
 * Check Drone/release badge links in the README.
+## 9. Production Observation
+
+After the immediate smoke check, follow the structured [72-hour production observation checklist](production-observation.md). Capture a baseline immediately after deployment, then repeat status/task/outbox/journal checks at approximately 24, 48 and 72 hours before considering a major runtime change fully production-proven.

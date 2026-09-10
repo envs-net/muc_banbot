@@ -6,6 +6,7 @@ import os
 import time
 
 import psutil
+from envs_xmpp_core import __version__ as envs_xmpp_version
 from envs_xmpp_core.formatting import format_bytes
 
 import config
@@ -71,6 +72,7 @@ class StatusMixin:
 
         # version
         status_lines.append(f"\n🤖 Bot Version: {__version__}")
+        status_lines.append(f"🧩 envs-xmpp: {envs_xmpp_version}")
         if self.last_version_check_result:
             status_lines.append(f"🏷️ Latest Release Version: {self.last_version_check_result}\n")
 
