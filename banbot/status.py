@@ -4,15 +4,31 @@ import asyncio
 import logging
 import os
 import time
+from importlib import metadata
 
 import psutil
 from envs_xmpp_core import __version__ as envs_xmpp_version
 from envs_xmpp_core.formatting import format_bytes
+from envs_xmpp_core.presentation import (
+    RoomListRequest,
+    RoomView,
+    StatusSection,
+    TaskListRequest,
+    filter_room_views,
+    filter_task_views,
+    normalize_tasks,
+    render_room_entry,
+    render_status_sections,
+    render_task_entry,
+    render_task_summary,
+    room_summary,
+)
+from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 
 import config
 
 from ._version import __version__
-from .occupants import bot_room_status_line
+from .occupants import BotOccupantMixin
 from .protections.definitions import PROTECTION_DEFAULTS, PROTECTION_ORDER
 from .protections.presentation import protection_status_line
 from .status_health import collect_status_health_snapshot, status_health_messages
@@ -21,178 +37,157 @@ from .utils import human_time
 log = logging.getLogger(__name__)
 
 
+def _package_version(package: str) -> str:
+    try:
+        return metadata.version(package)
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
 class StatusMixin:
     @staticmethod
     def human_size(num_bytes: int) -> str:
         return format_bytes(num_bytes, negative_label=None, max_unit="GiB")
 
-    async def _cmd_status(self, room: str) -> None:
-        now = int(time.time())
-
-        # Collect passive health signals through the shared snapshot model.
-        health = await collect_status_health_snapshot(self)
-        problems, warnings, notes = status_health_messages(health)
-        last_reconnect_time = getattr(self, "last_reconnect_time", None)
-
-        rooms_health = health.check("rooms")
-        protected_rooms = list(rooms_health.data.get("protected_rooms", ()))
-        admins = list(rooms_health.data.get("admins", ()))
-        db_stats = dict(health.check("database_stats").data.get("stats", {}))
-        expired_ban_rows = int(db_stats.get("expired_ban_rows", 0) or 0)
-
-        if problems:
-            status_lines = ["❌ Bot is online, but problems were detected."]
-        elif warnings:
-            status_lines = ["⚠️ Bot is online, but attention is needed."]
-        elif last_reconnect_time:
-            status_lines = [
-                "✅ Bot is online and healthy "
-                f"(last reconnect: {human_time(max(0, now - int(last_reconnect_time)))} ago)."
+    def _status_room_views(self, protected_rooms: list[str]) -> list[RoomView]:
+        views: list[RoomView] = []
+        for room_name in sorted(protected_rooms, key=str.casefold):
+            bot_nick, info = BotOccupantMixin._bot_occupant_entry(self, room_name)
+            affiliation = str((info or {}).get("affiliation") or "unknown").lower()
+            role = str((info or {}).get("role") or "") or None
+            joined = info is not None
+            is_admin = bool(info and occupant_is_admin_or_owner(info))
+            details = [
+                "joined" if joined else "not joined",
+                "protected",
+                f"affiliation={affiliation}",
             ]
-        else:
-            status_lines = ["✅ Bot is online and healthy."]
+            if bot_nick:
+                details.append(f"nick={bot_nick}")
+            if role:
+                details.append(f"role={role}")
+            if joined and not is_admin:
+                details.append("no admin rights")
+            views.append(
+                RoomView(
+                    jid=room_name,
+                    joined=joined,
+                    details=tuple(details),
+                    attention=joined and not is_admin,
+                    unavailable=not joined,
+                )
+            )
+        return views
 
-        if problems or warnings or notes:
-            status_lines.append("")
-            if problems:
-                status_lines.append("❌ Problems:")
-                status_lines.extend(f"  • {item}" for item in problems)
-            if warnings:
-                status_lines.append("⚠️ Warnings:")
-                status_lines.extend(f"  • {item}" for item in warnings)
-            if notes:
-                status_lines.append("ℹ️ Notes:")
-                status_lines.extend(f"  • {item}" for item in notes)
-
-        # backup / restore info
-        if getattr(self, "last_database_backup_file", None):
-            status_lines.append(f"\n💾 Last DB Backup: {self.last_database_backup_file}")
-        if getattr(self, "last_database_restore_file", None):
-            status_lines.append(f"♻️ Last DB Restore: {self.last_database_restore_file}")
-
-        # version
-        status_lines.append(f"\n🤖 Bot Version: {__version__}")
-        status_lines.append(f"🧩 envs-xmpp: {envs_xmpp_version}")
-        if self.last_version_check_result:
-            status_lines.append(f"🏷️ Latest Release Version: {self.last_version_check_result}\n")
-
-        # uptime
-        bot_uptime = now - int(self.bot_start_time)
-        status_lines.append(f"⏱️ Bot Uptime: {human_time(bot_uptime)}")
-
-        if self.server_connect_time:
-            server_uptime = now - int(self.server_connect_time)
-            status_lines.append(f"🌐 Server Connected: {human_time(server_uptime)}")
-
-        # connection
-        boundjid = getattr(self, "boundjid", None)
-        connect_host = (
-            getattr(config, "CONNECT_HOST", None)
-            or getattr(boundjid, "host", None)
-            or "JID domain"
-        )
-        connect_port = getattr(config, "CONNECT_PORT", 5222)
-        connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
-        status_lines.append(f"🌐 Connection: {connect_host}:{connect_port} ({connect_mode})")
-
-        process = None
-        try:
-            process = psutil.Process(os.getpid())
-        except Exception as e:
-            log.debug("Could not create process info handle: %s", e)
-
-        # mem info
-        try:
-            if process is not None:
-                memory_info = process.memory_info()
-                memory_mb = memory_info.rss / 1024 / 1024
-                status_lines.append(f"💾 Memory Usage: {memory_mb:.1f} MB")
-        except Exception as e:
-            log.debug("Could not get memory info: %s", e)
-
-        # cpu info
-        try:
-            if process is not None:
-                loop = asyncio.get_running_loop()
-
-                # psutil sampling runs in executor; use a short interval to avoid tying up a worker thread
-                cpu_percent = await loop.run_in_executor(None, process.cpu_percent, 0.1)
-                cpu_load = psutil.getloadavg()[0]
-                cpu_count = psutil.cpu_count() or 1
-
-                status_lines.append(f"🧠 CPU Usage: {cpu_percent:.1f}% (Process)")
-                status_lines.append(f"⚙️ System Load: {cpu_load:.2f} ({cpu_count} cores)")
-        except Exception as e:
-            log.debug("Could not get CPU info: %s", e)
-
-        # db info
-        db_size = int(db_stats.get("db_size_bytes", 0) or 0)
-        status_lines.append(f"💽 DB Size: {self.human_size(db_size)}")
-
-        # redaction index info
+    async def _redaction_counts(self) -> tuple[int, int]:
         try:
             if hasattr(self, "flush_redaction_index"):
                 await self.flush_redaction_index()
+            if not getattr(self, "db", None):
+                return 0, 0
+            async with self.db.execute(
+                """
+                SELECT COUNT(*),
+                       COALESCE(SUM(CASE WHEN redacted_at IS NOT NULL THEN 1 ELSE 0 END), 0)
+                FROM redaction_index
+                """
+            ) as cursor:
+                row = await cursor.fetchone()
+            return (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
+        except Exception as exc:
+            log.debug("Could not get redaction index stats: %s", exc)
+            return 0, 0
 
-            redaction_total = 0
-            redaction_redacted = 0
-            if getattr(self, "db", None):
-                async with self.db.execute(
-                    """
-                    SELECT
-                        COUNT(*),
-                        COALESCE(SUM(CASE WHEN redacted_at IS NOT NULL THEN 1 ELSE 0 END), 0)
-                    FROM redaction_index
-                    """
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        redaction_total = int(row[0] or 0)
-                        redaction_redacted = int(row[1] or 0)
-            if getattr(self, "redaction_enabled", False) or redaction_total > 0:
-                status_lines.append(
-                    f"🧹 Redaction Index: {redaction_total} tracked, {redaction_redacted} redacted"
-                )
-        except Exception as e:
-            log.debug("Could not get redaction index stats: %s", e)
-
-        # audit info
-        audit_events = db_stats.get("audit_events", 0)
-        status_lines.append(f"🧾 Audit Events: {audit_events} (retention: {self.audit_log_retention_days}d)")
-
-        if hasattr(self, "outbox_runtime_state"):
-            outbox = await self.outbox_runtime_state()
-            status_lines.append(
-                "📤 Outbox: "
-                f"{int(outbox.get('pending', 0))} pending, "
-                f"{int(outbox.get('inflight', 0))} inflight, "
-                f"{int(outbox.get('dead', 0))} dead"
+    async def _cmd_status(self, room: str, args: list[str] | None = None) -> None:
+        args = list(args or [])
+        if len(args) > 1 or (args and args[0].lower() not in {"full", "all", "details"}):
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"❌ Usage: {self.command_prefix}status [full]",
+                mtype="groupchat",
             )
+            return
+        full = bool(args)
+        now = int(time.time())
 
-        # affiliation query
-        if self.admin_affiliation_query_forbidden_rooms:
-            status_lines.append(
-                f"\nℹ️ Admin protection fallback rooms: "
-                f"{len(self.admin_affiliation_query_forbidden_rooms)}"
-            )
+        health = await collect_status_health_snapshot(self)
+        problems, warnings, notes = status_health_messages(health)
+        rooms_health = health.check("rooms")
+        protected_rooms = list(rooms_health.data.get("protected_rooms", ()))
+        admins = list(rooms_health.data.get("admins", ()))
+        room_views = self._status_room_views(protected_rooms)
+        db_stats = dict(health.check("database_stats").data.get("stats", {}))
 
-        # ban info
-        permanent_bans = db_stats.get("permanent_bans", 0)
-        temporary_bans = db_stats.get("temporary_bans", 0)
-        status_lines.append(f"\n📊 Active Bans: {permanent_bans} permanent, {temporary_bans} temporary")
-        status_lines.append(f"🧹 Expired tempbans pending auto-unban: {expired_ban_rows}")
+        if problems:
+            banner = "❌ Bot is online, but problems were detected."
+        elif warnings:
+            banner = "⚠️ Bot is online, but attention is needed."
+        else:
+            banner = "✅ Bot is online and healthy."
 
-        # room invite info
-        pending_invites = len(getattr(self, "pending_room_invites", {}) or {})
-        status_lines.append(f"📨 Pending Room Invites: {pending_invites}")
+        core_lines = [
+            f"Version: {__version__}",
+            f"envs-xmpp: {envs_xmpp_version}",
+            f"Uptime: {human_time(max(0, now - int(getattr(self, 'bot_start_time', now) or now)))}",
+        ]
+        if getattr(self, "last_version_check_result", None):
+            core_lines.append(f"Latest release: {self.last_version_check_result}")
+        server_connect_time = getattr(self, "server_connect_time", None)
+        if server_connect_time:
+            core_lines.append(f"Connection uptime: {human_time(max(0, now - int(server_connect_time)))}")
+        if getattr(self, "last_reconnect_time", None):
+            core_lines.append(f"Last reconnect: {human_time(max(0, now - int(self.last_reconnect_time)))} ago")
 
-        # rtbl
+        runtime_lines = [
+            f"Python: {os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}",
+            f"slixmpp: {_package_version('slixmpp')}",
+        ]
+        try:
+            process = psutil.Process(os.getpid())
+            runtime_lines.append(f"Memory: {process.memory_info().rss / 1024 / 1024:.1f} MiB")
+            loop = asyncio.get_running_loop()
+            cpu_percent = await loop.run_in_executor(None, process.cpu_percent, 0.1)
+            runtime_lines.append(f"CPU: {cpu_percent:.1f}%")
+            load1, load5, load15 = psutil.getloadavg()
+            runtime_lines.append(f"Load: {load1:.2f} / {load5:.2f} / {load15:.2f}")
+        except Exception as exc:
+            log.debug("Could not read process metrics: %s", exc)
+
+        boundjid = getattr(self, "boundjid", None)
+        connect_host = getattr(config, "CONNECT_HOST", None) or getattr(boundjid, "host", None) or "JID domain"
+        connect_port = getattr(config, "CONNECT_PORT", 5222)
+        connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
+        xmpp_lines = [
+            f"Connection: {connect_host}:{connect_port} ({connect_mode})",
+            room_summary(room_views),
+            f"Admin/owner rights: {sum(view.joined and not view.attention for view in room_views)}/{len(room_views)}",
+            f"Pending invites: {len(getattr(self, 'pending_room_invites', {}) or {})}",
+        ]
+
+        protection_configs = getattr(self, "protections", {}) or {}
+        enabled = observe = disabled = 0
+        for name in PROTECTION_ORDER:
+            cfg = protection_configs.get(name, PROTECTION_DEFAULTS[name])
+            if cfg.get("enabled"):
+                enabled += 1
+                if cfg.get("observe", False):
+                    observe += 1
+            else:
+                disabled += 1
+        permanent_bans = int(db_stats.get("permanent_bans", 0) or 0)
+        temporary_bans = int(db_stats.get("temporary_bans", 0) or 0)
+        moderation_lines = [
+            f"Bans: {permanent_bans} permanent · {temporary_bans} temporary",
+            f"Pending auto-unban: {int(db_stats.get('expired_ban_rows', 0) or 0)}",
+            f"Protections: {enabled} enabled · {observe} observe · {disabled} disabled",
+        ]
         if getattr(self, "rtbl_enabled", False):
-            rtbl_hashes = len(getattr(self, "rtbl_hash_cache", {}))
-            rtbl_domains = len(getattr(self, "rtbl_domain_cache", {}))
-            rtbl_subscriptions = len(getattr(self, "rtbl_subscriptions", []))
-            status_lines.append(f"\n🛡️ RTBL Entries: {rtbl_hashes} JID hashes, {rtbl_domains} domains")
-            status_lines.append(f"📋 RTBL Subscriptions: {rtbl_subscriptions}")
+            moderation_lines.append(
+                "RTBL: "
+                f"{len(getattr(self, 'rtbl_hash_cache', {}))} JIDs · "
+                f"{len(getattr(self, 'rtbl_domain_cache', {}))} domains · "
+                f"{len(getattr(self, 'rtbl_subscriptions', []))} subscriptions"
+            )
 
         rtbl_publish_runtime_enabled = getattr(self, "rtbl_publish_enabled", False)
         rtbl_publish_config_enabled = getattr(
@@ -202,56 +197,116 @@ class StatusMixin:
         )
         if rtbl_publish_config_enabled or rtbl_publish_runtime_enabled:
             if rtbl_publish_runtime_enabled:
-                status_lines.append("📡 RTBL Publish: enabled")
+                moderation_lines.append("RTBL Publish: enabled")
                 if getattr(self, "rtbl_publish_sanity_check_ok", None) is True:
-                    status_lines.append("   Sanity Check: ✅ OK")
-                status_lines.append(f"   Service:     {self.rtbl_publish_service}")
-                status_lines.append(f"   JID node:    {self.rtbl_publish_jid_node}")
-                status_lines.append(f"   Domain node: {self.rtbl_publish_domain_node}")
+                    moderation_lines.append("Sanity Check: ✅ OK")
             else:
-                status_lines.append("📡 RTBL Publish: ⚠️ disabled at runtime (configured: enabled)")
-                reason = getattr(self, "rtbl_publish_disabled_reason", None)
-                if reason:
-                    status_lines.append(f"   Reason: {reason}")
+                moderation_lines.append("RTBL Publish: ⚠️ disabled at runtime (configured: enabled)")
+                if getattr(self, "rtbl_publish_disabled_reason", None):
+                    moderation_lines.append(f"RTBL Publish reason: {self.rtbl_publish_disabled_reason}")
 
-        # admins
-        status_lines.append(
-            "\n🛡️ Admins/Owners in Admin-Room:\n" + "\n".join(admins)
-            if admins else "\n⚠️ No admins/owners found in Admin-Room."
-        )
-
-        # protected rooms
-        if protected_rooms:
-            preview_count = 10
-            preview_rooms = protected_rooms[:preview_count]
-            preview_lines = [
-                bot_room_status_line(self, room_name)
-                for room_name in preview_rooms
-            ]
-
-            status_lines.append(
-                f"\n🔒 Protected Rooms ({len(protected_rooms)}):\n"
-                + "\n".join(preview_lines)
-            )
-
-            remaining = len(protected_rooms) - len(preview_rooms)
-            if remaining > 0:
-                status_lines.append(
-                    f"\n... and {remaining} more.\n"
-                    f"Use {self.command_prefix}room list [page] to view all protected rooms."
-                )
-        else:
-            status_lines.append("\n⚠️ No protected rooms configured.")
-
-        # protection runtime state
-        protection_configs = getattr(self, "protections", {}) or {}
-        protection_lines = [
-            protection_status_line(
-                name,
-                protection_configs.get(name, PROTECTION_DEFAULTS[name]),
-            )
-            for name in PROTECTION_ORDER
+        redaction_total, redaction_redacted = await self._redaction_counts()
+        database_lines = [
+            f"Size: {self.human_size(int(db_stats.get('db_size_bytes', 0) or 0))}",
+            f"Audit events: {int(db_stats.get('audit_events', 0) or 0)} (retention: {self.audit_log_retention_days}d)",
         ]
-        status_lines.append("\n🛡️ Protections:\n" + "\n".join(protection_lines))
+        if getattr(self, "redaction_enabled", False) or redaction_total:
+            database_lines.append(f"Redaction index: {redaction_total} tracked · {redaction_redacted} redacted")
+        if getattr(self, "last_database_backup_file", None):
+            database_lines.append("Backup: available")
+        if getattr(self, "last_database_restore_file", None):
+            database_lines.append("Last restore: recorded")
 
-        await self.bot_send_message(mto=room, mbody="\n".join(status_lines), mtype="groupchat")
+        outbox = await self.outbox_runtime_state() if hasattr(self, "outbox_runtime_state") else {}
+        task_infos = list(getattr(getattr(self, "tasks", None), "snapshot", lambda **_: [])(include_done=True))
+        stale_ids: set[tuple[str, str]] = set()
+        task_supervisor = getattr(self, "tasks", None)
+        stale_getter = getattr(task_supervisor, "stale_services", None)
+        if callable(stale_getter):
+            try:
+                options = getattr(task_supervisor, "options", None)
+                stale_after = float(getattr(options, "stale_after", 3600.0) or 3600.0)
+                stale_ids = {(item.group, item.name) for item in stale_getter(stale_after)}
+            except Exception:
+                stale_ids = set()
+        task_views = normalize_tasks(task_infos, stale_ids=stale_ids)
+        task_summary = render_task_summary(task_views, tree=False, include_scopes=False)
+        health_lines = [
+            f"Overall: {'✅ OK' if not problems and not warnings else ('❌ problems' if problems else '⚠️ attention')}",
+            *task_summary[1:4],
+            f"Outbox: {int(outbox.get('pending', 0))} pending · {int(outbox.get('dead', 0))} dead",
+        ]
+        health_lines.extend(f"Problem: {item}" for item in problems)
+        health_lines.extend(f"Warning: {item}" for item in warnings)
+        if full:
+            health_lines.extend(f"Note: {item}" for item in notes)
+
+        sections = [
+            StatusSection.from_lines("Core", core_lines, icon="⚙️"),
+            StatusSection.from_lines("Runtime", runtime_lines, icon="🖥️"),
+            StatusSection.from_lines("XMPP", xmpp_lines, icon="💬"),
+            StatusSection.from_lines("Moderation", moderation_lines, icon="🛡️"),
+            StatusSection.from_lines("Database", database_lines, icon="🗄️"),
+            StatusSection.from_lines("Health", health_lines, icon="🩺"),
+        ]
+
+        if full:
+            attention_lines = [*(f"❌ {item}" for item in problems), *(f"⚠️ {item}" for item in warnings)]
+            attention_lines.extend(f"ℹ️ {item}" for item in notes)
+            if attention_lines:
+                sections.append(StatusSection.from_lines("Attention", attention_lines, icon="🚨"))
+
+            room_problems = filter_room_views(room_views, RoomListRequest(filter="problems"))
+            if room_problems:
+                rendered_rooms = [render_room_entry(view) for view in room_problems[:10]]
+                remaining = len(room_problems) - len(rendered_rooms)
+                if remaining:
+                    rendered_rooms.append(f"… {remaining} more; see {self.command_prefix}room list problems all")
+                sections.append(StatusSection.from_lines("Room issues", rendered_rooms, icon="🏠"))
+
+            problem_tasks = filter_task_views(task_views, TaskListRequest(mode="problems"))
+            task_lines = render_task_summary(task_views, tree=False, include_scopes=False)
+            if problem_tasks:
+                task_lines.extend(["Attention:", *(render_task_entry(view) for view in problem_tasks)])
+            else:
+                task_lines.append(f"Complete inventory: {self.command_prefix}tasks all")
+            sections.append(StatusSection.from_lines("Background tasks", task_lines, icon="🧵"))
+
+            sections.append(
+                StatusSection.from_lines(
+                    "Protections",
+                    [
+                        protection_status_line(name, protection_configs.get(name, PROTECTION_DEFAULTS[name]))
+                        for name in PROTECTION_ORDER
+                    ],
+                    icon="🛡️",
+                )
+            )
+            sections.append(StatusSection.from_lines("Admins/Owners", admins or ["none found"], icon="👥"))
+
+            operational: list[str] = []
+            if getattr(self, "last_database_backup_file", None):
+                operational.append(f"Last DB Backup: {self.last_database_backup_file}")
+            if getattr(self, "last_database_restore_file", None):
+                operational.append(f"Last DB Restore: {self.last_database_restore_file}")
+            if self.admin_affiliation_query_forbidden_rooms:
+                operational.append(f"Admin protection fallback rooms: {len(self.admin_affiliation_query_forbidden_rooms)}")
+            if rtbl_publish_config_enabled or rtbl_publish_runtime_enabled:
+                if rtbl_publish_runtime_enabled:
+                    operational.extend(
+                        [
+                            "RTBL Publish: enabled",
+                            f"Service: {self.rtbl_publish_service}",
+                            f"JID node: {self.rtbl_publish_jid_node}",
+                            f"Domain node: {self.rtbl_publish_domain_node}",
+                        ]
+                    )
+                    if getattr(self, "rtbl_publish_sanity_check_ok", None) is True:
+                        operational.append("Sanity Check: ✅ OK")
+                elif getattr(self, "rtbl_publish_disabled_reason", None):
+                    operational.append(f"RTBL Publish reason: {self.rtbl_publish_disabled_reason}")
+            if operational:
+                sections.append(StatusSection.from_lines("Operational details", operational, icon="🔧"))
+
+        body = "\n".join(render_status_sections("🤖 muc_banbot Status", sections, preamble=[banner]))
+        await self.bot_send_message(mto=room, mbody=body, mtype="groupchat")

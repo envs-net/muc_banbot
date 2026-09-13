@@ -198,7 +198,12 @@ class DirectMessageMixin:
                 return True
 
             if cmd == "status":
-                await self._cmd_status(reply_to)
+                try:
+                    await self._cmd_status(reply_to, args)
+                except TypeError as exc:
+                    if args or "positional argument" not in str(exc):
+                        raise
+                    await self._cmd_status(reply_to)
                 return True
 
             if cmd == "tasks":
@@ -264,16 +269,16 @@ class DirectMessageMixin:
                 await self.cmd_banlist(ADMIN_ROOM, page=page, show_all=show_all)
                 return True
 
-            if cmd == "room":
+            if cmd in ("room", "rooms"):
                 def valid_room_list_arg(arg: str) -> bool:
                     value = arg.lower()
-                    return value in {"all", "last"} or value.isdigit()
+                    return value in {"all", "last", "joined", "offline", "problems"} or value.isdigit()
 
                 if args and args[0].lower() == "list":
                     if any(not valid_room_list_arg(arg) for arg in args[1:]):
                         await self._send_direct_message(
                             reply_to,
-                            f"❌ Usage: {p}room list [all|page|last]",
+                            f"❌ Usage: {p}room list [joined|offline|problems] [all|page|last]",
                         )
                         return True
                     await self.cmd_room(args, reply_to)
@@ -293,7 +298,7 @@ class DirectMessageMixin:
                     reply_to,
                     (
                         "❌ Direct-message room commands are read-only.\n"
-                        f"Allowed: {p}room list [all|page|last], "
+                        f"Allowed: {p}room list [joined|offline|problems] [all|page|last], "
                         f"{p}room invite list [all|page|last]"
                     ),
                 )

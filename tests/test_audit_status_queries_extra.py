@@ -219,10 +219,16 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
         await bot._cmd_status("admin@conference.example.org")
         body = last_body(bot)
         assert "Bot is online" in body
-        assert "Bot Version" in body
+        assert "⚙️ Core:" in body
+        assert "Version:" in body
         assert f"envs-xmpp: {envs_xmpp_version}" in body
-        assert "RTBL Entries" in body
-        assert "Protected Rooms" in body
+        assert "🛡️ Moderation:" in body
+        assert "RTBL:" in body
+        assert "💬 XMPP:" in body
+        assert "🛡️ Protections:" not in body
+
+        await bot._cmd_status("admin@conference.example.org", ["full"])
+        body = last_body(bot)
         assert "🛡️ Protections:" in body
         assert "FloodSpamProtection [flood]" in body
         assert "PolicyChangeNotification [policy]" in body
@@ -290,7 +296,11 @@ async def test_status_shows_rtbl_publish_sanity_check_ok(temp_db_path, monkeypat
 
         assert "RTBL Publish: enabled" in body
         assert "Sanity Check: ✅ OK" in body
-        assert "Service:     pubsub.example.org" in body
+        assert "Service: pubsub.example.org" not in body
+
+        await bot._cmd_status("admin@conference.example.org", ["full"])
+        body = last_body(bot)
+        assert "Service: pubsub.example.org" in body
     finally:
         await bot.db.close()
 

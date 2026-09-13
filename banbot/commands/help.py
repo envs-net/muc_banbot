@@ -147,7 +147,7 @@ class CommandHelpMixin:
             "🛠️ Core / Runtime\n"
             f"{p}help - show this help\n"
             f"{p}status - show bot health, active rooms, and ban statistics\n"
-            f"{p}tasks [all|failed] - show supervised background tasks and watchdog state\n"
+            f"{p}tasks [all|full|failed|stale|restarting|restarted|problems] - show supervised background tasks and watchdog state\n"
             f"{p}config [all|page|last] / show/search/find/diff/set/unset - show/edit runtime config\n"
             f"{p}reload / {p}reloadconfig - reload config.py at runtime\n"
             f"{p}restart confirm - stop the bot so a supervisor can restart it\n"
@@ -165,7 +165,7 @@ class CommandHelpMixin:
 
             "🏠 Rooms / Policy\n"
             f"{p}room add/remove/delete/del/rm - manage protected rooms\n"
-            f"{p}room list [all|page|last] - list protected rooms\n"
+            f"{p}room/rooms list [joined|offline|problems] [all|page|last] - list protected rooms\n"
             f"{p}room rejoin <room|all> - retry selected protected-room joins\n"
             f"{p}room invite list [all|page|last] - list pending room invites\n"
             f"{p}room invite accept/decline/remove/delete/del/rm <id> - accept or remove a room invite\n"

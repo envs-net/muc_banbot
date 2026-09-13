@@ -1,4 +1,4 @@
-"""Dependency-light coverage for protected-room output in ``!status``."""
+"""Dependency-light coverage for compact/full protected-room status output."""
 
 from __future__ import annotations
 
@@ -15,9 +15,7 @@ class StatusRoomPreviewBot(StatusMixin):
     def __init__(self) -> None:
         self.sent: list[dict] = []
         self.command_prefix = "!"
-        self.protected_rooms = {
-            f"room{index:02d}@conference.example.test" for index in range(12)
-        }
+        self.protected_rooms = {f"room{index:02d}@conference.example.test" for index in range(12)}
         self.bot_admin_state = {room: True for room in self.protected_rooms}
         self.room_bot_nicks = {
             "room00@conference.example.test": "EffectiveBot",
@@ -25,22 +23,13 @@ class StatusRoomPreviewBot(StatusMixin):
         }
         self.occupants = {
             "admin@conference.example.org": {
-                "Admin": {
-                    "jid": "admin@example.org/resource",
-                    "affiliation": "owner",
-                }
+                "Admin": {"jid": "admin@example.org/resource", "affiliation": "owner"}
             },
             "room00@conference.example.test": {
-                "EffectiveBot": {
-                    "jid": "bot@example.org/resource",
-                    "affiliation": "owner",
-                }
+                "EffectiveBot": {"jid": "bot@example.org/resource", "affiliation": "owner"}
             },
             "room01@conference.example.test": {
-                "EffectiveBot": {
-                    "jid": "bot@example.org/resource",
-                    "affiliation": "member",
-                }
+                "EffectiveBot": {"jid": "bot@example.org/resource", "affiliation": "member"}
             },
         }
         self.db = None
@@ -57,6 +46,7 @@ class StatusRoomPreviewBot(StatusMixin):
         self.pending_room_invites = {}
         self.protections = {}
         self.redaction_enabled = False
+        self.tasks = None
 
     async def get_db_stats(self) -> dict:
         return {
@@ -79,9 +69,7 @@ class StatusRoomPreviewBot(StatusMixin):
         return str(jid).split("/", 1)[0]
 
 
-@pytest.mark.asyncio
-async def test_status_reuses_room_list_lines_and_keeps_ten_room_preview(monkeypatch):
-    bot = StatusRoomPreviewBot()
+def _patch_process(monkeypatch):
     status_module = importlib.import_module("banbot.status")
 
     class FakeProcess:
@@ -94,58 +82,67 @@ async def test_status_reuses_room_list_lines_and_keeps_ten_room_preview(monkeypa
     monkeypatch.setattr(status_module.psutil, "Process", lambda pid: FakeProcess())
     monkeypatch.setattr(status_module.psutil, "getloadavg", lambda: (0.1, 0.2, 0.3))
     monkeypatch.setattr(status_module.psutil, "cpu_count", lambda: 8)
+
+
+@pytest.mark.asyncio
+async def test_status_compact_summarizes_rooms_without_inventory(monkeypatch):
+    bot = StatusRoomPreviewBot()
+    _patch_process(monkeypatch)
 
     await bot._cmd_status("admin@conference.example.org")
     body = bot.sent[-1]["mbody"]
 
-    assert (
-        "🟢 room00@conference.example.test | joined | bot affiliation: owner"
-        in body
-    )
-    assert (
-        "🟠 room01@conference.example.test | joined | "
-        "bot affiliation: member (no admin rights)"
-        in body
-    )
-    assert (
-        "🔴 room02@conference.example.test | not joined | "
-        "bot affiliation: unknown"
-        in body
-    )
-    assert "room09@conference.example.test" in body
-    assert "room10@conference.example.test" not in body
-    assert "room11@conference.example.test" not in body
-    assert "... and 2 more." in body
-    assert "Use !room list [page] to view all protected rooms." in body
+    assert body.startswith("🤖 muc_banbot Status")
+    assert "⚙️ Core:" in body
+    assert "🖥️ Runtime:" in body
+    assert "💬 XMPP:" in body
+    assert "Summary: 12 configured · 2 joined · 11 issues" in body
+    assert "room00@conference.example.test" not in body
+    assert "🛡️ Moderation:" in body
+    assert "🩺 Health:" in body
+    assert "🛡️ Protections:" not in body
 
 
 @pytest.mark.asyncio
-async def test_status_reports_current_worker_restart_backoff_without_duplicate_history(monkeypatch):
+async def test_status_full_adds_bounded_problem_room_diagnostics(monkeypatch):
+    bot = StatusRoomPreviewBot()
+    _patch_process(monkeypatch)
+
+    await bot._cmd_status("admin@conference.example.org", ["full"])
+    body = bot.sent[-1]["mbody"]
+
+    assert "🏠 Room issues:" in body
+    assert "room00@conference.example.test" not in body
+    assert "room01@conference.example.test" in body
+    assert "no admin rights" in body
+    assert "… 1 more; see !room list problems all" in body
+    assert "🛡️ Protections:" in body
+    assert "👥 Admins/Owners:" in body
+
+
+@pytest.mark.asyncio
+async def test_status_reports_current_worker_restart_backoff(monkeypatch):
     bot = StatusRoomPreviewBot()
     bot.tasks = SimpleNamespace(
         snapshot=lambda include_done=False: [
             SimpleNamespace(
+                group="_core",
                 name="unban-worker",
                 status="restarting",
+                kind="service",
+                created_at=0.0,
+                heartbeat_at=None,
                 restart_count=1,
+                restart_at=None,
+                last_error=None,
             )
         ]
     )
-    status_module = importlib.import_module("banbot.status")
-
-    class FakeProcess:
-        def memory_info(self):
-            return type("Mem", (), {"rss": 42 * 1024 * 1024})()
-
-        def cpu_percent(self, interval):
-            return 0.5
-
-    monkeypatch.setattr(status_module.psutil, "Process", lambda pid: FakeProcess())
-    monkeypatch.setattr(status_module.psutil, "getloadavg", lambda: (0.1, 0.2, 0.3))
-    monkeypatch.setattr(status_module.psutil, "cpu_count", lambda: 8)
+    _patch_process(monkeypatch)
 
     await bot._cmd_status("admin@conference.example.org")
     body = bot.sent[-1]["mbody"]
 
     assert "Background worker restart/backoff in progress: unban-worker" in body
     assert "Background worker restart(s) observed: unban-worker×1" not in body
+    assert "Restarting: 1" in body

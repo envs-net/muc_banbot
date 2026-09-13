@@ -6,6 +6,14 @@ import logging
 import re
 import sys
 
+from envs_xmpp_core.pagination import format_page
+from envs_xmpp_core.presentation import (
+    RoomView,
+    filter_room_views,
+    parse_room_list_request,
+    render_room_entry,
+    room_summary,
+)
 from envs_xmpp_core.xmpp import await_muc_join_compat
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 from slixmpp.exceptions import IqError, IqTimeout
@@ -13,7 +21,7 @@ from slixmpp.exceptions import IqError, IqTimeout
 from config import ADMIN_ROOM, NICK
 
 from ..occupants import BotOccupantMixin, bot_room_status_line
-from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
+from ..utils import get_list_page_size
 
 log = logging.getLogger(__name__)
 
@@ -188,48 +196,61 @@ class ProtectedRoomMixin:
             return
 
         if action == "list":
-            show_all = wants_all_pages(args[1:])
-            list_args = without_all_pages_arg(args[1:])
-            page = 1
-            if list_args:
-                try:
-                    page = max(1, int(list_args[0]))
-                except ValueError:
-                    await self.bot_send_message(
-                        mto=room,
-                        mbody=f"❌ Usage: {self.command_prefix}room list [all|page]",
-                        mtype="groupchat"
-                    )
-                    return
+            request = parse_room_list_request(args[1:])
+            if request.error:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=(
+                        f"❌ Usage: {self.command_prefix}room list "
+                        "[joined|offline|problems] [all|page|last]"
+                    ),
+                    mtype="groupchat",
+                )
+                return
 
-            if self.protected_rooms:
-                rooms = sorted(self.protected_rooms)
-                room_lines = [bot_room_status_line(self, room_jid) for room_jid in rooms]
-                if show_all:
-                    page_lines = room_lines
-                    total_items = len(room_lines)
-                    text = (
-                        f"🔒 Protected Rooms ({total_items}) - All:\n"
-                        + "\n".join(page_lines)
+            all_views: list[RoomView] = []
+            for room_jid in sorted(self.protected_rooms, key=str.casefold):
+                bot_nick, info = BotOccupantMixin._bot_occupant_entry(self, room_jid)
+                joined = info is not None
+                affiliation = str((info or {}).get("affiliation") or "unknown").lower()
+                is_admin = bool(info and occupant_is_admin_or_owner(info))
+                details = [
+                    "joined" if joined else "not joined",
+                    "protected",
+                    f"affiliation={affiliation}",
+                ]
+                if bot_nick:
+                    details.append(f"nick={bot_nick}")
+                if joined and not is_admin:
+                    details.append("no admin rights")
+                all_views.append(
+                    RoomView(
+                        jid=room_jid,
+                        joined=joined,
+                        details=tuple(details),
+                        attention=joined and not is_admin,
+                        unavailable=not joined,
                     )
-                else:
-                    per_page = get_list_page_size(self)
-                    page = resolve_page(page, len(room_lines), per_page)
-                    page_lines, current_page, total_pages, total_items = paginate_lines(
-                        room_lines, page, per_page=per_page
-                    )
+                )
 
-                    text = (
-                        f"🔒 Protected Rooms ({total_items}) - Page {current_page}/{total_pages}:\n"
-                        + "\n".join(page_lines)
-                    )
-
-                    if current_page < total_pages:
-                        text += f"\n\nUse {self.command_prefix}room list {current_page + 1} for the next page."
-            else:
-                text = "🔒 Protected Rooms:\nNo protected rooms."
-
-            await self.bot_send_message(mto=room, mbody=text, mtype="groupchat")
+            views = filter_room_views(all_views, request)
+            entries = [render_room_entry(view) for view in views]
+            preamble = [
+                room_summary(all_views),
+                "Legend: 🟢 healthy · 🟠 attention · 🔴 unavailable · ⚪ not joined",
+            ]
+            if request.filter != "all":
+                preamble.append(f"View: {request.filter} · {len(views)} match(es)")
+            title = "🔒 Protected Rooms" + (f" — {request.filter}" if request.filter != "all" else "")
+            lines = format_page(
+                title,
+                entries or ["No protected rooms match this view."],
+                page_request=request.page,
+                page_size=get_list_page_size(self),
+                command_hint=f"{self.command_prefix}room list",
+                preamble=preamble,
+            )
+            await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype="groupchat")
 
         elif action in ("add", "remove", "delete", "del", "rm") and len(args) >= 2:
             target = args[1].lower()

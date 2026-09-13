@@ -599,7 +599,7 @@ async def test_admin_dm_rejects_invalid_room_list_page_argument():
     )
 
     assert bot.calls == []
-    assert "Usage: !room list [all|page|last]" in bot.sent[-1]["mbody"]
+    assert "Usage: !room list [joined|offline|problems] [all|page|last]" in bot.sent[-1]["mbody"]
     assert bot.sent[-1]["mtype"] == "chat"
 
 

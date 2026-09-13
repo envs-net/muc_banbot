@@ -16,6 +16,7 @@ ADMIN_COMMANDS = {
     "checkupdate",
     "updatecheck",
     "room",
+    "rooms",
     "ban",
     "tempban",
     "unban",

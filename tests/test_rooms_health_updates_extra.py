@@ -203,7 +203,8 @@ async def test_room_list_all_disables_paging(temp_db_path, monkeypatch):
     try:
         await bot.cmd_room(["list", "all"], "admin@conference.example.org")
         body = bot.sent[-1]["mbody"]
-        assert "Protected Rooms (12) - All" in body
+        assert "🔒 Protected Rooms" in body
+        assert "Summary: 12 configured · 0 joined · 12 issues" in body
         assert "Page" not in body
         assert "room0@conference.example.test" in body
         assert "room11@conference.example.test" in body
@@ -862,11 +863,13 @@ async def test_room_list_shows_join_state_and_bot_affiliation():
     await bot.cmd_room(["list", "all"], "admin@conference.example.org")
     body = bot.sent[-1]["mbody"]
 
-    assert f"🟢 {room} | joined | bot affiliation: owner" in body
+    assert f"🟢 {room}" in body
+    assert "joined · protected · affiliation=owner" in body
 
     bot.occupants[room] = {}
     await bot.cmd_room(["list", "all"], "admin@conference.example.org")
-    assert f"🔴 {room} | not joined | bot affiliation: unknown" in bot.sent[-1]["mbody"]
+    assert f"🔴 {room}" in bot.sent[-1]["mbody"]
+    assert "not joined · protected · affiliation=unknown" in bot.sent[-1]["mbody"]
 
 
 @pytest.mark.asyncio

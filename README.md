@@ -52,7 +52,7 @@ Verify the installed application and shared core without connecting to XMPP:
 
 ```bash
 muc_banbot --version
-# muc_banbot 3.0.0 (envs-xmpp 1.0.0)
+# muc_banbot 3.1.0 (envs-xmpp 1.1.0)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -257,8 +257,8 @@ Examples assume the default command prefix `!`.
 | Command | Description |
 | --- | --- |
 | `!help [all\|page\|last]` / `!help <command>` | Show available commands or focused help for every command topic, including subtopics such as `room invite` and `rtbl publish` |
-| `!status` | Show bot health, uptime, rooms, bans, RTBL, DB state, and protection status |
-| `!tasks [all\|failed]` | Show supervised background workers, restart/backoff state, restart counts, and runtime/systemd watchdog health |
+| `!status [full]` | Show compact structured bot/runtime/XMPP/moderation/database health; `full` adds problem and inventory diagnostics |
+| `!tasks [all\|full\|failed\|stale\|restarting\|restarted\|problems] [scope <name>]` | Show shared task health, filtered/paged diagnostics, and watchdog state |
 | `!config [all\|page\|last]` / `!config show [all\|page\|last]` | Show active configuration grouped in `config_sample.py` section order; secrets are hidden |
 | `!config search/find <query>` | Search config option names and displayed values |
 | `!config diff [all\|page\|last]` | Show current values that differ from `config_sample.py` defaults |
@@ -277,7 +277,7 @@ Examples assume the default command prefix `!`.
 | `!restore <file/latest> confirm` | Restore a managed full backup archive |
 | `!room add <room>` | Add a protected room |
 | `!room remove/delete/del/rm <room>` | Remove a protected room |
-| `!room list [all/page]` | List protected rooms with join state and bot affiliation |
+| `!room/rooms list [joined/offline/problems] [all/page/last]` | List protected rooms with join/admin health using shared filters |
 | `!room rejoin <room/all>` | Retry joining one or all protected rooms |
 | `!room invite list [all/page/last]` | List pending room invites |
 | `!room invite accept/decline/remove/delete/del/rm <id>` | Accept or decline a pending room invite |
@@ -308,7 +308,7 @@ Examples assume the default command prefix `!`.
 | `!export [list/show/delete/remove/del/rm]` | Manage CSV ban exports |
 | `!import <file> [dryrun]` | Import bans from CSV with validation and optional dry-run |
 
-For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`.
+For paginated commands, the standalone `all` argument disables paging and prints the complete result set. Examples: `!audit all`, `!banlist all`, `!banlist rtbl all`, `!bansearch all spam`, `!ignore list all`, `!whitelist all`, and `!room list all`. Task and room inventories additionally support focused `problems` views; `!status full` expands diagnostics without dumping every healthy room/task into the default status.
 
 Full command reference: [docs/commands.md](docs/commands.md).
 

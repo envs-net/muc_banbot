@@ -8,7 +8,7 @@ Protected rooms are rooms where BanBot enforces local bans, temporary bans, RTBL
 
 ```text
 !room
-!room list [all|page]
+!room/rooms list [joined|offline|problems] [all|page|last]
 !room add <room_jid>
 !room rejoin <room_jid|all>
 !room remove/delete/rm/del <room_jid>

@@ -1,12 +1,23 @@
-"""Runtime and bot-control admin command dispatch helpers."""
+"""Runtime/config admin command handlers."""
 
 import asyncio
 import inspect
 import logging
 import os
-import time
+
+from envs_xmpp_core.pagination import format_page
+from envs_xmpp_core.presentation import (
+    TaskListRequest,
+    filter_task_views,
+    normalize_tasks,
+    parse_task_list_request,
+    render_task_entry,
+    render_task_summary,
+    render_watchdog_lines,
+)
 
 from .._version import __version__
+from ..utils import get_list_page_size
 from .context import commands_module_attr
 
 log = logging.getLogger(__name__)
@@ -37,7 +48,7 @@ class CommandRuntimeMixin:
             return True
 
         if cmd == "status":
-            await self._cmd_status(room)
+            await self._cmd_status(room, args)
             return True
 
         if cmd == "tasks":
@@ -50,17 +61,26 @@ class CommandRuntimeMixin:
 
         return False
 
-    async def _cmd_tasks(self, room: str, args: list[str], *, mtype: str = "groupchat") -> None:
-        """Show supervised background workers and runtime watchdog health."""
-        mode = args[0].lower().strip() if args else "active"
-        if len(args) > 1 or mode not in {"active", "all", "failed"}:
-            await self.bot_send_message(
-                mto=room,
-                mbody=f"❌ {self._tasks_usage_text()}",
-                mtype=mtype,
-            )
-            return
+    def _task_stale_after(self) -> float:
+        supervisor = getattr(self, "tasks", None)
+        options = getattr(supervisor, "options", None)
+        try:
+            return float(getattr(options, "stale_after", 3600.0) or 3600.0)
+        except (TypeError, ValueError):
+            return 3600.0
 
+    def _task_stale_ids(self) -> set[tuple[str, str]]:
+        supervisor = getattr(self, "tasks", None)
+        stale_getter = getattr(supervisor, "stale_services", None)
+        if not callable(stale_getter):
+            return set()
+        return {
+            (item.group, item.name)
+            for item in stale_getter(self._task_stale_after())
+        }
+
+    async def _cmd_tasks(self, room: str, args: list[str], *, mtype: str = "groupchat") -> None:
+        """Show shared task health or a filtered supervised-task inventory."""
         supervisor = getattr(self, "tasks", None)
         snapshot = getattr(supervisor, "snapshot", None)
         if not callable(snapshot):
@@ -71,90 +91,67 @@ class CommandRuntimeMixin:
             )
             return
 
-        include_done = mode in {"all", "failed"}
-        task_infos = list(snapshot(include_done=include_done))
-        if mode == "failed":
-            task_infos = [info for info in task_infos if info.status == "failed"]
-
-        all_infos = list(snapshot(include_done=True))
-        running_count = sum(info.status == "running" for info in all_infos)
-        restarting_count = sum(info.status == "restarting" for info in all_infos)
-        failed_count = sum(info.status == "failed" for info in all_infos)
-        other_count = len(all_infos) - running_count - restarting_count - failed_count
-
-        lines = [
-            "🧵 Background Tasks: "
-            f"{running_count} running, {restarting_count} restarting, "
-            f"{failed_count} failed, {other_count} other"
-        ]
-
-        if task_infos:
-            for info in task_infos:
-                icon = {
-                    "running": "✅",
-                    "restarting": "🔄",
-                    "failed": "❌",
-                    "done": "☑️",
-                    "cancelled": "⏹️",
-                }.get(info.status, "ℹ️")
-                detail = f"{icon} {info.name} — {info.status} • restarts: {info.restart_count}"
-                restart_at = getattr(info, "restart_at", None)
-                if info.status == "restarting" and restart_at is not None:
-                    restart_in = max(0.0, float(restart_at) - time.time())
-                    detail += f" • retry in: {restart_in:.1f}s"
-                if info.last_error:
-                    detail += f" • last error: {info.last_error}"
-                lines.append(detail)
-        elif mode == "failed":
-            lines.append("✅ No failed background tasks.")
-        else:
-            lines.append("ℹ️ No background tasks match this view.")
-
-        watchdog = getattr(self, "runtime_watchdog", None)
-        runtime_state = getattr(watchdog, "runtime_state", None)
-        if callable(runtime_state):
-            state = runtime_state()
-            enabled = bool(state.get("enabled"))
-            worker_running = bool(state.get("worker_running"))
-            suppressed = int(state.get("heartbeat_suppressed", 0) or 0)
-            last_error = state.get("last_error")
-
-            if not enabled:
-                watchdog_status = "disabled"
-                watchdog_icon = "⏹️"
-            elif not worker_running or last_error:
-                watchdog_status = "unhealthy"
-                watchdog_icon = "❌"
-            elif suppressed:
-                watchdog_status = "degraded"
-                watchdog_icon = "⚠️"
-            else:
-                watchdog_status = "healthy"
-                watchdog_icon = "✅"
-
-            lines.extend(
-                [
-                    "",
-                    "🐕 Runtime Watchdog",
-                    f"{watchdog_icon} Status: {watchdog_status}",
-                    "systemd watchdog: "
-                    + ("active" if state.get("systemd_active") else "inactive"),
-                    "event-loop lag: "
-                    f"{float(state.get('last_lag_seconds', 0.0) or 0.0):.3f}s current / "
-                    f"{float(state.get('max_lag_seconds', 0.0) or 0.0):.3f}s max",
-                    "heartbeats: "
-                    f"{int(state.get('heartbeats', 0) or 0)} • "
-                    f"suppressed: {suppressed}",
-                ]
+        request = parse_task_list_request(args or [])
+        if request.error:
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"❌ {self._tasks_usage_text()}",
+                mtype=mtype,
             )
-            if last_error:
-                lines.append(f"last error: {last_error}")
+            return
 
-        await self.bot_send_message(
-            mto=room,
-            mbody="\n".join(lines),
-            mtype=mtype,
+        infos = list(snapshot(include_done=True))
+        views = normalize_tasks(infos, stale_ids=self._task_stale_ids())
+
+        if request.mode == "overview":
+            lines = ["🧵 Background Tasks", "", *render_task_summary(views)]
+            problems = filter_task_views(views, TaskListRequest(mode="problems"))
+            if problems:
+                lines.extend(["", "⚠️ Problems"])
+                lines.extend(render_task_entry(view, full=False) for view in problems[:5])
+            watchdog = getattr(self, "runtime_watchdog", None)
+            runtime_state = getattr(watchdog, "runtime_state", None)
+            if callable(runtime_state):
+                lines.extend(["", "🐕 Runtime Watchdog", *render_watchdog_lines(runtime_state())])
+            await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype=mtype)
+            return
+
+        filtered = filter_task_views(views, request)
+        if request.mode == "show" and not filtered:
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"⚠️ Task not found: {request.show}",
+                mtype=mtype,
+            )
+            return
+
+        entries = [render_task_entry(view, full=request.full or request.mode == "show") for view in filtered]
+        if not entries:
+            entries = [
+                "✅ No background tasks match this view."
+                if request.mode in {"failed", "stale", "restarting", "problems"}
+                else "No supervised tasks found."
+            ]
+
+        title = "🧵 Background Tasks"
+        qualifiers = []
+        if request.scope:
+            qualifiers.append(f"scope={request.scope}")
+        if request.mode not in {"inventory", "overview"}:
+            qualifiers.append(request.mode)
+        if request.full:
+            qualifiers.append("full")
+        if qualifiers:
+            title += " — " + " — ".join(qualifiers)
+
+        lines = format_page(
+            title,
+            entries,
+            page_request=request.page,
+            page_size=5 if request.full else get_list_page_size(self),
+            command_hint=f"{self.command_prefix}tasks",
         )
+        await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype=mtype)
 
     async def _cmd_checkupdate(self, room: str) -> None:
         """Check for a newer release and report the result to the admin room."""
@@ -219,7 +216,6 @@ class CommandRuntimeMixin:
 
     async def _restart_process(self) -> None:
         """Flush state, disconnect, and terminate the process for supervisor restart."""
-        # Give the confirmation message a short chance to leave the XMPP stream.
         asyncio_module = commands_module_attr("asyncio", asyncio)
         os_module = commands_module_attr("os", os)
 
@@ -234,8 +230,6 @@ class CommandRuntimeMixin:
             except Exception as exc:
                 log.warning("Restart: graceful shutdown failed: %s", exc)
         else:
-            # Compatibility for lightweight embedders that use the command mixin
-            # without the full BanBot lifecycle implementation.
             try:
                 if hasattr(self, "flush_redaction_index"):
                     await self.flush_redaction_index()

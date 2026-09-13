@@ -53,8 +53,8 @@ Explicit full output remains available regardless of mode:
 | Command | Description |
 | --- | --- |
 | `!help [all\|page\|last]` / `!help <command>` | Shows admin help or focused command help |
-| `!status` | Shows health, uptime, rooms, bans, DB, RTBL, workers, alerts, reconnect state, and all protection states |
-| `!tasks [all\|failed]` | Shows supervised background workers, restart/backoff state, restart counts, terminal failures, and runtime/systemd watchdog health |
+| `!status [full]` | Shows compact structured health; `full` adds problem-room, task, protection and RTBL publish diagnostics |
+| `!tasks [all\|full\|failed\|stale\|restarting\|restarted\|problems] [scope <name>]` | Shows shared task health, filtered/paged inventories, restart/circuit state, and watchdog health |
 | `!config [all\|page\|last]` | Shows active configuration; secrets are hidden |
 | `!config show [all\|page\|last]` | Same as `!config`, explicit show form |
 | `!config search/find <query>` | Searches config option names and displayed values |
@@ -85,7 +85,7 @@ See [Backups and Restore](backups.md).
 | Command | Description |
 | --- | --- |
 | `!room` | Shows focused room command usage |
-| `!room list [all\|page]` | Lists protected rooms with joined/not-joined state and the bot affiliation |
+| `!room/rooms list [joined\|offline\|problems] [all\|page\|last]` | Lists protected rooms with joined/admin health using shared filters |
 | `!room rejoin <room_jid\|all>` | Retries joining one or all protected rooms |
 | `!room add <room_jid>` | Adds a protected room and stores it in the database |
 | `!room remove/delete/rm/del <room_jid>` | Removes a protected room and makes the bot leave |
@@ -230,8 +230,8 @@ Allowed read-only DM/MUC-PM commands:
 !help <command>
 !config [all|page|last]
 !config show [all|page|last]
-!status
-!tasks [all|failed]
+!status [full]
+!tasks [all|full|failed|stale|restarting|restarted|problems] [scope <name>]
 !omemo status
 !omemo devices
 !omemo help
@@ -243,7 +243,7 @@ Allowed read-only DM/MUC-PM commands:
 !baninfo <jid|nick|*.domain.tld>
 !history <jid|nick|*.domain.tld> [all|page|last]
 !why <nick|jid>
-!room list [all|page]
+!room/rooms list [joined|offline|problems] [all|page|last]
 !room invite list [all|page|last]
 !ignore [list] [all|page|last]
 !whitelist [list] [all|page|last]

@@ -53,7 +53,7 @@ class CommandUsageMixin:
         p = self.command_prefix
         return (
             "Usage:\n"
-            f"  {p}room list [all|page]\n"
+            f"  {p}room/rooms list [joined|offline|problems] [all|page|last]\n"
             f"  {p}room add <room_jid>\n"
             f"  {p}room rejoin <room_jid|all>\n"
             f"  {p}room remove/delete/rm/del <room_jid>\n"
@@ -267,7 +267,7 @@ class CommandUsageMixin:
     def _status_usage_text(self) -> str:
         """Return usage text for status command."""
         p = self.command_prefix
-        return f"Usage: {p}status"
+        return f"Usage: {p}status [full]"
 
     def _tasks_usage_text(self) -> str:
         """Return usage text for background task diagnostics."""
@@ -275,8 +275,9 @@ class CommandUsageMixin:
         return (
             "Usage:\n"
             f"  {p}tasks\n"
-            f"  {p}tasks all\n"
-            f"  {p}tasks failed"
+            f"  {p}tasks [all|full|failed|stale|restarting|restarted|problems|page|last]\n"
+            f"  {p}tasks scope <name> [all|page|last]\n"
+            f"  {p}tasks show <scope>/<task>"
         )
 
     def _whoami_usage_text(self) -> str:

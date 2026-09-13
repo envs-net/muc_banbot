@@ -7,6 +7,7 @@ ADMIN_COMMAND_HANDLERS = {
     "restore": "_dispatch_restore_command",
     "omemo": "_dispatch_omemo_command",
     "room": "_dispatch_room_command",
+    "rooms": "_dispatch_room_command",
     "ban": "_dispatch_ban_command",
     "tempban": "_dispatch_tempban_command",
     "unban": "_dispatch_unban_command",

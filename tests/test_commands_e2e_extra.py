@@ -321,14 +321,17 @@ async def test_admin_tasks_shows_supervised_workers_and_watchdog(fake_msg_factor
     await bot.on_message(admin_msg(fake_msg_factory, "!tasks"))
 
     body = bot.sent[-1]["mbody"]
-    assert "Background Tasks: 2 running, 0 restarting, 0 failed, 0 other" in body
-    assert "health-check-worker — running • restarts: 0" in body
-    assert "unban-worker — running • restarts: 1" in body
-    assert "Runtime Watchdog" in body
+    assert body.startswith("🧵 Background Tasks")
+    assert "✅ Overall: healthy" in body
+    assert "Services: 2 running" in body
+    assert "📦 Scopes" in body
+    assert "_core: 2 active" in body
+    assert "health-check-worker" not in body
+    assert "🐕 Runtime Watchdog" in body
     assert "Status: healthy" in body
     assert "systemd watchdog: active" in body
-    assert "0.002s current / 0.015s max" in body
-    assert "heartbeats: 4 • suppressed: 0" in body
+    assert "0.002s current · 0.015s max" in body
+    assert "heartbeats: 4 · suppressed: 0" in body
 
 
 @pytest.mark.asyncio
@@ -358,9 +361,11 @@ async def test_admin_tasks_shows_restart_backoff_state(fake_msg_factory, monkeyp
     await bot.on_message(admin_msg(fake_msg_factory, "!tasks"))
 
     body = bot.sent[-1]["mbody"]
-    assert "Background Tasks: 0 running, 1 restarting, 0 failed, 0 other" in body
-    assert "🔄 unban-worker — restarting • restarts: 2" in body
-    assert "retry in:" in body
+    assert "⚠️ Overall: attention needed" in body
+    assert "Restarting: 1" in body
+    assert "⚠️ Problems" in body
+    assert "🔄 _core/unban-worker" in body
+    assert "restarts 2" in body
     assert "last error: RuntimeError: temporary failure" in body
 
 
@@ -373,11 +378,11 @@ async def test_admin_tasks_failed_and_invalid_usage(fake_msg_factory, monkeypatc
     bot = CommandE2EBot()
 
     await bot.on_message(admin_msg(fake_msg_factory, "!tasks failed"))
-    assert "No failed background tasks" in bot.sent[-1]["mbody"]
+    assert "No background tasks match this view" in bot.sent[-1]["mbody"]
 
     await bot.on_message(admin_msg(fake_msg_factory, "!tasks nonsense"))
     assert "❌ Usage:" in bot.sent[-1]["mbody"]
-    assert "!tasks failed" in bot.sent[-1]["mbody"]
+    assert "!tasks scope <name>" in bot.sent[-1]["mbody"]
 
 
 @pytest.mark.asyncio
@@ -570,7 +575,7 @@ async def test_admin_incomplete_commands_show_usage(fake_msg_factory, monkeypatc
         ("!unban", "Usage: !unban <jid|nick|domain.tld|*.domain.tld>"),
         ("!bansearch", "Usage: !bansearch <query> [all|page|last]"),
         ("!bansearch all", "Usage: !bansearch <query> [all|page|last]"),
-        ("!room", "!room list [all|page]"),
+        ("!room", "!room/rooms list [joined|offline|problems] [all|page|last]"),
     ]
 
     for body, expected in cases:
@@ -753,7 +758,7 @@ async def test_admin_help_room_shows_focused_room_usage(fake_msg_factory, monkey
 
     body = bot.sent[-1]["mbody"]
     assert "Usage:" in body
-    assert "!room list [all|page]" in body
+    assert "!room/rooms list [joined|offline|problems] [all|page|last]" in body
     assert "!room rejoin <room_jid|all>" in body
     assert "!room invite accept <id>" in body
     assert bot.room_calls == []
@@ -802,8 +807,8 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
 
     expected = {
         "help": "!help <command>",
-        "status": "!status",
-        "tasks": "!tasks failed",
+        "status": "!status [full]",
+        "tasks": "!tasks scope <name>",
         "config": "!config show [all|page|last]",
         "reload": "!reload / !reloadconfig",
         "reloadconfig": "!reload / !reloadconfig",
@@ -814,7 +819,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
         "audit": "!audit [all|page|last|query]",
         "backup": "!backup list [all|page|last]",
         "restore": "!restore <filename|latest> confirm",
-        "room": "!room list [all|page]",
+        "room": "!room/rooms list [joined|offline|problems] [all|page|last]",
         "room invite": "!room invite cleanup [expired]",
         "invite": "!room invite accept <id>",
         "policy": "!policy show",
@@ -903,7 +908,7 @@ async def test_admin_help_default_all_and_paginated_mode(fake_msg_factory, monke
 
     await bot.on_message(admin_msg(fake_msg_factory, "!help room"))
     assert "Usage:" in bot.sent[-1]["mbody"]
-    assert "!room list [all|page]" in bot.sent[-1]["mbody"]
+    assert "!room/rooms list [joined|offline|problems] [all|page|last]" in bot.sent[-1]["mbody"]
 
 
 @pytest.mark.asyncio
