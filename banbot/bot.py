@@ -224,6 +224,11 @@ class BanBot(
         self._shutdown_complete = False
         self._last_startup_phases: tuple[LifecyclePhaseResult, ...] = ()
         self._last_shutdown_phases: tuple[LifecyclePhaseResult, ...] = ()
+        # Track the currently executing session_start lifecycle.  A reconnect
+        # timeout/transport loss must cancel this task before the underlying
+        # stream is torn down, otherwise stale startup IQs can leak into the
+        # next connection and Slixmpp's send queue.
+        self._startup_task: asyncio.Task | None = None
         self.init_alert_state()
         self.init_outbox_state()
 
@@ -842,6 +847,12 @@ class BanBot(
             log.info("Ignoring session_start while shutdown is in progress")
             return
 
+        current_task = asyncio.current_task()
+        cancel_startup = getattr(self, "_cancel_incomplete_startup", None)
+        if callable(cancel_startup):
+            await cancel_startup("new session_start", exclude=current_task)
+        self._startup_task = current_task
+
         # Mark the XMPP session as established immediately. The systemd startup
         # timeout extender only runs while waiting for ``session_start``.
         self._session_start_received = True
@@ -869,6 +880,8 @@ class BanBot(
             # Preserve all completed/failed phases for status and diagnostics,
             # including when startup aborts before readiness.
             self._last_startup_phases = runner.results
+            if getattr(self, "_startup_task", None) is current_task:
+                self._startup_task = None
 
 
 def main() -> None:

@@ -706,3 +706,76 @@ async def test_sync_single_room_unbans_expired_domain_tempban_instead_of_recover
         assert "expired.example.test" not in bot.ban_index_by_domain
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_admins_retries_bounded_iq_timeout_without_raw_stanza_log(
+    temp_db_path,
+    monkeypatch,
+    sync_module,
+    noop_sleep_fn,
+    caplog,
+):
+    class FakeIqTimeout(Exception):
+        pass
+
+    class FlakyMucService(FakeMucService):
+        def __init__(self):
+            super().__init__(TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT)
+            self.failures = 1
+
+        async def get_users_by_affiliation(self, room, affiliation):
+            self.calls.append((room, affiliation))
+            if self.failures:
+                self.failures -= 1
+                raise FakeIqTimeout("<iq type='get' to='admin@example.test'/>")
+            return list(self.affiliations.get((room, affiliation), []))
+
+    monkeypatch.setattr(sync_module, "IqTimeout", FakeIqTimeout)
+    monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep_fn)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    service = FlakyMucService()
+    bot.plugin["xep_0045"] = service
+    try:
+        with caplog.at_level("WARNING", logger="banbot.sync"):
+            async with admin_room_override(sync_module):
+                await bot.sync_admins(announce=False)
+
+        assert service.calls.count((TEST_ADMIN_ROOM, "owner")) == 2
+        assert bot.occupants[TEST_ADMIN_ROOM][TEST_OWNER_JID]["affiliation"] == "owner"
+        assert "IQ timeout after 10s" in caplog.text
+        assert "<iq" not in caplog.text
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_admins_does_not_retry_permanent_iq_error(
+    temp_db_path,
+    monkeypatch,
+    sync_module,
+    caplog,
+):
+    class FakeIqError(Exception):
+        condition = "forbidden"
+        text = "owner affiliation list denied"
+
+    class ForbiddenMucService(FakeMucService):
+        async def get_users_by_affiliation(self, room, affiliation):
+            self.calls.append((room, affiliation))
+            raise FakeIqError("raw stanza")
+
+    monkeypatch.setattr(sync_module, "IqError", FakeIqError)
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    service = ForbiddenMucService()
+    bot.plugin["xep_0045"] = service
+    try:
+        with caplog.at_level("WARNING", logger="banbot.sync"):
+            async with admin_room_override(sync_module):
+                await bot.sync_admins(announce=False)
+
+        assert service.calls == [(TEST_ADMIN_ROOM, "owner")]
+        assert "IQ error forbidden: owner affiliation list denied" in caplog.text
+        assert "raw stanza" not in caplog.text
+    finally:
+        await bot.db.close()

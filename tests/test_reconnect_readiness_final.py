@@ -205,3 +205,26 @@ async def test_systemd_ready_is_not_sent_if_health_worker_never_starts(
     await asyncio.sleep(0)
 
     assert notifications == []
+
+
+@pytest.mark.asyncio
+async def test_partial_reconnect_abort_cancels_stale_startup_before_transport_reset() -> None:
+    bot = ReconnectFixture()
+    startup_blocker = asyncio.Event()
+
+    async def stale_startup() -> None:
+        await startup_blocker.wait()
+
+    startup_task = asyncio.create_task(stale_startup())
+    bot._startup_task = startup_task
+    bot.abort = lambda: bot.events.append("abort")
+    await asyncio.sleep(0)
+
+    await bot._disconnect_partial_reconnect("startup timeout")
+
+    assert startup_task.cancelled()
+    assert bot._startup_task is None
+    assert bot.events == ["abort"]
+    assert bot._session_start_received is False
+    assert bot.occupants == {}
+    assert bot.bot_admin_state == {}

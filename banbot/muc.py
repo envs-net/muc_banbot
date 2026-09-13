@@ -24,6 +24,8 @@ _RECONNECT_STARTUP_TIMEOUT_SECONDS = 120
 
 
 class MucMixin(BotOccupantMixin):
+    _startup_task: asyncio.Task | None
+
     def _get_reconnect_success_event(self) -> asyncio.Event:
         """Return the event used to signal that session_start completed after reconnect."""
         event = getattr(self, "reconnect_success_event", None)
@@ -33,8 +35,34 @@ class MucMixin(BotOccupantMixin):
         return event
 
 
+    async def _cancel_incomplete_startup(
+        self,
+        reason: str,
+        *,
+        exclude: asyncio.Task | None = None,
+    ) -> bool:
+        """Cancel a stale ``session_start`` lifecycle before stream teardown."""
+        task = getattr(self, "_startup_task", None)
+        if task is None or task is exclude or task.done():
+            return False
+
+        log.warning("Cancelling incomplete XMPP startup before %s", reason)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            log.debug("Incomplete XMPP startup ended while cancelling: %s", exc)
+        finally:
+            if getattr(self, "_startup_task", None) is task:
+                self._startup_task = None
+        return True
+
+
     async def _disconnect_partial_reconnect(self, reason: str) -> None:
         """Drop a reconnect session that never reached usable startup state."""
+        await self._cancel_incomplete_startup(reason, exclude=asyncio.current_task())
         self.reconnecting = True
         self._session_start_received = False
 
@@ -49,10 +77,26 @@ class MucMixin(BotOccupantMixin):
         getattr(self, "room_join_events", {}).clear()
 
         try:
+            abort = getattr(self, "abort", None)
+            if callable(abort):
+                # This path is intentionally forceful.  Draining Slixmpp's
+                # waiting/send queues after startup has timed out can race with
+                # connection_lost and produce NotConnectedError from stale IQs.
+                abort()
+                return
+
             try:
-                result = self.disconnect(wait=False)
+                result = self.disconnect(
+                    wait=0.0,
+                    reason=f"partial reconnect reset: {reason}",
+                    ignore_send_queue=True,
+                )
             except TypeError:
-                result = self.disconnect()
+                # Compatibility with older Slixmpp signatures.
+                try:
+                    result = self.disconnect(wait=0.0)
+                except TypeError:
+                    result = self.disconnect()
             if inspect.isawaitable(result):
                 try:
                     disconnect_task = asyncio.ensure_future(result)
@@ -220,6 +264,11 @@ class MucMixin(BotOccupantMixin):
         if getattr(self, "_shutdown_in_progress", False) or getattr(self, "_shutdown_complete", False):
             log.debug("Disconnect event received during shutdown; reconnect suppressed")
             return
+
+        await self._cancel_incomplete_startup(
+            "connection loss",
+            exclude=asyncio.current_task(),
+        )
 
         pre_session_disconnect = (
             hasattr(self, "server_connect_time")
