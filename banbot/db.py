@@ -8,7 +8,8 @@ from envs_xmpp_core.release.state import RELEASE_STATE_TABLE_SQL
 
 from config import DB_FILE
 
-from .utils import looks_like_domain, normalize_actor, normalize_ban_target
+from .ban_target import BanTarget
+from .utils import looks_like_domain, normalize_actor
 
 log = logging.getLogger(__name__)
 
@@ -122,7 +123,11 @@ class DatabaseMixin:
                 migrated: dict[tuple[str, str], tuple[str, str, str | None, str | None, int, str | None, str | None]] = {}
                 for jid, nick, until, issuer, comment in old_rows:
                     try:
-                        target_type, target, normalized_jid, normalized_nick = normalize_ban_target(jid, nick)
+                        ban_target = BanTarget.from_parts(jid, nick)
+                        target_type = ban_target.kind
+                        target = ban_target.value
+                        normalized_jid = ban_target.jid
+                        normalized_nick = ban_target.nick
                         key = (target_type, target)
                         current_until = int(until or 0)
                         previous = migrated.get(key)
@@ -280,11 +285,19 @@ class DatabaseMixin:
         self.ban_index_by_domain.clear()
 
         for target_type, target, jid, nick, until, issuer, comment in rows:
-            if target_type == "domain" and not jid:
-                jid = f"*.{target}"
-            if jid:
-                jid = self.bare_jid(jid)
-            self._cache_ban(jid, nick, int(until or 0), issuer, comment)
+            ban_target = BanTarget.from_storage(
+                target_type,
+                target,
+                jid=jid,
+                nick=nick,
+            )
+            self._cache_ban(
+                ban_target.jid,
+                ban_target.nick,
+                int(until or 0),
+                issuer,
+                comment,
+            )
 
         log.info("✅ Loaded %d active bans", len(self.ban_cache))
 
@@ -360,10 +373,12 @@ class DatabaseMixin:
         comment: str | None,
     ) -> None:
         """Insert or update a ban using the normalized target_type/target key."""
-        target_type, target, normalized_jid, normalized_nick = normalize_ban_target(jid, nick)
+        ban_target = BanTarget.from_parts(jid, nick)
+        target_type = ban_target.kind
+        target = ban_target.value
+        normalized_jid = ban_target.jid
+        normalized_nick = ban_target.nick
         issuer = normalize_actor(issuer)
-        if target_type == "domain" and normalized_jid is None:
-            normalized_jid = f"*.{target}"
 
         await self.db.execute(
             """
@@ -422,36 +437,25 @@ class DatabaseMixin:
             updated_at,
         ) in rows:
             try:
-                if target_type == "domain":
-                    raw_domain = str(target or jid or "").strip().lower()
-                    raw_domain = raw_domain[2:] if raw_domain.startswith("*.") else raw_domain
-                    normalized_type = "domain"
-                    normalized_target = raw_domain.strip(".")
-                    normalized_jid = f"*.{normalized_target}"
-                    normalized_nick = nick.lower().strip() if nick else None
-                elif target_type == "nick":
-                    normalized_type, normalized_target, normalized_jid, normalized_nick = normalize_ban_target(
-                        None,
-                        nick or target,
+                if target_type == "jid" and looks_like_domain(str(jid or target or "")):
+                    # Older startup-sync code could persist a domain-only MUC
+                    # outcast as a JID row.  Treat that legacy shape as a
+                    # wildcard domain target before canonicalizing the row.
+                    ban_target = BanTarget.from_identifier(
+                        str(jid or target),
+                        plain_domain=True,
                     )
                 else:
-                    raw_jid = str(jid or target or "").strip().lower()
-                    # Older startup-sync code could persist a domain-only MUC
-                    # outcast (for example ``xmpp.party``) as a JID ban.  BanBot
-                    # does not otherwise create domainpart-only JID bans: bare
-                    # domains are represented as wildcard domain bans.  Repair
-                    # those legacy rows here so command lookup/cache semantics
-                    # are consistent again.
-                    if looks_like_domain(raw_jid):
-                        normalized_type = "domain"
-                        normalized_target = raw_jid.strip(".")
-                        normalized_jid = f"*.{normalized_target}"
-                        normalized_nick = nick.lower().strip() if nick else None
-                    else:
-                        normalized_type, normalized_target, normalized_jid, normalized_nick = normalize_ban_target(
-                            raw_jid,
-                            nick,
-                        )
+                    ban_target = BanTarget.from_storage(
+                        target_type,
+                        str(target or ""),
+                        jid=jid,
+                        nick=nick,
+                    )
+                normalized_type = ban_target.kind
+                normalized_target = ban_target.value
+                normalized_jid = ban_target.jid
+                normalized_nick = ban_target.nick
             except Exception as exc:
                 log.warning(
                     "Skipping invalid ban row during normalization: id=%r target_type=%r target=%r jid=%r nick=%r error=%s",
@@ -529,20 +533,14 @@ class DatabaseMixin:
     async def delete_ban_db(self, identifier: str) -> int:
         """Delete a ban by JID, nick, or wildcard domain and return the affected row count."""
         ident = identifier.lower().strip()
-
-        if ident.startswith("*.") or looks_like_domain(ident):
-            target_type = "domain"
-            target = (ident[2:] if ident.startswith("*.") else ident).strip(".")
-        elif "@" in ident:
-            target_type = "jid"
-            target = self.bare_jid(ident)
-        else:
-            target_type = "nick"
-            target = ident
+        target = BanTarget.from_identifier(
+            ident,
+            plain_domain=ident.startswith("*.") or looks_like_domain(ident),
+        )
 
         cur = await self.db.execute(
             "DELETE FROM bans WHERE target_type = ? AND target = ?",
-            (target_type, target),
+            (target.kind, target.value),
         )
         await self.db.commit()
         return cur.rowcount

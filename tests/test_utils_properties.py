@@ -207,7 +207,7 @@ def test_normalize_ban_target_wildcard_domain(domain, nick):
     )
     assert target_type == "domain"
     assert target == domain.lower()
-    assert normalized_jid == f"*.{domain.lower()}."
+    assert normalized_jid == f"*.{domain.lower()}"
     assert normalized_nick == (nick.lower().strip() if nick else None)
 
 

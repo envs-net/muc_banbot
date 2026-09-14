@@ -5,6 +5,8 @@ from envs_xmpp_core.pagination import paginate
 from envs_xmpp_core.pagination import resolve_page as _core_resolve_page
 from envs_xmpp_core.xmpp.jid import bare_jid
 
+from .ban_target import BanTarget
+
 
 def parse_duration(s: str) -> int:
     """
@@ -115,22 +117,12 @@ def looks_like_domain(text: str | None) -> bool:
     )
 
 
-def normalize_ban_target(jid: str | None = None, nick: str | None = None) -> tuple[str, str, str | None, str | None]:
-    """Return (target_type, target, normalized_jid, normalized_nick)."""
-    normalized_jid = bare_jid(jid) if jid and not jid.startswith("*.") else (jid.lower() if jid else None)
-    normalized_nick = nick.lower().strip() if nick else None
-
-    if normalized_jid and normalized_jid.startswith("*."):
-        domain = normalized_jid[2:].strip(".")
-        return "domain", domain, normalized_jid, normalized_nick
-
-    if normalized_jid:
-        return "jid", normalized_jid, normalized_jid, normalized_nick
-
-    if normalized_nick:
-        return "nick", normalized_nick, None, normalized_nick
-
-    raise ValueError("Ban target requires jid/domain or nick")
+def normalize_ban_target(
+    jid: str | None = None,
+    nick: str | None = None,
+) -> tuple[str, str, str | None, str | None]:
+    """Compatibility wrapper returning BanTarget's historical tuple shape."""
+    return BanTarget.from_parts(jid, nick).as_legacy_tuple()
 
 
 
@@ -144,18 +136,18 @@ def without_all_pages_arg(args: list[str]) -> list[str]:
     return [arg for arg in args if str(arg).lower() != "all"]
 
 
-def get_list_page_size(obj=None, default: int = 10) -> int:
+def get_list_page_size(obj: object | None = None, default: int = 10) -> int:
     """Return the configured page size for paginated command output."""
     value = getattr(obj, "list_page_size", None) if obj is not None else None
     if value is None:
         try:
-            import config  # type: ignore
+            import config
 
             value = getattr(config, "LIST_PAGE_SIZE", default)
         except Exception:
             value = default
     try:
-        return max(1, int(value))
+        return max(1, int(str(value)))
     except Exception:
         return default
 

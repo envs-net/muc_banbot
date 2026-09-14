@@ -19,6 +19,10 @@ commands, integration markers and coverage thresholds are declared under
 `[tool.envs-xmpp.quality]` and `[tool.envs-xmpp.testing]` in `pyproject.toml`;
 the runner implementation lives in `envs-xmpp`. The project-validation stage also runs the shared-core release audit, so dependency metadata, constraints and the deployment bootstrap cannot silently drift to different envs-xmpp versions.
 
+`deploy.sh status` also reports runtime dependency drift against the matching
+Python constraint snapshot. `deploy.sh check` treats any missing, unpinned or
+version-mismatched runtime dependency as an operator-visible failure.
+
 The deploy helper deliberately does not replace an existing systemd unit or
 operator configuration. New installs default to the hardened
 `/etc/muc_banbot/config.py` + `/var/lib/muc_banbot/` layout. Existing

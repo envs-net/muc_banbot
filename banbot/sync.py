@@ -20,6 +20,7 @@ _SYNC_AFFILIATION_QUERY_OPTIONS = AffiliationQueryOptions(
     retry_delay_seconds=1.0,
 )
 
+from .ban_target import BanTarget
 from .locks import ban_state_lock
 from .utils import looks_like_domain
 
@@ -29,8 +30,8 @@ class SyncMixin:
         """Return BanBot's canonical target for one MUC outcast entry."""
         bare = self.bare_jid(value)
         if looks_like_domain(bare):
-            return f"*.{bare.strip('.')}"
-        return bare
+            return BanTarget.from_identifier(bare, plain_domain=True).identifier
+        return BanTarget.from_identifier(bare).identifier
 
     def _sync_bot_is_admin_or_owner(self, room: str) -> bool:
         """Return cached bot rights without emitting one warning per poll."""
@@ -101,15 +102,8 @@ class SyncMixin:
         for target_type, target, until, comment in db_bans:
             if until > 0 and until <= now:  # skip expired temporary bans
                 continue
-            ban_jid = (
-                target
-                if target_type == "jid"
-                else f"*.{target}"
-                if target_type == "domain"
-                else None
-            )
-            ban_nick = target if target_type == "nick" else None
-            active_bans.append((ban_jid, ban_nick, comment))
+            ban_target = BanTarget.from_storage(target_type, target)
+            active_bans.append((ban_target.jid, ban_target.nick, comment))
 
         async def sync_single_room(
             idx: int,
@@ -270,8 +264,8 @@ class SyncMixin:
             return False
 
         canonical = self._sync_canonical_outcast_target(jid_bare)
-        if canonical.startswith("*."):
-            domain = canonical[2:]
+        parsed = BanTarget.from_identifier(canonical)
+        if parsed.kind == "domain":
             async with self.db.execute(
                 """
                 SELECT until FROM bans
@@ -281,7 +275,7 @@ class SyncMixin:
                   AND until <= ?
                 LIMIT 1
                 """,
-                (domain, now),
+                (parsed.value, now),
             ) as cursor:
                 row = await cursor.fetchone()
         else:
@@ -424,12 +418,9 @@ class SyncMixin:
             return None
 
         canonical = self._sync_canonical_outcast_target(jid_bare)
-        if canonical.startswith("*."):
-            target_type = "domain"
-            target = canonical[2:].strip(".")
-        else:
-            target_type = "jid"
-            target = canonical
+        parsed = BanTarget.from_identifier(canonical)
+        target_type = parsed.kind
+        target = parsed.value
 
         async with self.db.execute(
             """
@@ -438,7 +429,7 @@ class SyncMixin:
               AND (target = ? OR jid = ?)
             LIMIT 1
             """,
-            (target_type, target, canonical),
+            (target_type, target, parsed.identifier),
         ) as cursor:
             row = await cursor.fetchone()
 

@@ -125,7 +125,7 @@ def test_normalize_ban_target_prefers_jid_over_nick_and_preserves_domain_marker(
     assert normalize_ban_target(jid="*.Example.Org.", nick="Nick") == (
         "domain",
         "example.org",
-        "*.example.org.",
+        "*.example.org",
         "nick",
     )
 
@@ -307,7 +307,7 @@ def test_normalize_ban_target_domain_strips_target_but_preserves_normalized_jid_
     )
     assert target_type == "domain"
     assert target == "example.org"
-    assert normalized_jid == "*.example.org."
+    assert normalized_jid == "*.example.org"
     assert normalized_nick == "reporter"
 
 
@@ -404,13 +404,13 @@ def test_normalize_ban_target_domain_without_nick_and_jid_resource_cases_are_dis
     assert normalize_ban_target(jid="*.Sub.Example.Org.") == (
         "domain",
         "sub.example.org",
-        "*.sub.example.org.",
+        "*.sub.example.org",
         None,
     )
     assert normalize_ban_target(jid="*.Sub.Example.Org..") == (
         "domain",
         "sub.example.org",
-        "*.sub.example.org..",
+        "*.sub.example.org",
         None,
     )
     assert normalize_ban_target(jid="User@Example.Org/Device/Extra") == (

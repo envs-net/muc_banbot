@@ -29,6 +29,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from _envs_xmpp_bootstrap import ensure_envs_xmpp  # noqa: E402
+from envs_xmpp_ops import inspect_dependency_drift  # noqa: E402
 from envs_xmpp_ops.deploy import DeploymentTarget  # noqa: E402
 
 _CHECKOUT_ROOT = Path(__file__).resolve().parents[1]
@@ -383,6 +384,29 @@ def _constraint_file(deployment: Deployment) -> Path:
         raise DeployError(f"constraint snapshot missing: {path}")
     return path
 
+
+
+def _dependency_drift(deployment: Deployment):
+    """Compare installed runtime dependencies with the reviewed constraints."""
+    if not deployment.venv_python.is_file():
+        raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
+    try:
+        return inspect_dependency_drift(
+            deployment.root,
+            deployment.venv_python,
+            _constraint_file(deployment),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise DeployError(f"could not inspect runtime dependency drift: {exc}") from exc
+
+
+def _check_dependency_drift(deployment: Deployment) -> None:
+    report = _dependency_drift(deployment)
+    if report.ok:
+        print(f"OK  dependency drift: {report.summary()}")
+        return
+    details = "; ".join(report.details())
+    raise DeployError(f"runtime dependency drift detected: {details}")
 
 def _install_dependencies(deployment: Deployment) -> None:
     from envs_xmpp_ops.venv import install_editable_checkout
@@ -1247,6 +1271,11 @@ def status(deployment: Deployment) -> int:
             rows.append(("Git status", f"unavailable ({exc})"))
     if shutil.which("systemctl"):
         rows.append(("service state", "active" if _service_active(deployment) else "inactive/not found"))
+    if deployment.venv_python.is_file():
+        try:
+            rows.append(("dependency drift", _dependency_drift(deployment).summary()))
+        except DeployError as exc:
+            rows.append(("dependency drift", f"unavailable ({exc})"))
     width = max((len(label) for label, _ in rows), default=1)
     for label, value in rows:
         print(f"  {label + ':':<{width + 1}}  {value}")
@@ -1276,6 +1305,7 @@ def check(deployment: Deployment) -> int:
             "installed systemd service differs from the hardened deployment; review FAIL entries above. "
             "Existing units are intentionally not replaced automatically."
         )
+    _check_dependency_drift(deployment)
     return 0
 
 

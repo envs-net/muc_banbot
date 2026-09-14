@@ -1,13 +1,30 @@
 """Ban list, ban search, RTBL entry listing, and ban reason lookup commands."""
 
 import time
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from config import ADMIN_ROOM
 
+from .ban_target import BanTarget
+from .cache import BanTuple
 from .utils import get_list_page_size, human_time, normalize_actor, paginate_lines, resolve_page
 
 
 class BanQueryMixin:
+    """Query mixin with an explicit structural contract for static checking."""
+
+    db: Any
+    command_prefix: str
+    ban_cache: dict[str, BanTuple]
+    ban_index_by_jid: dict[str, BanTuple]
+    ban_index_by_nick: dict[str, BanTuple]
+    ban_index_by_domain: dict[str, list[BanTuple]]
+    bare_jid: Callable[[str], str]
+    bot_send_message: Callable[..., Awaitable[Any]]
+    _format_audit_row: Callable[[Any], str]
+    _rtbl_hash_jid: Callable[[str], str]
+
     @staticmethod
     def _ban_emoji(until: int, issuer: str | None) -> str:
         """Return the display icon for a ban entry."""
@@ -48,12 +65,8 @@ class BanQueryMixin:
         value = str(identifier or "").strip().lower()
         if not value:
             return None
-        if value.startswith("*."):
-            target_type, target = "domain", value[2:].strip(".")
-        elif "@" in value:
-            target_type, target = "jid", self.bare_jid(value)
-        else:
-            target_type, target = "nick", value
+        parsed = BanTarget.from_identifier(value)
+        target_type, target = parsed.kind, parsed.value
         query = """
             SELECT id, target_type, target, jid, nick, until, issuer, comment, created_at, updated_at
             FROM bans WHERE target_type = ? AND target = ?
@@ -127,7 +140,7 @@ class BanQueryMixin:
         if row:
             terms.update(str(value).lower() for value in (row[2], row[3], row[4]) if value)
         clauses = []
-        params = []
+        params: list[str] = []
         for term in sorted(terms):
             like = f"%{term}%"
             clauses.append("(LOWER(COALESCE(target,'')) LIKE ? OR LOWER(COALESCE(jid,'')) LIKE ? OR LOWER(COALESCE(nick,'')) LIKE ? OR LOWER(COALESCE(details,'')) LIKE ?)")
@@ -205,7 +218,11 @@ class BanQueryMixin:
             if not self._is_active_ban(until, now):
                 return
 
-            key = (jid or "", nick or "", until, issuer or "", comment or "")
+            try:
+                identity = BanTarget.from_parts(jid, nick)
+                key: tuple[str, str] = (identity.kind, identity.value)
+            except ValueError:
+                key = ("raw", str(jid or nick or ""))
             if key not in seen:
                 seen.add(key)
                 matches.append(self._format_ban_match(jid, nick, until, issuer, comment, now))

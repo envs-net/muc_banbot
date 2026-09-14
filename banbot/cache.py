@@ -1,9 +1,21 @@
 """In-memory ban cache and lookup index helpers."""
 
-from .utils import normalize_ban_target
+from collections.abc import Callable
+
+from .ban_target import BanTarget
+
+BanTuple = tuple[str | None, str | None, int, str | None, str | None]
 
 
 class CacheMixin:
+    """Typed contract for BanBot's in-memory ban indexes."""
+
+    ban_cache: dict[str, BanTuple]
+    ban_index_by_jid: dict[str, BanTuple]
+    ban_index_by_nick: dict[str, BanTuple]
+    ban_index_by_domain: dict[str, list[BanTuple]]
+    bare_jid: Callable[[str], str]
+
     def _build_ban_tuple(
         self,
         jid: str | None,
@@ -11,12 +23,10 @@ class CacheMixin:
         until: int,
         issuer: str | None,
         comment: str | None,
-    ) -> tuple[str | None, str | None, int, str | None, str | None]:
+    ) -> BanTuple:
         """Return a normalized ban tuple for caches and indexes."""
-        target_type, target, normalized_jid, normalized_nick = normalize_ban_target(jid, nick)
-        if target_type == "domain" and normalized_jid is None:
-            normalized_jid = f"*.{target}"
-        return (normalized_jid, normalized_nick, until, issuer, comment)
+        target = BanTarget.from_parts(jid, nick)
+        return (target.jid, target.nick, until, issuer, comment)
 
 
     def _cache_ban(
@@ -28,22 +38,19 @@ class CacheMixin:
         comment: str | None,
     ) -> None:
         """Store a single ban consistently in cache and indexes."""
-        target_type, target, normalized_jid, normalized_nick = normalize_ban_target(jid, nick)
-        if target_type == "domain" and normalized_jid is None:
-            normalized_jid = f"*.{target}"
-        ban_tuple = (normalized_jid, normalized_nick, until, issuer, comment)
+        target = BanTarget.from_parts(jid, nick)
+        ban_tuple = (target.jid, target.nick, until, issuer, comment)
 
-        if target_type == "jid":
-            self.ban_cache[target] = ban_tuple
-            self.ban_index_by_jid[target] = ban_tuple
-        elif target_type == "nick":
-            self.ban_cache[target] = ban_tuple
-            self.ban_index_by_nick[target] = ban_tuple
-        elif target_type == "domain":
-            wildcard = f"*.{target}"
-            self.ban_cache[wildcard] = ban_tuple
+        if target.kind == "jid":
+            self.ban_cache[target.value] = ban_tuple
+            self.ban_index_by_jid[target.value] = ban_tuple
+        elif target.kind == "nick":
+            self.ban_cache[target.value] = ban_tuple
+            self.ban_index_by_nick[target.value] = ban_tuple
+        else:
+            self.ban_cache[target.identifier] = ban_tuple
             # One row per domain target; replace instead of appending to avoid stale duplicates after updates.
-            self.ban_index_by_domain[target] = [ban_tuple]
+            self.ban_index_by_domain[target.value] = [ban_tuple]
 
 
     def _remove_ban_from_cache(self, identifier: str, ban_jid: str | None = None, ban_nick: str | None = None) -> None:

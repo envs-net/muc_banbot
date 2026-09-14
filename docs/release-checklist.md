@@ -65,6 +65,7 @@ Check:
 * Confirm README/docs mention any new operator-facing behavior.
 * Verify `config.py` is not committed and `config_sample.py` remains safe to publish.
 * For hardened deployments, verify `deploy.sh check` rejects mutable paths outside the configured data directory.
+* Confirm `deploy.sh check` reports no runtime dependency drift from the reviewed Python constraint snapshot.
 * Verify hardened ownership/modes remain `/etc/muc_banbot` `0750`, `config.py` `0600`, and `/var/lib/muc_banbot` `0700` for the service account.
 * Verify runtime `!config set/unset` keeps `config.py` at `0600`.
 

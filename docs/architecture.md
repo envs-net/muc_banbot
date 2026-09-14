@@ -397,12 +397,28 @@ Use the module that already owns the responsibility:
 - protection definitions/checks/actions: `banbot.protections/*`
 - RTBL subscribe/apply/publish behavior: `banbot.rtbl/*`
 - backup and restore: `banbot.backups/*`
+- canonical ban identities (JID/nick/wildcard domain): `banbot.ban_target`
 - DB schema/core persistence: `banbot.db`
 - cross-subsystem mutation locking: `banbot.locks`
 - shared outbound messages: `banbot.messaging`
 - audit, alerts, redaction, or update checks: the matching focused module
 
 Avoid adding a second persistence path, occupant-identity implementation, command router, or subsystem-specific ban lock when a shared implementation already exists.
+
+### Canonical ban targets
+
+`banbot.ban_target.BanTarget` is the single normalization boundary for ban
+identity. Database rows, in-memory indexes, command lookup, room outcast
+recovery and ban search all normalize JIDs to bare lowercase JIDs, wildcard
+domains to one `*.domain.tld` identifier, and nicks to lowercase values. Bare
+dotted strings remain nick-like unless a caller has already established domain
+intent, preserving command compatibility while avoiding duplicate identities.
+
+The configured mypy gate intentionally expands incrementally around these
+well-defined contracts. The canonical target, utility, cache and ban-query
+surfaces are now part of the mandatory typed production gate; the remaining
+large mixin graph is migrated progressively rather than hidden behind broad
+ignores.
 
 ### Deployment and health ownership
 

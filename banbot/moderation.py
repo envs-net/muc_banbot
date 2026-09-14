@@ -10,6 +10,7 @@ from slixmpp.exceptions import IqError, IqTimeout
 
 from config import ADMIN_ROOM
 
+from .ban_target import BanTarget
 from .locks import ban_state_lock, is_maintenance_mode
 from .task_supervisor import sleep_with_heartbeat
 from .utils import (
@@ -17,7 +18,6 @@ from .utils import (
     human_time,
     looks_like_domain,
     normalize_actor,
-    normalize_ban_target,
     validate_domain_ban,
     validate_jid_format,
 )
@@ -440,9 +440,11 @@ class ModerationMixin:
                 )
                 return
 
-        target_type, target, normalized_jid, normalized_nick = normalize_ban_target(ban_jid, ban_nick)
-        if target_type == "domain" and normalized_jid is None:
-            normalized_jid = f"*.{target}"
+        ban_target = BanTarget.from_parts(ban_jid, ban_nick)
+        target_type = ban_target.kind
+        target = ban_target.value
+        normalized_jid = ban_target.jid
+        normalized_nick = ban_target.nick
 
         # If a nick-only command targets a nick that is already known on an
         # active JID ban, update that JID ban instead of creating a second
@@ -457,11 +459,13 @@ class ModerationMixin:
                     normalized_nick,
                     existing_jid,
                 )
-                normalized_jid = existing_jid
-                target_type = "jid"
-                target = existing_jid
+                ban_target = BanTarget.from_parts(existing_jid, normalized_nick)
+                target_type = ban_target.kind
+                target = ban_target.value
+                normalized_jid = ban_target.jid
+                normalized_nick = ban_target.nick
 
-        db_key = f"*.{target}" if target_type == "domain" else target
+        db_key = ban_target.identifier
         skip_final_message = False
         update_details: dict[str, object] = {"identifier": identifier}
         db_issuer = issuer
@@ -519,7 +523,7 @@ class ModerationMixin:
                 log.info("🔄 Converting permanent ban to tempban for %s", identifier)
                 await self.bot_send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"🔄 Converting permanent ban to tempban for {identifier} ({human_time(until - int(time.time()))})",
+                    mbody=f"🔄 Converting permanent ban to tempban for {identifier} ({human_time(ts - int(time.time()))})",
                     mtype="groupchat"
                 )
                 skip_final_message = True
@@ -532,7 +536,7 @@ class ModerationMixin:
                 )
                 skip_final_message = True
             else:
-                new_duration = human_time(until - int(time.time()))
+                new_duration = human_time(ts - int(time.time()))
                 old_duration = human_time(max(0, existing_until - int(time.time())))
                 log.info("🔄 Updating tempban for %s: %s → %s", identifier, old_duration, new_duration)
                 reason_suffix = " and reason" if reason_changed else ""
@@ -712,7 +716,23 @@ class ModerationMixin:
 
                 expired = []
                 for target_type, target, ban_jid, ban_nick in rows:
-                    identifier = f"*.{target}" if target_type == "domain" else (self.bare_jid(ban_jid) if ban_jid else ban_nick)
+                    try:
+                        expired_target = BanTarget.from_storage(
+                            target_type,
+                            target,
+                            jid=ban_jid,
+                            nick=ban_nick,
+                        )
+                    except ValueError:
+                        log.warning(
+                            "Skipping invalid expired ban target: type=%r target=%r jid=%r nick=%r",
+                            target_type,
+                            target,
+                            ban_jid,
+                            ban_nick,
+                        )
+                        continue
+                    identifier = expired_target.identifier
                     log.info("⏳ Temporary ban expired: %s, auto-unbanning...", identifier)
                     removed = await self.unban_all(
                         identifier,

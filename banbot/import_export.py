@@ -14,9 +14,9 @@ try:
 except ModuleNotFoundError:
     config = None
 
+from .ban_target import BanTarget
 from .utils import (
     get_list_page_size,
-    normalize_ban_target,
     paginate_lines,
     resolve_page,
     validate_domain_ban,
@@ -298,23 +298,24 @@ class ImportExportMixin:
                     errors.append(f"Row {row_num}: until must be a valid number or empty (got '{until_str}')")
                     skipped += 1
                     continue
-                target_type, target, normalized_jid, normalized_nick = normalize_ban_target(jid, nick)
-                if target_type == "domain" and normalized_jid is None:
-                    normalized_jid = f"*.{target}"
-                if target_type == "nick" and normalized_nick:
-                    existing_jid_ban = await self.find_active_jid_ban_by_nick(normalized_nick)
+                ban_target = BanTarget.from_parts(jid, nick)
+                if ban_target.kind == "nick" and ban_target.nick:
+                    existing_jid_ban = await self.find_active_jid_ban_by_nick(ban_target.nick)
                     if existing_jid_ban:
                         existing_jid, _existing_until, _existing_issuer, _existing_comment = existing_jid_ban
                         log.info(
                             "Row %d: resolving nick-only import %s to existing JID ban %s",
                             row_num,
-                            normalized_nick,
+                            ban_target.nick,
                             existing_jid,
                         )
-                        target_type = "jid"
-                        target = existing_jid
-                        normalized_jid = existing_jid
-                lookup_key = f"*.{target}" if target_type == "domain" else target
+                        ban_target = BanTarget.from_parts(existing_jid, ban_target.nick)
+
+                target_type = ban_target.kind
+                target = ban_target.value
+                normalized_jid = ban_target.jid
+                normalized_nick = ban_target.nick
+                lookup_key = ban_target.identifier
 
                 existing = self.ban_cache.get(lookup_key)
                 if existing:

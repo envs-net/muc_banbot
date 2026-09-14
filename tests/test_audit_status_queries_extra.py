@@ -188,6 +188,26 @@ async def test_ban_queries_cover_search_list_rtbl_and_why(temp_db_path):
 
 
 @pytest.mark.asyncio
+async def test_bansearch_deduplicates_same_canonical_jid_across_cache_aliases(temp_db_path):
+    bot = AuditStatusQueryBot()
+    await bot.setup_db()
+    try:
+        bot.rtbl_enabled = False
+        canonical = ("dup@jabber.vg", None, 0, "manual", "first")
+        alias = ("dup@jabber.vg", "dup", 0, "syncbans", "Recovered from room")
+        bot.ban_index_by_jid["dup@jabber.vg"] = canonical
+        bot.ban_cache["dup@jabber.vg"] = canonical
+        bot.ban_cache["legacy-alias"] = alias
+
+        await bot.cmd_bansearch("jabber.vg")
+        body = last_body(bot)
+        assert body.count("dup@jabber.vg") == 1
+        assert "Regular bans: 1" in body
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_status_and_config_outputs_include_operational_sections(temp_db_path, monkeypatch):
     bot = AuditStatusQueryBot()
     await bot.setup_db()

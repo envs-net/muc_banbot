@@ -14,6 +14,7 @@ from envs_xmpp_core.xmpp.occupants import (
 
 from config import ADMIN_ROOM, NICK
 
+from .ban_target import BanTarget
 from .locks import ban_state_lock
 from .occupants import BotOccupantMixin
 from .utils import domain_matches, looks_like_domain
@@ -668,7 +669,11 @@ class MucMixin(BotOccupantMixin):
 
         jid_bare = self.bare_jid(jid)
         is_domain_outcast = looks_like_domain(jid_bare)
-        ban_target = f"*.{jid_bare.strip('.')}" if is_domain_outcast else jid_bare
+        recovered_target = BanTarget.from_identifier(
+            jid_bare,
+            plain_domain=is_domain_outcast,
+        )
+        ban_target = recovered_target.identifier
         issuer = "manual_muc_ban"
         comment = reason or "Recovered from room"
         now = int(time.time())
