@@ -88,6 +88,48 @@ def test_deploy_python_environment_disables_bytecode_writes(tmp_path):
     assert deployment.environment["MUC_BANBOT_CONFIG"] == str(deployment.config)
 
 
+def test_constraint_file_matches_virtualenv_python(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    deployment.venv_python.parent.mkdir(parents=True)
+    deployment.venv_python.write_text("", encoding="utf-8")
+    constraints = deployment.root / "constraints"
+    constraints.mkdir()
+    expected = constraints / "python313.txt"
+    expected.write_text("slixmpp==1.17.0\n", encoding="utf-8")
+
+    class Result:
+        stdout = "3.13\n"
+
+    monkeypatch.setattr(deploy, "_run", lambda *_args, **_kwargs: Result())
+
+    assert deploy._constraint_file(deployment) == expected
+
+
+def test_install_dependencies_uses_python_constraint_snapshot(tmp_path, monkeypatch):
+    deployment = _deployment(tmp_path)
+    constraint = deployment.root / "constraints" / "python313.txt"
+    constraint.parent.mkdir()
+    constraint.write_text("slixmpp==1.17.0\n", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(deploy, "_constraint_file", lambda _deployment: constraint)
+
+    import envs_xmpp_ops.venv as venv_ops
+
+    def fake_install_editable_checkout(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(venv_ops, "install_editable_checkout", fake_install_editable_checkout)
+
+    deploy._install_dependencies(deployment)
+
+    assert captured["pip"] == deployment.pip
+    assert captured["root"] == deployment.root
+    assert captured["constraints"] == constraint
+    assert captured["deployment"] is deployment
+    assert captured["run_command"] is deploy._run
+
+
 def test_systemd_exec_path_parser_returns_clean_executable_path():
     value = (
         "{ path=/srv/adminbot/muc_banbot/venv/bin/muc_banbot ; "

@@ -352,12 +352,45 @@ def _create_venv_if_missing(deployment: Deployment) -> None:
     )
 
 
+def _venv_version(deployment: Deployment) -> tuple[int, int]:
+    if not deployment.venv_python.is_file():
+        raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
+    result = _run(
+        [
+            deployment.venv_python,
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
+        deployment=deployment,
+        capture=True,
+        announce=False,
+    )
+    try:
+        major, minor = result.stdout.strip().split(".", 1)
+        return int(major), int(minor)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise DeployError("could not determine virtualenv Python version") from exc
+
+
+def _constraint_file(deployment: Deployment) -> Path:
+    major, minor = _venv_version(deployment)
+    if major != 3 or minor not in {12, 13}:
+        raise DeployError(
+            f"unsupported Python version {major}.{minor}; muc_banbot supports Python 3.12/3.13"
+        )
+    path = deployment.root / f"constraints/python3{minor}.txt"
+    if not path.is_file():
+        raise DeployError(f"constraint snapshot missing: {path}")
+    return path
+
+
 def _install_dependencies(deployment: Deployment) -> None:
     from envs_xmpp_ops.venv import install_editable_checkout
 
     install_editable_checkout(
         pip=deployment.pip,
         root=deployment.root,
+        constraints=_constraint_file(deployment),
         run_command=_run,
         deployment=deployment,
     )
