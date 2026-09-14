@@ -95,8 +95,15 @@ async def test_status_compact_summarizes_rooms_without_inventory(monkeypatch):
 
     assert body.startswith("🤖 muc_banbot Status")
     assert "⚙️ Core:" in body
+    assert "JID:" in body
+    assert "Prefix: !" in body
+    assert "Connection uptime: unknown" in body
     assert "🖥️ Runtime:" in body
+    assert "envs-xmpp:" in body
     assert "💬 XMPP:" in body
+    assert "🗄️ Database:" in body
+    assert "Status: disconnected" in body
+    assert "Path:" in body
     assert "Summary: 12 configured · 2 joined · 11 issues" in body
     assert "room00@conference.example.test" not in body
     assert "🛡️ Moderation:" in body

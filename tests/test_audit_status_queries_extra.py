@@ -221,7 +221,14 @@ async def test_status_and_config_outputs_include_operational_sections(temp_db_pa
         assert "Bot is online" in body
         assert "⚙️ Core:" in body
         assert "Version:" in body
+        assert "JID:" in body
+        assert "Prefix: !" in body
+        assert "Connection uptime:" in body
+        assert "🖥️ Runtime:" in body
         assert f"envs-xmpp: {envs_xmpp_version}" in body
+        assert "🗄️ Database:" in body
+        assert "Status: connected" in body
+        assert "Path:" in body
         assert "🛡️ Moderation:" in body
         assert "RTBL:" in body
         assert "💬 XMPP:" in body

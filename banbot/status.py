@@ -126,21 +126,30 @@ class StatusMixin:
         else:
             banner = "✅ Bot is online and healthy."
 
+        boundjid = getattr(self, "boundjid", None)
         core_lines = [
             f"Version: {__version__}",
-            f"envs-xmpp: {envs_xmpp_version}",
-            f"Uptime: {human_time(max(0, now - int(getattr(self, 'bot_start_time', now) or now)))}",
         ]
         if getattr(self, "last_version_check_result", None):
             core_lines.append(f"Latest release: {self.last_version_check_result}")
+        core_lines.extend(
+            [
+                f"JID: {boundjid or getattr(config, 'JID', 'unknown')}",
+                f"Prefix: {self.command_prefix}",
+                f"Uptime: {human_time(max(0, now - int(getattr(self, 'bot_start_time', now) or now)))}",
+            ]
+        )
         server_connect_time = getattr(self, "server_connect_time", None)
         if server_connect_time:
             core_lines.append(f"Connection uptime: {human_time(max(0, now - int(server_connect_time)))}")
+        else:
+            core_lines.append("Connection uptime: unknown")
         if getattr(self, "last_reconnect_time", None):
             core_lines.append(f"Last reconnect: {human_time(max(0, now - int(self.last_reconnect_time)))} ago")
 
         runtime_lines = [
             f"Python: {os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}",
+            f"envs-xmpp: {envs_xmpp_version}",
             f"slixmpp: {_package_version('slixmpp')}",
         ]
         try:
@@ -154,7 +163,6 @@ class StatusMixin:
         except Exception as exc:
             log.debug("Could not read process metrics: %s", exc)
 
-        boundjid = getattr(self, "boundjid", None)
         connect_host = getattr(config, "CONNECT_HOST", None) or getattr(boundjid, "host", None) or "JID domain"
         connect_port = getattr(config, "CONNECT_PORT", 5222)
         connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
@@ -224,6 +232,8 @@ class StatusMixin:
 
         redaction_total, redaction_redacted = await self._redaction_counts()
         database_lines = [
+            f"Status: {'connected' if getattr(self, 'db', None) is not None else 'disconnected'}",
+            f"Path: {getattr(config, 'DB_FILE', 'unknown')}",
             f"Size: {self.human_size(int(db_stats.get('db_size_bytes', 0) or 0))}",
             f"Audit events: {int(db_stats.get('audit_events', 0) or 0)} (retention: {self.audit_log_retention_days}d)",
         ]
