@@ -278,6 +278,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         ban_nick: str | None,
         comment: str,
         announce_missing_rights: bool = True,
+        log_success: bool = True,
     ) -> None:
         """Record a requested room ban operation for test assertions.
 
@@ -286,6 +287,7 @@ class SyncBot(SyncMixin, DatabaseMixin, CacheMixin):
         sync behavior.
         """
         self.applied.append((room, ban_jid, ban_nick, comment, announce_missing_rights))
+        self.last_apply_log_success = log_success
 
     async def unban_all(self, target, issuer="system", *, notify_policy=True):
         self.unbanned.append((target, issuer))
@@ -361,6 +363,7 @@ async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, sync_m
         ]
         assert len(bot.applied) == 1
         assert all(applied[1] != "already@example.test" for applied in bot.applied)
+        assert bot.last_apply_log_success is False
         assert any("Finished syncing room" in msg["mbody"] for msg in bot.sent)
     finally:
         await bot.db.close()

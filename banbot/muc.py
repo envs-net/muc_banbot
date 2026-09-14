@@ -241,9 +241,9 @@ class MucMixin(BotOccupantMixin):
                     "waiting for Slixmpp retry"
                 )
             else:
-                log.warning(
-                    "Initial XMPP connection attempt failed before session_start; "
-                    "waiting for Slixmpp retry"
+                log.info(
+                    "Initial XMPP transport attempt failed before session_start; "
+                    "waiting for Slixmpp retry/fallback"
                 )
 
             # On the very first process startup, keep Type=notify alive while

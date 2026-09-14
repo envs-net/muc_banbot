@@ -167,3 +167,28 @@ async def test_repeated_successful_enforcement_keeps_action_but_deduplicates_inf
     assert [call["nick"] for call in bot.plugin["xep_0045"].roles] == ["User", "User"]
     # But the identical successful action is only operator-visible once at INFO.
     assert caplog.text.count("✅ Kicked User from room@conference.example.test") == 1
+
+
+@pytest.mark.asyncio
+async def test_bulk_sync_can_suppress_success_logs_without_skipping_enforcement(
+    monkeypatch,
+    caplog,
+):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = ApplyRoomBot()
+
+    with caplog.at_level("INFO", logger="banbot.moderation"):
+        await bot.apply_ban_to_room(
+            "room@conference.example.test",
+            "user@example.test",
+            "User",
+            "startup sync",
+            issuer="system",
+            log_success=False,
+        )
+
+    assert bot.plugin["xep_0045"].affiliations
+    assert bot.plugin["xep_0045"].roles
+    assert "Outcast set" not in caplog.text
+    assert "Kicked User" not in caplog.text

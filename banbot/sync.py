@@ -168,7 +168,7 @@ class SyncMixin:
                         log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
 
                 if not already_banned:
-                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
+                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment, log_success=False))
                     new_bans_count += 1
 
             if tasks:
@@ -601,6 +601,7 @@ class SyncMixin:
                             ban_nick,
                             comment,
                             announce_missing_rights=False,
+                            log_success=False,
                         )
                     )
                     new_bans_count += 1
@@ -877,6 +878,7 @@ class SyncMixin:
                             ban_nick,
                             comment,
                             announce_missing_rights=False,
+                            log_success=False,
                         )
                     )
                     applied_bans_set.add((ban_jid, ban_nick))

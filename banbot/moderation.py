@@ -173,6 +173,7 @@ class ModerationMixin:
         comment: str | None,
         issuer: str | None = None,
         announce_missing_rights: bool = True,
+        log_success: bool = True,
     ) -> None:
         """
         Apply a ban to a room:
@@ -211,12 +212,13 @@ class ModerationMixin:
                             affiliation="outcast",
                             reason=comment or "Banned by admin"
                         )
-                    self._log_moderation_success(
-                        f"outcast:{room.casefold()}:{ban_jid_bare.casefold()}",
-                        "✅ Outcast set for %s in %s",
-                        ban_jid_bare,
-                        room,
-                    )
+                    if log_success:
+                        self._log_moderation_success(
+                            f"outcast:{room.casefold()}:{ban_jid_bare.casefold()}",
+                            "✅ Outcast set for %s in %s",
+                            ban_jid_bare,
+                            room,
+                        )
                     break
                 except IqTimeout:
                     log.warning("Timeout setting outcast for %s in %s, retrying...", ban_jid_bare, room)
@@ -255,12 +257,13 @@ class ModerationMixin:
                                 reason=comment or "Banned by admin"
                             )
                         identity = self.bare_jid(jid_in_room) if jid_in_room else nick_name.casefold()
-                        self._log_moderation_success(
-                            f"kick:{room.casefold()}:{identity}",
-                            "✅ Kicked %s from %s",
-                            nick_name,
-                            room,
-                        )
+                        if log_success:
+                            self._log_moderation_success(
+                                f"kick:{room.casefold()}:{identity}",
+                                "✅ Kicked %s from %s",
+                                nick_name,
+                                room,
+                            )
                         break
                     except IqTimeout:
                         log.warning("Timeout kicking %s in %s, retrying...", nick_name, room)
