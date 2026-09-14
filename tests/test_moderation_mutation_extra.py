@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import importlib
 import asyncio
+import importlib
 import time
 
 import pytest
@@ -149,8 +149,34 @@ async def test_domain_ban_publishes_domain_and_applies_only_matching_occupants(t
         await bot.ban_all("*.spam.example", None, issuer="admin@example.test", comment="domain spam")
 
         assert bot.published == [(None, "spam.example", "domain spam")]
-        assert [call["jid"] for call in bot.plugin["xep_0045"].affiliations] == ["bad@spam.example"]
+        assert [call["jid"] for call in bot.plugin["xep_0045"].affiliations] == ["spam.example"]
+        assert bot.plugin["xep_0045"].affiliations[0]["affiliation"] == "outcast"
         assert {call["nick"] for call in bot.plugin["xep_0045"].roles} == {"Domain"}
+        assert "*.spam.example" in bot.ban_cache
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_domain_ban_persists_room_outcast_even_without_online_match(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        bot.occupants["room@conference.example.test"].pop("Domain")
+
+        await bot.ban_all("*.spam.example", None, issuer="admin@example.test", comment="domain spam")
+
+        assert bot.plugin["xep_0045"].affiliations == [
+            {
+                "room": "room@conference.example.test",
+                "jid": "spam.example",
+                "affiliation": "outcast",
+                "reason": "domain spam",
+            }
+        ]
+        assert bot.plugin["xep_0045"].roles == []
         assert "*.spam.example" in bot.ban_cache
     finally:
         await bot.db.close()

@@ -128,22 +128,20 @@ class ModerationMixin:
         async def apply_to_room(room: str) -> None:
             try:
                 if is_domain:
-                    for nick, info in list(self.occupants.get(room, {}).items()):
-                        jid_in_room = info.get("jid")
-                        bare_in_room = self.bare_jid(jid_in_room) if jid_in_room else None
-                        domain_in_room = (
-                            bare_in_room.split("@", 1)[1].lower()
-                            if bare_in_room and "@" in bare_in_room
-                            else None
-                        )
-                        if domain_matches(domain_in_room, target):
-                            await self.apply_ban_to_room(
-                                room,
-                                bare_in_room,
-                                nick,
-                                comment,
-                                issuer,
-                            )
+                    # Apply the wildcard itself once per room.  The room-level
+                    # helper persists the bare domain as an outcast and also
+                    # kicks every currently matching occupant.  Expanding the
+                    # domain into the JIDs that happen to be online here would
+                    # only create per-user outcasts and leave future users from
+                    # the banned domain able to join.
+                    domain_jid = normalized_jid or f"*.{target}"
+                    await self.apply_ban_to_room(
+                        room,
+                        domain_jid,
+                        None,
+                        comment,
+                        issuer,
+                    )
                 else:
                     await self.apply_ban_to_room(
                         room,
