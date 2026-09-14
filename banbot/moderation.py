@@ -197,34 +197,43 @@ class ModerationMixin:
 
             return
 
-        is_domain = ban_jid and ban_jid.startswith("*.")
+        is_domain = bool(ban_jid and ban_jid.startswith("*."))
         ban_jid_bare = None if is_domain else self.bare_jid(ban_jid)
+        domain_outcast = ban_jid[2:].strip(".").lower() if is_domain and ban_jid else None
         room_occupants = self.occupants.get(room, {})
 
         # --- Step 1: Set Outcast (offline ban) ---
-        if ban_jid_bare and not is_domain:
+        # MUC affiliation lists represent wildcard domain bans using a bare
+        # domain JID (for example ``jabber.vg``), not ``*.jabber.vg``.  Older
+        # BanBot code deliberately skipped the outcast step for domain bans and
+        # only kicked matching occupants.  That meant a banned-domain client
+        # could rejoin indefinitely and be kicked again every time.  Persist the
+        # domain as an outcast as well; if a server does not support domain-only
+        # affiliations, the kick path below remains a best-effort fallback.
+        outcast_target = domain_outcast or ban_jid_bare
+        if outcast_target:
             for _attempt in range(3):
                 try:
                     async with self.muc_write_semaphore:
                         await self.plugin["xep_0045"].set_affiliation(
                             room=room,
-                            jid=ban_jid_bare,
+                            jid=outcast_target,
                             affiliation="outcast",
                             reason=comment or "Banned by admin"
                         )
                     if log_success:
                         self._log_moderation_success(
-                            f"outcast:{room.casefold()}:{ban_jid_bare.casefold()}",
+                            f"outcast:{room.casefold()}:{outcast_target.casefold()}",
                             "✅ Outcast set for %s in %s",
-                            ban_jid_bare,
+                            outcast_target,
                             room,
                         )
                     break
                 except IqTimeout:
-                    log.warning("Timeout setting outcast for %s in %s, retrying...", ban_jid_bare, room)
+                    log.warning("Timeout setting outcast for %s in %s, retrying...", outcast_target, room)
                     await asyncio.sleep(1)
                 except IqError as e:
-                    log.warning("IqError setting outcast for %s in %s: %s", ban_jid_bare, room, iq_error_summary(e))
+                    log.warning("IqError setting outcast for %s in %s: %s", outcast_target, room, iq_error_summary(e))
                     break
 
         # --- Step 2: Kick matching occupants in parallel ---

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import importlib
 import asyncio
+import importlib
 
 import pytest
 
@@ -100,7 +100,7 @@ async def test_apply_ban_to_room_skips_admin_kick_and_reports_missing_bot_rights
 
 
 @pytest.mark.asyncio
-async def test_apply_domain_ban_kicks_matching_domain_only(monkeypatch):
+async def test_apply_domain_ban_sets_domain_outcast_and_kicks_matching_domain_only(monkeypatch):
     moderation_module = importlib.import_module("banbot.moderation")
 
     monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
@@ -114,9 +114,13 @@ async def test_apply_domain_ban_kicks_matching_domain_only(monkeypatch):
         issuer="admin@example.test",
     )
 
-    roles = bot.plugin["xep_0045"].roles
+    muc = bot.plugin["xep_0045"]
+    roles = muc.roles
     assert {call["nick"] for call in roles} == {"DomainUser"}
-    assert bot.plugin["xep_0045"].affiliations == []
+    assert len(muc.affiliations) == 1
+    assert muc.affiliations[0]["jid"] == "spam.example"
+    assert muc.affiliations[0]["affiliation"] == "outcast"
+    assert muc.affiliations[0]["reason"] == "domain spam"
 
 
 @pytest.mark.asyncio
