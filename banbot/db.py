@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import TYPE_CHECKING, TypedDict
 
 import aiosqlite
 from envs_xmpp_core.release.state import RELEASE_STATE_TABLE_SQL
@@ -14,7 +15,32 @@ from .utils import looks_like_domain, normalize_actor
 log = logging.getLogger(__name__)
 
 
-def _stronger_ban_row(previous: dict | None, current: dict) -> dict:
+if TYPE_CHECKING:
+    from .contracts import DatabaseMixinHost
+
+    class _DatabaseMixinContract(DatabaseMixinHost):
+        pass
+else:
+    class _DatabaseMixinContract:
+        pass
+
+
+class _NormalizedBanRow(TypedDict):
+    target_type: str
+    target: str
+    jid: str | None
+    nick: str | None
+    until: int
+    issuer: str | None
+    comment: str | None
+    created_at: int
+    updated_at: int
+
+
+def _stronger_ban_row(
+    previous: _NormalizedBanRow | None,
+    current: _NormalizedBanRow,
+) -> _NormalizedBanRow:
     """Return the stronger ban row when normalizing duplicate ban targets."""
     if previous is None:
         return current
@@ -35,7 +61,19 @@ def _stronger_ban_row(previous: dict | None, current: dict) -> dict:
     return previous
 
 
-class DatabaseMixin:
+class DatabaseMixin(_DatabaseMixinContract):
+    def _require_db(self) -> aiosqlite.Connection:
+        """Return the initialized database connection or fail with context.
+
+        Most DatabaseMixin operations are valid only after setup_db().  Keeping
+        that lifecycle assumption in one guard gives both runtime callers and
+        static checking a precise non-optional connection.
+        """
+        db: aiosqlite.Connection | None = getattr(self, "db", None)
+        if db is None:
+            raise RuntimeError("BanBot database is not initialized")
+        return db
+
     async def setup_db(self, *, create_startup_backup: bool = True) -> None:
         """Initialize SQLite DB, migrate bans schema, create indexes, load rooms."""
         if create_startup_backup and hasattr(self, "create_startup_database_snapshot"):
@@ -268,8 +306,9 @@ class DatabaseMixin:
         """
         Load all active bans from the database into RAM cache with O(1) lookup indexes.
         """
+        db = self._require_db()
         now = int(time.time())
-        async with self.db.execute(
+        async with db.execute(
             """
             SELECT target_type, target, jid, nick, until, issuer, comment
             FROM bans
@@ -305,7 +344,7 @@ class DatabaseMixin:
     async def find_active_jid_ban_by_nick(
         self,
         nick: str | None,
-    ) -> tuple[str | None, int | None, str | None, str | None] | None:
+    ) -> tuple[str, int, str | None, str | None] | None:
         """Return an active JID ban row for a nick, if one already exists.
 
         This prevents creating a second nick-only ban for a user who already has
@@ -315,9 +354,10 @@ class DatabaseMixin:
             return None
 
         normalized_nick = nick.lower().strip()
+        db = self._require_db()
         now = int(time.time())
 
-        async with self.db.execute(
+        async with db.execute(
             """
             SELECT jid, until, issuer, comment
             FROM bans
@@ -351,7 +391,8 @@ class DatabaseMixin:
             return 0
 
         normalized_nick = nick.lower().strip()
-        async with self.db.execute(
+        db = self._require_db()
+        async with db.execute(
             "DELETE FROM bans WHERE target_type = 'nick' AND target = ?",
             (normalized_nick,),
         ) as cur:
@@ -379,8 +420,9 @@ class DatabaseMixin:
         normalized_jid = ban_target.jid
         normalized_nick = ban_target.nick
         issuer = normalize_actor(issuer)
+        db = self._require_db()
 
-        await self.db.execute(
+        await db.execute(
             """
             INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))
@@ -397,7 +439,7 @@ class DatabaseMixin:
         if target_type == "jid" and normalized_nick:
             await self.delete_duplicate_nick_ban(normalized_nick)
 
-        await self.db.commit()
+        await db.commit()
         self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
 
 
@@ -409,7 +451,8 @@ class DatabaseMixin:
         always be bare JIDs, because XMPP resources are only client sessions and
         change frequently.
         """
-        async with self.db.execute(
+        db = self._require_db()
+        async with db.execute(
             """
             SELECT id, target_type, target, jid, nick, until, issuer, comment,
                    created_at, updated_at
@@ -421,7 +464,7 @@ class DatabaseMixin:
         if not rows:
             return
 
-        normalized_rows: dict[tuple[str, str], dict] = {}
+        normalized_rows: dict[tuple[str, str], _NormalizedBanRow] = {}
         changed = False
 
         for (
@@ -478,7 +521,7 @@ class DatabaseMixin:
                 changed = True
 
             key = (normalized_type, normalized_target)
-            current = {
+            current: _NormalizedBanRow = {
                 "target_type": normalized_type,
                 "target": normalized_target,
                 "jid": normalized_jid,
@@ -504,8 +547,8 @@ class DatabaseMixin:
         if not changed and len(normalized_rows) == len(rows):
             return
 
-        await self.db.execute("DELETE FROM bans")
-        await self.db.executemany(
+        await db.execute("DELETE FROM bans")
+        await db.executemany(
             """
             INSERT INTO bans
                 (target_type, target, jid, nick, until, issuer, comment, created_at, updated_at)
@@ -526,7 +569,7 @@ class DatabaseMixin:
                 for row in normalized_rows.values()
             ],
         )
-        await self.db.commit()
+        await db.commit()
         log.info("Normalized %d existing ban row(s)", len(rows))
 
 
@@ -538,17 +581,19 @@ class DatabaseMixin:
             plain_domain=ident.startswith("*.") or looks_like_domain(ident),
         )
 
-        cur = await self.db.execute(
+        db = self._require_db()
+        cur = await db.execute(
             "DELETE FROM bans WHERE target_type = ? AND target = ?",
             (target.kind, target.value),
         )
-        await self.db.commit()
+        await db.commit()
         return cur.rowcount
 
 
     async def get_public_policy(self) -> tuple[bool, str]:
         """Return public policy enabled state and text."""
-        async with self.db.execute(
+        db = self._require_db()
+        async with db.execute(
             "SELECT enabled, text FROM public_policy WHERE id = 1"
         ) as cursor:
             row = await cursor.fetchone()
@@ -561,7 +606,8 @@ class DatabaseMixin:
 
     async def set_public_policy_text(self, text: str, enabled: bool = True) -> None:
         """Persist public policy text and optionally enable it."""
-        await self.db.execute(
+        db = self._require_db()
+        await db.execute(
             """
             INSERT INTO public_policy (id, enabled, text, updated_at)
             VALUES (1, ?, ?, strftime('%s','now'))
@@ -573,12 +619,13 @@ class DatabaseMixin:
             """,
             (1 if enabled else 0, text),
         )
-        await self.db.commit()
+        await db.commit()
 
 
     async def set_public_policy_enabled(self, enabled: bool) -> None:
         """Enable or disable the public policy command."""
-        await self.db.execute(
+        db = self._require_db()
+        await db.execute(
             """
             INSERT INTO public_policy (id, enabled, text, updated_at)
             VALUES (1, ?, '', strftime('%s','now'))
@@ -589,12 +636,13 @@ class DatabaseMixin:
             """,
             (1 if enabled else 0,),
         )
-        await self.db.commit()
+        await db.commit()
 
 
     async def clear_public_policy(self) -> None:
         """Clear and disable the public policy text."""
-        await self.db.execute(
+        db = self._require_db()
+        await db.execute(
             """
             INSERT INTO public_policy (id, enabled, text, updated_at)
             VALUES (1, 0, '', strftime('%s','now'))
@@ -605,4 +653,4 @@ class DatabaseMixin:
                 updated_at = strftime('%s','now')
             """
         )
-        await self.db.commit()
+        await db.commit()

@@ -123,6 +123,32 @@ async def test_apply_domain_ban_sets_domain_outcast_and_kicks_matching_domain_on
     assert muc.affiliations[0]["reason"] == "domain spam"
 
 
+
+
+@pytest.mark.asyncio
+async def test_apply_domain_ban_ignores_malformed_occupant_jid(monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = ApplyRoomBot()
+    occupants = bot.occupants["room@conference.example.test"]
+    occupants["Malformed"] = {
+        "jid": "not-a-jid",
+        "affiliation": "member",
+        "role": "participant",
+    }
+
+    await bot.apply_ban_to_room(
+        "room@conference.example.test",
+        "*.spam.example",
+        None,
+        "domain spam",
+        issuer="admin@example.test",
+    )
+
+    assert {call["nick"] for call in bot.plugin["xep_0045"].roles} == {"DomainUser"}
+
+
 @pytest.mark.asyncio
 async def test_apply_unban_to_room_removes_outcast_and_restores_online_user(monkeypatch):
     moderation_module = importlib.import_module("banbot.moderation")

@@ -53,6 +53,15 @@ class DbBot(DatabaseMixin, CacheMixin):
         return str(jid).split("/", 1)[0].lower()
 
 
+
+
+def test_database_operation_before_setup_fails_with_clear_error():
+    bot = DbBot()
+
+    with pytest.raises(RuntimeError, match="database is not initialized"):
+        bot._require_db()
+
+
 @pytest.mark.asyncio
 async def test_setup_db_creates_schema_and_loads_rooms(temp_db_path):
     bot = DbBot()

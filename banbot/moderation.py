@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from envs_xmpp_core.runtime import KeyedCooldown
 from envs_xmpp_core.xmpp import iq_error_summary
@@ -25,7 +26,17 @@ from .utils import (
 log = logging.getLogger(__name__)
 
 
-class ModerationMixin:
+if TYPE_CHECKING:
+    from .contracts import ModerationMixinHost
+
+    class _ModerationMixinContract(ModerationMixinHost):
+        pass
+else:
+    class _ModerationMixinContract:
+        pass
+
+
+class ModerationMixin(_ModerationMixinContract):
     _MODERATION_SUCCESS_LOG_COOLDOWN_SECONDS = 15 * 60
 
     def _moderation_log_gate(self) -> KeyedCooldown:
@@ -196,8 +207,9 @@ class ModerationMixin:
             return
 
         is_domain = bool(ban_jid and ban_jid.startswith("*."))
+        banned_domain = ban_jid[2:].strip(".").lower() if is_domain and ban_jid else None
         ban_jid_bare = None if is_domain else self.bare_jid(ban_jid)
-        domain_outcast = ban_jid[2:].strip(".").lower() if is_domain and ban_jid else None
+        domain_outcast = banned_domain
         room_occupants = self.occupants.get(room, {})
 
         # --- Step 1: Set Outcast (offline ban) ---
@@ -240,9 +252,10 @@ class ModerationMixin:
             jid_in_room = info.get("jid")
             match = False
 
-            if is_domain and jid_in_room:
-                domain = self.bare_jid(jid_in_room).split("@")[1].lower()
-                match = domain_matches(domain, ban_jid[2:])
+            if banned_domain and jid_in_room:
+                occupant_jid = self.bare_jid(jid_in_room)
+                occupant_domain = occupant_jid.partition("@")[2] if occupant_jid else ""
+                match = domain_matches(occupant_domain, banned_domain)
             elif ban_jid_bare and jid_in_room:
                 match = self.bare_jid(jid_in_room) == ban_jid_bare
             elif ban_nick:
@@ -453,13 +466,13 @@ class ModerationMixin:
         if target_type == "nick" and normalized_nick:
             existing_jid_ban = await self.find_active_jid_ban_by_nick(normalized_nick)
             if existing_jid_ban:
-                existing_jid, _existing_until, _existing_issuer, _existing_comment = existing_jid_ban
+                matched_jid, _existing_until, _existing_issuer, _existing_comment = existing_jid_ban
                 log.info(
                     "🔗 Resolving nick-only ban %s to existing JID ban %s",
                     normalized_nick,
-                    existing_jid,
+                    matched_jid,
                 )
-                ban_target = BanTarget.from_parts(existing_jid, normalized_nick)
+                ban_target = BanTarget.from_parts(matched_jid, normalized_nick)
                 target_type = ban_target.kind
                 target = ban_target.value
                 normalized_jid = ban_target.jid
@@ -468,7 +481,7 @@ class ModerationMixin:
         db_key = ban_target.identifier
         skip_final_message = False
         update_details: dict[str, object] = {"identifier": identifier}
-        db_issuer = issuer
+        db_issuer: str | None = issuer
 
         if db_key in self.ban_cache:
             existing_jid, existing_nick, existing_until, existing_issuer, existing_comment = self.ban_cache[db_key]
@@ -709,7 +722,7 @@ class ModerationMixin:
                     )
                     continue
                 # --- Fetch expired bans (limited to 100 per check) ---
-                async with self.db.execute(
+                async with self._require_db().execute(
                     "SELECT target_type, target, jid, nick FROM bans WHERE until > 0 AND until <= ? LIMIT 100", (now,)
                 ) as cursor:
                     rows = await cursor.fetchall()
@@ -750,7 +763,7 @@ class ModerationMixin:
                 await self.cleanup_old_audit_logs()
 
                 # Check if there are more expired bans pending
-                async with self.db.execute(
+                async with self._require_db().execute(
                     "SELECT COUNT(*) FROM bans WHERE until > 0 AND until <= ?", (now,)
                 ) as cursor:
                     count_row = await cursor.fetchone()
@@ -821,8 +834,8 @@ class ModerationMixin:
             nick_role_restore_failed = False
             for nick, info in room_occupants.items():
                 jid_in_room = info.get("jid")
-                jid_bare = self.bare_jid(jid_in_room) if jid_in_room else ""
-                jid_domain = jid_bare.partition("@")[2].lower()
+                jid_bare = self.bare_jid(jid_in_room) if jid_in_room else None
+                jid_domain = (jid_bare or "").partition("@")[2].lower()
                 matches_domain = bool(domain and jid_domain and domain_matches(jid_domain, domain))
                 if (
                     (ban_jid and jid_in_room and jid_bare == self.bare_jid(ban_jid))
@@ -906,7 +919,7 @@ class ModerationMixin:
         identifier = identifier.strip().lower()
 
         async def fetch_exact(target_type: str, target: str):
-            async with self.db.execute(
+            async with self._require_db().execute(
                 "SELECT jid, nick, until, issuer "
                 "FROM bans WHERE target_type = ? AND target = ?",
                 (target_type, target),
@@ -935,7 +948,7 @@ class ModerationMixin:
             row = await fetch_exact(target_type, target)
         elif is_jid:
             target_type = "jid"
-            target = self.bare_jid(identifier)
+            target = self.bare_jid(identifier) or identifier
             row = await fetch_exact(target_type, target)
         else:
             # A dotted bare value is ambiguous: it may be an existing domain
@@ -956,19 +969,19 @@ class ModerationMixin:
                 row = await fetch_exact(target_type, target)
 
             if not row:
-                async with self.db.execute(
+                async with self._require_db().execute(
                     "SELECT jid, nick, until, issuer "
                     "FROM bans WHERE target_type = 'jid'"
                 ) as cursor:
                     async for jid_db, nick_db, until_db, issuer_db in cursor:
+                        candidate_jid = self.bare_jid(jid_db) if jid_db else None
                         if (
-                            jid_db
-                            and self.bare_jid(jid_db).split("@", 1)[0].lower()
-                            == identifier
+                            candidate_jid
+                            and candidate_jid.split("@", 1)[0].lower() == identifier
                         ):
                             row = (jid_db, nick_db, until_db, issuer_db)
                             target_type = "jid"
-                            target = self.bare_jid(jid_db)
+                            target = candidate_jid
                             break
 
         if not row:
@@ -1038,11 +1051,12 @@ class ModerationMixin:
                 )
             return False
 
-        await self.db.execute(
+        db = self._require_db()
+        await db.execute(
             "DELETE FROM bans WHERE target_type = ? AND target = ?",
             (target_type, target),
         )
-        await self.db.commit()
+        await db.commit()
 
         # --- RTBL Publish: Withdraw permanent bans from own feed ---
         # Only permanent JID/domain bans are published, so only those need to
