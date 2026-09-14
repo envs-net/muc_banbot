@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from xml.etree import ElementTree as ET
 
 from envs_xmpp_core.runtime.diagnostics import exception_summary
+from envs_xmpp_core.xmpp import iq_error_summary, iq_error_text
 
 from config import ADMIN_ROOM
 
@@ -54,6 +55,8 @@ def _redaction_exception_summary(exc: Exception) -> str:
         or exc.__class__.__name__ == "IqTimeout"
     ):
         return "redaction request timed out"
+    if exc.__class__.__name__ == "IqError":
+        return iq_error_summary(exc)
 
     text = str(exc).strip()
 
@@ -101,7 +104,11 @@ def _redaction_error_is_already_retracted(exc: Exception) -> bool:
     if condition in _REDACTION_ALREADY_RETRACTED_CONDITIONS:
         return True
 
-    text = str(exc).lower()
+    text = (
+        iq_error_text(exc).lower()
+        if exc.__class__.__name__ == "IqError"
+        else str(exc).lower()
+    )
     return any(token in text for token in _REDACTION_ALREADY_RETRACTED_TEXT)
 
 

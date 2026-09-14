@@ -8,7 +8,7 @@ from importlib import metadata
 
 import psutil
 from envs_xmpp_core import __version__ as envs_xmpp_version
-from envs_xmpp_core.formatting import format_bytes
+from envs_xmpp_core.formatting import format_bytes, format_relative_time
 from envs_xmpp_core.presentation import (
     RoomListRequest,
     RoomView,
@@ -18,6 +18,7 @@ from envs_xmpp_core.presentation import (
     filter_task_views,
     normalize_tasks,
     render_room_entry,
+    render_session_lifecycle_lines,
     render_status_sections,
     render_task_entry,
     render_task_summary,
@@ -163,6 +164,22 @@ class StatusMixin:
             f"Admin/owner rights: {sum(view.joined and not view.attention for view in room_views)}/{len(room_views)}",
             f"Pending invites: {len(getattr(self, 'pending_room_invites', {}) or {})}",
         ]
+        session_lifecycle = getattr(self, "session_lifecycle", None)
+        session_snapshot = getattr(session_lifecycle, "snapshot", None)
+        if callable(session_snapshot):
+            xmpp_lines.extend(
+                render_session_lifecycle_lines(session_snapshot(), full=full)
+            )
+        admin_sync_at = getattr(self, "last_admin_sync_at", None)
+        admin_sync_ok = getattr(self, "last_admin_sync_ok", None)
+        if admin_sync_at is not None:
+            state = "✅ OK" if admin_sync_ok else "⚠️ failed"
+            xmpp_lines.append(
+                f"Admin sync: {state} · {format_relative_time(admin_sync_at)}"
+            )
+            admin_sync_error = getattr(self, "last_admin_sync_error", None)
+            if full and admin_sync_error:
+                xmpp_lines.append(f"Admin sync error: {admin_sync_error}")
 
         protection_configs = getattr(self, "protections", {}) or {}
         enabled = observe = disabled = 0

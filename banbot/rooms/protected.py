@@ -14,7 +14,7 @@ from envs_xmpp_core.presentation import (
     render_room_entry,
     room_summary,
 )
-from envs_xmpp_core.xmpp import await_muc_join_compat
+from envs_xmpp_core.xmpp import await_muc_join_compat, iq_error_summary
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 from slixmpp.exceptions import IqError, IqTimeout
 
@@ -94,8 +94,7 @@ class ProtectedRoomMixin:
         except IqTimeout:
             return False, f"❌ Service Discovery timeout for '{room_jid}'. Room may not exist or server is unresponsive."
         except IqError as e:
-            error_msg = str(e.iq["error"]["type"]) if e.iq and e.iq["error"] else "Unknown error"
-            return False, f"❌ Service Discovery error for '{room_jid}': {error_msg}"
+            return False, f"❌ Service Discovery error for '{room_jid}': {iq_error_summary(e)}"
         except Exception as e:
             return False, f"❌ Failed to validate room: {str(e)}"
 

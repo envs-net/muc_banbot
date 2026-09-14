@@ -17,7 +17,7 @@ Run these helpers from the repository root inside the project virtualenv.
 other envs.net XMPP bot. Repository-specific source roots, project validation
 commands, integration markers and coverage thresholds are declared under
 `[tool.envs-xmpp.quality]` and `[tool.envs-xmpp.testing]` in `pyproject.toml`;
-the runner implementation lives in `envs-xmpp`.
+the runner implementation lives in `envs-xmpp`. The project-validation stage also runs the shared-core release audit, so dependency metadata, constraints and the deployment bootstrap cannot silently drift to different envs-xmpp versions.
 
 The deploy helper deliberately does not replace an existing systemd unit or
 operator configuration. New installs default to the hardened

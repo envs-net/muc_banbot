@@ -19,6 +19,7 @@ except Exception as exc:
 
 import aiosqlite
 from envs_xmpp_core.runtime.lifecycle import LifecyclePhaseResult, LifecyclePhaseRunner
+from envs_xmpp_core.runtime.session import SessionLifecycleState
 from envs_xmpp_core.xmpp.connection import connect_kwargs as _core_connect_kwargs
 from envs_xmpp_core.xmpp.jid import boundjid_domain
 from slixmpp import ClientXMPP
@@ -160,9 +161,12 @@ def connect_xmpp(xmpp) -> bool:
 
 @dataclass(slots=True)
 class _StartupContext:
-    """Mutable state shared by the ordered startup lifecycle phases."""
+    """Mutable state shared by one XMPP-session startup generation."""
 
+    generation: int = 0
     reconnect_waiter_active: bool = False
+    process_already_initialized: bool = False
+    had_ready_session: bool = False
     was_reconnecting: bool = False
     managed_rooms: tuple[str, ...] = ()
     missing_rooms: tuple[str, ...] = ()
@@ -223,7 +227,12 @@ class BanBot(
         self._shutdown_in_progress = False
         self._shutdown_complete = False
         self._last_startup_phases: tuple[LifecyclePhaseResult, ...] = ()
+        self._last_process_startup_phases: tuple[LifecyclePhaseResult, ...] = ()
         self._last_shutdown_phases: tuple[LifecyclePhaseResult, ...] = ()
+        self._process_startup_lock = asyncio.Lock()
+        self._process_startup_complete = False
+        self._process_startup_task: asyncio.Task | None = None
+        self.session_lifecycle = SessionLifecycleState()
         # Track the currently executing session_start lifecycle.  A reconnect
         # timeout/transport loss must cancel this task before the underlying
         # stream is torn down, otherwise stale startup IQs can leak into the
@@ -263,6 +272,9 @@ class BanBot(
         self.room_join_time: dict[str, float] = {}
         self.reconnecting = False
         self.last_reconnect_time: float | None = None
+        self.last_admin_sync_at: float | None = None
+        self.last_admin_sync_ok: bool | None = None
+        self.last_admin_sync_error: str | None = None
         self.reconnect_task: asyncio.Task | None = None
         self.reconnect_success_event: asyncio.Event | None = None
         self.reconnect_failure_event: asyncio.Event | None = None
@@ -577,6 +589,7 @@ class BanBot(
             if self._shutdown_complete:
                 return
 
+            await self._cancel_process_startup()
             runner = LifecyclePhaseRunner(observer=self._observe_shutdown_phase)
             phases = (
                 ("reconnect", self._shutdown_reconnect_phase),
@@ -630,11 +643,124 @@ class BanBot(
         """Reset reconnect-scoped workers and classify this XMPP session."""
         await self.stop_background_tasks()
         context.reconnect_waiter_active = bool(self.reconnecting)
-        context.was_reconnecting = bool(
-            context.reconnect_waiter_active
-            and getattr(self, "_startup_completed_once", False)
+        context.process_already_initialized = bool(
+            self._process_startup_complete or getattr(self, "_startup_completed_once", False)
         )
-        return "ok", {"reconnecting": context.was_reconnecting}
+        context.had_ready_session = bool(getattr(self, "_startup_completed_once", False))
+        context.was_reconnecting = context.process_already_initialized
+        return "ok", {
+            "reconnecting": context.was_reconnecting,
+            "had_ready_session": context.had_ready_session,
+        }
+
+    def _observe_process_startup_phase(
+        self,
+        result: LifecyclePhaseResult,
+        error: Exception | None,
+    ) -> None:
+        """Log one process-lifetime initialization phase."""
+        duration_ms = round(result.duration_seconds * 1000, 1)
+        if error is not None:
+            log.error(
+                "Process startup: %s phase failed after %.1fms: %s",
+                result.name,
+                duration_ms,
+                error,
+            )
+            return
+        log.debug(
+            "Process startup: %s phase completed with status %s in %.1fms",
+            result.name,
+            result.status,
+            duration_ms,
+        )
+
+    async def _initialize_process_runtime(self, context: _StartupContext) -> bool:
+        """Perform database/persistent-state initialization once per process."""
+        async with self._process_startup_lock:
+            if self._process_startup_complete:
+                return False
+            runner = LifecyclePhaseRunner(observer=self._observe_process_startup_phase)
+            self._last_process_startup_phases = runner.results
+            try:
+                await runner.run_all(
+                    (
+                        ("storage", lambda: self._startup_storage_phase(context)),
+                        ("state", lambda: self._startup_state_phase(context)),
+                    )
+                )
+            finally:
+                self._last_process_startup_phases = runner.results
+            self._process_startup_complete = True
+            return True
+
+    def _process_startup_done(self, task: asyncio.Task) -> None:
+        """Clear the shared process-startup task and consume orphaned errors."""
+        if getattr(self, "_process_startup_task", None) is task:
+            self._process_startup_task = None
+        if task.cancelled():
+            return
+        try:
+            error = task.exception()
+        except asyncio.CancelledError:
+            return
+        if error is not None:
+            log.error("Process startup task failed outside session owner: %s", error)
+
+    async def _ensure_process_runtime(self, context: _StartupContext) -> bool:
+        """Initialize process state once, surviving session-task replacement."""
+        if getattr(self, "_startup_completed_once", False):
+            self._process_startup_complete = True
+        if self._process_startup_complete:
+            return False
+        task = getattr(self, "_process_startup_task", None)
+        if task is None or task.done():
+            task = asyncio.get_running_loop().create_task(
+                self._initialize_process_runtime(context),
+                name="muc-banbot-process-startup",
+            )
+            self._process_startup_task = task
+            task.add_done_callback(self._process_startup_done)
+        try:
+            return bool(await asyncio.shield(task))
+        finally:
+            if task.done() and getattr(self, "_process_startup_task", None) is task:
+                self._process_startup_task = None
+
+    async def _cancel_process_startup(self) -> None:
+        """Cancel process initialization only during final bot shutdown."""
+        task = getattr(self, "_process_startup_task", None)
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if getattr(self, "_process_startup_task", None) is task:
+                self._process_startup_task = None
+
+    async def _startup_process_phase(
+        self,
+        context: _StartupContext,
+    ) -> tuple[str, dict[str, object]]:
+        initialized = await self._ensure_process_runtime(context)
+        return ("ok" if initialized else "skipped"), {"initialized": initialized}
+
+    async def _run_session_phase(
+        self,
+        context: _StartupContext,
+        name: str,
+        operation,
+    ):
+        """Run a phase only while its XMPP session generation is current."""
+        if not self.session_lifecycle.begin_phase(context.generation, name):
+            raise asyncio.CancelledError
+        result = await operation()
+        if not self.session_lifecycle.is_current(context.generation):
+            raise asyncio.CancelledError
+        return result
 
     async def _startup_storage_phase(
         self,
@@ -775,7 +901,7 @@ class BanBot(
 
         if self.announce_startup:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            action = "reconnected" if context.was_reconnecting else "restarted"
+            action = "reconnected" if context.had_ready_session else "restarted"
             if context.missing_rooms:
                 lifecycle_body = (
                     f"⚠️ Bot has {action}; automatic rejoin is active for "
@@ -822,7 +948,7 @@ class BanBot(
         ):
             self.reconnect_success_event.set()
 
-        if context.was_reconnecting:
+        if context.had_ready_session:
             self.last_reconnect_time = time.time()
             log.info("🔄 Reconnected successfully")
             await self.send_operational_alert(
@@ -842,7 +968,7 @@ class BanBot(
         return "ok", {}
 
     async def start(self, _) -> None:
-        """Run the ordered XMPP-session startup lifecycle."""
+        """Run one XMPP-session lifecycle on top of process-lifetime state."""
         if getattr(self, "_shutdown_in_progress", False):
             log.info("Ignoring session_start while shutdown is in progress")
             return
@@ -853,32 +979,40 @@ class BanBot(
             await cancel_startup("new session_start", exclude=current_task)
         self._startup_task = current_task
 
-        # Mark the XMPP session as established immediately. The systemd startup
-        # timeout extender only runs while waiting for ``session_start``.
+        generation = self.session_lifecycle.begin()
         self._session_start_received = True
-
-        context = _StartupContext()
+        context = _StartupContext(generation=generation)
         runner = LifecyclePhaseRunner(observer=self._observe_startup_phase)
         self._last_startup_phases = runner.results
+
+        def phase(name, operation):
+            return lambda: self._run_session_phase(context, name, operation)
+
         phases = (
-            ("session", lambda: self._startup_session_phase(context)),
-            ("storage", lambda: self._startup_storage_phase(context)),
-            ("state", lambda: self._startup_state_phase(context)),
-            ("transport", lambda: self._startup_transport_phase(context)),
-            ("rooms", lambda: self._startup_rooms_phase(context)),
+            ("session", phase("session", lambda: self._startup_session_phase(context))),
+            ("process", phase("process", lambda: self._startup_process_phase(context))),
+            ("transport", phase("transport", lambda: self._startup_transport_phase(context))),
+            ("rooms", phase("rooms", lambda: self._startup_rooms_phase(context))),
             (
                 "synchronization",
-                lambda: self._startup_synchronization_phase(context),
+                phase(
+                    "synchronization",
+                    lambda: self._startup_synchronization_phase(context),
+                ),
             ),
-            ("services", lambda: self._startup_services_phase(context)),
-            ("identity", lambda: self._startup_identity_phase(context)),
-            ("readiness", lambda: self._startup_readiness_phase(context)),
+            ("services", phase("services", lambda: self._startup_services_phase(context))),
+            ("identity", phase("identity", lambda: self._startup_identity_phase(context))),
+            ("readiness", phase("readiness", lambda: self._startup_readiness_phase(context))),
         )
         try:
             await runner.run_all(phases)
+            self.session_lifecycle.mark_ready(generation)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.session_lifecycle.mark_failed(generation, exc)
+            raise
         finally:
-            # Preserve all completed/failed phases for status and diagnostics,
-            # including when startup aborts before readiness.
             self._last_startup_phases = runner.results
             if getattr(self, "_startup_task", None) is current_task:
                 self._startup_task = None

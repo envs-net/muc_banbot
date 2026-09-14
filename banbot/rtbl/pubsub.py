@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 
+from envs_xmpp_core.xmpp import iq_error_summary
 from slixmpp.exceptions import IqError, IqTimeout
 
 from ..locks import is_maintenance_mode
@@ -36,7 +37,7 @@ class RtblPubSubMixin:
             log.warning("RTBL: Could not subscribe: %s", msg)
             return False, msg
         except IqError as e:
-            msg = f"subscription failed for '{node}' @ {service_jid}: {e}"
+            msg = f"subscription failed for '{node}' @ {service_jid}: {iq_error_summary(e)}"
             log.warning("RTBL: %s", msg)
             return False, msg
         except Exception as e:
@@ -164,13 +165,13 @@ class RtblPubSubMixin:
 
             except (IqError, IqTimeout) as e:
                 fetch_failed = True
-                fetch_error = str(e)
+                fetch_error = iq_error_summary(e)
                 log.warning(
                     "RTBL: Could not fetch items from '%s' @ %s (page %d): %s",
                     node,
                     service_jid,
                     page,
-                    e,
+                    fetch_error,
                 )
                 break
 

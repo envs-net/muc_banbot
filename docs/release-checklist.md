@@ -172,3 +172,16 @@ After deploying the release in a test or production-like environment:
 ## 9. Production Observation
 
 After the immediate smoke check, follow the structured [72-hour production observation checklist](production-observation.md). Capture a baseline immediately after deployment, then repeat status/task/outbox/journal checks at approximately 24, 48 and 72 hours before considering a major runtime change fully production-proven.
+
+## Shared-core release audit
+
+Before the next version bump/release candidate:
+
+- release or otherwise make the intended `envs-xmpp` version available first;
+- verify `requirements.txt`, `pyproject.toml`, both constraint snapshots and
+  `scripts/_envs_xmpp_bootstrap.py` agree on the intended shared-core floor/pin;
+- run the complete envs-xmpp quality gate before the muc_banbot gate;
+- keep the muc_banbot package version unchanged during feature development and
+  bump it only when the release contents are frozen;
+- run `git diff --check`, wheel smoke checks and the dependency audit before
+  tagging.

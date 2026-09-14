@@ -9,9 +9,10 @@ from typing import Any
 from envs_xmpp_core.runtime.health import (
     HealthCheck,
     HealthSnapshot,
-    HealthStatus,
-    analyze_task_snapshot,
     collect_health_snapshot,
+    health_check_from_messages,
+    health_snapshot_messages,
+    supervisor_task_health_state,
     watchdog_health_state,
 )
 
@@ -29,23 +30,15 @@ def _message_check(
     notes: Iterable[str] = (),
     data: dict[str, Any] | None = None,
 ) -> HealthCheck:
-    problem_items = tuple(problems)
-    warning_items = tuple(warnings)
-    note_items = tuple(notes)
-    status: HealthStatus
-    if problem_items:
-        status = "error"
-    elif warning_items:
-        status = "warning"
-    else:
-        status = "ok"
-    details = dict(data or {})
-    details.update(
-        problems=problem_items,
-        warnings=warning_items,
-        notes=note_items,
+    """Compatibility seam around the shared message-based health builder."""
+    return health_check_from_messages(
+        key,
+        summary,
+        problems=problems,
+        warnings=warnings,
+        notes=notes,
+        data=data,
     )
-    return HealthCheck(key, status, summary, details)
 
 
 def _connection_check(bot: Any) -> HealthCheck:
@@ -88,8 +81,8 @@ def _tasks_check(bot: Any) -> HealthCheck:
             problems.append(f"{task_name} stopped unexpectedly")
 
     supervisor = getattr(bot, "tasks", None)
-    if supervisor is not None:
-        diagnostics = analyze_task_snapshot(supervisor.snapshot(include_done=False))
+    diagnostics = supervisor_task_health_state(supervisor, include_done=False)
+    if diagnostics is not None:
         if diagnostics.failed_tasks:
             preview = ", ".join(info.name for info in diagnostics.failed_tasks[:5])
             problems.append(f"Supervised background task failure(s): {preview}")
@@ -251,14 +244,4 @@ def status_health_messages(
     snapshot: HealthSnapshot,
 ) -> tuple[list[str], list[str], list[str]]:
     """Flatten renderer-owned problem/warning/note text in check order."""
-    problems: list[str] = []
-    warnings: list[str] = []
-    notes: list[str] = []
-    for check in snapshot.checks.values():
-        check_problems = tuple(check.data.get("problems", ()))
-        problems.extend(str(item) for item in check_problems)
-        warnings.extend(str(item) for item in check.data.get("warnings", ()))
-        notes.extend(str(item) for item in check.data.get("notes", ()))
-        if check.status == "error" and not check_problems and check.error:
-            problems.append(f"{check.key} health check failed: {check.error}")
-    return problems, warnings, notes
+    return health_snapshot_messages(snapshot)

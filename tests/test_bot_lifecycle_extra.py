@@ -284,8 +284,7 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
     assert "Bot has restarted" in bot.sent[-1]["mbody"]
     assert [phase.name for phase in bot._last_startup_phases] == [
         "session",
-        "storage",
-        "state",
+        "process",
         "transport",
         "rooms",
         "synchronization",
@@ -293,7 +292,12 @@ async def test_start_runs_startup_flow_and_registers_room_handlers(monkeypatch):
         "identity",
         "readiness",
     ]
+    assert [phase.name for phase in bot._last_process_startup_phases] == [
+        "storage",
+        "state",
+    ]
     assert all(phase.status == "ok" for phase in bot._last_startup_phases)
+    assert all(phase.status == "ok" for phase in bot._last_process_startup_phases)
 
 
 @pytest.mark.asyncio
@@ -366,6 +370,71 @@ async def test_start_runs_redaction_cleanup_and_worker_when_enabled(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_second_session_reuses_process_storage_state(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    bot.protected_rooms = set()
+    bot.registered_rooms = set()
+    bot.plugin = {"xep_0045": FakeMucPlugin()}
+    _install_successful_join_stub(bot)
+    bot.sent = []
+    bot.version_check_enabled = False
+    bot.version_check_url = None
+    bot.redaction_enabled = False
+    bot.announce_startup = False
+
+    calls = []
+
+    async def record(name, result=None):
+        calls.append(name)
+        return result
+
+    bot.setup_db = lambda **kwargs: record(f"setup_db:{kwargs.get('create_startup_backup')}")
+    bot.prepare_startup_version_notice = lambda **kwargs: record("prepare_version")
+    bot.finalize_startup_version_notice = lambda **kwargs: record("finalize_version")
+    bot.load_pending_room_invites = lambda: record("load_invites")
+    bot.load_bans_from_db = lambda: record("load_bans")
+    bot.cleanup_old_audit_logs = lambda: record("cleanup_audit")
+    bot.setup_ignorelist = lambda: record("setup_ignorelist")
+    bot.load_protections = lambda: record("load_protections")
+    bot.get_roster = lambda: record("get_roster")
+    bot.wait_for_occupants = lambda timeout=20: record("wait_occupants")
+    bot.check_bot_admin_rights = lambda: record("check_admin")
+    bot.sync_admins = lambda announce=False: record("sync_admins")
+    bot.sync_bans_startup = lambda: record("sync_bans")
+    bot.setup_rtbl = lambda: record("setup_rtbl")
+    bot.setup_rtbl_publish = lambda: record("setup_rtbl_publish")
+    bot.update_vcard = lambda: record("update_vcard")
+    bot.send_presence = lambda: calls.append("presence")
+    bot.runtime_watchdog.start = lambda: record("watchdog_start")
+    bot.runtime_watchdog.notify_ready = lambda: None
+    bot.stop_background_tasks = lambda: record("stop_tasks")
+    bot._start_core_service = lambda *args, **kwargs: CompletedTask(kwargs.get("name", "task"))
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
+
+    await bot.start(None)
+    process_calls_after_first = list(calls)
+    bot.reconnecting = True
+    await bot.start(None)
+
+    assert calls.count("load_bans") == 1
+    assert calls.count("load_invites") == 1
+    assert sum(call.startswith("setup_db:") for call in calls) == 1
+    assert calls.count("get_roster") == 2
+    assert calls.count("sync_admins") == 2
+    assert len(calls) > len(process_calls_after_first)
+    assert bot._last_startup_phases[1].status == "skipped"
+    session = bot.session_lifecycle.snapshot()
+    assert session.generation == 2
+    assert session.reconnect_count == 1
+    assert session.state == "ready"
+
+
+@pytest.mark.asyncio
 async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
     _patch_lightweight_init(monkeypatch)
     bot = bot_module.BanBot("bot@example.org", "secret")
@@ -428,7 +497,7 @@ async def test_start_announces_reconnect_differently_from_restart(monkeypatch):
 
     await bot.start(None)
 
-    assert "setup_db:False" in calls
+    assert not any(call.startswith("setup_db:") for call in calls)
     assert bot.reconnecting is False
     assert bot.last_reconnect_time is not None
     assert bot._startup_completed_once is True
@@ -957,10 +1026,181 @@ async def test_reconnect_success_is_not_signalled_when_late_startup_stage_fails(
     assert bot.last_reconnect_time is None
     assert [phase.name for phase in bot._last_startup_phases] == [
         "session",
-        "storage",
-        "state",
+        "process",
         "transport",
         "rooms",
         "synchronization",
     ]
     assert bot._last_startup_phases[-1].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_new_session_start_cancels_stale_generation_before_session_sync(monkeypatch):
+    """A newer session_start retires an older generation without redoing process state."""
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    bot.protected_rooms = set()
+    bot.registered_rooms = set()
+    bot.plugin = {"xep_0045": FakeMucPlugin()}
+    _install_successful_join_stub(bot)
+    bot.version_check_enabled = False
+    bot.version_check_url = None
+    bot.redaction_enabled = False
+    bot.announce_startup = False
+
+    calls = []
+
+    async def record(name, result=None):
+        calls.append(name)
+        return result
+
+    bot.setup_db = lambda **kwargs: record(f"setup_db:{kwargs.get('create_startup_backup')}")
+    bot.prepare_startup_version_notice = lambda **kwargs: record("prepare_version")
+    bot.finalize_startup_version_notice = lambda **kwargs: record("finalize_version")
+    bot.load_pending_room_invites = lambda: record("load_invites")
+    bot.load_bans_from_db = lambda: record("load_bans")
+    bot.cleanup_old_audit_logs = lambda: record("cleanup_audit")
+    bot.setup_ignorelist = lambda: record("setup_ignorelist")
+    bot.load_protections = lambda: record("load_protections")
+    first_roster_started = asyncio.Event()
+    roster_calls = 0
+
+    async def get_roster():
+        nonlocal roster_calls
+        roster_calls += 1
+        if roster_calls == 1:
+            first_roster_started.set()
+            await asyncio.Event().wait()
+
+    bot.get_roster = get_roster
+    bot.wait_for_occupants = lambda timeout=20: record("wait_occupants")
+    bot.check_bot_admin_rights = lambda: record("check_admin")
+    bot.sync_admins = lambda announce=False: record("sync_admins")
+    bot.sync_bans_startup = lambda: record("sync_bans")
+    bot.setup_rtbl = lambda: record("setup_rtbl")
+    bot.setup_rtbl_publish = lambda: record("setup_rtbl_publish")
+    bot.update_vcard = lambda: record("update_vcard")
+    bot.send_presence = lambda: None
+    bot.runtime_watchdog.start = lambda: record("watchdog_start")
+    bot.runtime_watchdog.notify_ready = lambda: None
+    bot.stop_background_tasks = lambda: record("stop_tasks")
+    bot._start_core_service = lambda *args, **kwargs: CompletedTask(kwargs.get("name", "task"))
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
+
+    stale = asyncio.create_task(bot.start(None))
+    await asyncio.wait_for(first_roster_started.wait(), timeout=1)
+    current = asyncio.create_task(bot.start(None))
+    await asyncio.wait_for(current, timeout=1)
+
+    assert stale.cancelled()
+    assert roster_calls == 2
+    assert sum(call.startswith("setup_db:") for call in calls) == 1
+    assert calls.count("load_bans") == 1
+    assert calls.count("sync_admins") == 1
+    session = bot.session_lifecycle.snapshot()
+    assert session.generation == 2
+    assert session.reconnect_count == 1
+    assert session.state == "ready"
+    assert bot._startup_task is None
+
+
+@pytest.mark.asyncio
+async def test_session_replacement_does_not_cancel_process_storage_initialization(monkeypatch):
+    """Persistent storage/state startup survives replacement of an XMPP session."""
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    bot.protected_rooms = set()
+    bot.registered_rooms = set()
+    bot.plugin = {"xep_0045": FakeMucPlugin()}
+    _install_successful_join_stub(bot)
+    bot.version_check_enabled = False
+    bot.version_check_url = None
+    bot.redaction_enabled = False
+    bot.announce_startup = False
+
+    process_started = asyncio.Event()
+    release_process = asyncio.Event()
+    setup_calls = 0
+
+    async def setup_db(**_kwargs):
+        nonlocal setup_calls
+        setup_calls += 1
+        process_started.set()
+        await release_process.wait()
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    bot.setup_db = setup_db
+    bot.prepare_startup_version_notice = noop
+    bot.finalize_startup_version_notice = noop
+    bot.load_pending_room_invites = noop
+    bot.load_bans_from_db = noop
+    bot.cleanup_old_audit_logs = noop
+    bot.setup_ignorelist = noop
+    bot.load_protections = noop
+    bot.get_roster = noop
+    bot.wait_for_occupants = noop
+    bot.check_bot_admin_rights = noop
+    bot.sync_admins = noop
+    bot.sync_bans_startup = noop
+    bot.setup_rtbl = noop
+    bot.setup_rtbl_publish = noop
+    bot.update_vcard = noop
+    bot.send_presence = lambda: None
+    bot.runtime_watchdog.start = noop
+    bot.runtime_watchdog.notify_ready = lambda: None
+    bot.stop_background_tasks = noop
+    bot._start_core_service = lambda *args, **kwargs: CompletedTask(kwargs.get("name", "task"))
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", no_sleep)
+
+    stale = asyncio.create_task(bot.start(None))
+    await asyncio.wait_for(process_started.wait(), timeout=1)
+    current = asyncio.create_task(bot.start(None))
+    await asyncio.sleep(0)
+    release_process.set()
+    await asyncio.wait_for(current, timeout=1)
+
+    assert stale.cancelled()
+    assert setup_calls == 1
+    assert bot._process_startup_complete is True
+    assert bot._process_startup_task is None
+    assert bot.session_lifecycle.snapshot().generation == 2
+    assert bot.session_lifecycle.snapshot().state == "ready"
+
+
+@pytest.mark.asyncio
+async def test_late_completion_from_old_session_generation_is_rejected(monkeypatch):
+    """Late work from an obsolete BanBot session cannot mutate current startup."""
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    first_generation = bot.session_lifecycle.begin()
+    context = bot_module._StartupContext(generation=first_generation)
+    operation_started = asyncio.Event()
+    release_operation = asyncio.Event()
+
+    async def slow_operation():
+        operation_started.set()
+        await release_operation.wait()
+        return "late-result"
+
+    stale_phase = asyncio.create_task(
+        bot._run_session_phase(context, "synchronization", slow_operation)
+    )
+    await asyncio.wait_for(operation_started.wait(), timeout=1)
+    second_generation = bot.session_lifecycle.begin()
+    assert second_generation == first_generation + 1
+    release_operation.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await stale_phase
+    assert bot.session_lifecycle.snapshot().generation == second_generation
+    assert bot.session_lifecycle.snapshot().state == "starting"

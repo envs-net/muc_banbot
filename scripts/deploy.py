@@ -29,6 +29,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from _envs_xmpp_bootstrap import ensure_envs_xmpp  # noqa: E402
+from envs_xmpp_ops.deploy import DeploymentTarget  # noqa: E402
 
 _CHECKOUT_ROOT = Path(__file__).resolve().parents[1]
 _STABLE_RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
@@ -42,47 +43,20 @@ class UserCancelled(DeployError):
     """Raised when an interactive action is declined."""
 
 
-@dataclass(frozen=True)
-class Deployment:
-    root: Path
-    venv: Path
-    config: Path
+@dataclass(frozen=True, kw_only=True)
+class Deployment(DeploymentTarget):
+    """muc_banbot deployment target with its mutable data directory."""
+
     data_dir: Path
-    service: str
-    service_user: str
-    service_group: str
-    unit: Path
-    python: str
-    dry_run: bool = False
 
     @property
     def executable(self) -> Path:
-        from envs_xmpp_ops.layout import venv_binary
-
-        return venv_binary(self.venv, "muc_banbot")
-
-    @property
-    def pip(self) -> Path:
-        from envs_xmpp_ops.layout import venv_binary
-
-        return venv_binary(self.venv, "pip")
-
-    @property
-    def venv_python(self) -> Path:
-        from envs_xmpp_ops.layout import venv_binary
-
-        return venv_binary(self.venv, "python")
+        return self.binary("muc_banbot")
 
     @property
     def environment(self) -> dict[str, str]:
-        from envs_xmpp_ops.layout import deployment_environment
-
         # Keep operator config directories clean when deploy/check imports config.py.
-        return deployment_environment(
-            config_environment="MUC_BANBOT_CONFIG",
-            config=self.config,
-            disable_bytecode=True,
-        )
+        return self.environment_for("MUC_BANBOT_CONFIG", disable_bytecode=True)
 
     @property
     def legacy_layout(self) -> bool:
@@ -931,8 +905,10 @@ def _is_stable_release_tag(tag: str) -> bool:
 
 
 def _stable_tags(deployment: Deployment) -> list[str]:
+    from envs_xmpp_ops.git import stable_release_tags
+
     result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
-    return [tag for tag in (line.strip() for line in result.stdout.splitlines()) if _is_stable_release_tag(tag)]
+    return stable_release_tags([line.strip() for line in result.stdout.splitlines()])
 
 
 def _prepare_release_target(deployment: Deployment, requested: str | None) -> tuple[str, str]:

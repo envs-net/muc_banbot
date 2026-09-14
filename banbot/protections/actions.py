@@ -7,6 +7,8 @@ import logging
 import time
 from typing import Any
 
+from envs_xmpp_core.xmpp import iq_error_summary
+
 from config import ADMIN_ROOM
 
 try:
@@ -38,7 +40,7 @@ class ProtectionActionsMixin:
                 )
             return True
         except (IqError, IqTimeout) as exc:
-            log.warning("Protection kick failed for %s in %s: %s", nick, room, exc)
+            log.warning("Protection kick failed for %s in %s: %s", nick, room, iq_error_summary(exc))
         except Exception as exc:
             log.warning("Protection kick failed for %s in %s: %s", nick, room, exc)
         return False

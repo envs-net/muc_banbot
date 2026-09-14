@@ -26,6 +26,12 @@ _RECONNECT_STARTUP_TIMEOUT_SECONDS = 120
 class MucMixin(BotOccupantMixin):
     _startup_task: asyncio.Task | None
 
+    def _mark_session_reconnecting(self, reason: str) -> None:
+        lifecycle = getattr(self, "session_lifecycle", None)
+        marker = getattr(lifecycle, "mark_reconnecting", None)
+        if callable(marker):
+            marker(reason)
+
     def _get_reconnect_success_event(self) -> asyncio.Event:
         """Return the event used to signal that session_start completed after reconnect."""
         event = getattr(self, "reconnect_success_event", None)
@@ -65,6 +71,7 @@ class MucMixin(BotOccupantMixin):
         await self._cancel_incomplete_startup(reason, exclude=asyncio.current_task())
         self.reconnecting = True
         self._session_start_received = False
+        self._mark_session_reconnecting(reason)
 
         # The partially initialized session must not leak occupant/admin/join
         # state into the next connection attempt. on_disconnect() normally does
@@ -243,6 +250,7 @@ class MucMixin(BotOccupantMixin):
             # Slixmpp retries an unavailable remote server. This helper is
             # idempotent, so repeated connection_failed events only keep the
             # existing extender armed.
+            self._mark_session_reconnecting("connection attempt failed before session_start")
             if not bool(getattr(self, "_startup_completed_once", False)):
                 runtime_watchdog = getattr(self, "runtime_watchdog", None)
                 arm_startup_timeout = getattr(
@@ -306,6 +314,7 @@ class MucMixin(BotOccupantMixin):
         log.warning("⚠️  Disconnected from server")
         self.reconnecting = True
         self._session_start_received = False
+        self._mark_session_reconnecting("connection lost")
         self._get_reconnect_success_event().clear()
 
         # Before the first successful READY=1, a remote XMPP outage may last

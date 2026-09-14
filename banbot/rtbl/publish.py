@@ -5,6 +5,7 @@ import hashlib
 import logging
 import uuid
 
+from envs_xmpp_core.xmpp import iq_error_condition, iq_error_summary
 from slixmpp.exceptions import IqError, IqTimeout
 
 from .utils import RTBL_PUBLISH_SANITY_CHECK_REASON
@@ -215,14 +216,14 @@ class RtblPublishMixin:
             await self.plugin["xep_0060"].get_node_config(service, node)
             return True
         except IqError as e:
-            if "item-not-found" in str(e).lower() or "nodeid-required" in str(e).lower():
+            if iq_error_condition(e) in {"item-not-found", "nodeid-required"}:
                 return False
             # Some services may forbid config reads. Fall back to a cheap item fetch.
             try:
                 await self.plugin["xep_0060"].get_items(service, node, max_items=1)
                 return True
             except Exception:
-                log.debug("RTBL Publish: Could not verify node '%s' on %s: %s", node, service, e)
+                log.debug("RTBL Publish: Could not verify node '%s' on %s: %s", node, service, iq_error_summary(e))
                 return False
         except IqTimeout:
             return False
@@ -259,7 +260,7 @@ class RtblPublishMixin:
                 node_exists = True
                 log.info("RTBL Publish: Created node '%s' on %s", node, service)
             except IqError as e:
-                if "conflict" in str(e).lower():
+                if iq_error_condition(e) == "conflict":
                     node_exists = True
                     log.info("RTBL Publish: Node '%s' already exists on %s", node, service)
                 else:
@@ -271,10 +272,10 @@ class RtblPublishMixin:
                             service,
                         )
                     else:
-                        log.warning("RTBL Publish: Could not create node '%s': %s", node, e)
+                        log.warning("RTBL Publish: Could not create node '%s': %s", node, iq_error_summary(e))
                         return False
             except IqTimeout as e:
-                log.warning("RTBL Publish: Timeout creating node '%s': %s", node, e)
+                log.warning("RTBL Publish: Timeout creating node '%s': %s", node, iq_error_summary(e))
                 return False
 
         try:
@@ -293,15 +294,15 @@ class RtblPublishMixin:
                 configured_max_items,
             )
         except IqError as e:
-            if "forbidden" in str(e).lower():
+            if iq_error_condition(e) == "forbidden":
                 log.info(
                     "RTBL Publish: Node '%s' exists but cannot be configured; using existing node config.",
                     node,
                 )
             else:
-                log.warning("RTBL Publish: Could not configure node '%s': %s", node, e)
+                log.warning("RTBL Publish: Could not configure node '%s': %s", node, iq_error_summary(e))
         except IqTimeout as e:
-            log.warning("RTBL Publish: Timeout configuring node '%s': %s", node, e)
+            log.warning("RTBL Publish: Timeout configuring node '%s': %s", node, iq_error_summary(e))
         except TypeError as e:
             log.warning("RTBL Publish: Could not build config form for node '%s': %s", node, e)
 
@@ -387,7 +388,7 @@ class RtblPublishMixin:
                 try:
                     result = await self._rtbl_get_sanity_item(node, item_id)
                 except (IqError, IqTimeout) as e:
-                    fetch_error = f"{node}: test item fetch failed: {e}"
+                    fetch_error = f"{node}: test item fetch failed: {iq_error_summary(e)}"
                 except Exception as e:
                     fetch_error = f"{node}: test item fetch failed: {e}"
                 else:
@@ -404,7 +405,7 @@ class RtblPublishMixin:
                 primary_error = fetch_error
 
         except (IqError, IqTimeout) as e:
-            primary_error = f"{node}: test publish failed: {e}"
+            primary_error = f"{node}: test publish failed: {iq_error_summary(e)}"
         except Exception as e:
             primary_error = f"{node}: test publish failed: {e}"
         finally:
@@ -417,7 +418,7 @@ class RtblPublishMixin:
                         notify=False,
                     )
                 except (IqError, IqTimeout) as e:
-                    cleanup_error = f"{node}: test retract failed: {e}"
+                    cleanup_error = f"{node}: test retract failed: {iq_error_summary(e)}"
                     primary_error = primary_error or cleanup_error
                     log.warning("RTBL Publish: %s", cleanup_error)
                 except Exception as e:
@@ -567,7 +568,7 @@ class RtblPublishMixin:
             )
             return True
         except (IqError, IqTimeout) as e:
-            log.warning("RTBL Publish: Could not publish JID hash for %s: %s", bare_jid, e)
+            log.warning("RTBL Publish: Could not publish JID hash for %s: %s", bare_jid, iq_error_summary(e))
             return False
 
 
@@ -583,7 +584,7 @@ class RtblPublishMixin:
             log.debug("RTBL Publish: Domain ban published for *.%s", domain)
             return True
         except (IqError, IqTimeout) as e:
-            log.warning("RTBL Publish: Could not publish domain ban for *.%s: %s", domain, e)
+            log.warning("RTBL Publish: Could not publish domain ban for *.%s: %s", domain, iq_error_summary(e))
             return False
 
 
@@ -605,7 +606,7 @@ class RtblPublishMixin:
             # is already reached. This can happen when an old permanent ban is
             # converted to a tempban but was never published successfully, or
             # when the node was manually recreated. Keep admin logs quiet.
-            if "item-not-found" in str(e).lower():
+            if iq_error_condition(e) == "item-not-found":
                 log.info(
                     "RTBL Publish: Item '%s…' was already absent from node '%s'",
                     item_id[:16], node,
@@ -614,10 +615,10 @@ class RtblPublishMixin:
 
             log.warning(
                 "RTBL Publish: Could not retract '%s…' from '%s': %s",
-                item_id[:16], node, e,
+                item_id[:16], node, iq_error_summary(e),
             )
         except IqTimeout as e:
             log.warning(
                 "RTBL Publish: Timeout retracting '%s…' from '%s': %s",
-                item_id[:16], node, e,
+                item_id[:16], node, iq_error_summary(e),
             )

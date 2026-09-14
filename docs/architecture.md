@@ -60,48 +60,39 @@ Runtime settings are copied onto the `BanBot` instance. Code that supports live 
 The `session_start` event calls `BanBot.start()`.
 
 ```text
-XMPP session established
+process lifetime (first successful initialization only)
+        │
+        ├── open/migrate SQLite and create startup backup
+        ├── load bans, protected rooms, invites and protection state
+        └── keep persistent state/runtime watchdog alive across reconnects
+
+XMPP session_start (every connect/reconnect)
         │
         ▼
-stop old background tasks
+allocate new session generation and stop old reconnect-scoped workers
         │
-        ▼
-open/setup SQLite and load persisted state
-        │
-        ├── bans and indexes
-        ├── protected rooms and pending invites
-        ├── ignorelist and protections
-        ├── policy, audit and redaction state
-        └── update-notification metadata
         ▼
 send presence and fetch roster
         │
         ▼
-register room handlers
-        │
-        ▼
-join admin room and protected rooms in parallel
+register room handlers and join managed rooms
         │
         ▼
 wait for self/occupant presence
         │
         ▼
-check bot affiliation and synchronize admins/bans
+check bot affiliation and synchronize admins/bans with bounded IQ queries
         │
         ▼
-initialize RTBL subscriptions and publish nodes
+initialize RTBL session state and reconnect-scoped workers
         │
         ▼
-start background workers
-        │
-        ▼
-set vCard and send startup/update notifications
-        │
-        ▼
-start/confirm process-scoped runtime watchdog and notify systemd READY=1
+set vCard, send startup/reconnect notification and publish READY state
 ```
 
-Reconnects reuse the same startup sequence, but preserve the process uptime and emit reconnect-specific alerts. Reconnect-scoped core workers are cancelled before replacements are created. A reconnect is signalled as successful only after the complete critical startup path (DB, room joins/sync, RTBL, workers and watchdog) has completed. The process-scoped runtime watchdog remains active across XMPP reconnects.
+Process initialization and XMPP-session initialization are deliberately separate. The database, migrations, startup backup and persisted application state are initialized once per process. Each `session_start` then receives a monotonically increasing session generation and reruns only session-scoped transport, room joins, synchronization, RTBL/session services, identity publication and readiness work. Reconnect-scoped core workers are cancelled before replacements are created, while the process-scoped runtime watchdog and persistent database state remain active.
+
+A reconnect is signalled as successful only after the current generation has completed the complete session-scoped critical path. Every awaited session phase checks that its generation is still current; a late completion from an obsolete stream is cancelled instead of mutating the new session. Reconnect/status diagnostics expose the current generation, reconnect count, startup phase and timing information.
 
 ## MUC Join and Presence Model
 
@@ -230,7 +221,7 @@ It uses two sources:
 - live occupant affiliations from the MUC cache
 - server-side owner/admin affiliation queries when permitted
 
-Some MUC services reject affiliation-list queries for non-owners. Such rooms are remembered and fall back to the live occupant cache instead of repeatedly issuing a failing query.
+Some MUC services reject affiliation-list queries for non-owners. Such rooms are remembered and fall back to the live occupant cache instead of repeatedly issuing a failing query. Owner/admin/outcast list reads use `envs_xmpp_core.xmpp.query_muc_affiliation()` with explicit IQ timeout, bounded retry of transient conditions and sanitized structured errors; a missing IQ response therefore cannot block the complete session startup until Slixmpp's long default timeout.
 
 ## Protection Subsystem
 
@@ -283,7 +274,7 @@ Important state groups include:
 
 See [database.md](database.md) for the table-level reference.
 
-The database is opened during every startup/reconnect sequence. High-impact import, restore, backup, and state replacement operations must use the shared database/file mutation helpers.
+The database is opened, migrated and backed up during process initialization, once per bot process. XMPP reconnects reuse that live persistent state and do not create another startup backup or reopen the database. High-impact import, restore, backup, and state replacement operations must use the shared database/file mutation helpers.
 
 ## Concurrency and Maintenance Locks
 
@@ -341,9 +332,9 @@ drained once by the supervisor and are not awaited a second time by the legacy
 compatibility path; unsupervised operation tasks also use a bounded asyncio
 drain. This prevents a cancellation-resistant worker from hanging shutdown.
 
-`DatabaseMixin.setup_db()` closes an existing SQLite connection before opening
-a replacement on a new XMPP session, preventing reconnect cycles from leaking
-aiosqlite worker threads or file descriptors.
+`DatabaseMixin.setup_db()` remains defensive about an already-open connection,
+but normal XMPP reconnects no longer call it: database lifetime is process-scoped
+rather than session-scoped.
 
 ## Backups, Import, and Restore
 
@@ -412,3 +403,15 @@ Use the module that already owns the responsibility:
 - audit, alerts, redaction, or update checks: the matching focused module
 
 Avoid adding a second persistence path, occupant-identity implementation, command router, or subsystem-specific ban lock when a shared implementation already exists.
+
+### Deployment and health ownership
+
+The deploy frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` and adds
+only muc_banbot's mutable data directory and executable/config policy. Generic
+Git, systemd, virtualenv and release transactions remain in `envs_xmpp_ops`.
+Local wrappers remain as test/policy injection seams, not independent
+implementations.
+
+Status health uses the shared task-supervisor facts and message-based
+`HealthCheck` builder.  BanBot still owns moderation-specific severity policy,
+protected-room admin/owner checks, RTBL state and database statistics.

@@ -570,3 +570,9 @@ def test_local_coverage_profile_enforces_ci_threshold():
     assert testing["coverage-source"] == "banbot"
     assert testing["coverage-report"] == "term-missing"
     assert testing["coverage-fail-under"] == 55
+
+
+def test_deployment_uses_shared_target_base():
+    from envs_xmpp_ops.deploy import DeploymentTarget
+
+    assert issubclass(deploy.Deployment, DeploymentTarget)

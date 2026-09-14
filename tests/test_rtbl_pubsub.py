@@ -3,6 +3,7 @@ from __future__ import annotations
 from xml.etree import ElementTree as ET
 
 import pytest
+from slixmpp.exceptions import IqError
 
 pytest.importorskip("slixmpp")
 aiosqlite = pytest.importorskip("aiosqlite")
@@ -429,3 +430,30 @@ async def test_pubsub_retract_removes_domain_cache_when_last_reference_disappear
         assert bot.cleanup_calls == ["rtbl_retract"]
     finally:
         await db.close()
+
+
+@pytest.mark.rtbl
+@pytest.mark.asyncio
+async def test_subscribe_iq_error_log_is_stanza_safe(caplog):
+    class FailingPubSub:
+        async def subscribe(self, service, node):
+            del service, node
+            raise IqError({
+                "error": {
+                    "condition": "forbidden",
+                    "text": "subscription denied",
+                    "type": "auth",
+                }
+            })
+
+    bot = RtblBot(None, [])
+    bot.plugin["xep_0060"] = FailingPubSub()
+
+    with caplog.at_level("WARNING", logger="banbot.rtbl.pubsub"):
+        ok, error = await bot._rtbl_subscribe_node("pubsub.example.org", "node")
+
+    assert ok is False
+    assert error is not None
+    assert "IQ error forbidden: subscription denied" in error
+    assert "{'error':" not in caplog.text
+    assert "subscription denied" in caplog.text

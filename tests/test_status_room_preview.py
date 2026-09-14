@@ -7,6 +7,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from envs_xmpp_core.runtime import SessionLifecycleSnapshot
 
 from banbot.status import StatusMixin
 
@@ -146,3 +147,47 @@ async def test_status_reports_current_worker_restart_backoff(monkeypatch):
     assert "Background worker restart/backoff in progress: unban-worker" in body
     assert "Background worker restart(s) observed: unban-worker×1" not in body
     assert "Restarting: 1" in body
+
+
+@pytest.mark.asyncio
+async def test_status_exposes_shared_session_lifecycle_telemetry(monkeypatch):
+    bot = StatusRoomPreviewBot()
+    bot.session_lifecycle = SimpleNamespace(
+        snapshot=lambda: SessionLifecycleSnapshot(
+            generation=5,
+            reconnect_count=4,
+            state="starting",
+            phase="synchronization",
+            session_started_at="2026-09-14T05:00:00+00:00",
+            last_ready_at="2026-09-14T04:59:00+00:00",
+            last_disconnect_at="2026-09-14T04:59:55+00:00",
+            last_disconnect_reason="connection lost",
+            last_error=None,
+            startup_duration_seconds=None,
+            phase_age_seconds=7.0,
+            session_age_seconds=7.0,
+        )
+    )
+    _patch_process(monkeypatch)
+
+    await bot._cmd_status("admin@conference.example.org", ["full"])
+    body = bot.sent[-1]["mbody"]
+
+    assert "Session: starting · generation 5 · reconnects 4" in body
+    assert "Session phase: synchronization · age 7s" in body
+    assert "Last disconnect: connection lost" in body
+
+
+@pytest.mark.asyncio
+async def test_status_shows_last_admin_sync_result(monkeypatch):
+    bot = StatusRoomPreviewBot()
+    bot.last_admin_sync_at = time.time() - 30
+    bot.last_admin_sync_ok = False
+    bot.last_admin_sync_error = "owner: IQ timeout after 10s"
+    _patch_process(monkeypatch)
+
+    await bot._cmd_status("admin@conference.example.org", ["full"])
+    body = bot.sent[-1]["mbody"]
+
+    assert "Admin sync: ⚠️ failed · 30s ago" in body
+    assert "Admin sync error: owner: IQ timeout after 10s" in body

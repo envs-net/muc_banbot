@@ -136,3 +136,34 @@ async def test_apply_unban_to_room_removes_outcast_and_restores_online_user(monk
     assert muc.affiliations[0]["jid"] == "user@example.test"
     assert muc.affiliations[0]["affiliation"] == "none"
     assert any(call["nick"] == "User" and call["role"] == "participant" for call in muc.roles)
+
+
+@pytest.mark.asyncio
+async def test_repeated_successful_enforcement_keeps_action_but_deduplicates_info_log(
+    monkeypatch,
+    caplog,
+):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = ApplyRoomBot()
+
+    with caplog.at_level("INFO", logger="banbot.moderation"):
+        await bot.apply_ban_to_room(
+            "room@conference.example.test",
+            None,
+            "User",
+            "spam",
+            issuer="admin@example.test",
+        )
+        await bot.apply_ban_to_room(
+            "room@conference.example.test",
+            None,
+            "User",
+            "spam",
+            issuer="admin@example.test",
+        )
+
+    # Enforcement still happens on every rejoin/event.
+    assert [call["nick"] for call in bot.plugin["xep_0045"].roles] == ["User", "User"]
+    # But the identical successful action is only operator-visible once at INFO.
+    assert caplog.text.count("✅ Kicked User from room@conference.example.test") == 1

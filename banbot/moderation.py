@@ -4,6 +4,8 @@ import asyncio
 import logging
 import time
 
+from envs_xmpp_core.runtime import KeyedCooldown
+from envs_xmpp_core.xmpp import iq_error_summary
 from slixmpp.exceptions import IqError, IqTimeout
 
 from config import ADMIN_ROOM
@@ -24,6 +26,31 @@ log = logging.getLogger(__name__)
 
 
 class ModerationMixin:
+    _MODERATION_SUCCESS_LOG_COOLDOWN_SECONDS = 15 * 60
+
+    def _moderation_log_gate(self) -> KeyedCooldown:
+        gate = getattr(self, "_moderation_success_log_gate", None)
+        if gate is None:
+            gate = KeyedCooldown(
+                cooldown_seconds=self._MODERATION_SUCCESS_LOG_COOLDOWN_SECONDS,
+                max_keys=4096,
+            )
+            self._moderation_success_log_gate = gate
+        return gate
+
+    def _log_moderation_success(self, key: str, message: str, *args) -> None:
+        """Log a repeated successful action at INFO only once per window."""
+        decision = self._moderation_log_gate().check(key)
+        if decision.allowed:
+            suffix = (
+                f" ({decision.suppressed} repeated log event(s) suppressed)"
+                if decision.suppressed
+                else ""
+            )
+            log.info(message + suffix, *args)
+            return
+        log.debug(message + " (repeat suppressed at INFO)", *args)
+
     def _auto_redaction_matches_ban_reason(self, comment: str | None) -> bool:
         """Return whether a command ban will actually start auto-redaction.
 
@@ -184,13 +211,18 @@ class ModerationMixin:
                             affiliation="outcast",
                             reason=comment or "Banned by admin"
                         )
-                    log.info("✅ Outcast set for %s in %s", ban_jid_bare, room)
+                    self._log_moderation_success(
+                        f"outcast:{room.casefold()}:{ban_jid_bare.casefold()}",
+                        "✅ Outcast set for %s in %s",
+                        ban_jid_bare,
+                        room,
+                    )
                     break
                 except IqTimeout:
                     log.warning("Timeout setting outcast for %s in %s, retrying...", ban_jid_bare, room)
                     await asyncio.sleep(1)
                 except IqError as e:
-                    log.warning("IqError setting outcast for %s in %s: %s", ban_jid_bare, room, e)
+                    log.warning("IqError setting outcast for %s in %s: %s", ban_jid_bare, room, iq_error_summary(e))
                     break
 
         # --- Step 2: Kick matching occupants in parallel ---
@@ -222,13 +254,19 @@ class ModerationMixin:
                                 role="none",
                                 reason=comment or "Banned by admin"
                             )
-                        log.info("✅ Kicked %s from %s", nick_name, room)
+                        identity = self.bare_jid(jid_in_room) if jid_in_room else nick_name.casefold()
+                        self._log_moderation_success(
+                            f"kick:{room.casefold()}:{identity}",
+                            "✅ Kicked %s from %s",
+                            nick_name,
+                            room,
+                        )
                         break
                     except IqTimeout:
                         log.warning("Timeout kicking %s in %s, retrying...", nick_name, room)
                         await asyncio.sleep(1)
                     except IqError as e:
-                        log.warning("IqError kicking %s in %s: %s", nick_name, room, e)
+                        log.warning("IqError kicking %s in %s: %s", nick_name, room, iq_error_summary(e))
                         break
 
         try:
@@ -246,9 +284,14 @@ class ModerationMixin:
                         role="none",
                         reason=comment or "Banned by admin"
                     )
-                log.info("✅ Kick applied to %s (nick-only) in %s", ban_nick, room)
+                self._log_moderation_success(
+                    f"kick:{room.casefold()}:{ban_nick.casefold()}",
+                    "✅ Kick applied to %s (nick-only) in %s",
+                    ban_nick,
+                    room,
+                )
             except IqError as e:
-                log.debug("Could not kick nick-only user %s: %s", ban_nick, e)
+                log.debug("Could not kick nick-only user %s: %s", ban_nick, iq_error_summary(e))
             except IqTimeout:
                 log.warning("Timeout kicking nick-only user %s", ban_nick)
 
@@ -738,7 +781,7 @@ class ModerationMixin:
                         if attempt < 2:
                             await asyncio.sleep(1)
                     except IqError as exc:
-                        log.debug("IqError removing outcast for %s in %s: %s", bare, room, exc)
+                        log.debug("IqError removing outcast for %s in %s: %s", bare, room, iq_error_summary(exc))
                         break
                 if not removed:
                     return False
@@ -773,7 +816,7 @@ class ModerationMixin:
                             if attempt < 1:
                                 await asyncio.sleep(1)
                         except IqError as exc:
-                            log.debug("IqError restoring role for %s in %s: %s", nick, room, exc)
+                            log.debug("IqError restoring role for %s in %s: %s", nick, room, iq_error_summary(exc))
                             break
                     # Nick-only bans have no persistent affiliation to clear;
                     # restoring the matching occupant role is the actual
@@ -796,7 +839,7 @@ class ModerationMixin:
 
             return True
         except (IqError, IqTimeout) as exc:
-            log.warning("Failed to unban %s in %s: %s", ban_jid or ban_nick or domain, room, exc)
+            log.warning("Failed to unban %s in %s: %s", ban_jid or ban_nick or domain, room, iq_error_summary(exc))
             return False
 
 

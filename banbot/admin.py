@@ -3,13 +3,13 @@
 import asyncio
 import logging
 
+from envs_xmpp_core.xmpp import AffiliationQueryOptions, query_muc_affiliation
 from envs_xmpp_core.xmpp.occupants import (
     find_occupant_by_jid,
     find_occupant_by_nick,
     occupant_is_admin_or_owner,
     occupant_is_moderator,
 )
-from slixmpp.exceptions import IqError, IqTimeout
 
 from config import ADMIN_ROOM
 
@@ -17,6 +17,12 @@ from .occupants import BotOccupantMixin
 from .utils import domain_matches
 
 log = logging.getLogger(__name__)
+
+_ADMIN_AFFILIATION_QUERY_OPTIONS = AffiliationQueryOptions(
+    timeout_seconds=10.0,
+    attempts=2,
+    retry_delay_seconds=1.0,
+)
 
 
 class AdminMixin(BotOccupantMixin):
@@ -56,59 +62,71 @@ class AdminMixin(BotOccupantMixin):
 
 
     async def verify_admin_rights(self, room: str) -> bool:
-        """
-        Server-side check if the bot is actually admin/owner.
-        Returns True if yes, False otherwise.
-        """
-        try:
-            owners = await self.plugin["xep_0045"].get_users_by_affiliation(room, "owner")
-            admins = await self.plugin["xep_0045"].get_users_by_affiliation(room, "admin")
-            bare_bot_jid = self.boundjid.bare
-
-            for jid in owners + admins:
-                if str(jid).split("/")[0].lower() == bare_bot_jid.lower():
+        """Return whether the bot has server-side owner/admin affiliation."""
+        muc = self.plugin["xep_0045"]
+        bare_bot_jid = str(self.boundjid.bare).lower()
+        for affiliation in ("owner", "admin"):
+            result = await query_muc_affiliation(
+                muc,
+                room,
+                affiliation,
+                options=_ADMIN_AFFILIATION_QUERY_OPTIONS,
+            )
+            if not result.ok:
+                log.warning(
+                    "Server admin-rights check failed for %s (%s): %s",
+                    room,
+                    affiliation,
+                    result.summary,
+                )
+                return False
+            for jid in result.items:
+                if str(jid).split("/", 1)[0].lower() == bare_bot_jid:
                     return True
-            return False
-        except (IqError, IqTimeout) as e:
-            log.warning("Server check failed for %s: %s", room, e)
-            return False
+        return False
 
 
     async def get_room_admin_owner_jids(self, room: str) -> set[str]:
-        """Return bare JIDs with owner/admin affiliation from the server.
+        """Return server-known owner/admin bare JIDs using bounded IQ queries.
 
-        Some MUC services only allow owners to query affiliation lists. If the
-        server rejects the query with <forbidden/>, remember that room and fall
-        back to the live occupant cache instead of logging the same warning on
-        every ban command.
+        A room that rejects full affiliation lists with ``forbidden`` is
+        remembered so later ban checks use the live occupant cache without
+        repeatedly issuing an IQ the server will not permit.
         """
         protected: set[str] = set()
-
         if room in self.admin_affiliation_query_forbidden_rooms:
             return protected
 
-        try:
-            owners = await self.plugin["xep_0045"].get_users_by_affiliation(room, "owner")
-            admins = await self.plugin["xep_0045"].get_users_by_affiliation(room, "admin")
-            for jid in owners + admins:
+        muc = self.plugin["xep_0045"]
+        for affiliation in ("owner", "admin"):
+            result = await query_muc_affiliation(
+                muc,
+                room,
+                affiliation,
+                options=_ADMIN_AFFILIATION_QUERY_OPTIONS,
+            )
+            if not result.ok:
+                if result.error_condition == "forbidden":
+                    self.admin_affiliation_query_forbidden_rooms.add(room)
+                    log.warning(
+                        "Full owner/admin affiliation lists are unavailable for %s; "
+                        "using the live occupant cache for admin protection. "
+                        "This is expected when BanBot is room admin rather than owner; "
+                        "offline admins cannot be detected for this room.",
+                        room,
+                    )
+                else:
+                    log.warning(
+                        "Could not fetch %s affiliation list for %s: %s",
+                        affiliation,
+                        room,
+                        result.summary,
+                    )
+                return set()
+            for jid in result.items:
                 bare = self.bare_jid(str(jid))
                 if bare:
                     protected.add(bare)
-        except IqError as e:
-            if "forbidden" in str(e):
-                self.admin_affiliation_query_forbidden_rooms.add(room)
-                log.warning(
-                    "Full owner/admin affiliation lists are unavailable for %s; "
-                    "using the live occupant cache for admin protection. "
-                    "This is expected when BanBot is room admin rather than owner; "
-                    "offline admins cannot be detected for this room.",
-                    room,
-                )
-            else:
-                log.warning("Could not fetch admin/owner list for %s: %s", room, e)
-        except IqTimeout as e:
-            log.warning("Could not fetch admin/owner list for %s: %s", room, e)
-
         return protected
 
 

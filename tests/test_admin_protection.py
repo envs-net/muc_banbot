@@ -137,7 +137,8 @@ async def test_forbidden_affiliation_query_logs_expected_admin_fallback(monkeypa
     admin_module = importlib.import_module("banbot.admin")
 
     class FakeIqError(Exception):
-        pass
+        condition = "forbidden"
+        text = ""
 
     class ForbiddenMucPlugin:
         def __init__(self):
@@ -147,7 +148,6 @@ async def test_forbidden_affiliation_query_logs_expected_admin_fallback(monkeypa
             self.calls += 1
             raise FakeIqError("forbidden")
 
-    monkeypatch.setattr(admin_module, "IqError", FakeIqError)
     bot = AdminBot()
     plugin = ForbiddenMucPlugin()
     bot.plugin["xep_0045"] = plugin

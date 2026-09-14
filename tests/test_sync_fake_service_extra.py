@@ -731,7 +731,6 @@ async def test_sync_admins_retries_bounded_iq_timeout_without_raw_stanza_log(
                 raise FakeIqTimeout("<iq type='get' to='admin@example.test'/>")
             return list(self.affiliations.get((room, affiliation), []))
 
-    monkeypatch.setattr(sync_module, "IqTimeout", FakeIqTimeout)
     monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep_fn)
     bot = await initialize_sync_bot_for_test(temp_db_path)
     service = FlakyMucService()
@@ -739,8 +738,12 @@ async def test_sync_admins_retries_bounded_iq_timeout_without_raw_stanza_log(
     try:
         with caplog.at_level("WARNING", logger="banbot.sync"):
             async with admin_room_override(sync_module):
-                await bot.sync_admins(announce=False)
+                synced = await bot.sync_admins(announce=False)
 
+        assert synced is True
+        assert bot.last_admin_sync_ok is True
+        assert bot.last_admin_sync_at is not None
+        assert bot.last_admin_sync_error is None
         assert service.calls.count((TEST_ADMIN_ROOM, "owner")) == 2
         assert bot.occupants[TEST_ADMIN_ROOM][TEST_OWNER_JID]["affiliation"] == "owner"
         assert "IQ timeout after 10s" in caplog.text
@@ -765,15 +768,18 @@ async def test_sync_admins_does_not_retry_permanent_iq_error(
             self.calls.append((room, affiliation))
             raise FakeIqError("raw stanza")
 
-    monkeypatch.setattr(sync_module, "IqError", FakeIqError)
     bot = await initialize_sync_bot_for_test(temp_db_path)
     service = ForbiddenMucService()
     bot.plugin["xep_0045"] = service
     try:
         with caplog.at_level("WARNING", logger="banbot.sync"):
             async with admin_room_override(sync_module):
-                await bot.sync_admins(announce=False)
+                synced = await bot.sync_admins(announce=False)
 
+        assert synced is False
+        assert bot.last_admin_sync_ok is False
+        assert bot.last_admin_sync_at is not None
+        assert bot.last_admin_sync_error == "owner: IQ error forbidden: owner affiliation list denied"
         assert service.calls == [(TEST_ADMIN_ROOM, "owner")]
         assert "IQ error forbidden: owner affiliation list denied" in caplog.text
         assert "raw stanza" not in caplog.text

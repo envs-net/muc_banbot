@@ -4,23 +4,21 @@ import asyncio
 import logging
 import time
 
-from slixmpp.exceptions import IqError, IqTimeout
-
 from config import ADMIN_ROOM, NICK
 
 log = logging.getLogger(__name__)
 
-_ADMIN_SYNC_IQ_TIMEOUT_SECONDS = 10.0
-_ADMIN_SYNC_RETRIES = 2
-_ADMIN_SYNC_RETRY_DELAY_SECONDS = 1.0
-_ADMIN_SYNC_TRANSIENT_IQ_CONDITIONS = {
-    "internal-server-error",
-    "recipient-unavailable",
-    "remote-server-timeout",
-    "service-unavailable",
-}
+from envs_xmpp_core.xmpp import (
+    AffiliationQueryOptions,
+    await_muc_join_compat,
+    query_muc_affiliation,
+)
 
-from envs_xmpp_core.xmpp import await_muc_join_compat
+_SYNC_AFFILIATION_QUERY_OPTIONS = AffiliationQueryOptions(
+    timeout_seconds=10.0,
+    attempts=2,
+    retry_delay_seconds=1.0,
+)
 
 from .locks import ban_state_lock
 from .utils import looks_like_domain
@@ -395,35 +393,23 @@ class SyncMixin:
 
 
     async def _sync_fetch_room_outcasts(self, room: str) -> list[tuple[str, str | None]]:
-        """Fetch room outcasts, preserving reasons when the server/API exposes them."""
-        plugin = self.plugin["xep_0045"]
+        """Fetch room outcasts through the shared bounded affiliation query."""
+        result = await query_muc_affiliation(
+            self.plugin["xep_0045"],
+            room,
+            "outcast",
+            options=_SYNC_AFFILIATION_QUERY_OPTIONS,
+        )
+        if not result.ok:
+            raise RuntimeError(
+                f"outcast affiliation query failed for {room}: {result.summary}"
+            )
+
         entries: dict[str, str | None] = {}
-
-        # Prefer the richer affiliation-list API when available because it may
-        # expose MUC admin <reason/> text. get_users_by_affiliation often
-        # returns only JIDs, losing the manual ban reason.
-        get_affiliation_list = getattr(plugin, "get_affiliation_list", None)
-        if callable(get_affiliation_list):
-            try:
-                outcast_items = await get_affiliation_list(room, "outcast")
-                for item in self._sync_iter_affiliation_items(outcast_items):
-                    jid_bare, reason = self._sync_extract_outcast_entry(item)
-                    if jid_bare:
-                        entries[jid_bare] = reason or entries.get(jid_bare)
-            except Exception as exc:
-                log.debug("Could not fetch rich outcast list for %s: %s", room, exc)
-
-        try:
-            outcasts = await plugin.get_users_by_affiliation(room, "outcast")
-            for item in self._sync_iter_affiliation_items(outcasts):
-                jid_bare, reason = self._sync_extract_outcast_entry(item)
-                if jid_bare:
-                    entries.setdefault(jid_bare, reason)
-        except Exception as exc:
-            if not entries:
-                raise
-            log.debug("Fallback outcast JID fetch failed for %s after rich fetch succeeded: %s", room, exc)
-
+        for item in self._sync_iter_affiliation_items(result.items):
+            jid_bare, reason = self._sync_extract_outcast_entry(item)
+            if jid_bare:
+                entries[jid_bare] = reason or entries.get(jid_bare)
         return [(jid, reason) for jid, reason in entries.items()]
 
 
@@ -632,103 +618,48 @@ class SyncMixin:
             log.warning("⚠️ Failed to sync bans for room %s: %s", room, e)
 
 
-    async def _sync_get_affiliation_users(
-        self,
-        room: str,
-        affiliation: str,
-        *,
-        timeout: float = _ADMIN_SYNC_IQ_TIMEOUT_SECONDS,
-    ) -> list:
-        """Fetch one MUC affiliation list with a bounded IQ timeout."""
-        muc_plugin = self.plugin["xep_0045"]
-        getter = getattr(muc_plugin, "get_affiliation_list", None)
-        if callable(getter):
-            try:
-                request = getter(room, affiliation, timeout=timeout)
-            except TypeError as exc:
-                # Older XEP-0045 implementations may expose the method but not
-                # the IQ keyword arguments. Fall back only for that API shape.
-                if "timeout" not in str(exc):
-                    raise
-            else:
-                return list(await request)
-
-        # Compatibility with lightweight/fake or older XEP-0045 facades whose
-        # legacy get_users_by_affiliation() does not expose IQ kwargs.
-        legacy_getter = muc_plugin.get_users_by_affiliation
-        return list(
-            await asyncio.wait_for(
-                legacy_getter(room, affiliation),
-                timeout=timeout,
-            )
-        )
-
-
-    @staticmethod
-    def _sync_iq_error_detail(exc: IqError) -> str:
-        """Return a useful IQ error message without dumping the full stanza."""
-        condition = str(getattr(exc, "condition", "unknown") or "unknown")
-        text = str(getattr(exc, "text", "") or "").strip()
-        return f"IQ error {condition}" + (f": {text}" if text else "")
-
-
     async def _sync_fetch_admin_affiliations(
         self,
         room: str,
     ) -> tuple[list, list] | None:
-        """Fetch owner/admin lists with bounded retries for transient IQ failures."""
-        last_reason = "unknown error"
-        for attempt in range(1, _ADMIN_SYNC_RETRIES + 1):
-            retryable = True
-            try:
-                owners = await self._sync_get_affiliation_users(room, "owner")
-                admins = await self._sync_get_affiliation_users(room, "admin")
-                return owners, admins
-            except IqTimeout:
-                last_reason = (
-                    "IQ timeout after "
-                    f"{_ADMIN_SYNC_IQ_TIMEOUT_SECONDS:g}s"
-                )
-            except TimeoutError:
-                last_reason = (
-                    "local timeout after "
-                    f"{_ADMIN_SYNC_IQ_TIMEOUT_SECONDS:g}s"
-                )
-            except IqError as exc:
-                last_reason = self._sync_iq_error_detail(exc)
-                retryable = str(getattr(exc, "condition", "") or "") in (
-                    _ADMIN_SYNC_TRANSIENT_IQ_CONDITIONS
-                )
-            except Exception as exc:
-                retryable = False
-                detail = str(exc).strip()
-                last_reason = type(exc).__name__ + (f": {detail}" if detail else "")
-
-            if retryable and attempt < _ADMIN_SYNC_RETRIES:
-                log.warning(
-                    "Admin sync attempt %d/%d for %s failed: %s; retrying in %.1fs",
-                    attempt,
-                    _ADMIN_SYNC_RETRIES,
-                    room,
-                    last_reason,
-                    _ADMIN_SYNC_RETRY_DELAY_SECONDS,
-                )
-                await asyncio.sleep(_ADMIN_SYNC_RETRY_DELAY_SECONDS)
-                continue
-
-            log.warning(
-                "Failed to sync admins from %s after %d attempt(s): %s; "
-                "continuing without server affiliation refresh",
+        """Fetch owner/admin lists through the shared bounded IQ helper."""
+        muc_plugin = self.plugin["xep_0045"]
+        options = _SYNC_AFFILIATION_QUERY_OPTIONS
+        results = []
+        for affiliation in ("owner", "admin"):
+            result = await query_muc_affiliation(
+                muc_plugin,
                 room,
-                attempt,
-                last_reason,
+                affiliation,
+                options=options,
             )
-            return None
+            if not result.ok:
+                self.last_admin_sync_error = f"{affiliation}: {result.summary}"
+                log.warning(
+                    "Failed to sync %s affiliations from %s after %d attempt(s): %s; "
+                    "continuing without server affiliation refresh",
+                    affiliation,
+                    room,
+                    result.attempts,
+                    result.summary,
+                )
+                return None
+            if result.attempts > 1:
+                reason = result.retry_reasons[-1] if result.retry_reasons else "transient IQ failure"
+                log.warning(
+                    "Admin sync recovered %s affiliations from %s on attempt %d/%d "
+                    "after %s",
+                    affiliation,
+                    room,
+                    result.attempts,
+                    options.attempts,
+                    reason,
+                )
+            results.append(list(result.items))
+        return results[0], results[1]
 
-        return None
 
-
-    async def sync_admins(self, announce: bool = False) -> None:
+    async def sync_admins(self, announce: bool = False) -> bool:
         """
         Fetch current owners/admins from ADMIN_ROOM via XMPP.
         Updates self.occupants for admin checks.
@@ -736,10 +667,16 @@ class SyncMixin:
         """
         room = ADMIN_ROOM
         affiliations = await self._sync_fetch_admin_affiliations(room)
+        self.last_admin_sync_at = time.time()
         if affiliations is None:
-            return
+            self.last_admin_sync_ok = False
+            if not getattr(self, "last_admin_sync_error", None):
+                self.last_admin_sync_error = "affiliation query failed"
+            return False
 
         owners, admins = affiliations
+        self.last_admin_sync_ok = True
+        self.last_admin_sync_error = None
         self.occupants[room] = self.occupants.get(room, {})
         admin_list = []
         admin_log_list = []
@@ -772,6 +709,8 @@ class SyncMixin:
                 msg = "⚠️ No admins/owners found in Admin-Room."
 
             await self.bot_send_message(mto=ADMIN_ROOM, mbody=msg, mtype="groupchat")
+
+        return True
 
 
     async def sync_bans_to_rooms(self, startup: bool = False, announce_progress: bool = True) -> None:
