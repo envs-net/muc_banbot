@@ -96,9 +96,9 @@ A reconnect is signalled as successful only after the current generation has com
 
 ## MUC Join and Presence Model
 
-MUC reliability is split across three modules:
+MUC reliability is split between the shared XMPP primitives and the bot-specific runtime:
 
-- `banbot.muc_join` normalizes Slixmpp's `join_muc_wait()` API and the legacy join fallback.
+- `envs_xmpp_core.xmpp` provides the normalized Slixmpp `join_muc_wait()` compatibility helpers.
 - `banbot.muc` owns tracked joins, self-presence events, reconnect handling, and occupant-cache updates.
 - `banbot.occupants` provides the authoritative lookup for the bot's own room occupant and the shared room-status formatter.
 
@@ -387,7 +387,7 @@ Use the module that already owns the responsibility:
 - process startup, shared state, event registration: `banbot.bot`
 - config loading: `banbot.config_loader`
 - config validation/runtime mutation: `banbot.config/*`
-- MUC joins, reconnects, and presence: `banbot.muc` / `banbot.muc_join`
+- MUC joins, reconnects, and presence: shared helpers in `envs_xmpp_core.xmpp`, runtime policy in `banbot.muc`
 - bot occupant identity and room status: `banbot.occupants`
 - authorization and admin protection: `banbot.admin`
 - command parsing/routing: `banbot.commands/*`

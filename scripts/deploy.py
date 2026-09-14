@@ -898,12 +898,6 @@ def _current_revision(deployment: Deployment) -> str:
     return describe_revision(partial(_git, deployment))
 
 
-def _is_stable_release_tag(tag: str) -> bool:
-    from envs_xmpp_ops.git import is_stable_release_tag
-
-    return is_stable_release_tag(tag)
-
-
 def _stable_tags(deployment: Deployment) -> list[str]:
     from envs_xmpp_ops.git import stable_release_tags
 
