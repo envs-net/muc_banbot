@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import os
+import sys
 import time
 from importlib import metadata
+from typing import TYPE_CHECKING, cast
 
 import psutil
 from envs_xmpp_core import __version__ as envs_xmpp_version
@@ -35,7 +37,26 @@ from .protections.presentation import protection_status_line
 from .status_health import collect_status_health_snapshot, status_health_messages
 from .utils import human_time
 
+if TYPE_CHECKING:
+    from .contracts import StatusMixinHost
+
+    class _StatusMixinContract(StatusMixinHost):
+        pass
+else:
+    class _StatusMixinContract:
+        pass
+
 log = logging.getLogger(__name__)
+
+
+def _status_int(value: object, default: int = 0) -> int:
+    """Return a diagnostics integer without letting malformed state break status."""
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
 
 
 def _package_version(package: str) -> str:
@@ -45,7 +66,7 @@ def _package_version(package: str) -> str:
         return "unknown"
 
 
-class StatusMixin:
+class StatusMixin(_StatusMixinContract):
     @staticmethod
     def human_size(num_bytes: int) -> str:
         return format_bytes(num_bytes, negative_label=None, max_unit="GiB")
@@ -53,7 +74,7 @@ class StatusMixin:
     def _status_room_views(self, protected_rooms: list[str]) -> list[RoomView]:
         views: list[RoomView] = []
         for room_name in sorted(protected_rooms, key=str.casefold):
-            bot_nick, info = BotOccupantMixin._bot_occupant_entry(self, room_name)
+            bot_nick, info = BotOccupantMixin._bot_occupant_entry(cast(BotOccupantMixin, self), room_name)
             affiliation = str((info or {}).get("affiliation") or "unknown").lower()
             role = str((info or {}).get("role") or "") or None
             joined = info is not None
@@ -84,9 +105,10 @@ class StatusMixin:
         try:
             if hasattr(self, "flush_redaction_index"):
                 await self.flush_redaction_index()
-            if not getattr(self, "db", None):
+            db = self.db
+            if db is None:
                 return 0, 0
-            async with self.db.execute(
+            async with db.execute(
                 """
                 SELECT COUNT(*),
                        COALESCE(SUM(CASE WHEN redacted_at IS NOT NULL THEN 1 ELSE 0 END), 0)
@@ -144,11 +166,12 @@ class StatusMixin:
             core_lines.append(f"Connection uptime: {human_time(max(0, now - int(server_connect_time)))}")
         else:
             core_lines.append("Connection uptime: unknown")
-        if getattr(self, "last_reconnect_time", None):
-            core_lines.append(f"Last reconnect: {human_time(max(0, now - int(self.last_reconnect_time)))} ago")
+        last_reconnect_time = getattr(self, "last_reconnect_time", None)
+        if last_reconnect_time is not None:
+            core_lines.append(f"Last reconnect: {human_time(max(0, now - int(last_reconnect_time)))} ago")
 
         runtime_lines = [
-            f"Python: {os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}",
+            f"Python: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
             f"envs-xmpp: {envs_xmpp_version}",
             f"slixmpp: {_package_version('slixmpp')}",
         ]
@@ -199,11 +222,11 @@ class StatusMixin:
                     observe += 1
             else:
                 disabled += 1
-        permanent_bans = int(db_stats.get("permanent_bans", 0) or 0)
-        temporary_bans = int(db_stats.get("temporary_bans", 0) or 0)
+        permanent_bans = _status_int(db_stats.get("permanent_bans", 0) or 0)
+        temporary_bans = _status_int(db_stats.get("temporary_bans", 0) or 0)
         moderation_lines = [
             f"Bans: {permanent_bans} permanent · {temporary_bans} temporary",
-            f"Pending auto-unban: {int(db_stats.get('expired_ban_rows', 0) or 0)}",
+            f"Pending auto-unban: {_status_int(db_stats.get('expired_ban_rows', 0) or 0)}",
             f"Protections: {enabled} enabled · {observe} observe · {disabled} disabled",
         ]
         if getattr(self, "rtbl_enabled", False):
@@ -234,8 +257,8 @@ class StatusMixin:
         database_lines = [
             f"Status: {'connected' if getattr(self, 'db', None) is not None else 'disconnected'}",
             f"Path: {getattr(config, 'DB_FILE', 'unknown')}",
-            f"Size: {self.human_size(int(db_stats.get('db_size_bytes', 0) or 0))}",
-            f"Audit events: {int(db_stats.get('audit_events', 0) or 0)} (retention: {self.audit_log_retention_days}d)",
+            f"Size: {self.human_size(_status_int(db_stats.get('db_size_bytes', 0) or 0))}",
+            f"Audit events: {_status_int(db_stats.get('audit_events', 0) or 0)} (retention: {self.audit_log_retention_days}d)",
         ]
         if getattr(self, "redaction_enabled", False) or redaction_total:
             database_lines.append(f"Redaction index: {redaction_total} tracked · {redaction_redacted} redacted")
@@ -261,7 +284,7 @@ class StatusMixin:
         health_lines = [
             f"Overall: {'✅ OK' if not problems and not warnings else ('❌ problems' if problems else '⚠️ attention')}",
             *task_summary[1:4],
-            f"Outbox: {int(outbox.get('pending', 0))} pending · {int(outbox.get('dead', 0))} dead",
+            f"Outbox: {_status_int(outbox.get('pending', 0))} pending · {_status_int(outbox.get('dead', 0))} dead",
         ]
         health_lines.extend(f"Problem: {item}" for item in problems)
         health_lines.extend(f"Warning: {item}" for item in warnings)

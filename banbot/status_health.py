@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.runtime.health import (
     HealthCheck,
@@ -15,10 +15,24 @@ from envs_xmpp_core.runtime.health import (
     supervisor_task_health_state,
     watchdog_health_state,
 )
+from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 
 import config
 
+if TYPE_CHECKING:
+    from .contracts import StatusHealthHost
+
 log = logging.getLogger(__name__)
+
+
+def _diagnostic_int(value: object, default: int = 0) -> int:
+    """Coerce an operator-facing counter without failing the health snapshot."""
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
 
 
 def _message_check(
@@ -41,8 +55,8 @@ def _message_check(
     )
 
 
-def _connection_check(bot: Any) -> HealthCheck:
-    warnings = ("Reconnect/resync is currently in progress",) if getattr(bot, "reconnecting", False) else ()
+def _connection_check(bot: StatusHealthHost) -> HealthCheck:
+    warnings = ("Reconnect/resync is currently in progress",) if bot.reconnecting else ()
     return _message_check(
         "connection",
         "reconnect in progress" if warnings else "connected",
@@ -50,8 +64,8 @@ def _connection_check(bot: Any) -> HealthCheck:
     )
 
 
-def _database_available_check(bot: Any) -> HealthCheck:
-    problems = ("Database connection is not available",) if not getattr(bot, "db", None) else ()
+def _database_available_check(bot: StatusHealthHost) -> HealthCheck:
+    problems = ("Database connection is not available",) if not bot.db else ()
     return _message_check(
         "database",
         "database unavailable" if problems else "database available",
@@ -59,9 +73,12 @@ def _database_available_check(bot: Any) -> HealthCheck:
     )
 
 
-def _tasks_check(bot: Any) -> HealthCheck:
+def _tasks_check(bot: StatusHealthHost) -> HealthCheck:
     problems: list[str] = []
     warnings: list[str] = []
+    session_workers_expected = bool(getattr(bot, "_startup_completed_once", False)) and not (
+        bot.reconnecting or bool(getattr(bot, "_shutdown_in_progress", False))
+    )
     task_checks = [
         ("unban worker", getattr(bot, "unban_task", None), True),
         ("health check worker", getattr(bot, "health_check_task", None), True),
@@ -73,14 +90,20 @@ def _tasks_check(bot: Any) -> HealthCheck:
         (
             "RTBL refresh worker",
             getattr(bot, "_rtbl_refresh_task", None),
-            bool(getattr(bot, "rtbl_enabled", False) and getattr(bot, "rtbl_refresh_interval", 0) > 0),
+            bool(bot.rtbl_enabled and getattr(bot, "rtbl_refresh_interval", 0) > 0),
         ),
     ]
     for task_name, task, should_run in task_checks:
-        if should_run and task is not None and task.done():
+        if not should_run:
+            continue
+        if task is None:
+            if session_workers_expected:
+                problems.append(f"{task_name} is not running")
+            continue
+        if task.done() and session_workers_expected:
             problems.append(f"{task_name} stopped unexpectedly")
 
-    supervisor = getattr(bot, "tasks", None)
+    supervisor = bot.tasks
     diagnostics = supervisor_task_health_state(supervisor, include_done=False)
     if diagnostics is not None:
         if diagnostics.failed_tasks:
@@ -101,7 +124,7 @@ def _tasks_check(bot: Any) -> HealthCheck:
     )
 
 
-def _watchdog_check(bot: Any) -> HealthCheck:
+def _watchdog_check(bot: StatusHealthHost) -> HealthCheck:
     problems: list[str] = []
     warnings: list[str] = []
     notes: list[str] = []
@@ -126,15 +149,15 @@ def _watchdog_check(bot: Any) -> HealthCheck:
     )
 
 
-def _rooms_check(bot: Any) -> HealthCheck:
+def _rooms_check(bot: StatusHealthHost) -> HealthCheck:
     problems: list[str] = []
     warnings: list[str] = []
     notes: list[str] = []
-    protected_rooms = sorted(getattr(bot, "protected_rooms", set()))
+    protected_rooms = sorted(bot.protected_rooms)
     if not protected_rooms:
         warnings.append("No protected rooms configured\n   The bot is running but has no rooms to protect.")
 
-    admin_state = getattr(bot, "bot_admin_state", {})
+    admin_state = bot.bot_admin_state
     missing_admin_rooms = sorted(room_name for room_name in protected_rooms if admin_state.get(room_name) is False)
     if missing_admin_rooms:
         preview = ", ".join(missing_admin_rooms[:5])
@@ -149,20 +172,29 @@ def _rooms_check(bot: Any) -> HealthCheck:
             "   The bot may still be waiting for room presence/state."
         )
 
-    admin_infos = getattr(bot, "occupants", {}).get(config.ADMIN_ROOM, {})
-    admins = sorted(
-        {
-            bot.safe_jid(bot.bare_jid(info.get("jid")) or "unknown")
-            for info in admin_infos.values()
-            if info.get("affiliation") in ("owner", "admin")
-        }
+    admin_room_key = str(config.ADMIN_ROOM).casefold()
+    admin_infos: dict[str, dict[str, Any]] = next(
+        (
+            infos
+            for room_name, infos in bot.occupants.items()
+            if str(room_name).casefold() == admin_room_key
+        ),
+        {},
     )
+    admin_jids: set[str] = set()
+    for info in admin_infos.values():
+        if not occupant_is_admin_or_owner(info):
+            continue
+        admin_jid = bot.bare_jid(info.get("jid"))
+        if admin_jid:
+            admin_jids.add(bot.safe_jid(admin_jid))
+    admins = sorted(admin_jids)
     if not admins:
         warnings.append(
             "No admins/owners detected in the admin room\n   Admin authorization may fail until occupants are synced."
         )
 
-    fallback_rooms: set[str] = set(getattr(bot, "admin_affiliation_query_forbidden_rooms", set()))
+    fallback_rooms: set[str] = set(bot.admin_affiliation_query_forbidden_rooms)
     if fallback_rooms:
         notes.append(
             "Admin protection fallback active in "
@@ -186,10 +218,10 @@ def _rooms_check(bot: Any) -> HealthCheck:
     )
 
 
-def _rtbl_check(bot: Any) -> HealthCheck:
+def _rtbl_check(bot: StatusHealthHost) -> HealthCheck:
     warnings = (
         ("RTBL is enabled but no subscriptions are configured",)
-        if getattr(bot, "rtbl_enabled", False) and not getattr(bot, "rtbl_subscriptions", [])
+        if bot.rtbl_enabled and not bot.rtbl_subscriptions
         else ()
     )
     return _message_check(
@@ -199,7 +231,7 @@ def _rtbl_check(bot: Any) -> HealthCheck:
     )
 
 
-async def _database_stats_check(bot: Any) -> HealthCheck:
+async def _database_stats_check(bot: StatusHealthHost) -> HealthCheck:
     problems: list[str] = []
     warnings: list[str] = []
     try:
@@ -209,7 +241,7 @@ async def _database_stats_check(bot: Any) -> HealthCheck:
         problems.append(f"Database stats failed: {exc}")
         log.warning("Could not get database stats: %s", exc)
 
-    expired_ban_rows = int(db_stats.get("expired_ban_rows", 0) or 0)
+    expired_ban_rows = _diagnostic_int(db_stats.get("expired_ban_rows", 0) or 0)
     if expired_ban_rows > 0:
         warnings.append(
             f"{expired_ban_rows} expired tempban(s) pending auto-unban\n"
@@ -225,7 +257,7 @@ async def _database_stats_check(bot: Any) -> HealthCheck:
     )
 
 
-async def collect_status_health_snapshot(bot: Any) -> HealthSnapshot:
+async def collect_status_health_snapshot(bot: StatusHealthHost) -> HealthSnapshot:
     """Collect the passive checks that determine the ``!status`` headline."""
     return await collect_health_snapshot(
         [

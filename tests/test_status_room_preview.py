@@ -198,3 +198,110 @@ async def test_status_shows_last_admin_sync_result(monkeypatch):
 
     assert "Admin sync: ⚠️ failed · 30s ago" in body
     assert "Admin sync error: owner: IQ timeout after 10s" in body
+
+
+def _health_bot(**overrides):
+    """Return a minimal passive-health host with explicit worker lifecycle state."""
+    defaults = dict(
+        db=None,
+        reconnecting=False,
+        _startup_completed_once=True,
+        _shutdown_in_progress=False,
+        protected_rooms=set(),
+        bot_admin_state={},
+        occupants={},
+        admin_affiliation_query_forbidden_rooms=set(),
+        rtbl_enabled=False,
+        rtbl_subscriptions=[],
+        rtbl_refresh_interval=3600,
+        unban_task=None,
+        health_check_task=None,
+        version_check_task=None,
+        _rtbl_refresh_task=None,
+        version_check_enabled=False,
+        version_check_url=None,
+        tasks=None,
+        runtime_watchdog=None,
+        bare_jid=lambda value: str(value).strip().split("/", 1)[0].lower() if str(value or "").strip() else None,
+        safe_jid=lambda value: str(value).split("/", 1)[0],
+        get_db_stats=lambda: None,
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def test_status_health_reports_missing_workers_only_after_ready():
+    from banbot.status_health import _tasks_check
+
+    ready = _health_bot()
+    check = _tasks_check(ready)
+    assert "unban worker is not running" in check.data["problems"]
+    assert "health check worker is not running" in check.data["problems"]
+
+    starting = _health_bot(_startup_completed_once=False)
+    assert _tasks_check(starting).data["problems"] == ()
+
+
+def test_status_health_does_not_flag_expected_worker_stop_during_reconnect():
+    from banbot.status_health import _tasks_check
+
+    class DoneTask:
+        @staticmethod
+        def done():
+            return True
+
+    reconnecting = _health_bot(
+        reconnecting=True,
+        unban_task=DoneTask(),
+        health_check_task=DoneTask(),
+    )
+    assert _tasks_check(reconnecting).data["problems"] == ()
+
+
+def test_status_health_admin_room_lookup_is_case_insensitive_and_requires_valid_jid(monkeypatch):
+    from banbot import status_health
+
+    monkeypatch.setattr(status_health.config, "ADMIN_ROOM", "Admin@Conference.Example.Org")
+    bot = _health_bot(
+        protected_rooms={"room@conference.example.org"},
+        bot_admin_state={"room@conference.example.org": True},
+        occupants={
+            "admin@conference.example.org": {
+                "Valid": {"jid": "Admin@Example.Org/Device", "affiliation": "OWNER"},
+                "Broken": {"jid": "   ", "affiliation": "admin"},
+            }
+        },
+    )
+
+    check = status_health._rooms_check(bot)
+    assert check.data["admins"] == ("admin@example.org",)
+    assert not any("No admins/owners detected" in item for item in check.data["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_status_tolerates_malformed_numeric_diagnostics(monkeypatch):
+    bot = StatusRoomPreviewBot()
+
+    async def malformed_db_stats():
+        return {
+            "db_size_bytes": object(),
+            "audit_events": "not-a-number",
+            "permanent_bans": None,
+            "temporary_bans": "broken",
+            "expired_ban_rows": object(),
+        }
+
+    async def malformed_outbox_state():
+        return {"pending": "broken", "dead": object()}
+
+    bot.get_db_stats = malformed_db_stats
+    bot.outbox_runtime_state = malformed_outbox_state
+    _patch_process(monkeypatch)
+
+    await bot._cmd_status("admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+
+    assert "Bans: 0 permanent · 0 temporary" in body
+    assert "Pending auto-unban: 0" in body
+    assert "Audit events: 0" in body
+    assert "Outbox: 0 pending · 0 dead" in body

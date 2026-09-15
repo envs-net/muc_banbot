@@ -522,6 +522,16 @@ instead of silently preventing an otherwise valid message from being indexed.
 Bulk redaction summaries use a typed counter contract, and redaction DB mutation
 paths obtain an initialized connection through the shared database boundary.
 
+Status rendering and passive status-health collection now sit inside the same
+typed host-contract boundary. Diagnostics treat reconnect-scoped worker shutdown
+as expected while reconnect/final shutdown is in progress, but report a missing
+required worker once a session has previously reached readiness. Admin-room
+occupant lookup is case-insensitive and only reports owner/admin identities that
+normalize to a usable bare JID, preventing malformed occupant cache entries from
+creating a false healthy/admin-present status. Status numeric rendering also
+normalizes diagnostic counters defensively so malformed telemetry cannot break
+the operator command itself.
+
 ### Deployment and health ownership
 
 The deploy frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` and adds
