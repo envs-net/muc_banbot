@@ -38,7 +38,7 @@ import string
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, overload
 
 try:
     import slixmpp
@@ -132,6 +132,14 @@ async def maybe_await(value: Any) -> Any:
     if isinstance(value, Awaitable):
         return await value
     return value
+
+
+@overload
+def env_default(name: str, fallback: str) -> str: ...
+
+
+@overload
+def env_default(name: str, fallback: None = None) -> str | None: ...
 
 
 def env_default(name: str, fallback: str | None = None) -> str | None:
@@ -491,7 +499,7 @@ def parse_args(argv: list[str]) -> SmokeConfig:
 
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    cfg = parse_args(argv or sys.argv[1:])
+    cfg = parse_args(sys.argv[1:] if argv is None else argv)
     asyncio.run(run_smoke(cfg))
 
 

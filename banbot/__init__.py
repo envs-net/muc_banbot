@@ -5,9 +5,19 @@ imported in tests and tooling without requiring runtime-only dependencies to be
 installed first.
 """
 
-def __getattr__(name: str):
-    if name == "BanBot":
-        from .bot import BanBot
+from __future__ import annotations
 
-        return BanBot
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .bot import BanBot
+
+__all__ = ["BanBot"]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "BanBot":
+        from .bot import BanBot as _BanBot
+
+        return _BanBot
     raise AttributeError(name)

@@ -414,8 +414,9 @@ domains to one `*.domain.tld` identifier, and nicks to lowercase values. Bare
 dotted strings remain nick-like unless a caller has already established domain
 intent, preserving command compatibility while avoiding duplicate identities.
 
-The configured mypy gate intentionally expands incrementally around these
-well-defined contracts. The canonical target, utility, cache, ban-query,
+The configured mypy gate was expanded incrementally around these
+well-defined contracts and now covers the complete production/operator Python
+surface. The canonical target, utility, cache, ban-query,
 database, moderation command, moderation core, admin authorization, top-level
 groupchat command entry/routing/registry, runtime/restart command handling, the main BanBot lifecycle/composition, room/ban synchronization,
 protection action/check/command/storage/notification, RTBL administration
@@ -641,3 +642,26 @@ The package console entry point is now a strict lightweight argparse boundary.
 are rejected before `banbot.bot` is imported. Operator typos therefore cannot
 silently fall through into starting the production XMPP service. Release-state,
 managed-file and CLI modules are all part of the mandatory mypy gate.
+
+### Full typing and operator-tool boundary
+
+The mandatory static-analysis surface now targets the complete `banbot` package,
+the lightweight top-level launcher and config sample, every deployment/release
+helper under `scripts/`, and operator tools under `tools/`. This replaces the
+previous hand-maintained per-module mypy list so newly added production modules
+cannot silently land outside the type gate. The compile and Ruff targets use the
+same source roots.
+
+Closing the package-level gate exposed one remaining command-composition drift:
+several command host Protocols each redeclared `_actor_jid_from_room_nick`, and
+the runtime-command contract had diverged from the concrete entry-point method.
+Actor resolution is now one shared `ActorJidResolverHost` contract inherited by
+all command surfaces that consume it, so `commands.CommandMixin` itself type
+checks as a complete cooperative MRO rather than only checking its component
+files independently.
+
+The package-level `BanBot` export remains lazy at runtime but is explicit to type
+checkers. The destructive live-protection smoke tool is also part of the quality
+gate; its environment-default overloads preserve precise numeric option types,
+and an explicitly supplied empty argv is no longer replaced with the parent
+process command line.

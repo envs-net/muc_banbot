@@ -123,9 +123,9 @@ warn_unused_ignores = true
 no_implicit_optional = true
 
 [tool.envs-xmpp.quality]
-compile-targets = ["muc_banbot.py", "banbot", "scripts"]
-ruff-targets = ["muc_banbot.py", "banbot", "scripts"]
-mypy-targets = ["banbot/bot.py", "banbot/alerts.py", "banbot/audit.py", "banbot/health_check.py", "banbot/outbox.py", "banbot/redaction.py", "banbot/status.py", "banbot/status_health.py", "banbot/updates.py", "banbot/ban_target.py", "banbot/utils.py", "banbot/cache.py", "banbot/ban_queries.py", "banbot/contracts.py", "banbot/db.py", "banbot/moderation.py", "banbot/admin.py", "banbot/messaging.py", "banbot/direct_messages.py", "banbot/import_export.py", "banbot/locks.py", "banbot/managed_io.py", "banbot/config_loader.py", "banbot/vcard.py", "banbot/ignorelist.py", "banbot/release_state.py", "banbot/managed_files.py", "banbot/cli.py", "banbot/config", "banbot/backups", "banbot/commands/backups.py", "banbot/commands/import_export.py", "banbot/commands/config_display.py", "banbot/commands/help.py", "banbot/commands/ignore.py", "banbot/commands/policy.py", "banbot/commands/usage.py", "banbot/commands/constants.py", "banbot/commands/context.py", "banbot/commands/entrypoint.py", "banbot/commands/router.py", "banbot/commands/registry.py", "banbot/commands/runtime.py", "banbot/commands/moderation.py", "banbot/commands/omemo.py", "banbot/commands/rooms.py", "banbot/commands/rtbl.py", "banbot/commands/rtbl_admin.py", "banbot/sync.py", "banbot/occupants.py", "banbot/muc.py", "banbot/omemo", "banbot/rooms", "banbot/protections", "banbot/rtbl", "banbot/task_supervisor.py", "banbot/runtime_watchdog.py", "scripts/deploy.py"]
+compile-targets = ["muc_banbot.py", "config_sample.py", "banbot", "scripts", "tools"]
+ruff-targets = ["muc_banbot.py", "config_sample.py", "banbot", "scripts", "tools"]
+mypy-targets = ["muc_banbot.py", "config_sample.py", "banbot", "scripts", "tools"]
 mypy-args = ["--follow-imports=skip"]
 
 [[tool.envs-xmpp.quality.project-checks]]

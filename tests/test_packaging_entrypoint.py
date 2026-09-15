@@ -118,3 +118,10 @@ def test_legacy_systemd_service_remains_available() -> None:
     assert "Environment=MUC_BANBOT_CONFIG=" not in service
     assert "ReadWritePaths=/srv/adminbot/muc_banbot" in service
     assert "ExecStart=/srv/adminbot/muc_banbot/venv/bin/muc_banbot" in service
+
+
+def test_package_exports_banbot_lazily() -> None:
+    import banbot
+
+    assert "BanBot" in banbot.__all__
+    assert banbot.BanBot.__name__ == "BanBot"

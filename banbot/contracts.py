@@ -21,6 +21,12 @@ from slixmpp import JID
 from .cache import BanTuple
 
 
+class ActorJidResolverHost(Protocol):
+    """Canonical room/nick actor resolution shared by command mixins."""
+
+    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
+
+
 class DatabaseMixinHost(Protocol):
     """Capabilities supplied to :class:`DatabaseMixin` by the composed bot."""
 
@@ -157,7 +163,7 @@ class ModerationMixinHost(Protocol):
     ) -> None: ...
 
 
-class CommandModerationMixinHost(Protocol):
+class CommandModerationMixinHost(ActorJidResolverHost, Protocol):
     """Capabilities required by the moderation command dispatcher."""
 
     db: aiosqlite.Connection | None
@@ -175,8 +181,6 @@ class CommandModerationMixinHost(Protocol):
         mtype: str = "groupchat",
         **kwargs: Any,
     ) -> Any: ...
-
-    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
 
     async def ban_all(
         self,
@@ -528,7 +532,7 @@ class ProtectionChecksMixinHost(ProtectionCoordinatorHost, Protocol):
     ) -> Any: ...
 
 
-class ProtectionCommandsMixinHost(Protocol):
+class ProtectionCommandsMixinHost(ActorJidResolverHost, Protocol):
     """Capabilities required by protection administration commands."""
 
     command_prefix: str
@@ -554,8 +558,6 @@ class ProtectionCommandsMixinHost(Protocol):
         self,
         name: str,
     ) -> tuple[str, None] | tuple[None, str]: ...
-
-    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
 
     async def persist_protection(self, name: str) -> None: ...
 
@@ -623,7 +625,7 @@ class ProtectionStorageMixinHost(Protocol):
     def init_protection_state(self) -> None: ...
 
 
-class CommandRtblMixinHost(Protocol):
+class CommandRtblMixinHost(ActorJidResolverHost, Protocol):
     """Capabilities required by the top-level RTBL command dispatcher."""
 
     rtbl_enabled: bool
@@ -636,8 +638,6 @@ class CommandRtblMixinHost(Protocol):
         mtype: str = "groupchat",
         **kwargs: Any,
     ) -> Any: ...
-
-    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
 
     async def cmd_rtbl(
         self,
@@ -1092,7 +1092,7 @@ class AdminMixinHost(BotOccupantMixinHost, Protocol):
     ) -> Any: ...
 
 
-class CommandEntryPointMixinHost(Protocol):
+class CommandEntryPointMixinHost(ActorJidResolverHost, Protocol):
     """State and routing hooks required by the groupchat command entry point."""
 
     command_prefix: str
@@ -1186,7 +1186,7 @@ class CommandRouterMixinHost(Protocol):
     ) -> bool: ...
 
 
-class CommandRuntimeMixinHost(Protocol):
+class CommandRuntimeMixinHost(ActorJidResolverHost, Protocol):
     """Runtime command and restart lifecycle hooks required by command handlers."""
 
     command_prefix: str
@@ -1197,8 +1197,6 @@ class CommandRuntimeMixinHost(Protocol):
     _restart_schedule_lock: asyncio.Lock
     _shutdown_in_progress: bool
     _shutdown_complete: bool
-
-    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str | None: ...
 
     async def _cmd_config(
         self,
@@ -1495,10 +1493,8 @@ class OmemoStatusMixinHost(Protocol):
     ) -> Any: ...
 
 
-class CommandOmemoMixinHost(Protocol):
+class CommandOmemoMixinHost(ActorJidResolverHost, Protocol):
     """Capabilities required by the top-level ``!omemo`` dispatcher."""
-
-    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
 
     async def cmd_omemo(
         self,
@@ -2022,10 +2018,8 @@ class BackupCommandMixinHost(Protocol):
     ) -> Any: ...
 
 
-class CommandBackupMixinHost(Protocol):
+class CommandBackupMixinHost(ActorJidResolverHost, Protocol):
     """Command-router hooks for backup and restore commands."""
-
-    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
 
     async def cmd_backup(
         self,
@@ -2093,13 +2087,11 @@ class ImportExportMixinHost(Protocol):
     ) -> Any: ...
 
 
-class CommandImportExportMixinHost(Protocol):
+class CommandImportExportMixinHost(ActorJidResolverHost, Protocol):
     """CSV import/export operations required by command routing."""
 
     command_prefix: str
     last_database_backup_file: str | None
-
-    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
 
     async def import_bans_from_csv(
         self,
@@ -2324,10 +2316,8 @@ class IgnorelistMixinHost(Protocol):
     ) -> None: ...
 
 
-class CommandIgnoreMixinHost(Protocol):
+class CommandIgnoreMixinHost(ActorJidResolverHost, Protocol):
     """Actor resolution and ignorelist command surface required by routing."""
-
-    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
 
     async def cmd_ignore(
         self,
