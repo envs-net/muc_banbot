@@ -133,6 +133,40 @@ async def test_room_list_add_and_remove_flow(temp_db_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_room_add_does_not_mutate_runtime_state_when_persistence_fails():
+    class FailingDb:
+        async def execute(self, *_args, **_kwargs):
+            raise RuntimeError("synthetic room persistence failure")
+
+    bot = RoomHealthBot()
+    target = "new@conference.example.test"
+    bot.protected_rooms = set()
+    bot.db = FailingDb()
+
+    with pytest.raises(RuntimeError, match="synthetic room persistence failure"):
+        await bot.cmd_room(["add", target], "admin@conference.example.org")
+
+    assert target not in bot.protected_rooms
+
+
+@pytest.mark.asyncio
+async def test_room_remove_keeps_runtime_state_when_persistence_fails():
+    class FailingDb:
+        async def execute(self, *_args, **_kwargs):
+            raise RuntimeError("synthetic room persistence failure")
+
+    bot = RoomHealthBot()
+    target = "room@conference.example.test"
+    bot.protected_rooms = {target}
+    bot.db = FailingDb()
+
+    with pytest.raises(RuntimeError, match="synthetic room persistence failure"):
+        await bot.cmd_room(["remove", target], "admin@conference.example.org")
+
+    assert target in bot.protected_rooms
+
+
+@pytest.mark.asyncio
 async def test_health_check_reports_missing_bot_and_lost_admin(monkeypatch):
     bot = RoomHealthBot()
     bot.occupants = {"room@conference.example.test": {}}

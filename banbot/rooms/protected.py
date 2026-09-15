@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+from typing import TYPE_CHECKING, cast
 
 from envs_xmpp_core.pagination import format_page
 from envs_xmpp_core.presentation import (
@@ -25,6 +26,15 @@ from ..utils import get_list_page_size
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from ..contracts import ProtectedRoomMixinHost
+
+    class _ProtectedRoomMixinContract(ProtectedRoomMixinHost):
+        pass
+else:
+    class _ProtectedRoomMixinContract:
+        pass
+
 
 def _rooms_package_value(name: str, default: str) -> str:
     """Return room package compatibility values, including monkeypatched tests."""
@@ -42,7 +52,7 @@ def _nick() -> str:
     return _rooms_package_value("NICK", NICK)
 
 
-class ProtectedRoomMixin:
+class ProtectedRoomMixin(_ProtectedRoomMixinContract):
 
     async def validate_room_jid(self, room_jid: str) -> tuple[bool, str]:
         """
@@ -179,7 +189,8 @@ class ProtectedRoomMixin:
                     results.append(f"🔴 {target} | join failed")
                     continue
 
-                _bot_nick, info = BotOccupantMixin._bot_occupant_entry(self, target)
+                occupant_host = cast(BotOccupantMixin, self)
+                _bot_nick, info = BotOccupantMixin._bot_occupant_entry(occupant_host, target)
                 is_admin = bool(info and occupant_is_admin_or_owner(info))
                 admin_state[target] = is_admin
 
@@ -209,7 +220,8 @@ class ProtectedRoomMixin:
 
             all_views: list[RoomView] = []
             for room_jid in sorted(self.protected_rooms, key=str.casefold):
-                bot_nick, info = BotOccupantMixin._bot_occupant_entry(self, room_jid)
+                occupant_host = cast(BotOccupantMixin, self)
+                bot_nick, info = BotOccupantMixin._bot_occupant_entry(occupant_host, room_jid)
                 joined = info is not None
                 affiliation = str((info or {}).get("affiliation") or "unknown").lower()
                 is_admin = bool(info and occupant_is_admin_or_owner(info))
@@ -263,10 +275,13 @@ class ProtectedRoomMixin:
                     return
 
                 if target not in self.protected_rooms:
-                    # --- In-Memory and DB ---
+                    # Persist first so a database failure cannot leave runtime
+                    # state claiming that a room is protected when it will be
+                    # missing again after the next restart.
+                    db = self._require_db()
+                    await db.execute("INSERT OR REPLACE INTO rooms (room) VALUES (?)", (target,))
+                    await db.commit()
                     self.protected_rooms.add(target)
-                    await self.db.execute("INSERT OR REPLACE INTO rooms (room) VALUES (?)", (target,))
-                    await self.db.commit()
                     await self.bot_send_message(mto=room, mbody=f"✅ Room added: {target}", mtype="groupchat")
 
                     # --- Event handler for new occupants ---
@@ -333,9 +348,13 @@ class ProtectedRoomMixin:
                     await self.bot_send_message(mto=room, mbody=f"⚠️ Room already in protected list: {target}", mtype="groupchat")
 
             elif action in ("remove", "delete", "del", "rm"):
+                # Keep persisted and in-memory membership atomic from the
+                # command's perspective: only drop the runtime room after the
+                # database mutation commits successfully.
+                db = self._require_db()
+                await db.execute("DELETE FROM rooms WHERE room=?", (target,))
+                await db.commit()
                 self.protected_rooms.discard(target)
-                await self.db.execute("DELETE FROM rooms WHERE room=?", (target,))
-                await self.db.commit()
                 await self.bot_send_message(mto=room, mbody=f"✅ Room removed: {target}", mtype="groupchat")
 
                 # --- Bot leaves the room immediately ---

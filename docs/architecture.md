@@ -435,8 +435,16 @@ only counts an entry as removed when the canonical unban path confirms that the
 server-side and local removal actually completed. RTBL administration also
 checks the initialized database boundary before creating a remote PubSub
 subscription, so a startup-order mistake cannot leave an untracked remote
-subscription behind after a local persistence failure. The remaining large
-mixin graph is migrated progressively rather than hidden behind broad ignores.
+subscription behind after a local persistence failure. Room command dispatch,
+protected-room persistence, pending-invite handling, bot-occupant identity and
+the MUC lifecycle are now inside the same typed gate. Protected-room membership
+is persisted before the in-memory set changes, so a failed SQLite mutation
+cannot make the running process disagree with restart state. MUC presence data
+also treats the server-provided real JID as untrusted input: a value that cannot
+normalize to a usable bare JID cannot erase a nick-only ban during automatic
+JID promotion, and manual room-ban recovery skips such identities instead of
+feeding them into canonical ban-target parsing. The remaining large mixin graph
+is migrated progressively rather than hidden behind broad ignores.
 
 ### Deployment and health ownership
 

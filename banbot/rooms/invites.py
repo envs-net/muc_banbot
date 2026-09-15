@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from xml.etree import ElementTree as ET
 
 from envs_xmpp_core.xmpp.invites import (
@@ -43,6 +44,15 @@ from ..utils import (
 )
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ..contracts import RoomInviteMixinHost
+
+    class _RoomInviteMixinContract(RoomInviteMixinHost):
+        pass
+else:
+    class _RoomInviteMixinContract:
+        pass
 
 
 class _BanBotRoomInviteSqlBackend:
@@ -96,7 +106,7 @@ def _pending_invite_store(bot) -> PendingRoomInviteStore:
     return store
 
 
-class RoomInviteMixin:
+class RoomInviteMixin(_RoomInviteMixinContract):
 
     def init_room_invite_state(self) -> None:
         """Initialize runtime pending invite cache."""

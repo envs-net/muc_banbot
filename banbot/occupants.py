@@ -1,5 +1,7 @@
 """Shared helpers for identifying the bot's own live MUC occupant."""
 
+from typing import TYPE_CHECKING, Any
+
 from envs_xmpp_core.xmpp.occupants import (
     find_self_occupant,
     occupant_is_admin_or_owner,
@@ -9,11 +11,20 @@ from config import NICK
 
 from .utils import bare_jid
 
+if TYPE_CHECKING:
+    from .contracts import BotOccupantMixinHost
 
-class BotOccupantMixin:
+    class _BotOccupantMixinContract(BotOccupantMixinHost):
+        pass
+else:
+    class _BotOccupantMixinContract:
+        pass
+
+
+class BotOccupantMixin(_BotOccupantMixinContract):
     """Provide one authoritative bot-occupant lookup for all MUC consumers."""
 
-    def _bot_occupant_entry(self, room: str) -> tuple[str | None, dict | None]:
+    def _bot_occupant_entry(self, room: str) -> tuple[str | None, dict[str, Any] | None]:
         """Return the bot's live occupant entry without trusting one exact nick.
 
         The shared identity helper prefers the nickname learned from an actual

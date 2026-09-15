@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from envs_xmpp_core.xmpp.muc_join import join_muc_confirmed
 from envs_xmpp_core.xmpp.occupants import (
@@ -23,8 +24,17 @@ log = logging.getLogger(__name__)
 
 _RECONNECT_STARTUP_TIMEOUT_SECONDS = 120
 
+if TYPE_CHECKING:
+    from .contracts import MucMixinHost
 
-class MucMixin(BotOccupantMixin):
+    class _MucMixinContract(MucMixinHost):
+        pass
+else:
+    class _MucMixinContract:
+        pass
+
+
+class MucMixin(BotOccupantMixin, _MucMixinContract):
     _startup_task: asyncio.Task | None
 
     def _mark_session_reconnecting(self, reason: str) -> None:
@@ -523,19 +533,27 @@ class MucMixin(BotOccupantMixin):
                 # Found an active nick-only ban in the in-memory index; convert it
                 # to a JID ban without querying the database on every MUC join.
                 ban_jid_bare = self.bare_jid(jid_str)
-                _ban_jid, _ban_nick, until, issuer, comment = existing_ban
-                async with ban_state_lock(self):
-                    await self.upsert_ban_db(ban_jid_bare, nick_key, int(until or 0), issuer, comment)
-                    await self.db.execute(
-                        "DELETE FROM bans WHERE target_type = 'nick' AND target = ?",
-                        (nick_key,)
+                if ban_jid_bare:
+                    _ban_jid, _ban_nick, until, issuer, comment = existing_ban
+                    async with ban_state_lock(self):
+                        # upsert_ban_db() already merges/deletes the duplicate
+                        # nick-only row transactionally when a JID is supplied.
+                        await self.upsert_ban_db(
+                            ban_jid_bare,
+                            nick_key,
+                            int(until or 0),
+                            issuer,
+                            comment,
+                        )
+                        await self.load_bans_from_db()
+
+                    log.info("✅ Auto-updated ban for nick '%s': JID set to %s", nick, ban_jid_bare)
+                else:
+                    log.debug(
+                        "Skipping nick-only ban conversion for %s in %s: real JID did not normalize",
+                        nick,
+                        room,
                     )
-                    await self.db.commit()
-
-                    # Reload ban cache
-                    await self.load_bans_from_db()
-
-                log.info("✅ Auto-updated ban for nick '%s': JID set to %s", nick, ban_jid_bare)
 
         # --- Fetch all bans ---
         # Use indexes for O(1) lookups instead of O(n)
@@ -545,13 +563,13 @@ class MucMixin(BotOccupantMixin):
         # Check by JID
         if jid_str:
             jid_bare = self.bare_jid(jid_str)
-            if jid_bare in self.ban_index_by_jid:
+            if jid_bare and jid_bare in self.ban_index_by_jid:
                 ban_jid, ban_nick, until, issuer, comment = self.ban_index_by_jid[jid_bare]
                 if until <= 0 or until > now:  # Check if not expired
                     tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment))
 
             # Check by wildcard domain bans (*.domain.tld matches domain.tld and sub.domain.tld)
-            domain = jid_bare.split("@")[1].lower() if "@" in jid_bare else None
+            domain = jid_bare.split("@", 1)[1].lower() if jid_bare and "@" in jid_bare else None
             if domain:
                 for banned_domain, bans in self.ban_index_by_domain.items():
                     if domain_matches(domain, banned_domain):
@@ -668,6 +686,13 @@ class MucMixin(BotOccupantMixin):
             return
 
         jid_bare = self.bare_jid(jid)
+        if not jid_bare:
+            log.debug(
+                "Manual MUC ban for %s in %s had an unusable real JID; cannot recover",
+                nick,
+                room,
+            )
+            return
         is_domain_outcast = looks_like_domain(jid_bare)
         recovered_target = BanTarget.from_identifier(
             jid_bare,

@@ -243,6 +243,49 @@ async def test_muc_online_converts_nick_only_ban_to_jid_ban(temp_db_path):
         await bot.db.close()
 
 
+@pytest.mark.asyncio
+async def test_muc_online_keeps_nick_only_ban_when_real_jid_is_unusable(temp_db_path):
+    """A malformed/blank real JID must not destroy a valid nick-only ban."""
+    bot = MucBotFixture(temp_db_path)
+    await bot.setup_db()
+    try:
+        await bot.upsert_ban_db(None, BAD_NICK, 0, "tester", "nick ban")
+        await bot.load_bans_from_db()
+
+        await bot.muc_online(
+            FakePresence(
+                room=ROOM_JID,
+                nick=BAD_NICK,
+                jid="   ",
+            )
+        )
+
+        await bot.load_bans_from_db()
+        assert BAD_NICK_NORMALIZED in bot.ban_index_by_nick
+        assert bot.ban_index_by_jid == {}
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_manual_muc_ban_ignores_unusable_real_jid(temp_db_path):
+    bot = MucBotFixture(temp_db_path)
+    await bot.setup_db()
+    try:
+        await bot._handle_manual_muc_ban_presence(
+            ROOM_JID,
+            BAD_NICK,
+            "   ",
+            MANUAL_BAN_REASON,
+        )
+
+        await bot.load_bans_from_db()
+        assert bot.ban_cache == {}
+        assert bot.manual_redactions == []
+    finally:
+        await bot.db.close()
+
+
 def test_muc_presence_status_codes_reads_xml_without_mapping_status_codes():
     bot = MucBotFixture()
     presence = FakePresence(status_codes=None, xml_status_codes={MUC_STATUS_BANNED})
