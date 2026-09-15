@@ -110,6 +110,7 @@ class RtblCmdBot(DatabaseMixin, CacheMixin, RtblDatabaseMixin, RtblCommandMixin,
         self.plugin = {"xep_0060": FakePubSub(), "xep_0004": FakeXep0004()}
         self.event_handlers = []
         self.fetched = []
+        self.subscribe_attempts = []
         self.audit_events = []
         self.logged = []
 
@@ -142,6 +143,7 @@ class RtblCmdBot(DatabaseMixin, CacheMixin, RtblDatabaseMixin, RtblCommandMixin,
         self.subscribed_fetch = (service_jid, node)
 
     async def _rtbl_subscribe_node(self, service_jid, node):
+        self.subscribe_attempts.append((service_jid, node))
         return True, None
 
     async def _rtbl_fetch_all_items(self, service_jid, node, scan_occupants=True):
@@ -186,6 +188,19 @@ async def test_rtbl_list_add_refresh_and_delete_flow(temp_db_path):
         assert bot.audit_events[-1][0] == "rtbl_subscription_removed"
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_rtbl_add_requires_db_before_remote_subscription():
+    bot = RtblCmdBot()
+
+    with pytest.raises(RuntimeError, match="database is not initialized"):
+        await bot.cmd_rtbl(
+            ["add", "xmppbl.org", "muc_bans_sha256"],
+            "admin@conference.example.org",
+        )
+
+    assert bot.subscribe_attempts == []
 
 
 @pytest.mark.asyncio

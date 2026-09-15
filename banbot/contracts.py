@@ -621,6 +621,30 @@ class ProtectionStorageMixinHost(Protocol):
     def init_protection_state(self) -> None: ...
 
 
+class CommandRtblMixinHost(Protocol):
+    """Capabilities required by the top-level RTBL command dispatcher."""
+
+    rtbl_enabled: bool
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        **kwargs: Any,
+    ) -> Any: ...
+
+    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str: ...
+
+    async def cmd_rtbl(
+        self,
+        args: list[str],
+        room: str,
+        actor: str = "unknown",
+    ) -> None: ...
+
+
 class RtblRuntimeHost(Protocol):
     """Shared runtime state used across the RTBL subsystem."""
 
@@ -638,6 +662,67 @@ class RtblRuntimeHost(Protocol):
     bare_jid: Callable[[object | None], str | None]
 
     def _require_db(self) -> aiosqlite.Connection: ...
+
+
+class RtblCommandMixinHost(RtblRuntimeHost, Protocol):
+    """Capabilities required by RTBL administration commands."""
+
+    command_prefix: str
+    rtbl_publish_enabled: bool
+    rtbl_publish_service: str
+    rtbl_publish_jid_node: str
+    rtbl_publish_domain_node: str
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        **kwargs: Any,
+    ) -> Any: ...
+
+    def _rtbl_is_own_publish_node(self, service_jid: str, node: str) -> bool: ...
+
+    async def _rtbl_subscribe_node(
+        self,
+        service_jid: str,
+        node: str,
+    ) -> tuple[bool, str | None]: ...
+
+    async def _load_rtbl_subscriptions_from_db(self) -> None: ...
+
+    async def _rtbl_fetch_all_items(
+        self,
+        service_jid: str,
+        node: str,
+        scan_occupants: bool = True,
+    ) -> bool: ...
+
+    async def _rtbl_cleanup_stale_persisted_bans(
+        self,
+        issuer: str = "rtbl_cleanup",
+    ) -> int: ...
+
+    async def _rtbl_count_active_publish_bans(self) -> tuple[int, int]: ...
+
+    async def _rtbl_sync_all_bans_to_nodes(self) -> tuple[int, int, int, int]: ...
+
+    def log_event(self, level: int, event: str, **fields: Any) -> None: ...
+
+    async def audit_event(
+        self,
+        event_type: str,
+        actor: str | None = None,
+        room: str | None = None,
+        target_type: str | None = None,
+        target: str | None = None,
+        jid: str | None = None,
+        nick: str | None = None,
+        until: int | None = None,
+        comment: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None: ...
 
 
 class RtblDatabaseMixinHost(RtblRuntimeHost, Protocol):

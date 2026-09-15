@@ -1,9 +1,20 @@
 """RTBL admin command dispatch."""
 
+from typing import TYPE_CHECKING
+
 from ..locks import ban_state_lock
 
+if TYPE_CHECKING:
+    from ..contracts import CommandRtblMixinHost
 
-class CommandRtblMixin:
+    class _CommandRtblMixinContract(CommandRtblMixinHost):
+        pass
+else:
+    class _CommandRtblMixinContract:
+        pass
+
+
+class CommandRtblMixin(_CommandRtblMixinContract):
     async def _dispatch_rtbl_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
         if not getattr(self, "rtbl_enabled", False):
             await self.bot_send_message(

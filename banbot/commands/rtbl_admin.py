@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from ..rtbl.utils import _looks_like_pubsub_node, _looks_like_pubsub_service_jid
 from ..utils import (
@@ -16,7 +17,17 @@ from ..utils import (
 log = logging.getLogger(__name__)
 
 
-class RtblCommandMixin:
+if TYPE_CHECKING:
+    from ..contracts import RtblCommandMixinHost
+
+    class _RtblCommandMixinContract(RtblCommandMixinHost):
+        pass
+else:
+    class _RtblCommandMixinContract:
+        pass
+
+
+class RtblCommandMixin(_RtblCommandMixinContract):
     def _rtbl_status_age(self, ts: float | None) -> str:
         """Return a compact human-readable age for RTBL timestamps."""
         if not ts:
@@ -59,6 +70,7 @@ class RtblCommandMixin:
         # list
         # ----------------------------------------------------------------
         if action == "list":
+            db = self._require_db()
             show_all = wants_all_pages(args[1:])
             list_args = without_all_pages_arg(args[1:])
             page = 1
@@ -80,14 +92,14 @@ class RtblCommandMixin:
             for service_jid, node in self.rtbl_subscriptions:
                 key = (service_jid.lower(), node)
 
-                async with self.db.execute(
+                async with db.execute(
                     "SELECT COUNT(*) FROM rtbl_hashes WHERE service_jid = ? AND node = ?",
                     (service_jid, node),
                 ) as cursor:
                     row = await cursor.fetchone()
                     h_count = int(row[0] or 0) if row else 0
 
-                async with self.db.execute(
+                async with db.execute(
                     "SELECT COUNT(*) FROM rtbl_domains WHERE service_jid = ? AND node = ?",
                     (service_jid, node),
                 ) as cursor:
@@ -207,6 +219,11 @@ class RtblCommandMixin:
                 )
                 return
 
+            # Fail before creating a remote PubSub subscription if the local
+            # persistence layer is not initialized. Otherwise a successful
+            # subscribe followed by a DB failure leaves an untracked remote
+            # subscription behind.
+            db = self._require_db()
             subscribed, error = await self._rtbl_subscribe_node(service_jid, node)
             if not subscribed:
                 await self.bot_send_message(
@@ -219,11 +236,11 @@ class RtblCommandMixin:
                 )
                 return
 
-            await self.db.execute(
+            await db.execute(
                 "INSERT OR IGNORE INTO rtbl_subscriptions (service_jid, node) VALUES (?, ?)",
                 (service_jid, node),
             )
-            await self.db.commit()
+            await db.commit()
             await self._load_rtbl_subscriptions_from_db()
 
             await self.bot_send_message(
@@ -261,38 +278,39 @@ class RtblCommandMixin:
                 return
 
             service_jid = args[1].strip().lower()
-            node = args[2].strip() if len(args) >= 3 else None
+            delete_node = args[2].strip() if len(args) >= 3 else None
+            db = self._require_db()
 
-            if node:
-                async with self.db.execute(
+            if delete_node:
+                async with db.execute(
                     "SELECT 1 FROM rtbl_subscriptions WHERE service_jid = ? AND node = ?",
-                    (service_jid, node),
+                    (service_jid, delete_node),
                 ) as cursor:
                     existing = await cursor.fetchone()
 
                 if not existing:
                     await self.bot_send_message(
                         mto=room,
-                        mbody=f"⚠️ RTBL: Subscription '{node}' @ {service_jid} does not exist.",
+                        mbody=f"⚠️ RTBL: Subscription '{delete_node}' @ {service_jid} does not exist.",
                         mtype="groupchat",
                     )
                     return
 
-                await self.db.execute(
+                await db.execute(
                     "DELETE FROM rtbl_subscriptions WHERE service_jid = ? AND node = ?",
-                    (service_jid, node),
+                    (service_jid, delete_node),
                 )
-                await self.db.execute(
+                await db.execute(
                     "DELETE FROM rtbl_hashes WHERE service_jid = ? AND node = ?",
-                    (service_jid, node),
+                    (service_jid, delete_node),
                 )
-                await self.db.execute(
+                await db.execute(
                     "DELETE FROM rtbl_domains WHERE service_jid = ? AND node = ?",
-                    (service_jid, node),
+                    (service_jid, delete_node),
                 )
-                label = f"'{node}' @ {service_jid}"
+                label = f"'{delete_node}' @ {service_jid}"
             else:
-                async with self.db.execute(
+                async with db.execute(
                     "SELECT COUNT(*) FROM rtbl_subscriptions WHERE service_jid = ?",
                     (service_jid,),
                 ) as cursor:
@@ -307,31 +325,31 @@ class RtblCommandMixin:
                     )
                     return
 
-                await self.db.execute(
+                await db.execute(
                     "DELETE FROM rtbl_subscriptions WHERE service_jid = ?", (service_jid,)
                 )
-                await self.db.execute(
+                await db.execute(
                     "DELETE FROM rtbl_hashes WHERE service_jid = ?", (service_jid,)
                 )
-                await self.db.execute(
+                await db.execute(
                     "DELETE FROM rtbl_domains WHERE service_jid = ?", (service_jid,)
                 )
                 label = f"all subscriptions @ {service_jid}"
 
-            await self.db.commit()
+            await db.commit()
             await self._load_rtbl_subscriptions_from_db()
 
             await self._rtbl_cleanup_stale_persisted_bans(issuer="rtbl_delete")
 
             self.log_event(
                 logging.INFO, "rtbl_subscription_removed",
-                actor=actor, target_type="rtbl", target=f"{service_jid}/{node or '*'}",
+                actor=actor, target_type="rtbl", target=f"{service_jid}/{delete_node or '*'}",
             )
             await self.audit_event(
                 "rtbl_subscription_removed",
                 actor=actor,
                 target_type="rtbl",
-                target=f"{service_jid}/{node or '*'}",
+                target=f"{service_jid}/{delete_node or '*'}",
                 comment=f"Removed {label}",
             )
 

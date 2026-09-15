@@ -417,9 +417,9 @@ intent, preserving command compatibility while avoiding duplicate identities.
 The configured mypy gate intentionally expands incrementally around these
 well-defined contracts. The canonical target, utility, cache, ban-query,
 database, moderation command, moderation core, room/ban synchronization,
-protection action/check/command/storage/notification and RTBL
-subscribe/apply/publish surfaces are now part of the mandatory typed production
-gate. `banbot.contracts` describes
+protection action/check/command/storage/notification, RTBL administration
+commands and RTBL subscribe/apply/publish surfaces are now part of the
+mandatory typed production gate. `banbot.contracts` describes
 cross-mixin dependencies with static Protocols; the type-only protocol bases
 are replaced by empty runtime shims so the production mixins never inherit
 `Protocol` itself. Database users obtain an initialized connection through
@@ -432,8 +432,11 @@ with later message checks. Numeric protection settings explicitly reject boolean
 values even though `bool` is an `int` subclass in Python. RTBL persistence now
 uses the same explicit initialized-database boundary, and stale RTBL cleanup
 only counts an entry as removed when the canonical unban path confirms that the
-server-side and local removal actually completed. The remaining large mixin
-graph is migrated progressively rather than hidden behind broad ignores.
+server-side and local removal actually completed. RTBL administration also
+checks the initialized database boundary before creating a remote PubSub
+subscription, so a startup-order mistake cannot leave an untracked remote
+subscription behind after a local persistence failure. The remaining large
+mixin graph is migrated progressively rather than hidden behind broad ignores.
 
 ### Deployment and health ownership
 
