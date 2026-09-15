@@ -6,7 +6,6 @@ import pytest
 
 from banbot.protections import ProtectionMixin
 
-
 ROOM = "room@conference.example.test"
 ADMIN_ROOM = "admin@conference.example.test"
 
@@ -171,6 +170,28 @@ async def test_set_rejects_unknown_keys_invalid_actions_and_bad_bool_values() ->
 
     await bot.cmd_protection_set_config(ADMIN_ROOM, "policy", "notify_config", "maybe", "Admin")
     assert "notify_config must be True or False" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_numeric_config_rejects_boolean_values() -> None:
+    bot = DummyProtections()
+    original_max_messages = bot.protections["FloodSpamProtection"]["max_messages"]
+    original_similarity = bot.protections["SimilarMessageProtection"]["similarity_percent"]
+
+    await bot.cmd_protection_set_config(ADMIN_ROOM, "flood", "max_messages", "true", "Admin")
+    assert bot.protections["FloodSpamProtection"]["max_messages"] == original_max_messages
+    assert "max_messages must be a positive integer" in last_body(bot)
+
+    await bot.cmd_protection_set_config(
+        ADMIN_ROOM,
+        "similar",
+        "similarity_percent",
+        "true",
+        "Admin",
+    )
+    assert bot.protections["SimilarMessageProtection"]["similarity_percent"] == original_similarity
+    assert "similarity_percent must be an integer from 1 to 100" in last_body(bot)
+    assert bot.persisted == []
 
 
 @pytest.mark.asyncio

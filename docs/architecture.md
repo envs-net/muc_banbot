@@ -416,16 +416,20 @@ intent, preserving command compatibility while avoiding duplicate identities.
 
 The configured mypy gate intentionally expands incrementally around these
 well-defined contracts. The canonical target, utility, cache, ban-query,
-database, moderation command, moderation core and room/ban synchronization
-surfaces are now part of the
-mandatory typed production gate. `banbot.contracts` describes cross-mixin
-dependencies with static Protocols; the type-only contract bases are
-deliberately absent from the runtime MRO. Database users obtain an initialized
-connection through `DatabaseMixin._require_db()` instead of pretending the
-startup-time optional connection is always present. Synchronization also treats
-server affiliation entries as untrusted input and ignores entries that do not
-normalize to a usable JID. The remaining large mixin graph is migrated
-progressively rather than hidden behind broad ignores.
+database, moderation command, moderation core, room/ban synchronization and
+the protection action/check/command/storage/notification surfaces are now part
+of the mandatory typed production gate. `banbot.contracts` describes
+cross-mixin dependencies with static Protocols; the type-only protocol bases
+are replaced by empty runtime shims so the production mixins never inherit
+`Protocol` itself. Database users obtain an initialized connection through
+`DatabaseMixin._require_db()` instead of pretending the startup-time optional
+connection is always present. Synchronization also treats server affiliation
+entries as untrusted input and ignores entries that do not normalize to a
+usable JID. Protection join tracking similarly falls back to the normalized nick
+when a presence JID cannot be normalized, keeping first-message state aligned
+with later message checks. Numeric protection settings explicitly reject boolean
+values even though `bool` is an `int` subclass in Python. The remaining large
+mixin graph is migrated progressively rather than hidden behind broad ignores.
 
 ### Deployment and health ownership
 

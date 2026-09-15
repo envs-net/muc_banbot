@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from config import ADMIN_ROOM
 
 from ..utils import safe_jid
 
+if TYPE_CHECKING:
+    from ..contracts import ProtectionNotificationMixinHost
 
-class ProtectionNotificationMixin:
+    class _ProtectionNotificationMixinContract(ProtectionNotificationMixinHost):
+        pass
+else:
+    class _ProtectionNotificationMixinContract:
+        pass
+
+
+class ProtectionNotificationMixin(_ProtectionNotificationMixinContract):
     async def notify_policy_change(
         self,
         event: str,

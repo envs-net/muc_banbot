@@ -7,7 +7,6 @@ import pytest
 
 from banbot.protections import ProtectionMixin
 
-
 ROOM = "room@conference.example.org"
 ADMIN_ROOM = "admin@conference.example.org"
 
@@ -193,6 +192,33 @@ async def test_first_media_triggers_only_for_observed_recent_first_message(fake_
     assert bot.bans[0][1] is not None
     assert bot.bans[0][2] == "protection:FirstMessageMediaProtection"
     assert bot.redactions and bot.redactions[0][1] == "first message was media spam"
+
+
+@pytest.mark.asyncio
+async def test_first_media_uses_nick_subject_when_join_jid_does_not_normalize(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.occupants[ROOM]["BrokenJid"] = {
+        "jid": "   ",
+        "role": "participant",
+        "affiliation": "none",
+    }
+    bot.protections["FirstMessageMediaProtection"].update(
+        {"enabled": True, "action": "tempban", "redact": False}
+    )
+
+    await bot.protection_on_join(ROOM, "BrokenJid", "   ")
+    msg = fake_msg_factory(room=ROOM, nick="BrokenJid", body="https://upload.example.org/spam.jpg")
+
+    handled = await bot.protections_on_message(
+        msg,
+        ROOM,
+        "BrokenJid",
+        "https://upload.example.org/spam.jpg",
+    )
+
+    assert handled is True
+    assert (ROOM, "brokenjid") in bot.protection_joined_at
+    assert bot.bans[0][0] == "brokenjid"
 
 
 @pytest.mark.asyncio

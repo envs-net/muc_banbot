@@ -5,20 +5,30 @@ from __future__ import annotations
 import inspect
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp import iq_error_summary
 
 from config import ADMIN_ROOM
 
-try:
-    from slixmpp.exceptions import IqError, IqTimeout
-except ImportError:  # pragma: no cover - keeps pure unit tests importable without slixmpp
-    class IqError(Exception):
-        pass
 
-    class IqTimeout(Exception):
-        pass
+class _FallbackIqError(Exception):
+    pass
+
+
+class _FallbackIqTimeout(Exception):
+    pass
+
+
+try:
+    from slixmpp import exceptions as _slixmpp_exceptions
+except ImportError:  # pragma: no cover - keeps pure unit tests importable without slixmpp
+    _slixmpp_exceptions = None
+
+if _slixmpp_exceptions is None:
+    PROTECTION_IQ_EXCEPTIONS = (_FallbackIqError, _FallbackIqTimeout)
+else:
+    PROTECTION_IQ_EXCEPTIONS = (_slixmpp_exceptions.IqError, _slixmpp_exceptions.IqTimeout)
 
 from ..utils import safe_jid
 from .definitions import PROTECTION_ALLOWED_ACTIONS
@@ -26,7 +36,17 @@ from .definitions import PROTECTION_ALLOWED_ACTIONS
 log = logging.getLogger(__name__)
 
 
-class ProtectionActionsMixin:
+if TYPE_CHECKING:
+    from ..contracts import ProtectionActionsMixinHost
+
+    class _ProtectionActionsMixinContract(ProtectionActionsMixinHost):
+        pass
+else:
+    class _ProtectionActionsMixinContract:
+        pass
+
+
+class ProtectionActionsMixin(_ProtectionActionsMixinContract):
     async def _protection_kick(self, room: str, nick: str, reason: str) -> bool:
         if not self.is_bot_admin_or_owner(room):
             return False
@@ -39,7 +59,7 @@ class ProtectionActionsMixin:
                     reason=reason,
                 )
             return True
-        except (IqError, IqTimeout) as exc:
+        except PROTECTION_IQ_EXCEPTIONS as exc:
             log.warning("Protection kick failed for %s in %s: %s", nick, room, iq_error_summary(exc))
         except Exception as exc:
             log.warning("Protection kick failed for %s in %s: %s", nick, room, exc)
@@ -63,14 +83,15 @@ class ProtectionActionsMixin:
             return
         try:
             await self.flush_redaction_index()
-            async with self.db.execute(
+            db = self._require_db()
+            async with db.execute(
                 "SELECT id FROM redaction_index WHERE room_jid = ? AND stanza_id = ?",
                 (room, stanza_id),
             ) as cursor:
                 row = await cursor.fetchone()
             if row:
                 await self._redaction_mark_row(int(row[0]), actor, reason)
-                await self.db.commit()
+                await db.commit()
         except Exception as exc:
             log.debug("Protection redaction mark failed for stanza %s: %s", stanza_id, exc)
 

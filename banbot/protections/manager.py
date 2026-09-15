@@ -53,7 +53,8 @@ class ProtectionMixin(
 
     def _protection_join_subject(self, nick: str, jid: str | None = None) -> str:
         """Return the stable subject key used for join/rejoin tracking."""
-        return bare_jid(jid) if jid else str(nick or "").lower()
+        normalized_jid = bare_jid(jid) if jid else None
+        return normalized_jid or str(nick or "").lower()
 
     def protection_remember_current_occupants(self) -> None:
         """Remember current occupants so reconnect/restart waves do not look like raids.
@@ -69,7 +70,7 @@ class ProtectionMixin(
             self.protection_recent_rejoin_subjects.clear()
             return
 
-        rooms = getattr(self, "protected_rooms", set())
+        rooms: set[str] = getattr(self, "protected_rooms", set())
         occupants = getattr(self, "occupants", {})
         for room in rooms:
             room_occupants = occupants.get(room, {})
@@ -105,7 +106,7 @@ class ProtectionMixin(
             return False
         return True
 
-    def _resolve_protection_or_error(self, name: str) -> tuple[str | None, str | None]:
+    def _resolve_protection_or_error(self, name: str) -> tuple[str, None] | tuple[None, str]:
         canonical = canonical_protection_name(name)
         if canonical and canonical in self.protections:
             return canonical, None

@@ -5,18 +5,30 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from .definitions import canonical_protection_name
 
 log = logging.getLogger(__name__)
 
 
-class ProtectionStorageMixin:
+if TYPE_CHECKING:
+    from ..contracts import ProtectionStorageMixinHost
+
+    class _ProtectionStorageMixinContract(ProtectionStorageMixinHost):
+        pass
+else:
+    class _ProtectionStorageMixinContract:
+        pass
+
+
+class ProtectionStorageMixin(_ProtectionStorageMixinContract):
     async def setup_protections_db(self) -> None:
         """Create persistence table for protection overrides."""
-        if not getattr(self, "db", None):
+        db = getattr(self, "db", None)
+        if db is None:
             return
-        await self.db.execute(
+        await db.execute(
             """
             CREATE TABLE IF NOT EXISTS protections (
                 name TEXT PRIMARY KEY,
@@ -26,15 +38,16 @@ class ProtectionStorageMixin:
             )
             """
         )
-        await self.db.commit()
+        await db.commit()
 
     async def load_protections(self) -> None:
         """Load protection enabled state/config overrides from SQLite."""
         self.init_protection_state()
-        if not getattr(self, "db", None):
+        db = getattr(self, "db", None)
+        if db is None:
             return
         await self.setup_protections_db()
-        async with self.db.execute("SELECT name, enabled, config_json FROM protections") as cursor:
+        async with db.execute("SELECT name, enabled, config_json FROM protections") as cursor:
             rows = await cursor.fetchall()
 
         for raw_name, enabled, config_json in rows:
@@ -54,12 +67,13 @@ class ProtectionStorageMixin:
 
     async def persist_protection(self, name: str) -> None:
         """Persist one protection config override."""
-        if not getattr(self, "db", None):
+        db = getattr(self, "db", None)
+        if db is None:
             return
         await self.setup_protections_db()
         config = dict(self.protections[name])
         enabled = bool(config.pop("enabled", False))
-        await self.db.execute(
+        await db.execute(
             """
             INSERT INTO protections (name, enabled, config_json, updated_at)
             VALUES (?, ?, ?, ?)
@@ -70,4 +84,4 @@ class ProtectionStorageMixin:
             """,
             (name, 1 if enabled else 0, json.dumps(config, sort_keys=True), int(time.time())),
         )
-        await self.db.commit()
+        await db.commit()

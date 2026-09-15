@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from config import ADMIN_ROOM
 
@@ -62,7 +62,17 @@ PROTECTION_BOOL_VALIDATION_KEYS = {
 PROTECTION_LIST_OF_STR_VALIDATION_KEYS = {"words", "reporters"}
 
 
-class ProtectionCommandsMixin:
+if TYPE_CHECKING:
+    from ..contracts import ProtectionCommandsMixinHost
+
+    class _ProtectionCommandsMixinContract(ProtectionCommandsMixinHost):
+        pass
+else:
+    class _ProtectionCommandsMixinContract:
+        pass
+
+
+class ProtectionCommandsMixin(_ProtectionCommandsMixinContract):
     async def cmd_protection_report(self, room: str, nick: str, args: list[str]) -> None:
         """Public/admin trusted reporter command: !report <nick|jid> [reason]."""
         protection = "TrustedReporters"
@@ -299,8 +309,12 @@ class ProtectionCommandsMixin:
 
     async def cmd_protection_config(self, room: str, raw_name: str) -> None:
         name, error = self._resolve_protection_or_error(raw_name)
-        if error:
-            await self.bot_send_message(mto=room, mbody=error, mtype="groupchat")
+        if name is None:
+            await self.bot_send_message(
+                mto=room,
+                mbody=error or f"❌ Unknown protection: {raw_name}",
+                mtype="groupchat",
+            )
             return
         config = self.protection_config(name)
         lines = [f"🛡️ {name} config:", ""]
@@ -315,8 +329,12 @@ class ProtectionCommandsMixin:
     async def cmd_protection_reset(self, room: str, raw_name: str, nick: str) -> None:
         """Reset one protection to its built-in default config."""
         name, error = self._resolve_protection_or_error(raw_name)
-        if error:
-            await self.bot_send_message(mto=room, mbody=error, mtype="groupchat")
+        if name is None:
+            await self.bot_send_message(
+                mto=room,
+                mbody=error or f"❌ Unknown protection: {raw_name}",
+                mtype="groupchat",
+            )
             return
         old = dict(self.protection_config(name))
         self.protections[name] = deepcopy(PROTECTION_DEFAULTS[name])
@@ -411,8 +429,12 @@ class ProtectionCommandsMixin:
 
     async def cmd_protection_set_enabled(self, room: str, raw_name: str, enabled: bool, nick: str) -> None:
         name, error = self._resolve_protection_or_error(raw_name)
-        if error:
-            await self.bot_send_message(mto=room, mbody=error, mtype="groupchat")
+        if name is None:
+            await self.bot_send_message(
+                mto=room,
+                mbody=error or f"❌ Unknown protection: {raw_name}",
+                mtype="groupchat",
+            )
             return
         old = bool(self.protection_config(name).get("enabled", False))
         value = bool(enabled)
@@ -492,8 +514,12 @@ class ProtectionCommandsMixin:
 
     async def cmd_protection_set_config(self, room: str, raw_name: str, key: str, raw_value: str, nick: str) -> None:
         name, error = self._resolve_protection_or_error(raw_name)
-        if error:
-            await self.bot_send_message(mto=room, mbody=error, mtype="groupchat")
+        if name is None:
+            await self.bot_send_message(
+                mto=room,
+                mbody=error or f"❌ Unknown protection: {raw_name}",
+                mtype="groupchat",
+            )
             return
         config = self.protection_config(name)
         key = key.strip().lower()
@@ -571,13 +597,13 @@ class ProtectionCommandsMixin:
             - ``words`` and ``reporters`` must be lists of strings.
         """
         if key in PROTECTION_INT_VALIDATION_KEYS:
-            if not isinstance(value, int) or value < 1:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 return False, f"{key} must be a positive integer."
         if key in PROTECTION_BOOL_VALIDATION_KEYS:
             if not isinstance(value, bool):
                 return False, f"{key} must be True or False."
         if key == "similarity_percent":
-            if not isinstance(value, int) or not 1 <= value <= 100:
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 100:
                 return False, "similarity_percent must be an integer from 1 to 100."
         if key == "action":
             allowed_actions = PROTECTION_ACTIONS_BY_PROTECTION.get(

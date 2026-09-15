@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from config import ADMIN_ROOM
 
@@ -21,7 +21,17 @@ from .detection import (
 log = logging.getLogger(__name__)
 
 
-class ProtectionChecksMixin:
+if TYPE_CHECKING:
+    from ..contracts import ProtectionChecksMixinHost
+
+    class _ProtectionChecksMixinContract(ProtectionChecksMixinHost):
+        pass
+else:
+    class _ProtectionChecksMixinContract:
+        pass
+
+
+class ProtectionChecksMixin(_ProtectionChecksMixinContract):
     async def protection_on_join(self, room: str, nick: str, jid: str | None = None) -> None:
         """Run join-based protections for a MUC presence join."""
         if self._protection_is_exempt(room, nick, jid):
