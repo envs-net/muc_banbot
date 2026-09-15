@@ -136,6 +136,25 @@ async def test_audit_event_query_and_cleanup(temp_db_path):
         await bot.db.close()
 
 
+@pytest.mark.asyncio
+async def test_audit_helpers_are_safe_before_database_initialization() -> None:
+    bot = AuditStatusQueryBot()
+    bot.db = None
+
+    await bot.audit_event("startup_probe", details={"phase": "pre-db"})
+    assert await bot.cleanup_old_audit_logs() == 0
+    assert await bot.get_db_stats() == {
+        "permanent_bans": 0,
+        "temporary_bans": 0,
+        "expired_ban_rows": 0,
+        "audit_events": 0,
+        "db_size_bytes": 0,
+    }
+
+    await bot.cmd_audit([], "admin@conference.example.org")
+    assert "database is not initialized" in last_body(bot)
+
+
 def test_log_event_plaintext_when_structured_disabled(caplog):
     bot = AuditStatusQueryBot()
     bot.structured_event_logs = False

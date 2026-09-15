@@ -7,6 +7,7 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 from xml.etree import ElementTree as ET
 
 from envs_xmpp_core.runtime.diagnostics import exception_summary
@@ -18,6 +19,29 @@ from .task_supervisor import sleep_with_heartbeat
 from .utils import bare_jid, safe_jid, validate_jid_format
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from .contracts import RedactionMixinHost
+
+    class _RedactionMixinContract(RedactionMixinHost):
+        pass
+else:
+    class _RedactionMixinContract:
+        pass
+
+
+class RedactionSummary(TypedDict):
+    """Counters produced by a bulk redaction operation."""
+
+    found: int
+    redacted: int
+    unconfirmed: int
+    failed: int
+    skipped: int
+    failure_reasons: dict[str, int]
+    verified_via_mam: int
+    indexed_total: NotRequired[int]
+    previously_redacted: NotRequired[int]
 
 MODERATE_NS = "urn:xmpp:message-moderate:1"
 RETRACT_NS = "urn:xmpp:message-retract:1"
@@ -134,7 +158,30 @@ def _xml_namespace(tag: object) -> str:
     return ""
 
 
-class RedactionMixin:
+class RedactionMixin(_RedactionMixinContract):
+    _redaction_index_pending_writes: int
+    _redaction_index_last_commit: float
+    _redaction_index_flush_task: asyncio.Task[None] | None
+    _redaction_index_lock: asyncio.Lock
+
+    def _redaction_index_lock_obj(self) -> asyncio.Lock:
+        """Return the process-local lock that serializes index writes/flushes."""
+        lock = getattr(self, "_redaction_index_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._redaction_index_lock = lock
+        return lock
+
+    def _redaction_protected_rooms(self) -> list[str]:
+        """Return protected room JIDs in the canonical form used by the index."""
+        return sorted(
+            {
+                normalized
+                for room in self.protected_rooms
+                if (normalized := str(room).strip().lower())
+            }
+        )
+
     def _redaction_auto_reason_matches(self, comment: str | None) -> str | None:
         """Return the matching auto-redaction reason, if any."""
         if not getattr(self, "redaction_enabled", False):
@@ -179,14 +226,31 @@ class RedactionMixin:
         return stanza_ids[0].attrib.get("id") or None
 
 
-    def _redaction_extract_sender_jid(self, msg, room: str, nick: str) -> str | None:
+    def _redaction_extract_sender_jid(self, msg: Any, room: str, nick: str) -> str | None:
         """Best-effort extraction of the real sender bare JID for a MUC message."""
-        room_occupants = getattr(self, "occupants", {}).get(room, {})
-        occupant_info = room_occupants.get(nick) or room_occupants.get(nick.lower())
+        room_key = room.casefold()
+        room_occupants = self.occupants.get(room, {})
+        if not room_occupants:
+            for candidate_room, candidate_occupants in self.occupants.items():
+                if str(candidate_room).casefold() == room_key:
+                    room_occupants = candidate_occupants
+                    break
+
+        occupant_info = room_occupants.get(nick)
+        if occupant_info is None:
+            nick_key = nick.casefold()
+            occupant_info = next(
+                (info for candidate, info in room_occupants.items() if str(candidate).casefold() == nick_key),
+                None,
+            )
         if occupant_info and occupant_info.get("jid"):
-            return bare_jid(occupant_info.get("jid"))
+            occupant_jid = bare_jid(occupant_info.get("jid"))
+            if occupant_jid:
+                return occupant_jid
 
         # Some slixmpp MUC message stanzas expose real JID via the muc plugin.
+        # If the cache contains a malformed real JID, still try the stanza
+        # instead of treating the unusable cache value as authoritative.
         try:
             muc_jid = msg["muc"].get("jid")
             if muc_jid:
@@ -197,20 +261,24 @@ class RedactionMixin:
         return None
 
 
-    async def _redaction_index_message(self, msg) -> bool:
+    async def _redaction_index_message(self, msg: Any) -> bool:
         """Index a MUC message for possible later redaction."""
-        if not getattr(self, "redaction_enabled", False):
+        if not self.redaction_enabled or getattr(self, "_shutdown_in_progress", False):
             return False
-        if not getattr(self, "db", None):
+
+        db = self.db
+        if db is None:
             return False
 
         try:
-            room = msg["from"].bare
+            room = str(msg["from"].bare or "").strip().lower()
             nick = str(msg.get("mucnick", "") or "")
         except Exception:
             return False
 
-        if room not in getattr(self, "protected_rooms", set()):
+        if not room:
+            return False
+        if room not in self._redaction_protected_rooms():
             return False
 
         stanza_id = self._redaction_extract_stanza_id(msg)
@@ -221,23 +289,29 @@ class RedactionMixin:
         if not sender_jid:
             return False
 
-        message_id = None
         try:
             message_id = msg.get("id") or None
         except Exception:
             message_id = None
 
-        cursor = await self.db.execute(
-            """
-            INSERT OR IGNORE INTO redaction_index
-                (room_jid, sender_jid, sender_nick, stanza_id, message_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (room, sender_jid, nick or None, stanza_id, message_id, int(time.time())),
-        )
+        # Serialize the write with explicit/shutdown flushes. The second
+        # shutdown check closes the race where a stanza passed the first check
+        # just before shutdown began and then waited for an in-flight flush.
+        async with self._redaction_index_lock_obj():
+            if getattr(self, "_shutdown_in_progress", False) or self.db is not db:
+                return False
+            active_db = self._require_db()
+            cursor = await active_db.execute(
+                """
+                INSERT OR IGNORE INTO redaction_index
+                    (room_jid, sender_jid, sender_nick, stanza_id, message_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (room, sender_jid, nick or None, stanza_id, message_id, int(time.time())),
+            )
 
-        if cursor.rowcount:
-            await self._redaction_maybe_commit_index()
+            if cursor.rowcount:
+                await self._redaction_maybe_commit_index_locked()
 
         return True
 
@@ -296,19 +370,20 @@ class RedactionMixin:
             pass
 
 
-    async def _redaction_maybe_commit_index(
+    async def _redaction_maybe_commit_index_locked(
         self,
         force: bool = False,
         *,
         _from_scheduled_flush: bool = False,
     ) -> None:
-        """Batch redaction-index commits with a bounded transaction lifetime."""
-        if not getattr(self, "db", None):
+        """Update batch state and commit while the redaction index lock is held."""
+        db = self.db
+        if db is None:
             return
 
         now = time.monotonic()
-        pending = getattr(self, "_redaction_index_pending_writes", 0)
-        last_commit = getattr(self, "_redaction_index_last_commit", 0.0)
+        pending = self._redaction_index_pending_writes
+        last_commit = self._redaction_index_last_commit
 
         if not force:
             pending += 1
@@ -324,9 +399,7 @@ class RedactionMixin:
         )
 
         if should_commit:
-            if not _from_scheduled_flush:
-                await self._redaction_cancel_index_flush()
-            await self.db.commit()
+            await db.commit()
             self._redaction_index_pending_writes = 0
             self._redaction_index_last_commit = time.monotonic()
             return
@@ -335,11 +408,26 @@ class RedactionMixin:
         self._redaction_schedule_index_flush(remaining)
 
 
+    async def _redaction_maybe_commit_index(
+        self,
+        force: bool = False,
+        *,
+        _from_scheduled_flush: bool = False,
+    ) -> None:
+        """Batch redaction-index commits with a bounded transaction lifetime."""
+        async with self._redaction_index_lock_obj():
+            await self._redaction_maybe_commit_index_locked(
+                force=force,
+                _from_scheduled_flush=_from_scheduled_flush,
+            )
+
+
     async def flush_redaction_index(self) -> None:
         """Flush pending redaction-index writes and stop a delayed flush task."""
         await self._redaction_cancel_index_flush()
-        if getattr(self, "_redaction_index_pending_writes", 0) > 0:
-            await self._redaction_maybe_commit_index(force=True)
+        async with self._redaction_index_lock_obj():
+            if self._redaction_index_pending_writes > 0:
+                await self._redaction_maybe_commit_index_locked(force=True)
 
 
     async def _redaction_fetch_targets_for_jid(
@@ -347,7 +435,7 @@ class RedactionMixin:
         jid: str,
     ) -> list[tuple[int, str, str, int]]:
         """Return non-redacted indexed message rows for a bare JID in protected rooms."""
-        protected_rooms = sorted(getattr(self, "protected_rooms", set()))
+        protected_rooms = self._redaction_protected_rooms()
         if not protected_rooms:
             return []
 
@@ -360,13 +448,15 @@ class RedactionMixin:
               AND room_jid IN ({placeholders})
             ORDER BY created_at ASC, id ASC
         """
-        async with self.db.execute(query, [bare_jid(jid), *protected_rooms]) as cursor:
-            return await cursor.fetchall()
+        db = self._require_db()
+        async with db.execute(query, [jid, *protected_rooms]) as cursor:
+            rows = await cursor.fetchall()
+        return [(int(row[0]), str(row[1]), str(row[2]), int(row[3])) for row in rows]
 
 
     async def _redaction_index_stats_for_jid(self, jid: str) -> dict[str, int]:
         """Return redaction-index counters for a bare JID in protected rooms."""
-        protected_rooms = sorted(getattr(self, "protected_rooms", set()))
+        protected_rooms = self._redaction_protected_rooms()
         if not protected_rooms:
             return {"indexed_total": 0, "previously_redacted": 0}
 
@@ -379,7 +469,8 @@ class RedactionMixin:
             WHERE sender_jid = ?
               AND room_jid IN ({placeholders})
         """
-        async with self.db.execute(query, [bare_jid(jid), *protected_rooms]) as cursor:
+        db = self._require_db()
+        async with db.execute(query, [jid, *protected_rooms]) as cursor:
             row = await cursor.fetchone()
 
         if not row:
@@ -397,7 +488,8 @@ class RedactionMixin:
         actor: str | None,
         reason: str | None,
     ) -> None:
-        await self.db.execute(
+        db = self._require_db()
+        await db.execute(
             """
             UPDATE redaction_index
             SET redacted_at = ?, redacted_by = ?, redact_reason = ?
@@ -408,7 +500,7 @@ class RedactionMixin:
 
 
     @staticmethod
-    def _redaction_confirmation_ids(msg) -> set[str]:
+    def _redaction_confirmation_ids(msg: Any) -> set[str]:
         """Extract target stanza IDs from XEP-0425 moderation announcements.
 
         Prosody supports both XEP-0425 v0.2.1 and v0.3.0 and deployed
@@ -449,7 +541,7 @@ class RedactionMixin:
         return stanza_ids
 
 
-    def _redaction_confirm_from_message(self, msg) -> int:
+    def _redaction_confirm_from_message(self, msg: Any) -> int:
         """Set pending confirmation events found in an incoming message stanza."""
         stanza_ids = self._redaction_confirmation_ids(msg)
         if not stanza_ids:
@@ -481,7 +573,7 @@ class RedactionMixin:
         return confirmed
 
 
-    def _redaction_incoming_filter(self, stanza):
+    def _redaction_incoming_filter(self, stanza: Any) -> Any:
         """Inspect every incoming message stanza for moderation confirmation.
 
         Slixmpp incoming filters run before stream and custom event handlers,
@@ -501,12 +593,12 @@ class RedactionMixin:
         return stanza
 
 
-    def _handle_redaction_confirmation_stanza(self, msg) -> None:
+    def _handle_redaction_confirmation_stanza(self, msg: Any) -> None:
         """Compatibility callback for older embedding and test integrations."""
         self._redaction_confirm_from_message(msg)
 
 
-    async def on_redaction_confirmation_message(self, msg) -> None:
+    async def on_redaction_confirmation_message(self, msg: Any) -> None:
         """Compatibility event callback used by tests and embedding users."""
         self._redaction_confirm_from_message(msg)
 
@@ -538,7 +630,7 @@ class RedactionMixin:
 
     @staticmethod
     def _redaction_mam_tombstone_ids(
-        messages,
+        messages: Any,
         requested_ids: set[str],
     ) -> set[str]:
         """Return requested archive IDs whose MAM result contains a tombstone."""
@@ -578,7 +670,7 @@ class RedactionMixin:
                     confirmed.update(matching_ids)
         return confirmed
 
-    def _redaction_plugin(self, name: str):
+    def _redaction_plugin(self, name: str) -> Any | None:
         """Return one registered Slixmpp plugin without assuming mapping type."""
         plugins = getattr(self, "plugin", None)
         if plugins is None:
@@ -600,7 +692,7 @@ class RedactionMixin:
         self,
         room_jid: str,
         stanza_ids: list[str],
-    ) -> tuple[list, Exception | None]:
+    ) -> tuple[list[Any], Exception | None]:
         """Query one MUC archive for specific IDs using Slixmpp's MAM stanza model."""
         mam = self._redaction_plugin("xep_0313")
         if mam is None or not hasattr(mam, "_pre_mam_retrieve"):
@@ -647,7 +739,7 @@ class RedactionMixin:
         room_jid: str,
         start_ts: int,
         end_ts: int,
-    ) -> list:
+    ) -> list[Any]:
         """Retrieve a bounded MAM time window as fallback for non-extended servers."""
         mam = self._redaction_plugin("xep_0313")
         if mam is None or not hasattr(mam, "iterate"):
@@ -656,8 +748,8 @@ class RedactionMixin:
         start = datetime.fromtimestamp(start_ts, tz=UTC)
         end = datetime.fromtimestamp(end_ts, tz=UTC)
 
-        async def collect() -> list:
-            messages = []
+        async def collect() -> list[Any]:
+            messages: list[Any] = []
             async for message in mam.iterate(
                 jid=room_jid,
                 start=start,
@@ -711,11 +803,12 @@ class RedactionMixin:
                 )
 
         unresolved = requested_ids - confirmed
-        timestamped = sorted(
-            (int(entries[stanza_id]), stanza_id)
-            for stanza_id in unresolved
-            if entries[stanza_id]
-        )
+        timestamped: list[tuple[int, str]] = []
+        for stanza_id in unresolved:
+            created_at = entries[stanza_id]
+            if created_at is not None:
+                timestamped.append((created_at, stanza_id))
+        timestamped.sort()
         if not timestamped:
             return confirmed
 
@@ -863,9 +956,9 @@ class RedactionMixin:
         reason: str | None,
         actor: str | None,
         alert_on_failure: bool = True,
-    ) -> dict[str, object]:
+    ) -> RedactionSummary:
         """Retract all rows and return summary counts."""
-        summary: dict[str, object] = {
+        summary: RedactionSummary = {
             "found": len(rows),
             "redacted": 0,
             "unconfirmed": 0,
@@ -929,13 +1022,7 @@ class RedactionMixin:
 
         results = await asyncio.gather(*(redact_one(row) for row in rows))
 
-        failure_reasons_obj = summary.get("failure_reasons")
-        failure_reasons: dict[str, int]
-        if isinstance(failure_reasons_obj, dict):
-            failure_reasons = failure_reasons_obj
-        else:
-            failure_reasons = {}
-            summary["failure_reasons"] = failure_reasons
+        failure_reasons = summary["failure_reasons"]
 
         unconfirmed_rows: list[tuple[int, str, str, int]] = []
         for row, (status, row_value) in zip(rows, results, strict=True):
@@ -983,10 +1070,11 @@ class RedactionMixin:
                 len(mam_confirmed),
             )
 
+        db = self._require_db()
         rows_to_mark = changed_rows + skipped_rows
         if rows_to_mark:
             now = int(time.time())
-            await self.db.executemany(
+            await db.executemany(
                 """
                 UPDATE redaction_index
                 SET redacted_at = ?, redacted_by = ?, redact_reason = ?
@@ -995,7 +1083,7 @@ class RedactionMixin:
                 [(now, actor, reason, row_id) for row_id in rows_to_mark],
             )
 
-        await self.db.commit()
+        await db.commit()
         return summary
 
 
@@ -1008,7 +1096,7 @@ class RedactionMixin:
         target: str | None = None,
         jid: str | None = None,
         comment: str | None = None,
-        details: dict | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         """Write a redaction audit event when audit logging is available."""
         if not hasattr(self, "audit_event"):
@@ -1031,12 +1119,12 @@ class RedactionMixin:
         title: str,
         target: str,
         reason: str | None,
-        summary: dict[str, object],
+        summary: RedactionSummary,
     ) -> str:
         """Format a redaction summary for the admin room."""
         if summary.get("found", 0) == 0:
-            indexed_total = int(summary.get("indexed_total", 0) or 0)
-            previously_redacted = int(summary.get("previously_redacted", 0) or 0)
+            indexed_total = summary.get("indexed_total", 0)
+            previously_redacted = summary.get("previously_redacted", 0)
 
             lines = [
                 f"ℹ️ {title}",
@@ -1073,7 +1161,7 @@ class RedactionMixin:
             f"Messages found: {summary.get('found', 0)}",
             f"Redacted: {summary.get('redacted', 0)}",
         ]
-        verified_via_mam = int(summary.get("verified_via_mam", 0) or 0)
+        verified_via_mam = summary.get("verified_via_mam", 0)
         if verified_via_mam:
             lines.append(f"Verified via MAM: {verified_via_mam}")
         lines.extend(
@@ -1084,11 +1172,11 @@ class RedactionMixin:
             ]
         )
 
-        found = int(summary.get("found", 0) or 0)
-        redacted = int(summary.get("redacted", 0) or 0)
-        unconfirmed = int(summary.get("unconfirmed", 0) or 0)
-        failed = int(summary.get("failed", 0) or 0)
-        skipped = int(summary.get("skipped", 0) or 0)
+        found = summary.get("found", 0)
+        redacted = summary.get("redacted", 0)
+        unconfirmed = summary.get("unconfirmed", 0)
+        failed = summary.get("failed", 0)
+        skipped = summary.get("skipped", 0)
         failure_reasons = summary.get("failure_reasons", {})
         if unconfirmed > 0:
             lines.extend(
@@ -1130,9 +1218,22 @@ class RedactionMixin:
         actor: str | None = None,
         announce: bool = True,
         title: str = "Redaction completed",
-    ) -> dict[str, object]:
+    ) -> RedactionSummary:
         """Redact all indexed messages for a bare JID in protected rooms."""
         target = bare_jid(jid)
+        if not target or not validate_jid_format(target):
+            log.warning("Refusing redaction for invalid JID: %r", jid)
+            return {
+                "found": 0,
+                "redacted": 0,
+                "unconfirmed": 0,
+                "failed": 0,
+                "skipped": 0,
+                "failure_reasons": {},
+                "verified_via_mam": 0,
+                "indexed_total": 0,
+                "previously_redacted": 0,
+            }
         await self.flush_redaction_index()
         rows = await self._redaction_fetch_targets_for_jid(target)
         summary = await self._redaction_redact_rows(
@@ -1142,7 +1243,9 @@ class RedactionMixin:
             alert_on_failure=not title.startswith("Auto-redaction"),
         )
         if summary.get("found", 0) == 0:
-            summary.update(await self._redaction_index_stats_for_jid(target))
+            stats = await self._redaction_index_stats_for_jid(target)
+            summary["indexed_total"] = stats["indexed_total"]
+            summary["previously_redacted"] = stats["previously_redacted"]
 
         await self._audit_redaction_event(
             "auto_redact_jid" if title.startswith("Auto-redaction") else "redact_jid",
@@ -1182,6 +1285,7 @@ class RedactionMixin:
         actor: str | None = None,
     ) -> dict[str, int]:
         """Redact exactly one stanza-id in one room."""
+        db = self._require_db()
         summary = {
             "found": 1,
             "redacted": 0,
@@ -1200,7 +1304,7 @@ class RedactionMixin:
                     stanza_id,
                     room_jid,
                 )
-                await self.db.execute(
+                await db.execute(
                     """
                     UPDATE redaction_index
                     SET redacted_at = ?, redacted_by = ?, redact_reason = ?
@@ -1208,13 +1312,13 @@ class RedactionMixin:
                     """,
                     (int(time.time()), actor, reason, room_jid, stanza_id),
                 )
-                await self.db.commit()
+                await db.commit()
             elif _redaction_error_is_unconfirmed(exc):
                 mam_confirmed = await self._redaction_verify_mam_tombstones(
                     [(room_jid, stanza_id)]
                 )
                 if (str(room_jid).lower(), stanza_id) in mam_confirmed:
-                    await self.db.execute(
+                    await db.execute(
                         """
                         UPDATE redaction_index
                         SET redacted_at = ?, redacted_by = ?, redact_reason = ?
@@ -1222,7 +1326,7 @@ class RedactionMixin:
                         """,
                         (int(time.time()), actor, reason, room_jid, stanza_id),
                     )
-                    await self.db.commit()
+                    await db.commit()
                     summary["redacted"] = 1
                     summary["verified_via_mam"] = 1
                     log.info(
@@ -1257,7 +1361,7 @@ class RedactionMixin:
                         details={"room": room_jid, "stanza_id": stanza_id, "error": error_summary},
                     )
         else:
-            await self.db.execute(
+            await db.execute(
                 """
                 UPDATE redaction_index
                 SET redacted_at = ?, redacted_by = ?, redact_reason = ?
@@ -1265,7 +1369,7 @@ class RedactionMixin:
                 """,
                 (int(time.time()), actor, reason, room_jid, stanza_id),
             )
-            await self.db.commit()
+            await db.commit()
             summary["redacted"] = 1
 
         await self._audit_redaction_event(
@@ -1346,14 +1450,15 @@ class RedactionMixin:
                 )
             return result
 
+        db = self._require_db()
         cutoff = int(time.time()) - days * 86400
-        cur = await self.db.execute(
+        cur = await db.execute(
             "DELETE FROM redaction_index WHERE created_at < ?",
             (cutoff,),
         )
         deleted = cur.rowcount or 0
         result["deleted"] = deleted
-        await self.db.commit()
+        await db.commit()
 
         if audit and (deleted > 0 or audit_noop):
             await self._audit_redaction_event(
@@ -1486,7 +1591,7 @@ class RedactionMixin:
             room_jid = args[1].strip().lower()
             stanza_id = args[2].strip()
             reason = " ".join(args[3:]).strip() or None
-            if room_jid not in getattr(self, "protected_rooms", set()):
+            if room_jid not in self._redaction_protected_rooms():
                 await self.bot_send_message(
                     mto=room,
                     mbody=f"❌ Refusing redaction: {room_jid} is not a protected room.",

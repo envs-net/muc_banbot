@@ -509,6 +509,19 @@ transport and post-send acknowledgement; a periodic stale-inflight repair is a
 last-resort safety net for interrupted SQLite bookkeeping without immediately
 stealing work from a previous worker generation.
 
+Audit persistence and message redaction now sit inside the same explicit typed
+host-contract boundary. Audit/status helpers treat the startup-time database
+connection as optional and command output fails closed with a clear unavailable
+message before storage initialization. Redaction index writes and commits are
+serialized by one process-local lock; final shutdown sets its lifecycle gate
+before flushing and a writer rechecks that gate after acquiring the lock, so a
+stanza that was already waiting cannot open a new SQLite transaction after the
+shutdown flush completed. Sender extraction also treats cached occupant JIDs as
+untrusted: an invalid cached value falls through to the stanza-provided MUC JID
+instead of silently preventing an otherwise valid message from being indexed.
+Bulk redaction summaries use a typed counter contract, and redaction DB mutation
+paths obtain an initialized connection through the shared database boundary.
+
 ### Deployment and health ownership
 
 The deploy frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` and adds

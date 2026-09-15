@@ -5,6 +5,7 @@ import logging
 import pathlib
 import time
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from config import DB_FILE
 
@@ -12,8 +13,17 @@ from .utils import get_list_page_size, resolve_page, wants_all_pages, without_al
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from .contracts import AuditMixinHost
 
-class AuditMixin:
+    class _AuditMixinContract(AuditMixinHost):
+        pass
+else:
+    class _AuditMixinContract:
+        pass
+
+
+class AuditMixin(_AuditMixinContract):
     def log_event(self, level: int, event: str, **fields) -> None:
         """Emit a structured JSON event log when enabled."""
         if not self.structured_event_logs:
@@ -26,15 +36,25 @@ class AuditMixin:
             log.log(level, "%s: %s", event, fields)
 
 
-    async def audit_event(self, event_type: str, actor: str | None = None, room: str | None = None,
-                          target_type: str | None = None, target: str | None = None,
-                          jid: str | None = None, nick: str | None = None, until: int | None = None,
-                          comment: str | None = None, details: dict | None = None) -> None:
+    async def audit_event(
+        self,
+        event_type: str,
+        actor: str | None = None,
+        room: str | None = None,
+        target_type: str | None = None,
+        target: str | None = None,
+        jid: str | None = None,
+        nick: str | None = None,
+        until: int | None = None,
+        comment: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         """Persist an audit event in SQLite. Audit failures must never break moderation."""
-        if not self.audit_log_enabled or not self.db:
+        db = self.db
+        if not self.audit_log_enabled or db is None:
             return
         try:
-            await self.db.execute(
+            await db.execute(
                 """
                 INSERT INTO audit_log
                     (event_type, actor, room, target_type, target, jid, nick, until, comment, details)
@@ -43,36 +63,46 @@ class AuditMixin:
                 (event_type, actor, room, target_type, target, jid, nick, until, comment,
                  json.dumps(details or {}, ensure_ascii=False, sort_keys=True, default=str)),
             )
-            await self.db.commit()
-        except Exception as e:
-            log.warning("Failed to write audit event %s: %s", event_type, e)
+            await db.commit()
+        except Exception as exc:
+            log.warning("Failed to write audit event %s: %s", event_type, exc)
 
 
     async def cleanup_old_audit_logs(self) -> int:
         """Delete audit log entries older than AUDIT_LOG_RETENTION_DAYS."""
-        if not self.db or not self.audit_log_enabled:
+        db = self.db
+        if db is None or not self.audit_log_enabled:
             return 0
         cutoff = int(time.time()) - (self.audit_log_retention_days * 86400)
         try:
-            cur = await self.db.execute("DELETE FROM audit_log WHERE created_at < ?", (cutoff,))
-            await self.db.commit()
+            cur = await db.execute("DELETE FROM audit_log WHERE created_at < ?", (cutoff,))
+            await db.commit()
             deleted = cur.rowcount or 0
             self.last_audit_cleanup_count = deleted
             self.last_audit_cleanup_run = time.time()
             if deleted:
                 self.log_event(logging.INFO, "audit_cleanup", deleted=deleted, retention_days=self.audit_log_retention_days)
             return deleted
-        except Exception as e:
-            log.warning("Audit cleanup failed: %s", e)
+        except Exception as exc:
+            log.warning("Audit cleanup failed: %s", exc)
             return 0
 
 
     async def get_db_stats(self) -> dict[str, object]:
         """Return lightweight DB statistics for !status."""
         now = int(time.time())
-        stats = {"permanent_bans": 0, "temporary_bans": 0, "expired_ban_rows": 0, "audit_events": 0, "db_size_bytes": 0}
+        stats: dict[str, object] = {
+            "permanent_bans": 0,
+            "temporary_bans": 0,
+            "expired_ban_rows": 0,
+            "audit_events": 0,
+            "db_size_bytes": 0,
+        }
+        db = self.db
+        if db is None:
+            return stats
         try:
-            async with self.db.execute(
+            async with db.execute(
                 """
                 SELECT
                     SUM(CASE WHEN until <= 0 THEN 1 ELSE 0 END),
@@ -87,19 +117,19 @@ class AuditMixin:
                     stats["permanent_bans"] = int(row[0] or 0)
                     stats["temporary_bans"] = int(row[1] or 0)
                     stats["expired_ban_rows"] = int(row[2] or 0)
-            async with self.db.execute("SELECT COUNT(*) FROM audit_log") as cursor:
+            async with db.execute("SELECT COUNT(*) FROM audit_log") as cursor:
                 row = await cursor.fetchone()
                 if row:
                     stats["audit_events"] = int(row[0] or 0)
             db_path = pathlib.Path(DB_FILE)
             if db_path.exists():
                 stats["db_size_bytes"] = db_path.stat().st_size
-        except Exception as e:
-            log.debug("Could not collect DB stats: %s", e)
+        except Exception as exc:
+            log.debug("Could not collect DB stats: %s", exc)
         return stats
 
 
-    def _format_audit_row(self, row) -> str:
+    def _format_audit_row(self, row: tuple[Any, ...]) -> str:
         created_at, event_type, actor, target_type, target, jid, nick, until, comment, details = row
         ts = datetime.fromtimestamp(created_at).strftime("%Y-%m-%d %H:%M")
         display_target = target or jid or nick or "-"
@@ -124,6 +154,15 @@ class AuditMixin:
                 except ValueError:
                     query = " ".join(args).strip().lower()
 
+        db = self.db
+        if db is None:
+            await self.bot_send_message(
+                mto=room,
+                mbody="❌ Audit log unavailable: database is not initialized.",
+                mtype="groupchat",
+            )
+            return
+
         params: list[object] = []
         where = ""
         if query:
@@ -139,12 +178,12 @@ class AuditMixin:
             """
             params = [like] * 7
 
-        async with self.db.execute(f"SELECT COUNT(*) FROM audit_log {where}", params) as cursor:
+        async with db.execute(f"SELECT COUNT(*) FROM audit_log {where}", params) as cursor:
             row = await cursor.fetchone()
             total = int(row[0] or 0) if row else 0
 
         if show_all:
-            async with self.db.execute(
+            async with db.execute(
                 f"""
                 SELECT created_at, event_type, actor, target_type, target, jid, nick, until, comment, details
                 FROM audit_log
@@ -161,7 +200,7 @@ class AuditMixin:
             page = max(1, min(page, total_pages))
             offset = (page - 1) * per_page
 
-            async with self.db.execute(
+            async with db.execute(
                 f"""
                 SELECT created_at, event_type, actor, target_type, target, jid, nick, until, comment, details
                 FROM audit_log

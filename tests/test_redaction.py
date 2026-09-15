@@ -506,6 +506,11 @@ class RedactionBot(DatabaseMixin, RedactionMixin):
             },
             "command_prefix": "!",
             "redaction_retract_concurrency": 3,
+            "_shutdown_in_progress": False,
+            "_redaction_index_pending_writes": 0,
+            "_redaction_index_last_commit": 0.0,
+            "_redaction_index_flush_task": None,
+            "_redaction_index_lock": asyncio.Lock(),
         }
 
     @staticmethod
@@ -893,6 +898,59 @@ async def test_redaction_indexes_message_with_room_stanza_id(temp_db_path):
         async with bot.db.execute("SELECT room_jid, sender_jid, stanza_id FROM redaction_index") as cursor:
             rows = await cursor.fetchall()
         assert rows == [(TEST_ROOM_JID, TEST_SENDER_JID, TEST_STANZA_1)]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_redaction_index_rechecks_shutdown_after_waiting_for_index_lock(
+    temp_db_path,
+) -> None:
+    bot = RedactionBot()
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
+    await bot._redaction_index_lock.acquire()
+    try:
+        indexing = asyncio.create_task(
+            bot._redaction_index_message(
+                FakeMessage(TEST_ROOM_JID, TEST_SENDER_NICK, TEST_STANZA_1)
+            )
+        )
+        await asyncio.sleep(0)
+        bot._shutdown_in_progress = True
+    finally:
+        bot._redaction_index_lock.release()
+
+    try:
+        assert await indexing is False
+        assert await redaction_index_count(bot) == 0
+        assert bot._redaction_index_flush_task is None
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_redaction_sender_falls_back_to_stanza_when_cached_jid_is_invalid(
+    temp_db_path,
+) -> None:
+    bot = RedactionBot()
+    bot.occupants[TEST_ROOM_JID][TEST_SENDER_NICK]["jid"] = "   "
+    await setup_and_validate_redaction_test_db(bot, temp_db_path)
+    try:
+        message = FakeMessage(
+            TEST_ROOM_JID.upper(),
+            TEST_SENDER_NICK.upper(),
+            TEST_STANZA_1,
+        )
+        message._data["muc"] = {"jid": TEST_SENDER_RESOURCE_JID}
+
+        assert await bot._redaction_index_message(message) is True
+        await bot.flush_redaction_index()
+        assert await redaction_index_count(bot) == 1
+        async with bot.db.execute(
+            "SELECT room_jid, sender_jid FROM redaction_index"
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (TEST_ROOM_JID, TEST_SENDER_JID)
     finally:
         await bot.db.close()
 

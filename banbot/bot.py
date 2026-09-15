@@ -348,6 +348,10 @@ class BanBot(
         self.redaction_cleanup_task: asyncio.Task | None = None
         self.redaction_operation_tasks: set[asyncio.Task] = set()
         self._redaction_confirmation_waiters: dict[tuple[str, str], set[asyncio.Event]] = {}
+        self._redaction_index_pending_writes: int = 0
+        self._redaction_index_last_commit: float = 0.0
+        self._redaction_index_flush_task: asyncio.Task[None] | None = None
+        self._redaction_index_lock = asyncio.Lock()
 
         # --- RTBL ---
         self.rtbl_enabled: bool = getattr(config, "RTBL_ENABLED", False)
