@@ -318,6 +318,7 @@ class BanBot(
         # --- database backups / file operations ---
         self.last_database_backup_file: str | None = None
         self.last_database_restore_file: str | None = None
+        self._pending_database_backup_audit_events = []
         self._database_file_operation_lock = asyncio.Lock()
         self._ban_state_operation_lock = asyncio.Lock()
 

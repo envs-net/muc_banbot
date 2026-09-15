@@ -532,6 +532,20 @@ creating a false healthy/admin-present status. Status numeric rendering also
 normalizes diagnostic counters defensively so malformed telemetry cannot break
 the operator command itself.
 
+Backup, restore and CSV import/export now sit inside the same typed host-contract
+boundary. Managed backup verification/deletion and export creation/deletion are
+serialized with the canonical database/file lock, while export snapshots the ban
+cache/database under the ban-state lock before publishing the CSV. Blocking
+archive, extraction, integrity and CSV I/O is cancellation-safe: temporary
+directories and serialization locks stay alive until worker-thread work really
+finishes, and a cancelled backup/export removes any just-published managed file
+before propagating cancellation. The pre-startup backup-audit queue is drained
+before awaiting SQLite audit writes so events queued concurrently cannot be
+lost. Import requires an initialized database before creating its safety backup,
+and the SQLite commit is treated as the point of no return: cache recovery or
+automatic-redaction failures after commit are reported as post-commit problems
+without pretending the already-persisted import rolled back.
+
 ### Deployment and health ownership
 
 The deploy frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` and adds

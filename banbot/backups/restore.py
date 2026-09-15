@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import pathlib
 import tempfile
+from typing import TYPE_CHECKING
 
 from envs_xmpp_core.storage.restore import (
     RestoreFileSpec,
@@ -13,12 +13,24 @@ from envs_xmpp_core.storage.restore import (
     run_restore_transaction,
 )
 
-from ..locks import database_mutation_locks
+from ..locks import database_file_lock, database_mutation_locks
+from ..managed_io import run_blocking_io
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from ..contracts import BackupRestoreMixinHost
 
-class BackupRestoreMixin:
+    class _BackupRestoreMixinContract(BackupRestoreMixinHost):
+        pass
+else:
+    class _BackupRestoreMixinContract:
+        pass
+
+
+class BackupRestoreMixin(_BackupRestoreMixinContract):
+    last_database_restore_file: str | None
+
 
     async def _reload_database_runtime_after_restore(self) -> None:
         """Open the current DB file and refresh DB-backed runtime state."""
@@ -204,7 +216,11 @@ class BackupRestoreMixin:
             restored_config = config_will_restore
             restored_omemo = omemo_will_restore
             self.last_database_restore_file = str(backup.path)
-            await self.prune_database_backups(preserve=backup.path)
+            # Keep both the selected source and the freshly created safety
+            # backup after a successful restore. With a very small retention
+            # limit, pruning here while preserving only one of them would
+            # immediately delete the other and make the reported recovery path
+            # misleading. The next normal backup creation reconciles retention.
 
             if hasattr(self, "log_event"):
                 try:
@@ -263,8 +279,18 @@ class BackupRestoreMixin:
             return True, "\n".join(lines)
 
 
-    async def delete_database_backup(self, name: str, *, actor: str | None = None) -> tuple[bool, str]:
+    async def delete_database_backup(
+        self,
+        name: str,
+        *,
+        actor: str | None = None,
+        lock: bool = True,
+    ) -> tuple[bool, str]:
         """Delete a managed database backup archive and any legacy companion files."""
+        if lock:
+            async with database_file_lock(self):
+                return await self.delete_database_backup(name, actor=actor, lock=False)
+
         backup = self.resolve_database_backup(name)
         if backup is None:
             return False, f"Backup not found: {name}"
@@ -278,7 +304,7 @@ class BackupRestoreMixin:
         try:
             for path in [backup.path, *companion_paths]:
                 if path.exists():
-                    await asyncio.to_thread(path.unlink)
+                    await run_blocking_io(path.unlink)
                     removed.append(path.name)
         except OSError as exc:
             log.warning("Failed to delete backup %s: %s", backup.path, exc)

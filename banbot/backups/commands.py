@@ -4,12 +4,23 @@ from __future__ import annotations
 
 import logging
 import pathlib
+from typing import TYPE_CHECKING
 
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
 log = logging.getLogger(__name__)
 
-class BackupCommandMixin:
+if TYPE_CHECKING:
+    from ..contracts import BackupCommandMixinHost
+
+    class _BackupCommandMixinContract(BackupCommandMixinHost):
+        pass
+else:
+    class _BackupCommandMixinContract:
+        pass
+
+
+class BackupCommandMixin(_BackupCommandMixinContract):
 
     async def cmd_backup(self, args: list[str], room: str, actor: str | None = None) -> None:
         """Handle !backup commands."""

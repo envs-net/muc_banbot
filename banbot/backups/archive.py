@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import pathlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.storage.backup import (
     BackupArchiveEntrySpec,
@@ -15,6 +14,7 @@ from envs_xmpp_core.storage.backup import (
     stage_backup_archive,
 )
 
+from ..managed_io import run_blocking_io
 from .common import (
     _BACKUP_CONFIG_ENTRY,
     _BACKUP_DATABASE_ENTRY,
@@ -25,7 +25,17 @@ from .common import (
 
 log = logging.getLogger(__name__)
 
-class BackupArchiveMixin:
+if TYPE_CHECKING:
+    from ..contracts import BackupArchiveMixinHost
+
+    class _BackupArchiveMixinContract(BackupArchiveMixinHost):
+        pass
+else:
+    class _BackupArchiveMixinContract:
+        pass
+
+
+class BackupArchiveMixin(_BackupArchiveMixinContract):
 
     @staticmethod
     def _write_backup_archive_sync(
@@ -99,7 +109,7 @@ class BackupArchiveMixin:
         verify_checksums: bool = True,
     ) -> dict[str, pathlib.Path | None]:
         """Extract a ZIP backup archive without blocking the event loop."""
-        return await asyncio.to_thread(
+        return await run_blocking_io(
             self._extract_backup_archive_sync,
             archive_path,
             target_dir,

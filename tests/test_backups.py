@@ -629,3 +629,121 @@ async def test_restore_rollback_uses_exact_state_after_safety_backup(
     finally:
         if bot.db:
             await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_backup_waits_for_archive_worker_and_removes_published_file(
+    backup_config,
+    monkeypatch,
+):
+    import threading
+
+    _db_path, _backup_dir = backup_config
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    started = threading.Event()
+    release = threading.Event()
+    original_writer = bot._write_backup_archive_sync
+
+    def blocked_writer(*args, **kwargs):
+        started.set()
+        assert release.wait(timeout=5)
+        return original_writer(*args, **kwargs)
+
+    monkeypatch.setattr(bot, "_write_backup_archive_sync", blocked_writer)
+    task = asyncio.create_task(bot.create_database_backup("cancelled"))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        assert bot._database_file_operation_lock.locked()
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert not bot._database_file_operation_lock.locked()
+        assert bot.last_database_backup_file is None
+        assert bot.list_database_backups() == []
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_backup_audit_flush_preserves_events_queued_while_flushing(backup_config):
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    recorded = []
+
+    bot._pending_database_backup_audit_events = [
+        ("first", "system", "backup", "first.zip", {"value": 1})
+    ]
+
+    async def blocking_audit(event_type, **kwargs):
+        recorded.append((event_type, kwargs))
+        entered.set()
+        await release.wait()
+
+    bot.audit_event = blocking_audit
+    flush_task = asyncio.create_task(bot.flush_pending_database_backup_audit_events())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        bot._queue_database_backup_audit_event(
+            "second",
+            actor="system",
+            target_type="backup",
+            target="second.zip",
+            details={"value": 2},
+        )
+        release.set()
+        await flush_task
+
+        assert [event[0] for event in recorded] == ["first"]
+        assert bot._pending_database_backup_audit_events == [
+            ("second", "system", "backup", "second.zip", {"value": 2})
+        ]
+    finally:
+        release.set()
+        if not flush_task.done():
+            await flush_task
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_restore_retains_safety_backup_even_when_keep_limit_is_one(
+    backup_config,
+    monkeypatch,
+):
+    backups_module = importlib.import_module("banbot.backups")
+    monkeypatch.setattr(backups_module.config, "DB_BACKUP_KEEP", 1, raising=False)
+
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, source_path = await bot.create_database_backup("source")
+        assert ok is True
+
+        ok, message = await bot.restore_database_backup("latest", actor="admin@example.org")
+        assert ok is True, message
+        assert bot.last_database_backup_file is not None
+        safety_path = pathlib.Path(bot.last_database_backup_file)
+
+        assert pathlib.Path(source_path).is_file()
+        assert safety_path.is_file()
+        assert "snapshot-before-restore" in safety_path.name
+        assert len(bot.list_database_backups()) == 2
+
+        ok, next_path = await bot.create_database_backup("after-restore")
+        assert ok is True
+        assert pathlib.Path(next_path).is_file()
+        assert [item.path for item in bot.list_database_backups()] == [pathlib.Path(next_path)]
+    finally:
+        await bot.db.close()

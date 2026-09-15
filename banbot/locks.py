@@ -48,11 +48,12 @@ def _fallback_lock(
     except TypeError:
         # Very defensive fallback for objects that cannot be weak-referenced.
         # This path is not used by BanBot, but keeps standalone mixin users safe.
-        lock = getattr(owner, attr_name, None)
-        if lock is None:
-            lock = asyncio.Lock()
-            setattr(owner, attr_name, lock)
-        return lock
+        fallback = getattr(owner, attr_name, None)
+        if isinstance(fallback, asyncio.Lock):
+            return fallback
+        fallback = asyncio.Lock()
+        setattr(owner, attr_name, fallback)
+        return fallback
 
 
 def get_database_file_lock(owner: Any) -> asyncio.Lock:

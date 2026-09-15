@@ -1,16 +1,16 @@
-import importlib
 import asyncio
 import csv
+import importlib
 import pathlib
 
 import pytest
 
 aiosqlite = pytest.importorskip("aiosqlite")
 
+from banbot.backups import BackupMixin
 from banbot.cache import CacheMixin
 from banbot.db import DatabaseMixin
 from banbot.import_export import ImportExportMixin
-from banbot.backups import BackupMixin
 
 
 class ImportBot(DatabaseMixin, CacheMixin, BackupMixin, ImportExportMixin):
@@ -365,3 +365,67 @@ async def test_export_list_paginates_and_remove_alias(tmp_path, monkeypatch):
     await bot.cmd_export(["remove", "latest"], "admin@conference.example.org")
     assert "Export deleted" in bot.sent[-1]["mbody"]
     assert not latest.exists()
+
+
+@pytest.mark.asyncio
+async def test_import_requires_initialized_database_before_creating_safety_backup(tmp_path):
+    csv_file = tmp_path / "valid-without-db.csv"
+    csv_file.write_text(
+        "jid,nick,until,issuer,comment\n"
+        "user@example.org,User,0,imported,reason\n",
+        encoding="utf-8",
+    )
+    bot = ImportBot()
+
+    successful, skipped, errors = await bot.import_bans_from_csv(str(csv_file))
+
+    assert (successful, skipped) == (0, 0)
+    assert errors == ["❌ Import aborted: BanBot database is not initialized"]
+    assert bot.last_database_backup_file is None
+
+
+@pytest.mark.asyncio
+async def test_import_post_commit_redaction_failure_keeps_successful_count(
+    temp_db_path,
+    tmp_path,
+    monkeypatch,
+):
+    backups_module = importlib.import_module("banbot.backups")
+    monkeypatch.setattr(
+        backups_module.config,
+        "DB_BACKUP_DIR",
+        str(tmp_path / "backups"),
+        raising=False,
+    )
+    csv_file = tmp_path / "redaction-failure.csv"
+    csv_file.write_text(
+        "jid,nick,until,issuer,comment\n"
+        "committed@example.org,Committed,0,imported,spam\n",
+        encoding="utf-8",
+    )
+    bot = ImportBot()
+    await bot.setup_db(create_startup_backup=False)
+
+    async def fail_redaction(jid, comment, actor=None):
+        raise RuntimeError("redaction unavailable")
+
+    monkeypatch.setattr(bot, "maybe_auto_redact_after_imported_ban", fail_redaction)
+    try:
+        successful, skipped, errors = await bot.import_bans_from_csv(
+            str(csv_file),
+            actor="admin@example.org",
+        )
+
+        assert (successful, skipped) == (1, 0)
+        assert len(errors) == 1
+        assert "Import committed" in errors[0]
+        assert "automatic redaction failed" in errors[0]
+        assert "committed@example.org" in bot.ban_cache
+        async with bot.db.execute(
+            "SELECT target, comment FROM bans WHERE target = ?",
+            ("committed@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == ("committed@example.org", "spam")
+    finally:
+        await bot.db.close()

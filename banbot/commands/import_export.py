@@ -1,12 +1,21 @@
 """Import command handling for managed ban CSV files."""
 
-import inspect
 import logging
+from typing import TYPE_CHECKING
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from ..contracts import CommandImportExportMixinHost
 
-class CommandImportMixin:
+    class _CommandImportExportMixinContract(CommandImportExportMixinHost):
+        pass
+else:
+    class _CommandImportExportMixinContract:
+        pass
+
+
+class CommandImportMixin(_CommandImportExportMixinContract):
     async def _handle_import_command(self, args: list[str], room: str, nick: str) -> None:
         """Import bans from a managed CSV file and announce a compact summary."""
         if len(args) < 1:
@@ -21,22 +30,10 @@ class CommandImportMixin:
         dry_run = len(args) >= 2 and args[1].lower() in {"dryrun", "dry-run", "check"}
         actor_jid = self._actor_jid_from_room_nick(room, nick)
         previous_backup = getattr(self, "last_database_backup_file", None)
-        import_kwargs = {"actor": actor_jid}
-        # Lightweight tests and older mixins may not support dry_run yet.
-        import_sig = inspect.signature(self.import_bans_from_csv)
-        supports_dry_run = (
-            "dry_run" in import_sig.parameters
-            or any(
-                parameter.kind == inspect.Parameter.VAR_KEYWORD
-                for parameter in import_sig.parameters.values()
-            )
-        )
-        if supports_dry_run:
-            import_kwargs["dry_run"] = dry_run
-
         successful, skipped, errors = await self.import_bans_from_csv(
             filename,
-            **import_kwargs,
+            actor=actor_jid,
+            dry_run=dry_run,
         )
         import_backup = getattr(self, "last_database_backup_file", None)
         if import_backup == previous_backup:

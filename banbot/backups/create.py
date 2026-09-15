@@ -10,16 +10,27 @@ import shutil
 import sqlite3
 import tempfile
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .._version import __version__
 from ..locks import database_file_lock
 from ..managed_files import prune_managed_files
+from ..managed_io import run_blocking_io, wait_for_completion_on_cancel
 from .common import _BACKUP_CONFIG_ENTRY, _BACKUP_DATABASE_ENTRY, _BACKUP_FORMAT, _BACKUP_OMEMO_ENTRY
 
 log = logging.getLogger(__name__)
 
-class BackupCreateMixin:
+if TYPE_CHECKING:
+    from ..contracts import BackupCreateMixinHost
+
+    class _BackupCreateMixinContract(BackupCreateMixinHost):
+        pass
+else:
+    class _BackupCreateMixinContract:
+        pass
+
+
+class BackupCreateMixin(_BackupCreateMixinContract):
 
     async def prune_database_backups(self, *, preserve: pathlib.Path | None = None) -> list[pathlib.Path]:
         """Delete old managed backups beyond DB_BACKUP_KEEP."""
@@ -70,6 +81,10 @@ class BackupCreateMixin:
         if not getattr(self, "db", None) or not hasattr(self, "audit_event"):
             return
 
+        # Drain first. A concurrent pre-startup backup can append a new event
+        # while audit_event() below yields; replacing the list only after the
+        # awaits would otherwise discard that newly queued event.
+        self._pending_database_backup_audit_events = []
         remaining: list[tuple[str, str | None, str | None, str | None, dict[str, Any]]] = []
         for event_type, actor, target_type, target, details in pending:
             try:
@@ -83,19 +98,24 @@ class BackupCreateMixin:
             except Exception as exc:
                 log.debug("Failed to flush pending backup audit event %s: %s", event_type, exc)
                 remaining.append((event_type, actor, target_type, target, details))
-        self._pending_database_backup_audit_events = remaining
+        if remaining:
+            self._pending_database_backup_audit_events = [
+                *remaining,
+                *self._pending_database_backup_audit_events,
+            ]
 
     async def _copy_database_to_backup(self, db_path: pathlib.Path, backup_path: pathlib.Path) -> None:
         """Create a consistent database snapshot using SQLite's online backup API when possible."""
-        if getattr(self, "db", None):
-            await self.db.commit()
+        db = self.db
+        if db is not None:
+            await wait_for_completion_on_cancel(db.commit())
             destination = sqlite3.connect(str(backup_path))
             try:
-                await self.db.backup(destination)
+                await wait_for_completion_on_cancel(db.backup(destination))
             finally:
                 destination.close()
         else:
-            await asyncio.to_thread(shutil.copy2, db_path, backup_path)
+            await run_blocking_io(shutil.copy2, db_path, backup_path)
 
     async def create_database_backup(
         self,
@@ -178,14 +198,22 @@ class BackupCreateMixin:
                     },
                 }
 
-                await asyncio.to_thread(
-                    self._write_backup_archive_sync,
-                    backup_path,
-                    database_path=database_copy,
-                    config_path=config_source,
-                    omemo_path=omemo_source,
-                    manifest=manifest,
-                )
+                try:
+                    await run_blocking_io(
+                        self._write_backup_archive_sync,
+                        backup_path,
+                        database_path=database_copy,
+                        config_path=config_source,
+                        omemo_path=omemo_source,
+                        manifest=manifest,
+                    )
+                except asyncio.CancelledError:
+                    # The worker is guaranteed to have finished before the
+                    # cancellation is re-raised. Remove a fully published
+                    # archive so a cancelled operation cannot leave an
+                    # unaudited/unpruned managed backup behind.
+                    await run_blocking_io(backup_path.unlink, missing_ok=True)
+                    raise
 
             self.last_database_backup_file = str(backup_path)
             if prune:

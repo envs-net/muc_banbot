@@ -9,8 +9,8 @@ from typing import Any
 
 import config
 
-from ..managed_files import format_file_size, list_managed_files, resolve_managed_file
-from .common import _BACKUP_CONFIG_ENTRY, _BACKUP_OMEMO_ENTRY, _BACKUP_SAFE_RE, DatabaseBackup
+from ..managed_files import ManagedFile, format_file_size, list_managed_files, resolve_managed_file
+from .common import _BACKUP_CONFIG_ENTRY, _BACKUP_OMEMO_ENTRY, _BACKUP_SAFE_RE
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ class BackupBaseMixin:
             companions.append("omemo.json")
         return companions
 
-    def _format_backup_entry(self, backup: DatabaseBackup, index: int | None = None) -> str:
+    def _format_backup_entry(self, backup: ManagedFile, index: int | None = None) -> str:
         prefix = f"{index}. " if index is not None else ""
         companions = self._backup_companion_names(backup.path)
         companion_suffix = f", {', '.join(companions)}" if companions else ""
@@ -121,7 +121,7 @@ class BackupBaseMixin:
     def _is_database_backup_file(self, path: pathlib.Path) -> bool:
         return path.is_file() and not path.name.endswith((".config.py", ".omemo.json"))
 
-    def list_database_backups(self) -> list[DatabaseBackup]:
+    def list_database_backups(self) -> list[ManagedFile]:
         """Return managed backup files sorted newest first."""
         return list_managed_files(
             self._database_backup_dir(),
@@ -130,7 +130,7 @@ class BackupBaseMixin:
             predicate=self._is_database_backup_file,
         )
 
-    def resolve_database_backup(self, name: str) -> DatabaseBackup | None:
+    def resolve_database_backup(self, name: str) -> ManagedFile | None:
         """Resolve a backup by basename, path inside backup dir, or 'latest'."""
         backups = self.list_database_backups()
         path = resolve_managed_file(
@@ -145,9 +145,9 @@ class BackupBaseMixin:
             stat = path.stat()
         except OSError:
             return None
-        return DatabaseBackup(path=path, size=stat.st_size, mtime=stat.st_mtime)
+        return ManagedFile(path=path, size=stat.st_size, mtime=stat.st_mtime)
 
-    def _format_backup_details(self, backup: DatabaseBackup) -> str:
+    def _format_backup_details(self, backup: ManagedFile) -> str:
         companions = self._backup_companion_names(backup.path)
         content_label = "Archive entries" if self._is_backup_archive(backup.path) else "Companions"
         lines = [

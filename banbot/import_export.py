@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import logging
 import os
 import pathlib
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     import config
@@ -15,6 +17,7 @@ except ModuleNotFoundError:
     config = None
 
 from .ban_target import BanTarget
+from .cache import BanTuple
 from .utils import (
     get_list_page_size,
     paginate_lines,
@@ -27,13 +30,24 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 
-from .locks import database_mutation_locks
+from .locks import ban_state_lock, database_file_lock, database_mutation_locks
 from .managed_files import ManagedFile, format_file_size, list_managed_files, prune_managed_files, resolve_managed_file
+from .managed_io import run_blocking_io
 
-ExportFile = ManagedFile
+type ImportBanRow = tuple[str, str, str | None, str | None, int, str | None, str | None]
 
 
-class ImportExportMixin:
+if TYPE_CHECKING:
+    from .contracts import ImportExportMixinHost
+
+    class _ImportExportMixinContract(ImportExportMixinHost):
+        pass
+else:
+    class _ImportExportMixinContract:
+        pass
+
+
+class ImportExportMixin(_ImportExportMixinContract):
     def _export_config_value(self, name: str, default: Any) -> Any:
         if config is None:
             return default
@@ -56,14 +70,14 @@ class ImportExportMixin:
     def _is_export_file(self, path: pathlib.Path) -> bool:
         return path.is_file() and path.name.startswith("bans_export_") and path.suffix == ".csv"
 
-    def list_export_files(self) -> list[ExportFile]:
+    def list_export_files(self) -> list[ManagedFile]:
         return list_managed_files(
             self._export_dir(),
             "bans_export_*.csv",
             predicate=self._is_export_file,
         )
 
-    def _format_export_entry(self, export_file: ExportFile, index: int | None = None) -> str:
+    def _format_export_entry(self, export_file: ManagedFile, index: int | None = None) -> str:
         prefix = f"{index}. " if index is not None else ""
         return f"{prefix}{export_file.name} ({self._format_export_size(export_file.size)}, {export_file.mtime_text})"
 
@@ -89,54 +103,104 @@ class ImportExportMixin:
             predicate=self._is_export_file,
         )
 
+    @staticmethod
+    def _write_export_csv_sync(filename: pathlib.Path, rows: list[BanTuple]) -> None:
+        """Write one CSV export completely before returning to the event loop."""
+        with filename.open("w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["jid", "nick", "until", "issuer", "comment"])
+            for jid, nick, until, issuer, comment in rows:
+                writer.writerow(
+                    [
+                        jid or "",
+                        nick or "",
+                        until if until is not None else "",
+                        issuer or "",
+                        comment or "",
+                    ]
+                )
+
     async def export_bans_to_csv(self) -> tuple[bool, str]:
-        """Export all bans to a managed CSV file."""
+        """Export a consistent ban snapshot to a managed CSV file."""
         try:
-            export_dir = self._export_dir()
-            export_dir.mkdir(parents=True, exist_ok=True)
+            async with database_file_lock(self):
+                export_dir = self._export_dir()
+                export_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.chmod(export_dir, 0o700)
+                except OSError as exc:
+                    log.debug(
+                        "Failed to restrict export directory permissions for %s: %s",
+                        export_dir,
+                        exc,
+                    )
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = export_dir / f"bans_export_{timestamp}.csv"
+                counter = 2
+                while filename.exists():
+                    filename = export_dir / f"bans_export_{timestamp}-{counter}.csv"
+                    counter += 1
+
+                async with ban_state_lock(self):
+                    if self.ban_cache:
+                        rows: list[BanTuple] = list(self.ban_cache.values())
+                        log.info("📤 Export using cache (%d bans)", len(rows))
+                    else:
+                        db = self.db
+                        if db is not None:
+                            async with db.execute(
+                                "SELECT jid, nick, until, issuer, comment FROM bans"
+                            ) as cursor:
+                                fetched = await cursor.fetchall()
+                            rows = [
+                                (jid, nick, int(until or 0), issuer, comment)
+                                for jid, nick, until, issuer, comment in fetched
+                            ]
+                            log.info("📤 Export using database query (%d bans)", len(rows))
+                        else:
+                            rows = []
+                            log.info(
+                                "📤 Export skipped: no cache entries and no database connection"
+                            )
+
+                if not rows:
+                    return False, "❌ No bans to export."
+
+                try:
+                    await run_blocking_io(self._write_export_csv_sync, filename, rows)
+                except asyncio.CancelledError:
+                    await run_blocking_io(filename.unlink, missing_ok=True)
+                    raise
+                try:
+                    os.chmod(filename, 0o600)
+                except OSError as exc:
+                    log.debug(
+                        "Failed to restrict export file permissions for %s: %s",
+                        filename,
+                        exc,
+                    )
+                await self.prune_export_files(preserve=filename)
+                log.info("✅ Exported %d bans to %s", len(rows), filename)
+                return True, f"✅ Exported {len(rows)} bans to {filename}"
+        except OSError as exc:
+            log.error("File I/O error during export: %s", exc)
+            return False, f"❌ Failed to write file: {exc}"
+        except Exception as exc:
+            log.error("Export error: %s", exc)
+            return False, f"❌ Export failed: {exc}"
+
+    async def delete_export_file(self, name: str) -> tuple[bool, str]:
+        """Delete one managed export while serialized with other file operations."""
+        async with database_file_lock(self):
+            path = self.resolve_export_file(name)
+            if path is None:
+                return False, f"❌ Export not found: {name}"
             try:
-                os.chmod(export_dir, 0o700)
+                await run_blocking_io(path.unlink)
             except OSError as exc:
-                log.debug("Failed to restrict export directory permissions for %s: %s", export_dir, exc)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = export_dir / f"bans_export_{timestamp}.csv"
-            counter = 2
-            while filename.exists():
-                filename = export_dir / f"bans_export_{timestamp}-{counter}.csv"
-                counter += 1
-
-            if self.ban_cache:
-                rows = [(v[0], v[1], v[2], v[3], v[4]) for v in self.ban_cache.values()]
-                log.info("📤 Export using cache (%d bans)", len(rows))
-            elif getattr(self, "db", None) is not None:
-                async with self.db.execute("SELECT jid, nick, until, issuer, comment FROM bans") as cursor:
-                    rows = await cursor.fetchall()
-                log.info("📤 Export using database query (%d bans)", len(rows))
-            else:
-                rows = []
-                log.info("📤 Export skipped: no cache entries and no database connection")
-
-            if not rows:
-                return False, "❌ No bans to export."
-
-            with open(filename, "w", newline="", encoding="utf-8") as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(["jid", "nick", "until", "issuer", "comment"])
-                for jid, nick, until, issuer, comment in rows:
-                    writer.writerow([jid or "", nick or "", until if until is not None else "", issuer or "", comment or ""])
-            try:
-                os.chmod(filename, 0o600)
-            except OSError as exc:
-                log.debug("Failed to restrict export file permissions for %s: %s", filename, exc)
-            await self.prune_export_files(preserve=filename)
-            log.info("✅ Exported %d bans to %s", len(rows), filename)
-            return True, f"✅ Exported {len(rows)} bans to {filename}"
-        except OSError as e:
-            log.error("File I/O error during export: %s", e)
-            return False, f"❌ Failed to write file: {e}"
-        except Exception as e:
-            log.error("Export error: %s", e)
-            return False, f"❌ Export failed: {e}"
+                return False, f"❌ Failed to delete export: {exc}"
+            return True, path.name
 
     async def cmd_export(self, args: list[str], room: str) -> None:
         """Handle !export commands."""
@@ -226,16 +290,9 @@ class ImportExportMixin:
             if len(args) < 2:
                 await self.bot_send_message(mto=room, mbody=f"❌ Usage: {self.command_prefix}export delete <filename|latest>", mtype="groupchat")
                 return
-            path = self.resolve_export_file(args[1])
-            if path is None:
-                await self.bot_send_message(mto=room, mbody=f"❌ Export not found: {args[1]}", mtype="groupchat")
-                return
-            try:
-                path.unlink()
-            except OSError as exc:
-                await self.bot_send_message(mto=room, mbody=f"❌ Failed to delete export: {exc}", mtype="groupchat")
-                return
-            await self.bot_send_message(mto=room, mbody=f"✅ Export deleted: {path.name}", mtype="groupchat")
+            ok, result = await self.delete_export_file(args[1])
+            body = f"✅ Export deleted: {result}" if ok else result
+            await self.bot_send_message(mto=room, mbody=body, mtype="groupchat")
             return
         await self.bot_send_message(
             mto=room,
@@ -249,23 +306,31 @@ class ImportExportMixin:
             mtype="groupchat",
         )
 
-    async def _stage_ban_import_rows(self, filename: str) -> tuple[list[tuple], int, list[str]]:
+    @staticmethod
+    def _read_import_csv_sync(
+        path: pathlib.Path,
+    ) -> tuple[Sequence[str] | None, list[dict[str, str | None]]]:
+        with path.open(encoding="utf-8") as csvfile:
+            reader = csv.DictReader(csvfile)
+            return reader.fieldnames, list(reader)
+
+    async def _stage_ban_import_rows(
+        self, filename: str
+    ) -> tuple[list[ImportBanRow], int, list[str]]:
         """Read and validate CSV import rows. Returns staged rows, skipped count and errors."""
         skipped = 0
         errors: list[str] = []
-        staged_rows: dict[str, tuple] = {}
+        staged_rows: dict[str, ImportBanRow] = {}
         path = pathlib.Path(filename)
         if not path.exists():
             return [], 0, [f"❌ File not found: {filename}"]
         try:
-            with open(path, encoding="utf-8") as csvfile:
-                reader = csv.DictReader(csvfile)
-                if not reader.fieldnames or set(reader.fieldnames) != {"jid", "nick", "until", "issuer", "comment"}:
-                    return [], 0, ["❌ Invalid CSV header. Expected: jid,nick,until,issuer,comment"]
-                rows = list(reader)
-        except OSError as e:
-            log.error("Import file error: %s", e)
-            return [], 0, [f"❌ File I/O error: {e}"]
+            fieldnames, rows = await run_blocking_io(self._read_import_csv_sync, path)
+            if not fieldnames or set(fieldnames) != {"jid", "nick", "until", "issuer", "comment"}:
+                return [], 0, ["❌ Invalid CSV header. Expected: jid,nick,until,issuer,comment"]
+        except OSError as exc:
+            log.error("Import file error: %s", exc)
+            return [], 0, [f"❌ File I/O error: {exc}"]
 
         for row_num, row in enumerate(rows, start=2):
             try:
@@ -337,7 +402,7 @@ class ImportExportMixin:
                         skipped += 1
                         continue
 
-                candidate = (target_type, target, normalized_jid, normalized_nick, until, issuer, comment)
+                candidate: ImportBanRow = (target_type, target, normalized_jid, normalized_nick, until, issuer, comment)
                 previous = staged_rows.get(lookup_key)
                 if previous:
                     previous_until = int(previous[4] or 0)
@@ -416,18 +481,26 @@ class ImportExportMixin:
         if not bans_to_insert:
             log.info("Import complete: 0 successful, %d skipped", skipped)
             return 0, skipped, errors
-        create_backup = getattr(self, "create_database_backup", None)
-        if not callable(create_backup):
-            await self.load_bans_from_db()
-            errors.append("❌ Import aborted: managed full backups are unavailable.")
+        try:
+            db = self._require_db()
+        except RuntimeError as exc:
+            errors.append(f"❌ Import aborted: {exc}")
             return 0, skipped, errors
-        backup_ok, backup_message = await create_backup("before-import", actor=actor or "import", lock=False)
+
+        backup_ok, backup_message = await self.create_database_backup(
+            "before-import",
+            actor=actor or "import",
+            lock=False,
+        )
         if not backup_ok:
             await self.load_bans_from_db()
-            errors.append(f"❌ Import aborted: failed to create full backup before import: {backup_message}")
+            errors.append(
+                f"❌ Import aborted: failed to create full backup before import: {backup_message}"
+            )
             return 0, skipped, errors
+
         try:
-            await self.db.executemany(
+            await db.executemany(
                 """
                 INSERT INTO bans (target_type, target, jid, nick, until, issuer, comment, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))
@@ -441,29 +514,65 @@ class ImportExportMixin:
                 """,
                 bans_to_insert,
             )
-            await self.db.commit()
-            for target_type, _target, normalized_jid, normalized_nick, until, issuer, comment in bans_to_insert:
-                self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
-                if (
-                    target_type == "jid"
-                    and normalized_jid
-                    and int(until or 0) <= 0
-                    and hasattr(self, "maybe_auto_redact_after_imported_ban")
-                ):
-                    await self.maybe_auto_redact_after_imported_ban(
-                        normalized_jid,
-                        comment,
-                        actor=actor or issuer or "import",
-                    )
-            log.info("✅ Batch upserted %d bans", len(bans_to_insert))
-        except Exception as e:
-            log.error("Batch insert failed, rolling back import transaction: %s", e)
+            await db.commit()
+        except Exception as exc:
+            log.error("Batch insert failed, rolling back import transaction: %s", exc)
             try:
-                await self.db.rollback()
+                await db.rollback()
             except Exception as rollback_error:
                 log.error("Rollback after failed import also failed: %s", rollback_error)
             await self.load_bans_from_db()
-            errors.append(f"❌ Database batch insert failed: {e}")
+            errors.append(f"❌ Database batch insert failed: {exc}")
             return 0, skipped, errors
+
+        # The commit above is the point of no return. Cache refresh and optional
+        # redaction are post-commit side effects; failures there must never make
+        # the command claim that zero bans were imported or attempt a fake
+        # rollback of already-persisted rows.
+        try:
+            for (
+                _target_type,
+                _target,
+                normalized_jid,
+                normalized_nick,
+                until,
+                issuer,
+                comment,
+            ) in bans_to_insert:
+                self._cache_ban(normalized_jid, normalized_nick, until, issuer, comment)
+        except Exception as exc:
+            log.error("Import committed but cache update failed; reloading cache: %s", exc)
+            await self.load_bans_from_db()
+            errors.append(f"⚠️ Import committed, but cache refresh needed recovery: {exc}")
+
+        for (
+            target_type,
+            _target,
+            normalized_jid,
+            _normalized_nick,
+            until,
+            issuer,
+            comment,
+        ) in bans_to_insert:
+            if target_type != "jid" or not normalized_jid or int(until or 0) > 0:
+                continue
+            try:
+                await self.maybe_auto_redact_after_imported_ban(
+                    normalized_jid,
+                    comment,
+                    actor=actor or issuer or "import",
+                )
+            except Exception as exc:
+                log.error(
+                    "Imported %s but automatic redaction failed: %s",
+                    normalized_jid,
+                    exc,
+                )
+                errors.append(
+                    "⚠️ Import committed, but automatic redaction failed for "
+                    f"{normalized_jid}: {exc}"
+                )
+
+        log.info("✅ Batch upserted %d bans", len(bans_to_insert))
         log.info("Import complete: %d successful, %d skipped", successful, skipped)
         return successful, skipped, errors

@@ -2,20 +2,32 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import pathlib
 import tempfile
+from typing import TYPE_CHECKING
 
 from envs_xmpp_core.storage.backup import verify_backup_archive
 from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
 
+from ..locks import database_file_lock
+from ..managed_io import run_blocking_io
 from .common import _BACKUP_DATABASE_ENTRY, _BACKUP_FORMAT, _BACKUP_MANIFEST_ENTRY
 
 log = logging.getLogger(__name__)
 
-class BackupVerifyMixin:
+if TYPE_CHECKING:
+    from ..contracts import BackupVerifyMixinHost
+
+    class _BackupVerifyMixinContract(BackupVerifyMixinHost):
+        pass
+else:
+    class _BackupVerifyMixinContract:
+        pass
+
+
+class BackupVerifyMixin(_BackupVerifyMixinContract):
 
     @staticmethod
     def _check_sqlite_integrity_sync(path: pathlib.Path) -> tuple[bool, str]:
@@ -26,12 +38,21 @@ class BackupVerifyMixin:
     async def _check_sqlite_integrity(self, path: pathlib.Path) -> tuple[bool, str]:
         """Run SQLite integrity_check without blocking the event loop."""
         try:
-            return await asyncio.to_thread(self._check_sqlite_integrity_sync, path)
+            return await run_blocking_io(self._check_sqlite_integrity_sync, path)
         except Exception as exc:
             return False, str(exc)
 
-    async def verify_database_backup(self, name: str) -> tuple[bool, str]:
+    async def verify_database_backup(
+        self,
+        name: str,
+        *,
+        lock: bool = True,
+    ) -> tuple[bool, str]:
         """Verify a managed backup archive or legacy database snapshot."""
+        if lock:
+            async with database_file_lock(self):
+                return await self.verify_database_backup(name, lock=False)
+
         backup = self.resolve_database_backup(name)
         if backup is None:
             return False, f"Backup not found: {name}"
@@ -63,7 +84,7 @@ class BackupVerifyMixin:
                 config_source = sources.get("config")
                 if config_source is not None:
                     try:
-                        text = await asyncio.to_thread(config_source.read_text, encoding="utf-8")
+                        text = await run_blocking_io(config_source.read_text, encoding="utf-8")
                         compile(text, str(config_source), "exec")
                         lines.append("✅ config.py companion: readable and valid Python")
                     except Exception as exc:
@@ -75,7 +96,7 @@ class BackupVerifyMixin:
                 omemo_source = sources.get("omemo")
                 if omemo_source is not None:
                     try:
-                        text = await asyncio.to_thread(omemo_source.read_text, encoding="utf-8")
+                        text = await run_blocking_io(omemo_source.read_text, encoding="utf-8")
                         if text.strip():
                             json.loads(text)
                         lines.append("✅ OMEMO companion: readable JSON")
@@ -85,7 +106,7 @@ class BackupVerifyMixin:
                 else:
                     lines.append("ℹ️ OMEMO companion: not present")
 
-                archive_verification = await asyncio.to_thread(
+                archive_verification = await run_blocking_io(
                     verify_backup_archive,
                     backup.path,
                     manifest_name=_BACKUP_MANIFEST_ENTRY,
@@ -113,7 +134,7 @@ class BackupVerifyMixin:
         config_backup = self._config_backup_path_for(backup.path)
         if config_backup.is_file():
             try:
-                text = await asyncio.to_thread(config_backup.read_text, encoding="utf-8")
+                text = await run_blocking_io(config_backup.read_text, encoding="utf-8")
                 compile(text, str(config_backup), "exec")
                 lines.append("✅ config.py companion: readable and valid Python")
             except Exception as exc:
@@ -125,7 +146,7 @@ class BackupVerifyMixin:
         omemo_backup = self._omemo_backup_path_for(backup.path)
         if omemo_backup.is_file():
             try:
-                text = await asyncio.to_thread(omemo_backup.read_text, encoding="utf-8")
+                text = await run_blocking_io(omemo_backup.read_text, encoding="utf-8")
                 if text.strip():
                     json.loads(text)
                 lines.append("✅ OMEMO companion: readable JSON")
