@@ -756,6 +756,34 @@ async def test_sync_admins_retries_bounded_iq_timeout_without_raw_stanza_log(
 
 
 @pytest.mark.asyncio
+async def test_sync_admins_skips_invalid_affiliation_jids(
+    temp_db_path,
+    sync_module,
+    caplog,
+):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    bot.plugin["xep_0045"] = FakeMucService(
+        {
+            (TEST_ADMIN_ROOM, "owner"): ["", TEST_OWNER_JID],
+            (TEST_ADMIN_ROOM, "admin"): [TEST_ADMIN_JID],
+        }
+    )
+    try:
+        with caplog.at_level("WARNING", logger="banbot.sync"):
+            async with admin_room_override(sync_module):
+                synced = await bot.sync_admins(announce=False)
+
+        assert synced is True
+        assert bot.last_admin_sync_ok is True
+        assert None not in bot.occupants[TEST_ADMIN_ROOM]
+        assert bot.occupants[TEST_ADMIN_ROOM][TEST_OWNER_JID]["affiliation"] == "owner"
+        assert bot.occupants[TEST_ADMIN_ROOM][TEST_ADMIN_JID]["affiliation"] == "admin"
+        assert "Skipping admin affiliation entry without a valid JID" in caplog.text
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_sync_admins_does_not_retry_permanent_iq_error(
     temp_db_path,
     monkeypatch,

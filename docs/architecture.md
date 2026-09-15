@@ -416,12 +416,15 @@ intent, preserving command compatibility while avoiding duplicate identities.
 
 The configured mypy gate intentionally expands incrementally around these
 well-defined contracts. The canonical target, utility, cache, ban-query,
-database and moderation surfaces are now part of the mandatory typed production
-gate. `banbot.contracts` describes cross-mixin dependencies with static
-Protocols; the type-only contract bases are deliberately absent from the
-runtime MRO. Database users obtain an initialized connection through
-`DatabaseMixin._require_db()` instead of pretending the startup-time optional
-connection is always present. The remaining large mixin graph is migrated
+database, moderation command, moderation core and room/ban synchronization
+surfaces are now part of the
+mandatory typed production gate. `banbot.contracts` describes cross-mixin
+dependencies with static Protocols; the type-only contract bases are
+deliberately absent from the runtime MRO. Database users obtain an initialized
+connection through `DatabaseMixin._require_db()` instead of pretending the
+startup-time optional connection is always present. Synchronization also treats
+server affiliation entries as untrusted input and ignores entries that do not
+normalize to a usable JID. The remaining large mixin graph is migrated
 progressively rather than hidden behind broad ignores.
 
 ### Deployment and health ownership

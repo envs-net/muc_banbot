@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from typing import TYPE_CHECKING, Any
 
 from config import ADMIN_ROOM, NICK
 
@@ -24,11 +25,26 @@ from .ban_target import BanTarget
 from .locks import ban_state_lock
 from .utils import looks_like_domain
 
+if TYPE_CHECKING:
+    from .contracts import SyncMixinHost
 
-class SyncMixin:
+    class _SyncMixinContract(SyncMixinHost):
+        pass
+else:
+    class _SyncMixinContract:
+        pass
+
+
+class SyncMixin(_SyncMixinContract):
+    last_admin_sync_at: float | None
+    last_admin_sync_ok: bool | None
+    last_admin_sync_error: str | None
+
     def _sync_canonical_outcast_target(self, value: str) -> str:
         """Return BanBot's canonical target for one MUC outcast entry."""
         bare = self.bare_jid(value)
+        if not bare:
+            raise ValueError("MUC outcast target must not be empty")
         if looks_like_domain(bare):
             return BanTarget.from_identifier(bare, plain_domain=True).identifier
         return BanTarget.from_identifier(bare).identifier
@@ -96,8 +112,9 @@ class SyncMixin:
 
         # Fetch active bans once per full sync run instead of once per room.
         # This avoids repeating identical database reads for every room in the batch.
-        active_bans = []
-        async with self.db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
+        active_bans: list[tuple[str | None, str | None, str | None]] = []
+        db = self._require_db()
+        async with db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
             db_bans = await cursor.fetchall()
         for target_type, target, until, comment in db_bans:
             if until > 0 and until <= now:  # skip expired temporary bans
@@ -265,8 +282,9 @@ class SyncMixin:
 
         canonical = self._sync_canonical_outcast_target(jid_bare)
         parsed = BanTarget.from_identifier(canonical)
+        db = self._require_db()
         if parsed.kind == "domain":
-            async with self.db.execute(
+            async with db.execute(
                 """
                 SELECT until FROM bans
                 WHERE target_type = 'domain'
@@ -280,7 +298,7 @@ class SyncMixin:
                 row = await cursor.fetchone()
         else:
             target = self.bare_jid(canonical)
-            async with self.db.execute(
+            async with db.execute(
                 """
                 SELECT until FROM bans
                 WHERE target_type = 'jid'
@@ -296,7 +314,7 @@ class SyncMixin:
         return row is not None
 
 
-    def _sync_extract_outcast_entry(self, item) -> tuple[str | None, str | None]:
+    def _sync_extract_outcast_entry(self, item: Any) -> tuple[str | None, str | None]:
         """Return (bare_jid, reason) from a MUC outcast list item."""
         jid_value = None
         reason_value = None
@@ -348,7 +366,7 @@ class SyncMixin:
         return self.bare_jid(jid_text), reason_text or None
 
 
-    def _sync_iter_affiliation_items(self, result):
+    def _sync_iter_affiliation_items(self, result: Any) -> list[Any]:
         """Yield MUC admin item objects from common slixmpp result shapes."""
         if result is None:
             return []
@@ -422,7 +440,8 @@ class SyncMixin:
         target_type = parsed.kind
         target = parsed.value
 
-        async with self.db.execute(
+        db = self._require_db()
+        async with db.execute(
             """
             SELECT comment FROM bans
             WHERE target_type = ?
@@ -500,7 +519,8 @@ class SyncMixin:
             issuer_tag = "sync_room_add"
 
             # --- Load all bans from DB ---
-            async with self.db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
+            db = self._require_db()
+            async with db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
                 db_bans = await cursor.fetchall()
 
             # --- Remove expired temporary bans from consideration ---
@@ -613,11 +633,11 @@ class SyncMixin:
     async def _sync_fetch_admin_affiliations(
         self,
         room: str,
-    ) -> tuple[list, list] | None:
+    ) -> tuple[list[Any], list[Any]] | None:
         """Fetch owner/admin lists through the shared bounded IQ helper."""
         muc_plugin = self.plugin["xep_0045"]
         options = _SYNC_AFFILIATION_QUERY_OPTIONS
-        results = []
+        results: list[list[Any]] = []
         for affiliation in ("owner", "admin"):
             result = await query_muc_affiliation(
                 muc_plugin,
@@ -670,11 +690,14 @@ class SyncMixin:
         self.last_admin_sync_ok = True
         self.last_admin_sync_error = None
         self.occupants[room] = self.occupants.get(room, {})
-        admin_list = []
-        admin_log_list = []
+        admin_list: list[str] = []
+        admin_log_list: list[str] = []
 
         for jid in owners + admins:
             bare = self.bare_jid(str(jid))
+            if not bare:
+                log.warning("Skipping admin affiliation entry without a valid JID: %r", jid)
+                continue
             nick = None
 
             for n, info in self.occupants.get(room, {}).items():
@@ -733,7 +756,8 @@ class SyncMixin:
         applied_bans_set: set[tuple[str | None, str | None]] = set()
 
         # --- Load all bans from DB ---
-        async with self.db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
+        db = self._require_db()
+        async with db.execute("SELECT target_type, target, until, comment FROM bans") as cursor:
             db_bans = await cursor.fetchall()
 
         # --- Filter active bans ---

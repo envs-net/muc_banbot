@@ -1,12 +1,22 @@
 """Moderation and ban query admin command dispatch."""
 
 import time
+from typing import TYPE_CHECKING
 
 from ..locks import ban_state_lock
 from ..utils import parse_duration, validate_jid_format, wants_all_pages, without_all_pages_arg
 
+if TYPE_CHECKING:
+    from ..contracts import CommandModerationMixinHost
 
-class CommandModerationMixin:
+    class _CommandModerationMixinContract(CommandModerationMixinHost):
+        pass
+else:
+    class _CommandModerationMixinContract:
+        pass
+
+
+class CommandModerationMixin(_CommandModerationMixinContract):
     async def _dispatch_ban_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
         if len(args) < 1:
             await self.bot_send_message(
@@ -132,7 +142,7 @@ class CommandModerationMixin:
                 await self.bot_send_message(mto=room, mbody="❌ Only a nick ban can be converted to a JID ban.", mtype="groupchat")
                 return
             new_jid = self.bare_jid(args[2].strip().lower())
-            if not validate_jid_format(new_jid):
+            if not new_jid or not validate_jid_format(new_jid):
                 await self.bot_send_message(mto=room, mbody=f"❌ Invalid JID format: {args[2]}", mtype="groupchat")
                 return
             protected, reason = await self.is_protected_admin_target(new_jid, nick=row[4], jid=new_jid)
@@ -142,17 +152,18 @@ class CommandModerationMixin:
             if self.is_ignored_target(new_jid):
                 await self.bot_send_message(mto=room, mbody=f"⛔ Refusing conversion: {new_jid} is on the ignorelist.", mtype="groupchat")
                 return
-            async with self.db.execute("SELECT 1 FROM bans WHERE target_type = 'jid' AND target = ?", (new_jid,)) as cursor:
+            db = self._require_db()
+            async with db.execute("SELECT 1 FROM bans WHERE target_type = 'jid' AND target = ?", (new_jid,)) as cursor:
                 if await cursor.fetchone():
                     await self.bot_send_message(mto=room, mbody=f"❌ A JID ban already exists for {new_jid}", mtype="groupchat")
                     return
             old_target = row[2]
             async with ban_state_lock(self):
-                await self.db.execute(
+                await db.execute(
                     "UPDATE bans SET target_type = 'jid', target = ?, jid = ?, updated_at = strftime('%s','now') WHERE id = ?",
                     (new_jid, new_jid, row[0]),
                 )
-                await self.db.commit()
+                await db.commit()
                 self._remove_ban_from_cache(old_target, ban_nick=row[4])
                 self._cache_ban(new_jid, row[4], until, row[6], comment)
                 for protected_room in self.protected_rooms:
