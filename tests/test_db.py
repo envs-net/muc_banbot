@@ -250,3 +250,75 @@ async def test_setup_db_closes_previous_connection_before_reconnect(temp_db_path
             await first_db.execute("SELECT 1")
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_db_merges_zero_width_jid_duplicate_into_canonical_row(temp_db_path):
+    db = await aiosqlite.connect(temp_db_path)
+    try:
+        await create_legacy_bans_table(db)
+        await insert_legacy_ban(
+            db,
+            target="bulk_be49a07335@\u200bjabber.vg",
+            jid="bulk_be49a07335@\u200bjabber.vg",
+            nick=None,
+            until=0,
+            issuer="jjj333@pain.agency",
+            comment="spam",
+        )
+        await insert_legacy_ban(
+            db,
+            target="bulk_be49a07335@jabber.vg",
+            jid="bulk_be49a07335@jabber.vg",
+            nick=None,
+            until=0,
+            issuer="syncbans",
+            comment="Recovered from room",
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    bot = DbBot()
+    await bot.setup_db()
+    try:
+        async with bot.db.execute(
+            "SELECT target_type, target, jid, issuer, comment FROM bans"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        assert rows == [
+            (
+                "jid",
+                "bulk_be49a07335@jabber.vg",
+                "bulk_be49a07335@jabber.vg",
+                "jjj333@pain.agency",
+                "spam",
+            )
+        ]
+
+        await bot.load_bans_from_db()
+        assert set(bot.ban_index_by_jid) == {"bulk_be49a07335@jabber.vg"}
+        assert set(bot.ban_cache) == {"bulk_be49a07335@jabber.vg"}
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_upsert_zero_width_jid_uses_canonical_storage_key(temp_db_path):
+    bot = DbBot()
+    await bot.setup_db()
+    try:
+        await bot.upsert_ban_db(
+            jid="bulk_be49a07335@\u200bjabber.vg",
+            nick=None,
+            until=0,
+            issuer="tester",
+            comment="spam",
+        )
+        async with bot.db.execute("SELECT target, jid FROM bans") as cursor:
+            rows = await cursor.fetchall()
+
+        assert rows == [("bulk_be49a07335@jabber.vg", "bulk_be49a07335@jabber.vg")]
+    finally:
+        await bot.db.close()

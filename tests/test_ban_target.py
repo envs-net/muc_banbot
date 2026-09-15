@@ -38,3 +38,27 @@ def test_ban_target_from_storage_preserves_domain_metadata():
     assert (target.kind, target.value, target.identifier, target.nick) == (
         "domain", "example.org", "*.example.org", "reporter"
     )
+
+
+def test_ban_target_strips_accidental_zero_width_jid_characters():
+    observed = BanTarget.from_parts("bulk_be49a07335@\u200bjabber.vg")
+    canonical = BanTarget.from_parts("bulk_be49a07335@jabber.vg")
+    assert observed == canonical
+    assert observed.value == "bulk_be49a07335@jabber.vg"
+
+    bom = BanTarget.from_identifier("User@\ufeffExample.Org/Phone")
+    assert bom.value == "user@example.org"
+
+
+def test_ban_target_strips_zero_width_characters_from_domain_bans_only():
+    domain = BanTarget.from_identifier("*.\u200bExample.Org")
+    assert (domain.kind, domain.value, domain.identifier) == (
+        "domain",
+        "example.org",
+        "*.example.org",
+    )
+
+    # Nick identities remain byte-for-byte meaningful apart from their
+    # historical whitespace/case normalization.
+    nick = BanTarget.from_identifier("Nick\u200bName")
+    assert (nick.kind, nick.value) == ("nick", "nick\u200bname")

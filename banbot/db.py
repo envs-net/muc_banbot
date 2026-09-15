@@ -570,7 +570,11 @@ class DatabaseMixin(_DatabaseMixinContract):
             ],
         )
         await db.commit()
-        log.info("Normalized %d existing ban row(s)", len(rows))
+        log.info(
+            "Normalized %d existing ban row(s) into %d canonical row(s)",
+            len(rows),
+            len(normalized_rows),
+        )
 
 
     async def delete_ban_db(self, identifier: str) -> int:
