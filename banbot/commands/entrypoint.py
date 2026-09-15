@@ -1,13 +1,24 @@
 """XMPP groupchat command entry point."""
 
+from typing import TYPE_CHECKING
+
 from .context import bot_nick
 
+if TYPE_CHECKING:
+    from ..contracts import CommandEntryPointMixinHost
 
-class CommandEntryPointMixin:
+    class _CommandEntryPointMixinContract(CommandEntryPointMixinHost):
+        pass
+else:
+    class _CommandEntryPointMixinContract:
+        pass
+
+
+class CommandEntryPointMixin(_CommandEntryPointMixinContract):
     def _actor_jid_from_room_nick(self, room: str, nick: str) -> str:
         """Resolve a room occupant nick to the best actor JID for logs/audit."""
         jid = self.occupants.get(room, {}).get(nick, {}).get("jid")
-        return jid or nick
+        return str(jid) if jid else nick
 
     def user_cmds_allowed(self, room: str) -> bool:
         """Check if user commands are allowed in protected rooms."""
@@ -20,7 +31,10 @@ class CommandEntryPointMixin:
         - Parses commands
         - Delegates to user/admin handlers
         """
-        if msg["mucnick"].lower() == bot_nick().lower():
+        nick = str(msg["mucnick"] or "").strip()
+        if not nick:
+            return
+        if nick.casefold() == bot_nick().casefold():
             return  # Ignore own messages
 
         encrypted = False
@@ -29,9 +43,10 @@ class CommandEntryPointMixin:
             if msg is None:
                 return
 
-        room = msg["from"].bare
-        nick = msg["mucnick"]
-        body = msg["body"].strip()
+        room = str(getattr(msg["from"], "bare", "") or "").strip()
+        if not room:
+            return
+        body = str(msg["body"] or "").strip()
 
         if hasattr(self, "_redaction_index_message"):
             await self._redaction_index_message(msg)

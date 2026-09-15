@@ -95,6 +95,36 @@ async def test_on_message_stops_when_omemo_decrypt_fails(fake_msg_factory, monke
     assert not bot.sent
 
 
+@pytest.mark.asyncio
+async def test_on_message_ignores_incomplete_groupchat_identity(fake_msg_factory, monkeypatch):
+    commands = importlib.import_module("banbot.commands")
+
+    monkeypatch.setattr(commands, "NICK", "adminbot")
+    bot = CommandBot()
+    msg = fake_msg_factory(body="!ping")
+    msg["mucnick"] = None
+
+    await bot.on_message(msg)
+
+    assert not bot.user_handled
+    assert not bot.sent
+
+
+@pytest.mark.asyncio
+async def test_on_message_treats_missing_body_as_empty(fake_msg_factory, monkeypatch):
+    commands = importlib.import_module("banbot.commands")
+
+    monkeypatch.setattr(commands, "NICK", "adminbot")
+    bot = CommandBot()
+    msg = fake_msg_factory(body="!ping")
+    msg["body"] = None
+
+    await bot.on_message(msg)
+
+    assert not bot.user_handled
+    assert not bot.sent
+
+
 def test_public_command_rate_limit(monkeypatch):
     commands = importlib.import_module("banbot.commands")
 

@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from ..utils import wants_all_pages, without_all_pages_arg
 from .constants import ADMIN_COMMANDS, PUBLIC_COMMANDS
@@ -10,8 +11,19 @@ from .registry import ADMIN_COMMAND_HANDLERS
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from ..contracts import CommandRouterMixinHost
 
-class CommandRouterMixin:
+    class _CommandRouterMixinContract(CommandRouterMixinHost):
+        pass
+else:
+    class _CommandRouterMixinContract:
+        pass
+
+
+class CommandRouterMixin(_CommandRouterMixinContract):
+    public_command_rate_limit_hits: dict[tuple[str, str, str], list[float]]
+
     async def _handle_unknown_command(self, msg, room: str, cmd: str) -> None:
         """
         Inform admins about unknown commands and point to help.

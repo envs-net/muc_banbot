@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from envs_xmpp_core.xmpp import AffiliationQueryOptions, query_muc_affiliation
 from envs_xmpp_core.xmpp.occupants import (
@@ -24,8 +25,17 @@ _ADMIN_AFFILIATION_QUERY_OPTIONS = AffiliationQueryOptions(
     retry_delay_seconds=1.0,
 )
 
+if TYPE_CHECKING:
+    from .contracts import AdminMixinHost
 
-class AdminMixin(BotOccupantMixin):
+    class _AdminMixinContract(AdminMixinHost):
+        pass
+else:
+    class _AdminMixinContract:
+        pass
+
+
+class AdminMixin(BotOccupantMixin, _AdminMixinContract):
     def is_admin_or_owner(self, room: str, nick: str | None = None, jid: str | None = None) -> bool:
         """Check if a user is admin or owner in a room using the live occupant cache."""
         occupants = self.occupants.get(room, {})
@@ -51,12 +61,14 @@ class AdminMixin(BotOccupantMixin):
 
     def is_authorized(self, msg) -> bool:
         """Check if a message sender is authorized to issue admin commands."""
-        if msg["from"].bare != ADMIN_ROOM:
+        room = str(getattr(msg["from"], "bare", "") or "").strip()
+        nick = str(msg["mucnick"] or "").strip()
+        if not room or not nick or room.casefold() != ADMIN_ROOM.casefold():
             return False
         occupant = find_occupant_by_nick(
-            self.occupants.get(ADMIN_ROOM, {}),
-            msg["mucnick"],
-            room=ADMIN_ROOM,
+            self.occupants.get(room, {}),
+            nick,
+            room=room,
         )
         return bool(occupant and occupant_is_admin_or_owner(occupant))
 

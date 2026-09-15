@@ -1069,3 +1069,115 @@ class MucMixinHost(Protocol):
         mtype: str = "groupchat",
         **kwargs: Any,
     ) -> Any: ...
+
+
+class AdminMixinHost(BotOccupantMixinHost, Protocol):
+    """Cross-subsystem state required by admin/owner authorization helpers."""
+
+    plugin: Any
+    protected_rooms: set[str]
+    admin_affiliation_query_forbidden_rooms: set[str]
+    bot_admin_state: dict[str, bool]
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        **kwargs: Any,
+    ) -> Any: ...
+
+
+class CommandEntryPointMixinHost(Protocol):
+    """State and routing hooks required by the groupchat command entry point."""
+
+    command_prefix: str
+    protected_rooms: set[str]
+    allow_user_cmds: bool
+    occupants: dict[str, dict[str, dict[str, Any]]]
+
+    def _set_reply_encryption_context(self, encrypted: bool | None) -> Any: ...
+
+    def _reset_reply_encryption_context(self, token: Any) -> None: ...
+
+    async def _handle_user_command(
+        self,
+        msg: Any,
+        room: str,
+        nick: str,
+        cmd: str,
+        args: list[str],
+    ) -> bool: ...
+
+    async def _handle_admin_command(
+        self,
+        msg: Any,
+        room: str,
+        nick: str,
+        cmd: str,
+        args: list[str],
+    ) -> bool: ...
+
+    async def _handle_unknown_command(self, msg: Any, room: str, cmd: str) -> None: ...
+
+
+class CommandRouterMixinHost(Protocol):
+    """Capabilities required by public/admin command routing."""
+
+    command_prefix: str
+    public_command_rate_limit_window: int
+    public_command_rate_limit_max: int
+    public_command_rate_limit_hits: dict[tuple[str, str, str], list[float]]
+
+    def is_authorized(self, msg: Any) -> bool: ...
+
+    def user_cmds_allowed(self, room: str) -> bool: ...
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        **kwargs: Any,
+    ) -> Any: ...
+
+    def _admin_help_response(self, args: list[str]) -> str: ...
+
+    async def _user_help_text(self) -> str: ...
+
+    async def cmd_banlist_rtbl(
+        self,
+        room: str,
+        page: int = 1,
+        show_all: bool = False,
+    ) -> None: ...
+
+    async def cmd_banlist(
+        self,
+        room: str,
+        page: int = 1,
+        show_all: bool = False,
+    ) -> None: ...
+
+    async def cmd_why(self, identifier: str, room: str) -> None: ...
+
+    async def _cmd_whoami(self, room: str, nick: str) -> None: ...
+
+    async def cmd_protection_report(
+        self,
+        room: str,
+        nick: str,
+        args: list[str],
+    ) -> None: ...
+
+    async def _cmd_public_policy_show(self, room: str) -> None: ...
+
+    async def _dispatch_runtime_admin_command(
+        self,
+        room: str,
+        nick: str,
+        cmd: str,
+        args: list[str],
+    ) -> bool: ...

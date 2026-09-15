@@ -91,6 +91,19 @@ def test_is_authorized_requires_admin_room_and_admin_affiliation(monkeypatch, fa
     assert not bot.is_authorized(other_room_msg)
 
 
+def test_is_authorized_normalizes_room_case_and_rejects_blank_nick(monkeypatch, fake_msg_factory):
+    admin_module = importlib.import_module("banbot.admin")
+
+    monkeypatch.setattr(admin_module, "ADMIN_ROOM", "Admin@Conference.Example.Test")
+    bot = AdminBot()
+
+    admin_msg = fake_msg_factory(room="admin@conference.example.test", nick="Root", body="!status")
+    assert bot.is_authorized(admin_msg)
+
+    admin_msg["mucnick"] = "   "
+    assert not bot.is_authorized(admin_msg)
+
+
 @pytest.mark.asyncio
 async def test_protected_admin_target_detects_cached_admin_nick(monkeypatch):
     admin_module = importlib.import_module("banbot.admin")

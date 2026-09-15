@@ -10,6 +10,9 @@ from types import SimpleNamespace
 import pytest
 
 from banbot.commands import CommandMixin
+from banbot.commands.constants import ADMIN_COMMANDS
+from banbot.commands.registry import ADMIN_COMMAND_HANDLERS, RUNTIME_ADMIN_COMMANDS
+from banbot.bot import BanBot
 from banbot.messaging import MessagingMixin
 
 
@@ -191,6 +194,14 @@ def admin_msg(fake_msg_factory, body: str, nick: str = "Admin"):
         nick=nick,
         body=body,
     )
+
+
+def test_admin_command_registry_covers_each_recognized_command_once():
+    registered = set(ADMIN_COMMAND_HANDLERS)
+
+    assert not (registered & RUNTIME_ADMIN_COMMANDS)
+    assert ADMIN_COMMANDS == registered | RUNTIME_ADMIN_COMMANDS
+    assert all(callable(getattr(BanBot, name, None)) for name in ADMIN_COMMAND_HANDLERS.values())
 
 
 @pytest.mark.asyncio

@@ -416,7 +416,8 @@ intent, preserving command compatibility while avoiding duplicate identities.
 
 The configured mypy gate intentionally expands incrementally around these
 well-defined contracts. The canonical target, utility, cache, ban-query,
-database, moderation command, moderation core, room/ban synchronization,
+database, moderation command, moderation core, admin authorization, top-level
+groupchat command entry/routing/registry, room/ban synchronization,
 protection action/check/command/storage/notification, RTBL administration
 commands and RTBL subscribe/apply/publish surfaces are now part of the
 mandatory typed production gate. `banbot.contracts` describes
@@ -445,6 +446,19 @@ normalize to a usable bare JID cannot erase a nick-only ban during automatic
 JID promotion, and manual room-ban recovery skips such identities instead of
 feeding them into canonical ban-target parsing. The remaining large mixin graph
 is migrated progressively rather than hidden behind broad ignores.
+
+Admin authorization and command routing now have explicit static host
+contracts as well. Incoming groupchat command stanzas are treated as untrusted
+at the routing boundary: missing/blank nick, room, or body values are normalized
+or ignored instead of raising from string operations. Admin-room matching is
+case-insensitive at the authorization boundary, while authorization still
+requires the live occupant entry to carry owner/admin affiliation. The admin
+command registry is also validated when imported: every recognized admin
+command must be handled exactly once by either the runtime dispatcher or the
+typed handler registry, and registry handler names are restricted to the known
+dispatcher methods. This turns command-table drift into an immediate startup or
+type-check failure instead of a latent error discovered only when an operator
+uses the affected command.
 
 ### Deployment and health ownership
 
