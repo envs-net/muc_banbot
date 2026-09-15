@@ -267,6 +267,10 @@ class BanBot(
         # Rooms where the server refuses owner/admin affiliation queries.
         # In those rooms, admin protection falls back to the live occupant cache.
         self.admin_affiliation_query_forbidden_rooms: set[str] = set()
+        # Successful full affiliation lists are safe to reuse for a few seconds.
+        # This avoids repeating owner+admin IQs for every moderation command while
+        # keeping the cache short-lived enough for privilege changes to converge.
+        self._admin_affiliation_cache_entries: dict[str, tuple[float, frozenset[str]]] = {}
         self.occupants: dict[str, dict] = {}
         self.room_bot_nicks: dict[str, str] = {}
         self.room_join_events: dict[str, asyncio.Event] = {}
@@ -695,7 +699,8 @@ class BanBot(
                 error,
             )
             return
-        log.debug(
+        log_method = log.info if result.duration_seconds >= 1.0 else log.debug
+        log_method(
             "Startup: %s phase completed with status %s in %.1fms",
             result.name,
             result.status,
@@ -734,7 +739,8 @@ class BanBot(
                 error,
             )
             return
-        log.debug(
+        log_method = log.info if result.duration_seconds >= 1.0 else log.debug
+        log_method(
             "Process startup: %s phase completed with status %s in %.1fms",
             result.name,
             result.status,
@@ -864,10 +870,12 @@ class BanBot(
         self,
         _context: _StartupContext,
     ) -> tuple[str, dict[str, object]]:
-        """Publish presence, fetch the roster and settle the XMPP session."""
+        """Publish presence and fetch the roster before tracked MUC joins."""
         self.send_presence()
         await self.get_roster()
-        await asyncio.sleep(3)
+        # There used to be an unconditional three-second settling sleep here.
+        # The following room phase already waits for confirmed MUC joins and
+        # self-presence, so the fixed delay only made every startup slower.
         self.server_connect_time = time.time()
         return "ok", {}
 

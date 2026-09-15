@@ -499,6 +499,59 @@ class SyncMixin(_SyncMixinContract):
         return self._sync_bot_is_admin_or_owner(room)
 
 
+    async def _sync_room_outcast_snapshot(
+        self,
+        room: str,
+    ) -> tuple[str, list[tuple[str, str | None]]]:
+        """Return join/rights state and one room's current outcast snapshot.
+
+        The helper is side-effect free apart from the server IQ.  It lets the
+        startup path inspect multiple rooms concurrently while the later DB
+        reconciliation remains ordered and protected by ``ban_state_lock``.
+        """
+        bot_entry = getattr(self, "_bot_occupant_entry", None)
+        bot_in_room = (
+            bot_entry(room)[1] is not None
+            if bot_entry is not None
+            else bool(self.occupants.get(room))
+        )
+        if not bot_in_room:
+            return "not_joined", []
+
+        if not await self._wait_for_bot_admin_rights(room, timeout=2.0):
+            return "missing_rights", []
+
+        try:
+            return "ok", await self._sync_fetch_room_outcasts(room)
+        except Exception as exc:
+            # Preserve historic behavior: if the affiliation query fails, keep
+            # reconciling local bans as if no outcast list was available.
+            log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, exc)
+            return "ok", []
+
+    async def _sync_prefetch_room_outcast_snapshots(
+        self,
+        rooms: tuple[str, ...],
+    ) -> dict[str, tuple[str, list[tuple[str, str | None]]]]:
+        """Inspect startup rooms concurrently with bounded query fan-out."""
+        if not rooms:
+            return {}
+        raw_limit = getattr(self, "sync_batch_size", 10)
+        try:
+            configured_limit = int(raw_limit)
+        except (TypeError, ValueError):
+            configured_limit = 10
+        concurrency = max(1, min(configured_limit, 10, len(rooms)))
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def inspect(room: str) -> tuple[str, list[tuple[str, str | None]]]:
+            async with semaphore:
+                return await self._sync_room_outcast_snapshot(room)
+
+        snapshots = await asyncio.gather(*(inspect(room) for room in rooms))
+        return dict(zip(rooms, snapshots, strict=True))
+
+
     async def sync_bans_to_rooms_for_single_room(self, room: str) -> None:
         """
         Sync bans for a single room (after !room add or !sync).
@@ -678,6 +731,10 @@ class SyncMixin(_SyncMixinContract):
         If announce=True, sends list to ADMIN_ROOM.
         """
         room = ADMIN_ROOM
+        invalidate_admin_cache = getattr(self, "_invalidate_room_admin_owner_cache", None)
+        if callable(invalidate_admin_cache):
+            invalidate_admin_cache(room)
+
         affiliations = await self._sync_fetch_admin_affiliations(room)
         self.last_admin_sync_at = time.time()
         if affiliations is None:
@@ -714,6 +771,10 @@ class SyncMixin(_SyncMixinContract):
 
             admin_list.append(self.safe_jid(bare))
             admin_log_list.append(bare)
+
+        cache_admins = getattr(self, "_cache_room_admin_owner_jids", None)
+        if callable(cache_admins):
+            cache_admins(room, set(admin_log_list))
 
         log.info("Admins synced: %s", ", ".join(admin_log_list))
 
@@ -782,8 +843,19 @@ class SyncMixin(_SyncMixinContract):
                 mtype="groupchat"
             )
 
+        # Startup already waited for MUC joins.  Inspect room rights/outcasts in
+        # parallel now so network round-trips scale with the slowest room rather
+        # than linearly with the number of protected rooms.  DB reconciliation
+        # below remains deliberately ordered.
+        rooms = tuple(sorted(self.protected_rooms))
+        startup_snapshots = (
+            await self._sync_prefetch_room_outcast_snapshots(rooms)
+            if startup
+            else {}
+        )
+
         # --- Apply bans to each protected room ---
-        for idx, room in enumerate(self.protected_rooms, start=1):
+        for idx, room in enumerate(rooms, start=1):
             if announce_progress:
                 await self.bot_send_message(
                     mto=ADMIN_ROOM,
@@ -791,14 +863,12 @@ class SyncMixin(_SyncMixinContract):
                     mtype="groupchat"
                 )
 
-            # Distinguish a missing room join from insufficient affiliation.
-            bot_entry = getattr(self, "_bot_occupant_entry", None)
-            bot_in_room = (
-                bot_entry(room)[1] is not None
-                if bot_entry is not None
-                else bool(self.occupants.get(room))
+            room_state, outcast_entries = (
+                startup_snapshots[room]
+                if startup
+                else await self._sync_room_outcast_snapshot(room)
             )
-            if not bot_in_room:
+            if room_state == "not_joined":
                 log.warning("⛔ Skipping %s — bot is not joined", room)
                 if announce_progress:
                     await self.bot_send_message(
@@ -807,25 +877,20 @@ class SyncMixin(_SyncMixinContract):
                         mtype="groupchat",
                     )
                 continue
-
-            if not await self._wait_for_bot_admin_rights(room, timeout=2.0):
+            if room_state == "missing_rights":
                 log.warning("⛔ Skipping %s — bot is joined but not admin/owner", room)
                 if announce_progress:
                     await self.bot_send_message(
                         mto=ADMIN_ROOM,
                         mbody=f"⛔ Skipping {room} — bot is joined but has no admin/owner rights",
-                        mtype="groupchat"
+                        mtype="groupchat",
                     )
                 continue
 
-            # --- Fetch current outcasts ---
-            try:
-                outcast_entries = await self._sync_fetch_room_outcasts(room)
-                outcasts_bare = [self._sync_canonical_outcast_target(jid) for jid, _reason in outcast_entries]
-            except Exception as e:
-                log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
-                outcast_entries = []
-                outcasts_bare = []
+            outcasts_bare = [
+                self._sync_canonical_outcast_target(jid)
+                for jid, _reason in outcast_entries
+            ]
 
             # --- Add orphan outcasts to DB ---
             # Important: do not promote expired tempbans that are still present

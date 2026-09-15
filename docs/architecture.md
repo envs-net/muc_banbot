@@ -594,3 +594,24 @@ supported, and paging markers are interpreted only for list operations so words
 such as `all` remain intact inside reasons. Policy/help/usage rendering is also
 typed; empty policy text is rejected and focused help aliases/room-invite usage
 stay aligned with the command surface.
+
+### Startup and moderation hot-path performance
+
+Startup and ban protection avoid unnecessary serial XMPP round-trips. The
+transport phase no longer adds a fixed three-second settling delay after roster
+retrieval because the following room phase already waits for confirmed MUC
+joins and self-presence. During startup, protected-room rights/outcast snapshots
+are prefetched with bounded concurrency and are then reconciled against SQLite
+in deterministic order under the existing ban-state lock. Startup/process phases
+that take at least one second are surfaced at INFO level so production logs show
+which lifecycle boundary is actually slow.
+
+Admin/owner ban protection still checks live occupants first. Nick-only bans do
+not need server affiliation lists and therefore stay off the network entirely.
+For JID/domain targets, owner/admin snapshots for different managed rooms are
+queried with bounded room-level concurrency while owner/admin queries within a
+room retain their established failure semantics. Successful snapshots are cached
+for only a short window and explicit admin synchronization/refresh invalidates
+the relevant cache, reducing repeated IQ traffic without turning cached
+membership into long-lived authorization state. Query failures and rooms that
+forbid full affiliation lists keep the previous live-occupant fallback policy.

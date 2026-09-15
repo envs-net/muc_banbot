@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from envs_xmpp_core.xmpp import AffiliationQueryOptions, query_muc_affiliation
@@ -24,6 +25,8 @@ _ADMIN_AFFILIATION_QUERY_OPTIONS = AffiliationQueryOptions(
     attempts=2,
     retry_delay_seconds=1.0,
 )
+_ADMIN_AFFILIATION_CACHE_SECONDS = 10.0
+_ADMIN_AFFILIATION_QUERY_CONCURRENCY = 4
 
 if TYPE_CHECKING:
     from .contracts import AdminMixinHost
@@ -98,21 +101,74 @@ class AdminMixin(BotOccupantMixin, _AdminMixinContract):
         return False
 
 
-    async def get_room_admin_owner_jids(self, room: str) -> set[str]:
-        """Return server-known owner/admin bare JIDs using bounded IQ queries.
+    def _admin_affiliation_cache(self) -> dict[str, tuple[float, frozenset[str]]]:
+        """Return the short-lived successful affiliation-query cache.
 
-        A room that rejects full affiliation lists with ``forbidden`` is
-        remembered so later ban checks use the live occupant cache without
-        repeatedly issuing an IQ the server will not permit.
+        Lightweight mixin tests do not run :class:`BanBot.__init__`, so keep a
+        lazy fallback here even though production initializes the cache
+        centrally.  Only successful server responses are cached.
         """
-        protected: set[str] = set()
-        if room in self.admin_affiliation_query_forbidden_rooms:
-            return protected
+        cache = getattr(self, "_admin_affiliation_cache_entries", None)
+        if cache is None:
+            cache = {}
+            self._admin_affiliation_cache_entries = cache
+        return cache
 
-        muc = self.plugin["xep_0045"]
+    def _cache_room_admin_owner_jids(self, room: str, jids: set[str]) -> None:
+        """Cache one successful owner/admin snapshot for a very short window."""
+        key = room.strip().casefold()
+        if not key:
+            return
+        expires_at = time.monotonic() + _ADMIN_AFFILIATION_CACHE_SECONDS
+        self._admin_affiliation_cache()[key] = (expires_at, frozenset(jids))
+
+    def _invalidate_room_admin_owner_cache(self, room: str | None = None) -> None:
+        """Invalidate cached affiliation data after an explicit refresh/change."""
+        cache = self._admin_affiliation_cache()
+        if room is None:
+            cache.clear()
+            return
+        cache.pop(room.strip().casefold(), None)
+
+    def _cached_room_admin_owner_jids(self, room: str) -> set[str] | None:
+        key = room.strip().casefold()
+        cached = self._admin_affiliation_cache().get(key)
+        if cached is None:
+            return None
+        expires_at, jids = cached
+        if time.monotonic() >= expires_at:
+            self._admin_affiliation_cache().pop(key, None)
+            return None
+        return set(jids)
+
+    async def get_room_admin_owner_jids(
+        self,
+        room: str,
+        *,
+        refresh: bool = False,
+    ) -> set[str]:
+        """Return server-known owner/admin bare JIDs with bounded, cached IQs.
+
+        Successful results are cached only briefly; this keeps consecutive ban
+        commands off the network without turning the cache into long-lived
+        authorization state.  A room that rejects full affiliation lists with
+        ``forbidden`` is remembered exactly as before and falls back to live
+        occupant data.
+        """
+        if room in self.admin_affiliation_query_forbidden_rooms:
+            return set()
+
+        if refresh:
+            self._invalidate_room_admin_owner_cache(room)
+        else:
+            cached = self._cached_room_admin_owner_jids(room)
+            if cached is not None:
+                return cached
+
+        protected: set[str] = set()
         for affiliation in ("owner", "admin"):
             result = await query_muc_affiliation(
-                muc,
+                self.plugin["xep_0045"],
                 room,
                 affiliation,
                 options=_ADMIN_AFFILIATION_QUERY_OPTIONS,
@@ -120,6 +176,7 @@ class AdminMixin(BotOccupantMixin, _AdminMixinContract):
             if not result.ok:
                 if result.error_condition == "forbidden":
                     self.admin_affiliation_query_forbidden_rooms.add(room)
+                    self._invalidate_room_admin_owner_cache(room)
                     log.warning(
                         "Full owner/admin affiliation lists are unavailable for %s; "
                         "using the live occupant cache for admin protection. "
@@ -135,10 +192,12 @@ class AdminMixin(BotOccupantMixin, _AdminMixinContract):
                         result.summary,
                     )
                 return set()
-            for jid in result.items:
-                bare = self.bare_jid(str(jid))
+            for server_jid in result.items:
+                bare = self.bare_jid(str(server_jid))
                 if bare:
                     protected.add(bare)
+
+        self._cache_room_admin_owner_jids(room, protected)
         return protected
 
 
@@ -148,23 +207,41 @@ class AdminMixin(BotOccupantMixin, _AdminMixinContract):
         nick: str | None = None,
         jid: str | None = None,
     ) -> tuple[bool, str | None]:
-        """
-        Return (True, reason) if the target would ban an owner/admin in any
-        protected room or the admin room.
+        """Return whether a target would ban an owner/admin in a managed room.
+
+        Live occupant state remains the fastest and freshest check.  Offline
+        owner/admin protection still uses server affiliation lists, but room
+        queries are bounded and concurrent instead of serializing two IQs for
+        every room on every ban command.
         """
         target = target.lower().strip()
         bare_target_jid = self.bare_jid(jid or target) if "@" in target or jid else None
         domain_target = target[2:].strip(".") if target.startswith("*.") else None
-        rooms_to_check = set(self.protected_rooms) | {ADMIN_ROOM}
+        rooms_to_check = sorted(set(self.protected_rooms) | {ADMIN_ROOM})
 
+        # First use the live cache.  Online admins/owners never need a server
+        # round-trip and are protected even if full affiliation queries are
+        # forbidden for the bot.
         for room in rooms_to_check:
             if nick and self.is_admin_or_owner(room, nick=nick):
                 return True, f"{nick} is admin/owner in {room}"
             if bare_target_jid and self.is_admin_or_owner(room, jid=bare_target_jid):
                 return True, f"{bare_target_jid} is admin/owner in {room}"
 
-            protected_jids = await self.get_room_admin_owner_jids(room)
+        if not bare_target_jid and not domain_target:
+            return False, None
 
+        query_limit = asyncio.Semaphore(
+            max(1, min(_ADMIN_AFFILIATION_QUERY_CONCURRENCY, len(rooms_to_check)))
+        )
+
+        async def fetch(room: str) -> tuple[str, set[str]]:
+            async with query_limit:
+                return room, await self.get_room_admin_owner_jids(room)
+
+        room_affiliations = await asyncio.gather(*(fetch(room) for room in rooms_to_check))
+
+        for room, protected_jids in room_affiliations:
             if bare_target_jid and bare_target_jid in protected_jids:
                 return True, f"{bare_target_jid} is admin/owner in {room}"
 

@@ -1,4 +1,6 @@
+import asyncio
 import importlib
+
 import pytest
 
 pytest.importorskip("slixmpp")
@@ -174,3 +176,55 @@ async def test_forbidden_affiliation_query_logs_expected_admin_fallback(monkeypa
     assert "expected when BanBot is room admin rather than owner" in caplog.text
     assert "offline admins cannot be detected" in caplog.text
     assert "Server forbids" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_successful_affiliation_queries_are_reused_briefly(monkeypatch):
+    admin_module = importlib.import_module("banbot.admin")
+
+    monkeypatch.setattr(admin_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = AdminBot()
+    plugin = FakeMucPlugin(owners=["owner@example.test"], admins=["admin@example.test"])
+    bot.plugin["xep_0045"] = plugin
+    room = "room@conference.example.test"
+
+    first = await bot.get_room_admin_owner_jids(room)
+    second = await bot.get_room_admin_owner_jids(room)
+
+    assert first == {"owner@example.test", "admin@example.test"}
+    assert second == first
+    assert plugin.calls == [(room, "owner"), (room, "admin")]
+
+
+@pytest.mark.asyncio
+async def test_admin_protection_checks_managed_rooms_concurrently(monkeypatch):
+    admin_module = importlib.import_module("banbot.admin")
+    admin_room = "admin@conference.example.test"
+    protected_room = "room@conference.example.test"
+    monkeypatch.setattr(admin_module, "ADMIN_ROOM", admin_room)
+
+    class BarrierMucPlugin:
+        def __init__(self):
+            self.owner_rooms: set[str] = set()
+            self.owner_queries_started = asyncio.Event()
+
+        async def get_users_by_affiliation(self, room, affiliation):
+            if affiliation == "owner":
+                self.owner_rooms.add(room)
+                if self.owner_rooms == {admin_room, protected_room}:
+                    self.owner_queries_started.set()
+                await self.owner_queries_started.wait()
+                if room == protected_room:
+                    return ["offline-owner@example.test"]
+            return []
+
+    bot = AdminBot()
+    bot.plugin["xep_0045"] = BarrierMucPlugin()
+
+    protected, reason = await asyncio.wait_for(
+        bot.is_protected_admin_target("offline-owner@example.test"),
+        timeout=0.5,
+    )
+
+    assert protected is True
+    assert reason == f"offline-owner@example.test is admin/owner in {protected_room}"

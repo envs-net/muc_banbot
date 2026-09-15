@@ -1078,6 +1078,7 @@ class AdminMixinHost(BotOccupantMixinHost, Protocol):
     plugin: Any
     protected_rooms: set[str]
     admin_affiliation_query_forbidden_rooms: set[str]
+    _admin_affiliation_cache_entries: dict[str, tuple[float, frozenset[str]]]
     bot_admin_state: dict[str, bool]
 
     async def bot_send_message(

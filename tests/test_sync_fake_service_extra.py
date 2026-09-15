@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -816,3 +817,42 @@ async def test_sync_admins_does_not_retry_permanent_iq_error(
         assert "raw stanza" not in caplog.text
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_startup_room_outcast_prefetch_runs_rooms_concurrently(temp_db_path):
+    bot = SyncBot(str(temp_db_path))
+    room_a = "a@conference.example.test"
+    room_b = "b@conference.example.test"
+    bot.protected_rooms = {room_a, room_b}
+    bot.admin_rooms = {room_a, room_b}
+    bot.occupants = {
+        room: {
+            "BanBot": {
+                "jid": "bot@example.test/resource",
+                "affiliation": "admin",
+                "role": "moderator",
+            }
+        }
+        for room in bot.protected_rooms
+    }
+
+    started: set[str] = set()
+    both_started = asyncio.Event()
+
+    async def fetch_outcasts(room: str):
+        started.add(room)
+        if started == {room_a, room_b}:
+            both_started.set()
+        await both_started.wait()
+        return [(f"blocked-{room[0]}@example.test", None)]
+
+    bot._sync_fetch_room_outcasts = fetch_outcasts
+
+    snapshots = await asyncio.wait_for(
+        bot._sync_prefetch_room_outcast_snapshots((room_a, room_b)),
+        timeout=0.5,
+    )
+
+    assert snapshots[room_a] == ("ok", [("blocked-a@example.test", None)])
+    assert snapshots[room_b] == ("ok", [("blocked-b@example.test", None)])

@@ -1425,3 +1425,29 @@ async def test_shutdown_cancels_incomplete_session_startup_before_teardown(monke
     )
     assert session_phase.status == "ok"
     assert disconnect_calls == [{"wait": False}]
+
+
+@pytest.mark.asyncio
+async def test_startup_transport_has_no_fixed_settling_sleep(monkeypatch):
+    calls: list[str] = []
+
+    class TransportBot:
+        server_connect_time = None
+
+        def send_presence(self):
+            calls.append("presence")
+
+        async def get_roster(self):
+            calls.append("roster")
+
+    async def unexpected_sleep(_delay):
+        raise AssertionError("startup transport must not use a fixed settling sleep")
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", unexpected_sleep)
+    bot = TransportBot()
+
+    status, details = await bot_module.BanBot._startup_transport_phase(bot, object())
+
+    assert (status, details) == ("ok", {})
+    assert calls == ["presence", "roster"]
+    assert bot.server_connect_time is not None
