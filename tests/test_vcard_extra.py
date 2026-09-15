@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 
 import pytest
@@ -9,7 +10,6 @@ import pytest
 pytest.importorskip("slixmpp")
 
 from banbot.vcard import VCardMixin
-
 
 VCARD_CONFIG_ATTRS = (
     "VCARD_NICKNAME",
@@ -43,12 +43,16 @@ class FakeXep0084:
     def __init__(self):
         self.avatars = []
         self.metadata = []
+        self.stop_calls = 0
 
     async def publish_avatar(self, data):
         self.avatars.append(data)
 
     async def publish_avatar_metadata(self, metadata):
         self.metadata.append(metadata)
+
+    async def stop(self):
+        self.stop_calls += 1
 
 
 class FakeXep0153:
@@ -117,6 +121,7 @@ class VCardBot(VCardMixin):
             },
         )()
         self.room_bot_nicks = {}
+        self.avatar_hash = None
 
     def __getitem__(self, key):
         if key == "xep_0054":
@@ -197,7 +202,7 @@ async def test_load_avatar_payload_falls_back_to_packaged_default(monkeypatch, t
     monkeypatch.setattr(bundled_assets, "_BUNDLED_DIR", packaged)
     monkeypatch.setattr(config, "AVATAR_PATH", "avatar.png", raising=False)
 
-    payload = await VCardBot()._load_avatar_payload()
+    payload = await VCardBot()._load_avatar_payload("avatar.png")
 
     assert payload is not None
     assert payload.data == b"packaged-avatar"
@@ -281,19 +286,26 @@ async def test_update_vcard_broadcasts_avatar_hash_to_joined_mucs(
 
 
 @pytest.mark.asyncio
-async def test_update_vcard_without_avatar_publishes_only_vcard(cleared_vcard_config):
+async def test_update_vcard_without_avatar_withdraws_cached_avatar(cleared_vcard_config):
     bot = VCardBot()
+    bot.avatar_hash = "old-hash"
+
     assert await bot.update_vcard() is True
 
     assert len(bot.xep0054.published) == 1
     vcard = bot.xep0054.published[0]
 
-    # No avatar configured: keep PHOTO empty and do not publish XEP-0084/avatar-hash presence.
+    # Explicitly disabling the avatar withdraws both modern metadata and the
+    # legacy cached hash rather than leaving clients on the old image.
     assert vcard["PHOTO"] == {}
     assert bot.xep0084.avatars == []
     assert bot.xep0084.metadata == []
-    assert bot.xep0153.hashes == []
-    assert bot.sent == []
+    assert bot.xep0084.stop_calls == 1
+    assert bot.xep0153.hashes == [(bot.boundjid, "")]
+    assert len(bot.sent) == 1
+    photo = bot.sent[0].xml.find(".//{vcard-temp:x:update}x/photo")
+    assert photo is not None
+    assert photo.text in (None, "")
     assert bot.avatar_hash is None
 
     # No profile fields configured: values should remain absent/empty.
@@ -422,4 +434,141 @@ async def test_update_vcard_skips_presence_when_connection_lost_after_publish(
     ]
     assert debug_messages == [
         "Skipping XEP-0153 avatar hash presence because XMPP stream is not connected"
+    ]
+
+@pytest.mark.asyncio
+async def test_missing_configured_avatar_does_not_erase_published_identity(
+    tmp_path,
+    monkeypatch,
+    cleared_vcard_config,
+):
+    import config
+
+    missing = tmp_path / "missing-avatar.png"
+    monkeypatch.setattr(config, "AVATAR_PATH", str(missing), raising=False)
+
+    bot = VCardBot()
+    bot.avatar_hash = "old-hash"
+
+    assert await bot.update_vcard() is False
+    assert bot.xep0054.published == []
+    assert bot.xep0084.stop_calls == 0
+    assert bot.xep0153.hashes == []
+    assert bot.sent == []
+    assert bot.avatar_hash == "old-hash"
+
+
+@pytest.mark.asyncio
+async def test_xep0054_failure_preserves_previous_legacy_hash(
+    tmp_path,
+    monkeypatch,
+    cleared_vcard_config,
+):
+    import config
+
+    avatar = tmp_path / "avatar.png"
+    avatar.write_bytes(b"new-avatar")
+    monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
+
+    bot = VCardBot()
+    bot.avatar_hash = "old-hash"
+
+    async def fail_vcard(_vcard):
+        raise RuntimeError("vCard unavailable")
+
+    monkeypatch.setattr(bot.xep0054, "publish_vcard", fail_vcard)
+
+    assert await bot.update_vcard() is False
+    # XEP-0084 is independent and may still publish successfully.
+    assert bot.xep0084.avatars == [b"new-avatar"]
+    # XEP-0153 must keep the last published/cache-aligned value because the
+    # matching XEP-0054 PHOTO was not accepted by the server.
+    assert bot.xep0153.hashes == []
+    assert bot.sent == []
+    assert bot.avatar_hash == "old-hash"
+
+
+@pytest.mark.asyncio
+async def test_avatar_presence_failure_isolated_per_target(
+    tmp_path,
+    monkeypatch,
+    cleared_vcard_config,
+):
+    import config
+
+    avatar = tmp_path / "avatar.png"
+    avatar.write_bytes(b"avatar")
+    monkeypatch.setattr(config, "AVATAR_PATH", str(avatar), raising=False)
+
+    bot = VCardBot()
+    bot.room_bot_nicks = {
+        "broken@example.org": "BanBot",
+        "working@example.org": "BanBot",
+    }
+    original_make = bot._make_avatar_hash_presence
+
+    def make_presence(avatar_hash, *, pto=None):
+        presence = original_make(avatar_hash, pto=pto)
+        if presence is not None and pto == "broken@example.org/BanBot":
+            def fail_send():
+                raise RuntimeError("room presence failed")
+
+            presence.send = fail_send
+        return presence
+
+    monkeypatch.setattr(bot, "_make_avatar_hash_presence", make_presence)
+
+    assert await bot.update_vcard() is True
+    assert [presence.kwargs.get("pto") for presence in bot.sent] == [
+        None,
+        "working@example.org/BanBot",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_identity_updates_use_consistent_serialized_snapshots(
+    monkeypatch,
+    cleared_vcard_config,
+):
+    from envs_xmpp_core.xmpp.avatar import AvatarPayload
+
+    import config
+
+    bot = VCardBot()
+    entered_old_load = asyncio.Event()
+    release_old_load = asyncio.Event()
+
+    monkeypatch.setattr(config, "AVATAR_PATH", "old.png", raising=False)
+    monkeypatch.setattr(config, "VCARD_NICKNAME", "Old", raising=False)
+
+    async def controlled_load(path):
+        if path == "old.png":
+            entered_old_load.set()
+            await release_old_load.wait()
+            return AvatarPayload(b"old", "image/png", "old-hash")
+        assert path == "new.png"
+        return AvatarPayload(b"new", "image/png", "new-hash")
+
+    monkeypatch.setattr(bot, "_load_avatar_payload", controlled_load)
+
+    first = asyncio.create_task(bot.update_vcard())
+    await entered_old_load.wait()
+
+    # Mutate the live config while the first publish is suspended. The first
+    # generation must retain its captured profile, while the second waits for
+    # the identity lock and then captures/publishes the new generation.
+    config.AVATAR_PATH = "new.png"
+    config.VCARD_NICKNAME = "New"
+    second = asyncio.create_task(bot.update_vcard())
+    await asyncio.sleep(0)
+
+    assert bot.xep0054.published == []
+    release_old_load.set()
+    assert await first is True
+    assert await second is True
+
+    assert [vcard["NICKNAME"] for vcard in bot.xep0054.published] == ["Old", "New"]
+    assert [vcard["PHOTO"]["BINVAL"] for vcard in bot.xep0054.published] == [
+        b"old",
+        b"new",
     ]

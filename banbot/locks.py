@@ -10,6 +10,7 @@ from typing import Any
 
 _FALLBACK_DATABASE_FILE_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = weakref.WeakKeyDictionary()
 _FALLBACK_BAN_STATE_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = weakref.WeakKeyDictionary()
+_FALLBACK_IDENTITY_PUBLISH_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = weakref.WeakKeyDictionary()
 
 
 def is_maintenance_mode(owner: Any) -> bool:
@@ -70,6 +71,25 @@ def get_ban_state_lock(owner: Any) -> asyncio.Lock:
     if lock is not None:
         return lock
     return _fallback_lock(_FALLBACK_BAN_STATE_LOCKS, owner, "_ban_state_operation_lock")
+
+
+def get_identity_publish_lock(owner: Any) -> asyncio.Lock:
+    """Return the shared lock serializing vCard/avatar identity publication."""
+    lock = getattr(owner, "_identity_publish_operation_lock", None)
+    if lock is not None:
+        return lock
+    return _fallback_lock(
+        _FALLBACK_IDENTITY_PUBLISH_LOCKS,
+        owner,
+        "_identity_publish_operation_lock",
+    )
+
+
+@asynccontextmanager
+async def identity_publish_lock(owner: Any) -> AsyncIterator[None]:
+    """Serialize profile/avatar publication without coupling it to DB locks."""
+    async with get_identity_publish_lock(owner):
+        yield
 
 
 @asynccontextmanager

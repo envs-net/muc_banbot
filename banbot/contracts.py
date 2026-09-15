@@ -2164,6 +2164,20 @@ class ConfigSnapshotMixinHost(Protocol):
     version_check_url: str | None
 
 
+class VCardMixinHost(Protocol):
+    """Slixmpp/profile state required by vCard and avatar publication."""
+
+    room_bot_nicks: dict[str, str]
+    avatar_hash: str | None
+    boundjid: Any
+
+    def __getitem__(self, key: str) -> Any: ...
+
+    def make_presence(self, **kwargs: Any) -> Any: ...
+
+    def is_connected(self) -> bool: ...
+
+
 class ConfigDisplayMixinHost(Protocol):
     """Schema key sets required by configuration display helpers."""
 

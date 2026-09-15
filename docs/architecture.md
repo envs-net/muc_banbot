@@ -546,6 +546,17 @@ and the SQLite commit is treated as the point of no return: cache recovery or
 automatic-redaction failures after commit are reported as post-commit problems
 without pretending the already-persisted import rolled back.
 
+vCard/avatar identity publication now sits inside the typed host-contract boundary as
+well. A dedicated process-local identity lock serializes startup and runtime-config
+publishes, and each attempt snapshots all profile inputs before its first await so a
+concurrent config reload cannot combine an old avatar with new vCard fields. Avatar file
+reads use the cancellation-safe managed-I/O boundary. A configured avatar that cannot be
+loaded aborts the publish instead of silently replacing a previously valid server-side
+PHOTO with an empty one. Explicit avatar removal withdraws XEP-0084 metadata and clears
+the XEP-0153 cache/presence after the avatar-less XEP-0054 vCard is accepted. Legacy
+avatar-hash presence sends are isolated per target so one stale MUC identity cannot block
+the global or remaining room updates.
+
 Runtime configuration loading, snapshots and admin config commands now sit inside
 the same typed host-contract boundary. Runtime reload shares the canonical
 DB/file-operation lock with chat edits, backups, restores and managed exports,

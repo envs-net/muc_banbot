@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from types import FrameType
+from typing import Any
 
 from .config_loader import format_config_import_error, load_config_module
 
@@ -318,9 +319,13 @@ class BanBot(
         # --- database backups / file operations ---
         self.last_database_backup_file: str | None = None
         self.last_database_restore_file: str | None = None
-        self._pending_database_backup_audit_events = []
+        self._pending_database_backup_audit_events: list[
+            tuple[str, str | None, str | None, str | None, dict[str, Any]]
+        ] = []
         self._database_file_operation_lock = asyncio.Lock()
         self._ban_state_operation_lock = asyncio.Lock()
+        self._identity_publish_operation_lock = asyncio.Lock()
+        self.avatar_hash: str | None = None
 
         # --- structured event logs and audit retention ---
         self.structured_event_logs: bool = True
