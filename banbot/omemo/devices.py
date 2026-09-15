@@ -6,11 +6,22 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 log = logging.getLogger(__name__)
 
-class OmemoDeviceMixin:
+
+if TYPE_CHECKING:
+    from ..contracts import OmemoDeviceMixinHost
+
+    class _OmemoDeviceMixinContract(OmemoDeviceMixinHost):
+        pass
+else:
+    class _OmemoDeviceMixinContract:
+        pass
+
+
+class OmemoDeviceMixin(_OmemoDeviceMixinContract):
 
     def _collect_omemo_storage_device_hints(self) -> dict[str, set[str]]:
         """Best-effort extract JID/device-id hints from the JSON storage file.

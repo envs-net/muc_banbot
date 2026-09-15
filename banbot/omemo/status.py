@@ -4,18 +4,31 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .helpers import _current_omemo_identity, _omemo_identity_metadata_path, _read_omemo_identity_metadata
 
 log = logging.getLogger(__name__)
 
-class OmemoStatusMixin:
+
+if TYPE_CHECKING:
+    from ..contracts import OmemoStatusMixinHost
+
+    class _OmemoStatusMixinContract(OmemoStatusMixinHost):
+        pass
+else:
+    class _OmemoStatusMixinContract:
+        pass
+
+
+class OmemoStatusMixin(_OmemoStatusMixinContract):
 
     def _omemo_storage_status_lines(self) -> list[str]:
         """Return human-readable status lines for the configured OMEMO store."""
         storage_path = Path(str(getattr(self, "omemo_storage_file", "data/omemo.json"))).expanduser()
         metadata_path = _omemo_identity_metadata_path(storage_path)
         identity = _current_omemo_identity(__import__("config"))
+        metadata_error: str | None
         try:
             stored_identity = _read_omemo_identity_metadata(metadata_path)
         except Exception as exc:

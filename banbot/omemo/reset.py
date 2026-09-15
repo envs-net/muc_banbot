@@ -7,6 +7,7 @@ import inspect
 import logging
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .helpers import (
     _backup_existing_path,
@@ -17,7 +18,18 @@ from .helpers import (
 
 log = logging.getLogger(__name__)
 
-class OmemoResetMixin:
+
+if TYPE_CHECKING:
+    from ..contracts import OmemoResetMixinHost
+
+    class _OmemoResetMixinContract(OmemoResetMixinHost):
+        pass
+else:
+    class _OmemoResetMixinContract:
+        pass
+
+
+class OmemoResetMixin(_OmemoResetMixinContract):
 
     async def _restart_after_omemo_reset(self) -> None:
         """Restart the bot after OMEMO storage was reset."""
@@ -56,6 +68,18 @@ class OmemoResetMixin:
                     "⚠️ This rotates the local OMEMO storage and identity metadata to .bak-* files.\n"
                     "A restart is required afterwards so the OMEMO plugin creates a fresh identity.\n\n"
                     f"Confirm with: {getattr(self, 'command_prefix', '!')}omemo reset confirm"
+                ),
+                mtype="groupchat",
+                encrypted=False,
+            )
+            return
+
+        if getattr(self, "omemo_reset_pending_restart", False):
+            await self.bot_send_message(
+                mto=room,
+                mbody=(
+                    "ℹ️ OMEMO reset is already prepared and waiting for restart. "
+                    "No additional storage rotation was performed."
                 ),
                 mtype="groupchat",
                 encrypted=False,

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from slixmpp import JID
 
@@ -14,7 +14,18 @@ from .helpers import _current_omemo_identity, _ensure_omemo_identity_metadata, _
 
 log = logging.getLogger(__name__)
 
-class OmemoCoreMixin:
+
+if TYPE_CHECKING:
+    from ..contracts import OmemoCoreMixinHost
+
+    class _OmemoCoreMixinContract(OmemoCoreMixinHost):
+        pass
+else:
+    class _OmemoCoreMixinContract:
+        pass
+
+
+class OmemoCoreMixin(_OmemoCoreMixinContract):
 
     def _configure_omemo_dependency_logging(self) -> None:
         """Reduce noisy third-party OMEMO logs during normal bot operation.
@@ -297,14 +308,31 @@ class OmemoCoreMixin:
         """Best-effort extraction of recipient JIDs from slixmpp-omemo errors."""
         text = str(exc)
         matches = re.findall(r"['\"]([^'\"]+@[^'\"]+)['\"]", text)
-        return {JID(match).bare.lower() for match in matches if JID(match).bare}
+        recipients: set[str] = set()
+        for match in matches:
+            bare = self._normalize_omemo_bare_jid(match)
+            if bare:
+                recipients.add(bare)
+        return recipients
+
+    @staticmethod
+    def _normalize_omemo_bare_jid(value: object) -> str | None:
+        """Return a normalized bare JID, or ``None`` for untrusted invalid input."""
+        try:
+            text = str(value).strip()
+            if not text:
+                return None
+            bare = str(JID(text).bare).strip().lower()
+        except Exception:
+            return None
+        return bare or None
 
     def _bare_jid(self, value: object) -> str:
         """Return a bare JID string from a JID-like value."""
-        bare = getattr(value, "bare", None)
-        if bare:
-            return str(bare)
-        return JID(str(value)).bare
+        bare = self._normalize_omemo_bare_jid(value)
+        if not bare:
+            raise ValueError("OMEMO recipient does not contain a valid bare JID")
+        return bare
 
     def _message_has_omemo_payload(self, msg: Any) -> bool:
         """Return True only if the stanza contains an actual OMEMO encrypted payload."""
@@ -331,33 +359,40 @@ class OmemoCoreMixin:
         stanza was encrypted but could not be decrypted, in which case callers
         should stop processing it.
         """
+        has_omemo_payload = self._message_has_omemo_payload(msg)
+
         if getattr(self, "omemo_reset_pending_restart", False):
-            if self._message_has_omemo_payload(msg):
+            if has_omemo_payload:
                 log.warning(
                     "OMEMO: encrypted incoming message received while reset is pending restart"
                 )
                 return None, True
             return msg, False
 
-        if not getattr(self, "omemo_enabled", False):
+        if not has_omemo_payload:
             return msg, False
 
+        if not getattr(self, "omemo_enabled", False):
+            log.info("OMEMO: encrypted incoming message ignored while OMEMO is disabled")
+            return None, True
+
         if "xep_0384" not in self.plugin:
-            return msg, False
+            log.warning("OMEMO: encrypted incoming message ignored because the plugin is unavailable")
+            return None, True
 
         omemo = self.plugin["xep_0384"]
 
-        if not self._message_has_omemo_payload(msg):
-            return msg, False
-
         try:
             namespace = omemo.is_encrypted(msg)
-        except Exception as exc:
-            log.warning("OMEMO: could not check incoming message encryption: %s", exc)
-            return msg, False
+        except Exception:
+            # We already saw an actual OMEMO payload.  Never reinterpret its
+            # fallback body as plaintext merely because plugin inspection failed.
+            log.warning("OMEMO: could not inspect encrypted incoming message; ignoring stanza")
+            return None, True
 
-        if namespace is None:
-            return msg, False
+        if not namespace:
+            log.info("OMEMO: encrypted payload was not recognized by the active plugin; ignoring stanza")
+            return None, True
 
         if not await self._wait_for_omemo_ready():
             log.warning("OMEMO: encrypted incoming message received before OMEMO was ready")
@@ -413,15 +448,23 @@ class OmemoCoreMixin:
 
     async def _omemo_recipients_for_room(self, room_jid: str) -> set[JID]:
         """Collect current real bare JIDs for an encrypted MUC message."""
-        room = str(room_jid).split("/")[0].lower().strip()
+        room = self._normalize_omemo_bare_jid(room_jid)
+        if not room:
+            return set()
         recipients: set[JID] = set()
+        invalid_recipient_count = 0
 
-        own_bare = self.boundjid.bare if getattr(self, "boundjid", None) is not None else ""
+        own_bare = self._normalize_omemo_bare_jid(
+            self.boundjid.bare if getattr(self, "boundjid", None) is not None else ""
+        )
 
         for info in self.occupants.get(room, {}).values():
             jid = info.get("jid") if isinstance(info, dict) else None
             if jid:
-                bare = JID(jid).bare
+                bare = self._normalize_omemo_bare_jid(jid)
+                if not bare:
+                    invalid_recipient_count += 1
+                    continue
                 if bare and bare != own_bare:
                     recipients.add(JID(bare))
 
@@ -432,5 +475,11 @@ class OmemoCoreMixin:
             recipients.add(JID(own_bare))
 
         recipients = {jid for jid in recipients if jid and jid.bare}
+        if invalid_recipient_count:
+            log.debug(
+                "OMEMO: skipped %d occupant JID(s) that could not be normalized for %s",
+                invalid_recipient_count,
+                room,
+            )
         log.debug("OMEMO: %d recipient(s) available for %s", len(recipients), room)
         return recipients

@@ -13,15 +13,15 @@ try:  # Optional dependency; only required when OMEMO_ENABLED=True.
     import slixmpp_omemo as XEP_0384_module
     from omemo.storage import Just, Maybe, Nothing, Storage
     from omemo.types import DeviceInformation, JSONType
-    from slixmpp.plugins import register_plugin  # type: ignore[attr-defined]
-    XEP_0384 = XEP_0384_module.XEP_0384
+    from slixmpp.plugins import register_plugin
+    XEP_0384: Any = XEP_0384_module.XEP_0384
 
     OMEMO_AVAILABLE = True
 except Exception:  # pragma: no cover - depends on optional runtime dependency
-    Just = Maybe = Nothing = Storage = None  # type: ignore[assignment]
-    DeviceInformation = JSONType = Any  # type: ignore[misc,assignment]
-    XEP_0384 = None  # type: ignore[assignment]
-    XEP_0384_module = None  # type: ignore[assignment]
+    Just = Maybe = Nothing = Storage = None
+    DeviceInformation = JSONType = Any
+    XEP_0384 = None
+    XEP_0384_module = None
     OMEMO_AVAILABLE = False
 
 log = logging.getLogger(__name__)
@@ -46,9 +46,12 @@ from .helpers import (  # noqa: E402
     _write_omemo_identity_metadata,
 )
 
+XEP_0384Impl: Any = None
+
+
 if OMEMO_AVAILABLE and XEP_0384 is not None:
 
-    class JsonFileStorage(Storage):  # type: ignore[misc,valid-type]
+    class JsonFileStorage(Storage):
         """Small JSON-file backed OMEMO storage."""
 
         def __init__(self, json_file_path: Path) -> None:
@@ -60,12 +63,12 @@ if OMEMO_AVAILABLE and XEP_0384 is not None:
                 content = f.read().strip()
                 self._data = json.loads(content) if content else {}
 
-        async def _load(self, key: str) -> Maybe[JSONType]:  # type: ignore[valid-type]
+        async def _load(self, key: str) -> Maybe[JSONType]:
             if key in self._data:
                 return Just(self._data[key])
             return Nothing()
 
-        async def _store(self, key: str, value: JSONType) -> None:  # type: ignore[valid-type]
+        async def _store(self, key: str, value: JSONType) -> None:
             self._data[key] = value
             self._write()
 
@@ -84,7 +87,7 @@ if OMEMO_AVAILABLE and XEP_0384 is not None:
             os.chmod(self._json_file_path, 0o600)
 
 
-    class XEP_0384Impl(XEP_0384):  # type: ignore[misc,valid-type]
+    class _XEP_0384Impl(XEP_0384):
         """slixmpp-omemo plugin implementation for BanBot."""
 
         default_config = {
@@ -101,7 +104,7 @@ if OMEMO_AVAILABLE and XEP_0384 is not None:
             super().plugin_init()
 
         @property
-        def storage(self) -> Storage:  # type: ignore[valid-type]
+        def storage(self) -> Storage:
             return self._storage
 
         @property
@@ -110,7 +113,7 @@ if OMEMO_AVAILABLE and XEP_0384 is not None:
 
         async def _devices_blindly_trusted(
             self,
-            blindly_trusted: frozenset[DeviceInformation],  # type: ignore[valid-type]
+            blindly_trusted: frozenset[DeviceInformation],
             identifier: str | None,
         ) -> None:
             jid_count = len({
@@ -127,7 +130,7 @@ if OMEMO_AVAILABLE and XEP_0384 is not None:
 
         async def _prompt_manual_trust(
             self,
-            manually_trusted: frozenset[DeviceInformation],  # type: ignore[valid-type]
+            manually_trusted: frozenset[DeviceInformation],
             identifier: str | None,
         ) -> None:
             log.warning(
@@ -136,10 +139,8 @@ if OMEMO_AVAILABLE and XEP_0384 is not None:
                 len(manually_trusted),
             )
 
-
-    register_plugin(XEP_0384Impl)
-else:
-    XEP_0384Impl = None  # type: ignore[assignment]
+    XEP_0384Impl = _XEP_0384Impl
+    register_plugin(_XEP_0384Impl)
 
 from .core import OmemoCoreMixin  # noqa: E402
 from .devices import OmemoDeviceMixin  # noqa: E402

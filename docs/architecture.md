@@ -470,6 +470,19 @@ the same owner-task isolation principle as DM reply routing; background tasks
 spawned by an encrypted DM command therefore cannot inherit that command's forced
 encryption state.
 
+The OMEMO runtime and `!omemo` command dispatcher are now inside the typed
+boundary as well. Core encryption, device diagnostics, status and reset helpers
+declare their Slixmpp/cross-mixin dependencies through explicit host Protocols,
+including plugin registration, message creation, live occupants, audit output and
+the shared messaging layer. Incoming stanzas that visibly contain an OMEMO
+payload are handled fail-closed: when OMEMO is disabled, the plugin is missing,
+or plugin inspection fails, the stanza is ignored instead of reinterpreting its
+fallback body as plaintext. MUC recipient collection treats occupant JIDs as
+untrusted input and skips malformed entries without preventing delivery to valid
+recipients. OMEMO reset confirmation is also idempotent while a restart is
+pending, preventing repeated confirmations from rotating metadata again or
+scheduling duplicate restart tasks.
+
 ### Deployment and health ownership
 
 The deploy frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` and adds

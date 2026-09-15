@@ -223,6 +223,24 @@ async def test_omemo_recipients_for_room_uses_visible_occupant_jids_only():
 
 
 @pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_omemo_recipients_for_room_skips_malformed_occupant_jids():
+    bot = OmemoProbe()
+    bot.occupants["room@conference.example.test"]["broken"] = {
+        "jid": "not a valid jid",
+    }
+
+    recipients = await bot._omemo_recipients_for_room("room@conference.example.test")
+    bares = {jid.bare for jid in recipients}
+
+    assert bares == {
+        "alice@example.test",
+        "bob@example.test",
+        "bot@example.test",
+    }
+
+
+@pytest.mark.omemo
 def test_extract_unusable_omemo_recipients():
     bot = OmemoProbe()
     # Intentionally mixed quoting verifies parser robustness against
@@ -236,6 +254,17 @@ def test_extract_unusable_omemo_recipients():
         "envsbot@example.org",
         "user@example.org",
     }
+
+
+@pytest.mark.omemo
+def test_extract_unusable_omemo_recipients_skips_malformed_jid_tokens():
+    bot = OmemoProbe()
+    exc = RuntimeError(
+        "bad recipients: "
+        "frozenset({'bad@ value', 'good@example.org'})"
+    )
+
+    assert bot._extract_unusable_omemo_recipients(exc) == {"good@example.org"}
 
 
 @pytest.mark.omemo
@@ -353,6 +382,46 @@ async def test_decrypt_incoming_plaintext_message_does_not_call_omemo_backend():
     assert result is msg
     assert encrypted is False
     assert plugin.decrypt_calls == 0
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_decrypt_incoming_omemo_message_fails_closed_when_omemo_is_disabled(
+    omemo_payload_xml,
+):
+    bot = OmemoProbe()
+    bot.omemo_enabled = False
+    msg = make_message(omemo_payload_xml)
+
+    result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
+
+    assert result is None
+    assert encrypted is True
+
+
+class FailingEncryptionCheckPlugin(FakeDecryptPlugin):
+    def is_encrypted(self, msg):
+        raise RuntimeError("sensitive plugin failure details")
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_decrypt_incoming_omemo_message_fails_closed_when_plugin_check_fails(
+    omemo_payload_xml,
+    caplog,
+):
+    bot = OmemoProbe()
+    bot.plugin = {"xep_0384": FailingEncryptionCheckPlugin()}
+    bot.omemo_ready = ReadyFlag(True)
+    msg = make_message(omemo_payload_xml)
+
+    with caplog.at_level("WARNING", logger="banbot.omemo"):
+        result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
+
+    assert result is None
+    assert encrypted is True
+    assert "could not inspect encrypted incoming message" in caplog.text
+    assert "sensitive plugin failure details" not in caplog.text
 
 
 @pytest.mark.omemo
@@ -740,6 +809,52 @@ async def test_cmd_omemo_reset_requires_confirm_and_rotates_storage(tmp_path, mo
     assert bot.audited[-1][0] == "omemo_reset"
     assert list(tmp_path.glob("omemo.json.bak-*"))
     assert list(tmp_path.glob("omemo.identity.json.bak-*"))
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_cmd_omemo_reset_confirm_is_idempotent_while_restart_is_pending(
+    tmp_path,
+    monkeypatch,
+):
+    import config
+
+    storage = tmp_path / "omemo.json"
+    storage.write_text('{"old": true}', encoding="utf8")
+    metadata = storage.with_name("omemo.identity.json")
+    metadata.write_text('{"jid": "old@example.test"}', encoding="utf8")
+
+    bot = OmemoProbe()
+    bot.omemo_storage_file = str(storage)
+    bot.omemo_ready = ReadyFlag(True)
+    monkeypatch.setattr(config, "JID", "bot@example.test", raising=False)
+    monkeypatch.setattr(config, "RESOURCE", "service", raising=False)
+    monkeypatch.setattr(config, "NICK", "BanBot", raising=False)
+
+    scheduled = []
+    monkeypatch.setattr(
+        bot,
+        "_schedule_omemo_reset_restart",
+        lambda: scheduled.append("restart"),
+    )
+
+    await bot._cmd_omemo_reset(
+        "admin@conference.example.org",
+        actor="admin@example.org",
+        confirm=True,
+    )
+    backups_after_first_reset = sorted(tmp_path.glob("*.bak-*"))
+
+    await bot._cmd_omemo_reset(
+        "admin@conference.example.org",
+        actor="admin@example.org",
+        confirm=True,
+    )
+
+    assert scheduled == ["restart"]
+    assert sorted(tmp_path.glob("*.bak-*")) == backups_after_first_reset
+    assert "already prepared and waiting for restart" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["encrypted"] is False
 
 
 @pytest.mark.omemo
