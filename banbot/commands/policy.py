@@ -1,16 +1,27 @@
 """Public policy/rules command handling."""
 
+from typing import TYPE_CHECKING
+
 from .context import admin_room
 
+if TYPE_CHECKING:
+    from ..contracts import CommandPolicyMixinHost
 
-class CommandPolicyMixin:
+    class _CommandPolicyMixinContract(CommandPolicyMixinHost):
+        pass
+else:
+    class _CommandPolicyMixinContract:
+        pass
+
+
+class CommandPolicyMixin(_CommandPolicyMixinContract):
     def _format_public_policy_text(self, text: str, room: str) -> str:
         """Format public policy text with simple placeholders."""
         replacements = {
             "bot_name": "muc_banbot",
             "prefix": self.command_prefix,
             "room": room,
-            "room_count": str(len(getattr(self, "protected_rooms", []))),
+            "room_count": str(len(self.protected_rooms)),
             "admin_room": admin_room(),
         }
 
@@ -95,6 +106,14 @@ class CommandPolicyMixin:
                 return
 
             text = " ".join(args[1:]).strip()
+            if not text:
+                await self.bot_send_message(
+                    mto=room,
+                    mbody=f"❌ Usage: {p}policy set <text>",
+                    mtype="groupchat",
+                )
+                return
+
             await self.set_public_policy_text(text, enabled=True)
 
             await self.bot_send_message(

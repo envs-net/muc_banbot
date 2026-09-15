@@ -166,3 +166,64 @@ async def test_ignore_list_all_disables_paging(temp_db_path):
         assert "Ignorelist (12) - All" in body
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_ignore_add_preserves_all_in_reason_and_canonicalizes_resource_jid(temp_db_path):
+    bot = await make_bot()
+    try:
+        await bot.cmd_ignore(
+            ["add", "User@Example.org/Laptop", "trusted", "for", "all", "rooms"],
+            "admin@conference.example.test",
+            actor="admin@example.test",
+        )
+
+        db = bot._require_db()
+        async with db.execute(
+            "SELECT target, target_type, reason FROM ignorelist WHERE target_type = 'jid'"
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row == ("user@example.org", "jid", "trusted for all rooms")
+        assert bot.is_ignored_jid("user@example.org/phone")
+        assert "Added user@example.org" in bot.sent[-1]["mbody"]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_ignore_rm_accepts_canonicalized_jid_and_domain_forms(temp_db_path):
+    bot = await make_bot()
+    try:
+        await bot.cmd_ignore(["add", "user@example.org"], "admin@conference.example.test")
+        await bot.cmd_ignore(["rm", "USER@example.org/desktop"], "admin@conference.example.test")
+        assert not bot.is_ignored_jid("user@example.org")
+        assert "Removed user@example.org" in bot.sent[-1]["mbody"]
+
+        await bot.cmd_ignore(["add", "*.example.net"], "admin@conference.example.test")
+        await bot.cmd_ignore(["rm", "example.net."], "admin@conference.example.test")
+        assert not bot.is_ignored_domain("example.net")
+        assert "Removed *.example.net" in bot.sent[-1]["mbody"]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_ignore_setup_canonicalizes_legacy_resource_jid_storage(temp_db_path):
+    bot = await make_bot()
+    try:
+        db = bot._require_db()
+        await db.execute(
+            "INSERT INTO ignorelist (target, target_type, reason, added_by) VALUES (?, 'jid', ?, ?)",
+            ("Legacy@Example.org/OldResource", "legacy", "migration"),
+        )
+        await db.commit()
+
+        await bot.setup_ignorelist()
+
+        async with db.execute("SELECT target FROM ignorelist WHERE target_type = 'jid'") as cursor:
+            row = await cursor.fetchone()
+        assert row == ("legacy@example.org",)
+        assert bot.is_ignored_jid("legacy@example.org/new-resource")
+    finally:
+        await bot.db.close()

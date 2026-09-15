@@ -584,3 +584,13 @@ implementations.
 Status health uses the shared task-supervisor facts and message-based
 `HealthCheck` builder.  BanBot still owns moderation-specific severity policy,
 protected-room admin/owner checks, RTBL state and database statistics.
+
+### Ignorelist, policy, help, and usage contracts
+
+The ignorelist and its command dispatcher now use explicit host contracts for
+database, moderation, audit, actor-resolution and messaging dependencies.
+Ignorelist JIDs are canonicalized to bare JIDs, documented `rm` removal is
+supported, and paging markers are interpreted only for list operations so words
+such as `all` remain intact inside reasons. Policy/help/usage rendering is also
+typed; empty policy text is rejected and focused help aliases/room-invite usage
+stay aligned with the command surface.

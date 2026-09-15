@@ -1,9 +1,20 @@
 """Ignorelist/whitelist admin command dispatch."""
 
+from typing import TYPE_CHECKING
+
 from ..locks import ban_state_lock
 
+if TYPE_CHECKING:
+    from ..contracts import CommandIgnoreMixinHost
 
-class CommandIgnoreMixin:
+    class _CommandIgnoreMixinContract(CommandIgnoreMixinHost):
+        pass
+else:
+    class _CommandIgnoreMixinContract:
+        pass
+
+
+class CommandIgnoreMixin(_CommandIgnoreMixinContract):
     async def _dispatch_ignore_command(self, room: str, nick: str, args: list[str], cmd: str) -> None:
         actor_jid = self._actor_jid_from_room_nick(room, nick)
         async with ban_state_lock(self):

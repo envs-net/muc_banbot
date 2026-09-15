@@ -391,7 +391,7 @@ class RoomInviteMixin(_RoomInviteMixinContract):
             "Usage:\n"
             f"  {p}room invite list [all|page|last]\n"
             f"  {p}room invite accept <id>\n"
-            f"  {p}room invite decline/remove/delete <id>\n"
+            f"  {p}room invite decline/remove/delete/del/rm <id>\n"
             f"  {p}room invite cleanup [expired]"
         )
 

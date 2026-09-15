@@ -1,6 +1,9 @@
 """Global ignorelist/whitelist protection for JIDs and domain-based bans."""
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 from .utils import (
     domain_matches,
@@ -12,14 +15,26 @@ from .utils import (
     without_all_pages_arg,
 )
 
+if TYPE_CHECKING:
+    import aiosqlite
+
+    from .contracts import IgnorelistMixinHost
+
+    class _IgnorelistMixinContract(IgnorelistMixinHost):
+        pass
+else:
+    class _IgnorelistMixinContract:
+        pass
+
 log = logging.getLogger(__name__)
 
 
-class IgnorelistMixin:
+class IgnorelistMixin(_IgnorelistMixinContract):
 
     async def setup_ignorelist(self) -> None:
         """Create ignorelist table, migrate old RTBL ignorelist entries, and load into memory."""
-        await self.db.execute("""
+        db = self._require_db()
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS ignorelist (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 target      TEXT    NOT NULL UNIQUE,
@@ -29,18 +44,18 @@ class IgnorelistMixin:
                 created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
             )
         """)
-        await self.db.execute(
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_ignorelist_target ON ignorelist(target)"
         )
 
         # One-time compatibility migration from the old RTBL-only ignorelist.
-        async with self.db.execute(
+        async with db.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rtbl_ignorelist'"
         ) as cursor:
             old_table = await cursor.fetchone()
 
         if old_table:
-            await self.db.execute("""
+            await db.execute("""
                 INSERT OR IGNORE INTO ignorelist
                     (target, target_type, reason, added_by, created_at)
                 SELECT
@@ -48,25 +63,71 @@ class IgnorelistMixin:
                 FROM rtbl_ignorelist
             """)
 
-        await self.db.commit()
+        await self._normalize_ignorelist_storage(db)
+        await db.commit()
         await self._load_ignorelist_from_db()
 
+    async def _normalize_ignorelist_storage(self, db: aiosqlite.Connection) -> None:
+        """Canonicalize legacy ignorelist targets before loading the runtime cache."""
+        async with db.execute("SELECT id, target, target_type FROM ignorelist") as cursor:
+            rows = await cursor.fetchall()
+
+        for row_id, target, target_type in rows:
+            raw_target = str(target or "").strip().lower()
+            if not raw_target:
+                continue
+
+            if target_type == "jid":
+                normalized = self.bare_jid(raw_target)
+            elif target_type == "domain":
+                domain = raw_target.lstrip("*.").strip(".")
+                normalized = f"*.{domain}" if domain else None
+            else:
+                continue
+
+            if not normalized or normalized == raw_target:
+                continue
+
+            async with db.execute(
+                "SELECT id FROM ignorelist WHERE target = ? AND id != ? LIMIT 1",
+                (normalized, row_id),
+            ) as cursor:
+                duplicate = await cursor.fetchone()
+
+            if duplicate:
+                await db.execute("DELETE FROM ignorelist WHERE id = ?", (row_id,))
+                log.info(
+                    "Ignorelist: removed duplicate legacy target %s in favor of canonical %s",
+                    raw_target,
+                    normalized,
+                )
+            else:
+                await db.execute(
+                    "UPDATE ignorelist SET target = ? WHERE id = ?",
+                    (normalized, row_id),
+                )
+                log.info("Ignorelist: normalized legacy target %s -> %s", raw_target, normalized)
 
     async def _load_ignorelist_from_db(self) -> None:
         """Load ignorelist from DB into in-memory sets."""
         ignore_jids: set[str] = set()
         ignore_domains: set[str] = set()
+        db = self._require_db()
 
-        async with self.db.execute(
+        async with db.execute(
             "SELECT target, target_type FROM ignorelist"
         ) as cursor:
             async for target, target_type in cursor:
                 if not target:
                     continue
                 if target_type == "jid":
-                    ignore_jids.add(target.lower())
+                    bare = self.bare_jid(target)
+                    if bare:
+                        ignore_jids.add(bare)
                 elif target_type == "domain":
-                    ignore_domains.add(target.lstrip("*." ).lower())
+                    domain = str(target).strip().lower().lstrip("*.").strip(".")
+                    if domain:
+                        ignore_domains.add(domain)
 
         self.ignore_jids = ignore_jids
         self.ignore_domains = ignore_domains
@@ -86,7 +147,7 @@ class IgnorelistMixin:
         if not bare:
             return False
 
-        return bare.lower() in getattr(self, "ignore_jids", set())
+        return bare.lower() in self.ignore_jids
 
 
     def is_ignored_domain(self, domain_or_wildcard: str | None) -> bool:
@@ -98,7 +159,7 @@ class IgnorelistMixin:
         if not domain:
             return False
 
-        ignore_domains = getattr(self, "ignore_domains", set())
+        ignore_domains = self.ignore_domains
         if domain in ignore_domains:
             return True
 
@@ -149,12 +210,13 @@ class IgnorelistMixin:
 
     async def _unban_matching_ignore_entries(self, target: str, target_type: str) -> None:
         """Remove active bans that are now protected by a newly added ignorelist entry."""
+        db = self._require_db()
         if target_type == "jid":
             bare = self.bare_jid(target)
             if not bare:
                 return
 
-            async with self.db.execute(
+            async with db.execute(
                 "SELECT 1 FROM bans WHERE target_type = 'jid' AND target = ? LIMIT 1",
                 (bare,),
             ) as cursor:
@@ -167,7 +229,7 @@ class IgnorelistMixin:
             return
 
         # Remove an exact wildcard-domain ban if one exists.
-        async with self.db.execute(
+        async with db.execute(
             "SELECT 1 FROM bans WHERE target_type = 'domain' AND target = ? LIMIT 1",
             (domain,),
         ) as cursor:
@@ -177,7 +239,7 @@ class IgnorelistMixin:
         # Remove concrete JID bans that were applied from RTBL domain matches.
         # This lets `!ignore add user@example.org`, `!ignore add *.example.org`,
         # or the `!whitelist` alias immediately clear already-applied RTBL bans.
-        async with self.db.execute(
+        async with db.execute(
             "SELECT jid FROM bans WHERE issuer = 'rtbl' AND target_type = 'jid' AND jid IS NOT NULL"
         ) as cursor:
             rows = [row[0] for row in await cursor.fetchall()]
@@ -221,13 +283,20 @@ class IgnorelistMixin:
         #   !ignore all / !whitelist all   -> list all
         #   !ignore list all               -> list all
         raw_args = list(args or [])
-        show_all = wants_all_pages(raw_args)
-        args = without_all_pages_arg(raw_args)
-
-        if not args:
+        show_all = False
+        if not raw_args:
             args = ["list"]
-        elif args[0].lower() == "all":
+        elif raw_args[0].lower() == "all":
+            # Short form: ``!ignore all``.  Paging markers are interpreted
+            # only for list operations so a reason containing the word
+            # "all" is preserved verbatim for add/update operations.
             args = ["list"]
+            show_all = True
+        elif raw_args[0].lower() == "list":
+            show_all = wants_all_pages(raw_args[1:])
+            args = [raw_args[0], *without_all_pages_arg(raw_args[1:])]
+        else:
+            args = raw_args
 
         sub_action = args[0].lower()
 
@@ -240,7 +309,8 @@ class IgnorelistMixin:
         # list
         # ----------------------------------------------------------------
         if sub_action == "list":
-            async with self.db.execute(
+            db = self._require_db()
+            async with db.execute(
                 "SELECT COUNT(*) FROM ignorelist"
             ) as cursor:
                 row = await cursor.fetchone()
@@ -266,7 +336,7 @@ class IgnorelistMixin:
 
             per_page = get_list_page_size(self)
             if show_all:
-                async with self.db.execute(
+                async with db.execute(
                     "SELECT target, target_type, reason, added_by FROM ignorelist "
                     "ORDER BY target_type, target",
                 ) as cursor:
@@ -278,7 +348,7 @@ class IgnorelistMixin:
                 offset = (resolved_page - 1) * per_page
                 total_pages = max(1, (total + per_page - 1) // per_page)
 
-                async with self.db.execute(
+                async with db.execute(
                     "SELECT target, target_type, reason, added_by FROM ignorelist "
                     "ORDER BY target_type, target LIMIT ? OFFSET ?",
                     (per_page, offset),
@@ -314,7 +384,8 @@ class IgnorelistMixin:
             reason = " ".join(args[2:]) if len(args) > 2 else None
 
             if "@" in raw_target and not raw_target.startswith("*." ):
-                if not validate_jid_format(raw_target):
+                bare_target = self.bare_jid(raw_target)
+                if not bare_target or not validate_jid_format(bare_target):
                     await self.bot_send_message(
                         mto=room,
                         mbody=(
@@ -325,7 +396,7 @@ class IgnorelistMixin:
                     )
                     return
 
-                target = raw_target
+                target = bare_target
                 target_type = "jid"
             else:
                 is_valid_domain, _error_msg = validate_domain_ban(raw_target)
@@ -343,7 +414,8 @@ class IgnorelistMixin:
                 target = f"*.{raw_target.lstrip('*.').strip('.')}"
                 target_type = "domain"
 
-            await self.db.execute(
+            db = self._require_db()
+            await db.execute(
                 """
                 INSERT INTO ignorelist (target, target_type, reason, added_by)
                 VALUES (?, ?, ?, ?)
@@ -353,7 +425,7 @@ class IgnorelistMixin:
                 """,
                 (target, target_type, reason, actor),
             )
-            await self.db.commit()
+            await db.commit()
             await self._load_ignorelist_from_db()
 
             # Ensure the ignorelisted target is no longer actively banned.
@@ -385,7 +457,7 @@ class IgnorelistMixin:
         # ----------------------------------------------------------------
         # remove
         # ----------------------------------------------------------------
-        if sub_action in ("remove", "del", "delete"):
+        if sub_action in ("remove", "del", "delete", "rm"):
             if len(args) < 2:
                 await self.bot_send_message(
                     mto=room,
@@ -395,11 +467,16 @@ class IgnorelistMixin:
                 return
 
             raw_target = args[1].strip().lower()
-            targets_to_try = sorted(set([
-                raw_target,
-                raw_target.lstrip("*."),
-                f"*.{raw_target.lstrip('*.')}",
-            ]))
+            if "@" in raw_target:
+                bare_target = self.bare_jid(raw_target)
+                targets_to_try = sorted({target for target in (raw_target, bare_target) if target})
+            else:
+                domain = raw_target.lstrip("*.").strip(".")
+                targets_to_try = sorted(
+                    {target for target in (raw_target, domain, f"*.{domain}" if domain else "") if target}
+                )
+
+            db = self._require_db()
 
             found = None
             found_type = None
@@ -407,7 +484,7 @@ class IgnorelistMixin:
             found_added_by = None
 
             for t in targets_to_try:
-                async with self.db.execute(
+                async with db.execute(
                     """
                     SELECT target, target_type, reason, added_by
                     FROM ignorelist
@@ -432,8 +509,8 @@ class IgnorelistMixin:
                 )
                 return
 
-            await self.db.execute("DELETE FROM ignorelist WHERE target = ?", (found,))
-            await self.db.commit()
+            await db.execute("DELETE FROM ignorelist WHERE target = ?", (found,))
+            await db.commit()
             await self._load_ignorelist_from_db()
 
             self.log_event(
@@ -461,6 +538,6 @@ class IgnorelistMixin:
 
         await self.bot_send_message(
             mto=room,
-            mbody=f"❌ Unknown sub-command: {sub_action}\nAvailable: list / add / remove",
+            mbody=f"❌ Unknown sub-command: {sub_action}\nAvailable: list / add / remove / rm",
             mtype="groupchat",
         )

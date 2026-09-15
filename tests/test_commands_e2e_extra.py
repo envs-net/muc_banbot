@@ -803,6 +803,19 @@ async def test_policy_set_without_text_shows_usage(fake_msg_factory, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_policy_set_rejects_whitespace_only_text():
+    bot = PolicyCommandBot()
+    bot.policy_enabled = True
+    bot.policy_text = "keep existing policy"
+
+    await bot.cmd_policy(["set", "   "], "admin@conference.example.test")
+
+    assert bot.policy_enabled is True
+    assert bot.policy_text == "keep existing policy"
+    assert bot.sent[-1]["mbody"] == "❌ Usage: !policy set <text>"
+
+
+@pytest.mark.asyncio
 async def test_policy_show_with_existing_text_includes_commands(fake_msg_factory, monkeypatch):
     commands = importlib.import_module("banbot.commands")
 
@@ -875,6 +888,7 @@ async def test_admin_help_room_shows_focused_room_usage(fake_msg_factory, monkey
     assert "!room/rooms list [joined|offline|problems] [all|page|last]" in body
     assert "!room rejoin <room_jid|all>" in body
     assert "!room invite accept <id>" in body
+    assert "!room invite decline/remove/delete/del/rm <id>" in body
     assert bot.room_calls == []
 
 
@@ -934,6 +948,7 @@ async def test_admin_help_all_command_topics_have_focused_usage(fake_msg_factory
         "backup": "!backup list [all|page|last]",
         "restore": "!restore <filename|latest> confirm",
         "room": "!room/rooms list [joined|offline|problems] [all|page|last]",
+        "rooms": "!room/rooms list [joined|offline|problems] [all|page|last]",
         "room invite": "!room invite cleanup [expired]",
         "invite": "!room invite accept <id>",
         "policy": "!policy show",

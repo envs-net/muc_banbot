@@ -1,9 +1,20 @@
 """Help text generation for BanBot commands."""
 
+from typing import TYPE_CHECKING
+
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
 
+if TYPE_CHECKING:
+    from ..contracts import CommandHelpMixinHost
 
-class CommandHelpMixin:
+    class _CommandHelpMixinContract(CommandHelpMixinHost):
+        pass
+else:
+    class _CommandHelpMixinContract:
+        pass
+
+
+class CommandHelpMixin(_CommandHelpMixinContract):
     def _admin_topic_help_text(self, topic: str | list[str]) -> str:
         """Return focused help for one admin command topic."""
         if isinstance(topic, str):
@@ -16,6 +27,7 @@ class CommandHelpMixin:
         normalized = raw_topic
         aliases = {
             "blacklist": "banlist",
+            "rooms": "room",
             "rules": "policy",
             "whitelist": "ignore",
             "reloadconfig": "reload",
@@ -31,14 +43,10 @@ class CommandHelpMixin:
         first = normalized.split()[0] if normalized else ""
         normalized = aliases.get(first, normalized) if len(normalized.split()) == 1 else normalized
 
-        room_invite_help = getattr(self, "_room_invite_usage", None)
-        if room_invite_help is None:
-            room_invite_help = self._room_invite_usage_text
-
         topic_help = {
             "help": self._help_usage_text,
             "room": self._room_usage_text,
-            "room invite": room_invite_help,
+            "room invite": self._room_invite_usage_text,
             "redact": self._redact_usage_text,
             "policy": self._policy_usage_text,
             "backup": self._backup_usage_text,
@@ -190,7 +198,7 @@ class CommandHelpMixin:
             f"{p}history <target> [all|page|last] - show moderation history\n\n"
 
             "✅ Ignorelist / Whitelist\n"
-            f"{p}ignore [list|all|page|last] - show global ignorelist (alias: {p}whitelist)\n"
+            f"{p}ignore [list] [all|page|last] - show global ignorelist (alias: {p}whitelist)\n"
             f"{p}ignore add <jid|domain> [reason] - protect from all bans\n"
             f"{p}ignore remove/delete/del/rm <jid|domain> - remove from ignorelist\n"
             f"{p}whitelist [list|all|page|last|add|remove|delete|del|rm] - alias for {p}ignore\n\n"

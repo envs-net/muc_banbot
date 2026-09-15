@@ -1,7 +1,18 @@
 """Focused usage text helpers for BanBot commands."""
 
+from typing import TYPE_CHECKING
 
-class CommandUsageMixin:
+if TYPE_CHECKING:
+    from ..contracts import CommandUsageMixinHost
+
+    class _CommandUsageMixinContract(CommandUsageMixinHost):
+        pass
+else:
+    class _CommandUsageMixinContract:
+        pass
+
+
+class CommandUsageMixin(_CommandUsageMixinContract):
 
     def _protection_usage_text(self) -> str:
         """Return usage text for protection commands."""
@@ -147,7 +158,7 @@ class CommandUsageMixin:
         p = self.command_prefix
         return (
             "Usage:\n"
-            f"  {p}ignore [list|all|page|last]\n"
+            f"  {p}ignore [list] [all|page|last]\n"
             f"  {p}ignore add <jid|domain> [reason]\n"
             f"  {p}ignore remove/delete/del/rm <jid|domain>\n"
             f"  {p}whitelist ... - alias for {p}ignore"
