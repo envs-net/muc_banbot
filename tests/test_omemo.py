@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import json
 import os
@@ -107,6 +108,23 @@ class OmemoProbe(OmemoMixin):
         self.sent = []
         self.audited = []
         self.restart_calls = []
+        self._restart_task = None
+
+    def _restart_task_pending(self):
+        task = self._restart_task
+        return task is not None and not task.done()
+
+    def _schedule_restart_task(self, operation, *, name):
+        if self._restart_task_pending():
+            return False
+        task = asyncio.create_task(operation(), name=name)
+        self._restart_task = task
+        task.add_done_callback(
+            lambda done: setattr(self, "_restart_task", None)
+            if self._restart_task is done
+            else None
+        )
+        return True
 
     async def _restart_process(self):
         self.restart_calls.append("restart")
@@ -855,6 +873,44 @@ async def test_cmd_omemo_reset_confirm_is_idempotent_while_restart_is_pending(
     assert sorted(tmp_path.glob("*.bak-*")) == backups_after_first_reset
     assert "already prepared and waiting for restart" in bot.sent[-1]["mbody"]
     assert bot.sent[-1]["encrypted"] is False
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_cmd_omemo_reset_uses_existing_process_restart(tmp_path, monkeypatch):
+    import config
+
+    storage = tmp_path / "omemo.json"
+    storage.write_text('{"old": true}', encoding="utf8")
+
+    bot = OmemoProbe()
+    bot.omemo_storage_file = str(storage)
+    bot.omemo_ready = ReadyFlag(True)
+    monkeypatch.setattr(config, "JID", "bot@example.test", raising=False)
+    monkeypatch.setattr(config, "RESOURCE", "service", raising=False)
+    monkeypatch.setattr(config, "NICK", "BanBot", raising=False)
+
+    class PendingRestart:
+        def done(self):
+            return False
+
+    bot._restart_task = PendingRestart()
+    scheduled = []
+    monkeypatch.setattr(
+        bot,
+        "_schedule_omemo_reset_restart",
+        lambda: scheduled.append("restart"),
+    )
+
+    await bot._cmd_omemo_reset(
+        "admin@conference.example.org",
+        actor="admin@example.org",
+        confirm=True,
+    )
+
+    assert scheduled == []
+    assert bot.omemo_reset_pending_restart is True
+    assert "A process restart is already scheduled" in bot.sent[-1]["mbody"]
 
 
 @pytest.mark.omemo

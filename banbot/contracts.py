@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 import aiosqlite
@@ -73,7 +73,7 @@ class ModerationMixinHost(Protocol):
         **kwargs: Any,
     ) -> Any: ...
 
-    def is_bot_admin_or_owner(self, room: str) -> bool: ...
+    def is_bot_admin_or_owner(self, room: str, *, log_missing: bool = True) -> bool: ...
 
     async def maybe_auto_redact_after_ban(
         self,
@@ -331,7 +331,7 @@ class SyncMixinHost(Protocol):
         **kwargs: Any,
     ) -> Any: ...
 
-    def is_bot_admin_or_owner(self, room: str) -> bool: ...
+    def is_bot_admin_or_owner(self, room: str, *, log_missing: bool = True) -> bool: ...
 
     async def apply_ban_to_room(
         self,
@@ -396,7 +396,7 @@ class ProtectionActionsMixinHost(Protocol):
 
     def _require_db(self) -> aiosqlite.Connection: ...
 
-    def is_bot_admin_or_owner(self, room: str) -> bool: ...
+    def is_bot_admin_or_owner(self, room: str, *, log_missing: bool = True) -> bool: ...
 
     def protection_config(self, name: str) -> dict[str, Any]: ...
 
@@ -1184,6 +1184,65 @@ class CommandRouterMixinHost(Protocol):
     ) -> bool: ...
 
 
+class CommandRuntimeMixinHost(Protocol):
+    """Runtime command and restart lifecycle hooks required by command handlers."""
+
+    command_prefix: str
+    version_check_url: str | None
+    tasks: Any
+    runtime_watchdog: Any
+    _restart_task: asyncio.Task[Any] | None
+    _restart_schedule_lock: asyncio.Lock
+    _shutdown_in_progress: bool
+    _shutdown_complete: bool
+
+    def _actor_jid_from_room_nick(self, room: str, nick: str) -> str | None: ...
+
+    async def _cmd_config(
+        self,
+        room: str,
+        args: list[str] | None = None,
+        actor: str | None = None,
+    ) -> None: ...
+
+    async def _cmd_reloadconfig(self, room: str) -> None: ...
+
+    async def _cmd_status(self, room: str, args: list[str] | None = None) -> None: ...
+
+    def _tasks_usage_text(self) -> str: ...
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        **kwargs: Any,
+    ) -> Any: ...
+
+    async def check_for_updates_once(
+        self,
+        announce: bool = True,
+    ) -> tuple[bool, str | None, str | None]: ...
+
+    async def shutdown(self) -> None: ...
+
+    async def flush_redaction_index(self) -> None: ...
+
+    async def stop_background_tasks(self) -> None: ...
+
+    def disconnect(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def _schedule_restart_task(
+        self,
+        operation: Callable[[], Awaitable[None]],
+        *,
+        name: str,
+    ) -> bool: ...
+
+    def _restart_task_pending(self) -> bool: ...
+
+
 class MessagingMixinHost(Protocol):
     """Transport hooks required by the centralized outbound messaging layer."""
 
@@ -1196,7 +1255,7 @@ class MessagingMixinHost(Protocol):
         *,
         mto: str,
         mbody: str,
-        mtype: str,
+        mtype: str = "groupchat",
         **kwargs: Any,
     ) -> Any: ...
 
@@ -1380,7 +1439,15 @@ class OmemoResetMixinHost(Protocol):
     omemo_enabled: bool
     omemo_reset_pending_restart: bool
     omemo_ready: asyncio.Event
-    _restart_task: asyncio.Task[Any] | None
+
+    def _schedule_restart_task(
+        self,
+        operation: Callable[[], Awaitable[None]],
+        *,
+        name: str,
+    ) -> bool: ...
+
+    def _restart_task_pending(self) -> bool: ...
 
     async def bot_send_message(
         self,

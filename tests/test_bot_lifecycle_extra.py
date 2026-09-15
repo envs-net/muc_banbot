@@ -139,6 +139,7 @@ def test_banbot_init_sets_runtime_state_and_registers_plugins(monkeypatch):
 
     assert str(bot.boundjid).startswith("bot@example.org/tests")
     assert bot.db is None
+    assert bot._restart_task is None
     assert bot.ban_cache == {}
     assert bot.protected_rooms == set()
     assert bot.registered_rooms == set()
@@ -948,6 +949,8 @@ async def test_shutdown_cancels_pending_reconnect_before_disconnect(monkeypatch)
     assert bot._shutdown_complete is True
     assert bot.reconnect_task is None
     assert [phase.name for phase in bot._last_shutdown_phases] == [
+        "restart",
+        "process_startup",
         "reconnect",
         "redaction",
         "background_tasks",
@@ -957,6 +960,110 @@ async def test_shutdown_cancels_pending_reconnect_before_disconnect(monkeypatch)
         "xmpp",
     ]
     assert all(phase.healthy for phase in bot._last_shutdown_phases)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_pending_restart_requested_by_another_task(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    restart_started = asyncio.Event()
+
+    async def delayed_restart():
+        restart_started.set()
+        await asyncio.Event().wait()
+
+    bot._restart_task = asyncio.create_task(delayed_restart())
+    await asyncio.wait_for(restart_started.wait(), timeout=1)
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    bot.flush_redaction_index = noop
+    bot.stop_background_tasks = noop
+    bot.runtime_watchdog.stop = noop
+    bot.tasks.cancel_all = noop
+    bot.disconnect = lambda **_kwargs: None
+
+    restart_task = bot._restart_task
+    await asyncio.wait_for(bot.shutdown(), timeout=1)
+
+    assert restart_task is not None
+    assert restart_task.cancelled()
+    assert bot._restart_task is None
+    restart_phase = next(
+        phase for phase in bot._last_shutdown_phases if phase.name == "restart"
+    )
+    assert restart_phase.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_shutdown_continues_when_process_startup_cancellation_raises(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    startup_started = asyncio.Event()
+
+    async def broken_startup():
+        startup_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise RuntimeError("startup cleanup failed") from None
+
+    bot._process_startup_task = asyncio.create_task(broken_startup())
+    await asyncio.wait_for(startup_started.wait(), timeout=1)
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    disconnect_calls = []
+    bot.flush_redaction_index = noop
+    bot.stop_background_tasks = noop
+    bot.runtime_watchdog.stop = noop
+    bot.tasks.cancel_all = noop
+    bot.disconnect = lambda **kwargs: disconnect_calls.append(kwargs)
+
+    await asyncio.wait_for(bot.shutdown(), timeout=1)
+
+    assert bot._shutdown_complete is True
+    assert bot._process_startup_task is None
+    assert disconnect_calls == [{"wait": False}]
+    process_phase = next(
+        phase for phase in bot._last_shutdown_phases if phase.name == "process_startup"
+    )
+    assert process_phase.status == "failed"
+    xmpp_phase = next(
+        phase for phase in bot._last_shutdown_phases if phase.name == "xmpp"
+    )
+    assert xmpp_phase.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_stop_background_tasks_never_cancels_the_current_task():
+    current = asyncio.current_task()
+    assert current is not None
+
+    class Supervisor:
+        async def cancel_group(self, _group):
+            return 0
+
+        def owns(self, _task):
+            return False
+
+    class Bot:
+        def __init__(self):
+            self.tasks = Supervisor()
+            self.outbox_task = None
+            self._rtbl_refresh_task = None
+            self.unban_task = current
+            self.health_check_task = None
+            self.version_check_task = None
+            self.redaction_cleanup_task = None
+            self.redaction_operation_tasks = set()
+
+    bot = Bot()
+    await bot_module.BanBot.stop_background_tasks(bot)
+
+    assert current.cancelled() is False
 
 
 @pytest.mark.asyncio

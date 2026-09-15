@@ -51,14 +51,12 @@ class OmemoResetMixin(_OmemoResetMixinContract):
             if restart_result is not None:
                 log.debug("OMEMO: reset restart helper returned %r", restart_result)
 
-    def _schedule_omemo_reset_restart(self) -> None:
-        """Schedule a delayed restart after OMEMO reset confirmation."""
-        task = asyncio.create_task(self._restart_after_omemo_reset())
-        self._restart_task = task
-
-        clear_restart_task = getattr(self, "_clear_restart_task", None)
-        if callable(clear_restart_task):
-            task.add_done_callback(clear_restart_task)
+    def _schedule_omemo_reset_restart(self) -> bool:
+        """Schedule the delayed OMEMO restart through the shared restart slot."""
+        return self._schedule_restart_task(
+            self._restart_after_omemo_reset,
+            name="omemo-reset-restart",
+        )
 
     async def _cmd_omemo_reset(self, room: str, actor: str | None, confirm: bool) -> None:
         if not confirm:
@@ -98,11 +96,17 @@ class OmemoResetMixin(_OmemoResetMixinContract):
         self.omemo_enabled = False
         self.omemo_reset_pending_restart = True
         restart_available = callable(getattr(self, "_restart_process", None))
+        restart_pending = restart_available and self._restart_task_pending()
         lines = [
             "✅ OMEMO storage reset prepared.",
             "OMEMO is disabled for this running process until restart.",
         ]
-        if restart_available:
+        if restart_pending:
+            lines.append(
+                "A process restart is already scheduled; it will create and publish "
+                "the fresh OMEMO identity."
+            )
+        elif restart_available:
             lines.append(
                 f"Restarting in {__import__('banbot.omemo', fromlist=['OMEMO_RESET_RESTART_DELAY_SECONDS']).OMEMO_RESET_RESTART_DELAY_SECONDS} seconds "
                 "to create and publish a fresh OMEMO identity."
@@ -132,8 +136,9 @@ class OmemoResetMixin(_OmemoResetMixinContract):
             encrypted=False,
         )
 
-        if restart_available:
-            self._schedule_omemo_reset_restart()
+        if restart_available and not restart_pending:
+            if not self._schedule_omemo_reset_restart():
+                log.info("OMEMO: process restart became pending while reset completed")
 
     async def cmd_omemo(self, args: list[str], room: str, actor: str | None = None) -> None:
         """Admin command entry point for OMEMO diagnostics and reset."""

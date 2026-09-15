@@ -417,7 +417,7 @@ intent, preserving command compatibility while avoiding duplicate identities.
 The configured mypy gate intentionally expands incrementally around these
 well-defined contracts. The canonical target, utility, cache, ban-query,
 database, moderation command, moderation core, admin authorization, top-level
-groupchat command entry/routing/registry, room/ban synchronization,
+groupchat command entry/routing/registry, runtime/restart command handling, the main BanBot lifecycle/composition, room/ban synchronization,
 protection action/check/command/storage/notification, RTBL administration
 commands and RTBL subscribe/apply/publish surfaces are now part of the
 mandatory typed production gate. `banbot.contracts` describes
@@ -482,6 +482,20 @@ untrusted input and skips malformed entries without preventing delivery to valid
 recipients. OMEMO reset confirmation is also idempotent while a restart is
 pending, preventing repeated confirmations from rotating metadata again or
 scheduling duplicate restart tasks.
+
+Runtime restart handling now uses one process-wide tracked restart slot shared by
+`!restart` and OMEMO reset. Restart confirmations are serialized across outbound
+reply I/O and the tracked task is created only after the confirmation has been
+handed to the messaging layer, so overlapping handlers cannot launch competing
+shutdown sequences or race the operator acknowledgement. New restart scheduling
+is also refused once final shutdown has begun. An external shutdown cancels a
+separately pending restart task, while a restart task
+that is itself executing shutdown is explicitly left alone so it can finish with
+the supervisor restart exit code. Process-startup cancellation is part of the
+ordered shutdown phase runner; a cleanup failure is therefore recorded as a
+failed phase without preventing watchdog, database, or XMPP cleanup. Legacy
+unmanaged background-task draining also never cancels the task currently running
+shutdown.
 
 ### Deployment and health ownership
 

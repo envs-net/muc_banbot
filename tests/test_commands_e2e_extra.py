@@ -59,6 +59,10 @@ class CommandE2EBot(CommandMixin, MessagingMixin):
         self.flushed_redaction = False
         self.stopped_background_tasks = False
         self.disconnect_calls = []
+        self._restart_task = None
+        self._restart_schedule_lock = asyncio.Lock()
+        self._shutdown_in_progress = False
+        self._shutdown_complete = False
         self.tasks = SimpleNamespace(
             snapshot=lambda include_done=True: [
                 SimpleNamespace(
@@ -442,6 +446,105 @@ async def test_admin_restart_requires_confirmation(fake_msg_factory, monkeypatch
     assert bot.disconnect_calls == []
     assert bot.flushed_redaction is False
     assert bot.stopped_background_tasks is False
+
+
+@pytest.mark.asyncio
+async def test_admin_restart_confirm_is_idempotent_while_restart_is_pending(
+    fake_msg_factory,
+    monkeypatch,
+):
+    commands = importlib.import_module("banbot.commands")
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+        return object()
+
+    monkeypatch.setattr(commands.asyncio, "create_task", fake_create_task)
+    bot = CommandE2EBot()
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!restart confirm"))
+    await bot.on_message(admin_msg(fake_msg_factory, "!restart confirm"))
+
+    assert len(created_tasks) == 1
+    assert bot.sent[-1]["mbody"] == "ℹ️ A restart is already scheduled or in progress."
+    assert bot.sent[-1]["encrypted"] is False
+
+    created_tasks[0].close()
+
+
+@pytest.mark.asyncio
+async def test_admin_restart_confirm_is_serialized_across_overlapping_handlers(
+    fake_msg_factory,
+    monkeypatch,
+):
+    commands = importlib.import_module("banbot.commands")
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+        return object()
+
+    monkeypatch.setattr(commands.asyncio, "create_task", fake_create_task)
+    bot = CommandE2EBot()
+    original_send = bot.bot_send_message
+    first_reply_started = asyncio.Event()
+    release_first_reply = asyncio.Event()
+    blocked_once = False
+
+    async def blocking_send(**kwargs):
+        nonlocal blocked_once
+        if "Restart confirmed" in kwargs.get("mbody", "") and not blocked_once:
+            blocked_once = True
+            first_reply_started.set()
+            await release_first_reply.wait()
+        await original_send(**kwargs)
+
+    bot.bot_send_message = blocking_send
+    loop = asyncio.get_running_loop()
+    first = loop.create_task(bot.on_message(admin_msg(fake_msg_factory, "!restart confirm")))
+    await asyncio.wait_for(first_reply_started.wait(), timeout=1)
+    second = loop.create_task(bot.on_message(admin_msg(fake_msg_factory, "!restart confirm")))
+    await asyncio.sleep(0)
+
+    assert len(created_tasks) == 0
+    assert second.done() is False
+
+    release_first_reply.set()
+    await asyncio.gather(first, second)
+
+    assert len(created_tasks) == 1
+    assert bot.sent[-1]["mbody"] == "ℹ️ A restart is already scheduled or in progress."
+    created_tasks[0].close()
+
+
+@pytest.mark.asyncio
+async def test_admin_restart_is_suppressed_after_shutdown_has_started(
+    fake_msg_factory,
+    monkeypatch,
+):
+    commands = importlib.import_module("banbot.commands")
+
+    monkeypatch.setattr(commands, "ADMIN_ROOM", "admin@conference.example.test")
+    monkeypatch.setattr(commands, "NICK", "BanBot")
+    created_tasks = []
+    monkeypatch.setattr(commands.asyncio, "create_task", lambda coro: created_tasks.append(coro))
+    bot = CommandE2EBot()
+    bot._shutdown_in_progress = True
+
+    await bot.on_message(admin_msg(fake_msg_factory, "!restart confirm"))
+
+    assert created_tasks == []
+    assert "Shutdown is already in progress" in bot.sent[-1]["mbody"]
+    assert bot.sent[-1]["encrypted"] is False
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,8 @@ else:
 
 class MucMixin(BotOccupantMixin, _MucMixinContract):
     _startup_task: asyncio.Task | None
+    reconnect_success_event: asyncio.Event | None
+    reconnect_failure_event: asyncio.Event | None
 
     def _mark_session_reconnecting(self, reason: str) -> None:
         lifecycle = getattr(self, "session_lifecycle", None)

@@ -6,8 +6,10 @@ import logging
 import signal
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from types import FrameType
 
 from .config_loader import format_config_import_error, load_config_module
 
@@ -51,7 +53,7 @@ from .outbox import OutboxMixin
 from .protections import ProtectionMixin
 from .redaction import RedactionMixin
 from .rooms import RoomInviteMixin, RoomMixin
-from .rtbl import RtblMixin
+from .rtbl.mixin import RtblMixin
 from .runtime_watchdog import RuntimeWatchdog
 from .status import StatusMixin
 from .sync import SyncMixin
@@ -128,8 +130,8 @@ def _install_slixmpp_statuses_warning_filter() -> None:
             return None
         return original_handle(self, record)
 
-    logging.Logger.handle = handle_with_statuses_filter
-    logging._banbot_statuses_warning_handle_filter_installed = True
+    logging.Logger.handle = handle_with_statuses_filter  # type: ignore[method-assign]
+    logging._banbot_statuses_warning_handle_filter_installed = True  # type: ignore[attr-defined]
 
 
 _install_slixmpp_statuses_warning_filter()
@@ -204,7 +206,7 @@ class BanBot(
     bare_jid = staticmethod(bare_jid)
     safe_jid = staticmethod(safe_jid)
 
-    def __init__(self, jid: str, password: str, resource: str = None):
+    def __init__(self, jid: str, password: str, resource: str | None = None):
         """
         Initialize the bot with:
         - Connection info (jid/resource/password)
@@ -226,6 +228,8 @@ class BanBot(
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_in_progress = False
         self._shutdown_complete = False
+        self._restart_task: asyncio.Task[None] | None = None
+        self._restart_schedule_lock = asyncio.Lock()
         self._last_startup_phases: tuple[LifecyclePhaseResult, ...] = ()
         self._last_process_startup_phases: tuple[LifecyclePhaseResult, ...] = ()
         self._last_shutdown_phases: tuple[LifecyclePhaseResult, ...] = ()
@@ -288,7 +292,7 @@ class BanBot(
 
         # --- Uptime tracking ---
         self.bot_start_time = time.time()
-        self.server_connect_time = None
+        self.server_connect_time: float | None = None
 
         # --- default config options ---
         self.command_prefix: str = "!"
@@ -436,6 +440,7 @@ class BanBot(
         operation_tasks = list(getattr(self, "redaction_operation_tasks", set()))
         unmanaged_tasks = []
         seen_task_ids: set[int] = set()
+        current_task = asyncio.current_task()
         for task in (
             getattr(self, "outbox_task", None),
             self._rtbl_refresh_task,
@@ -445,7 +450,7 @@ class BanBot(
             self.redaction_cleanup_task,
             *operation_tasks,
         ):
-            if task is None or task.done():
+            if task is None or task is current_task or task.done():
                 continue
             if callable(owns) and owns(task):
                 continue
@@ -500,6 +505,44 @@ class BanBot(
                 log.warning("Shutdown: %s phase %s: %s", result.name, result.status, detail)
             else:
                 log.warning("Shutdown: %s phase completed with status %s", result.name, result.status)
+
+    async def _shutdown_restart_phase(self) -> tuple[str, dict[str, object]]:
+        """Cancel a separately scheduled restart during an external shutdown."""
+        restart_task = getattr(self, "_restart_task", None)
+        if (
+            restart_task is None
+            or restart_task.done()
+            or restart_task is asyncio.current_task()
+        ):
+            return "skipped", {}
+
+        restart_task.cancel()
+        done, pending = await asyncio.wait({restart_task}, timeout=5.0)
+        status = "ok"
+        details: dict[str, object] = {}
+        if pending:
+            status = "partial"
+            details["detail"] = "restart task did not stop within 5.0s"
+        elif done:
+            try:
+                restart_task.result()
+            except asyncio.CancelledError:
+                log.debug("Pending restart task cancelled during shutdown")
+            except Exception as exc:  # noqa: BLE001 - shutdown boundary
+                log.debug("Restart task raised during shutdown", exc_info=exc)
+                status = "partial"
+                details["detail"] = f"restart task raised {type(exc).__name__}"
+        if getattr(self, "_restart_task", None) is restart_task:
+            self._restart_task = None
+        return status, details
+
+    async def _shutdown_process_startup_phase(self) -> tuple[str, dict[str, object]]:
+        """Cancel process initialization without blocking later shutdown phases."""
+        task = getattr(self, "_process_startup_task", None)
+        if task is None or task.done() or task is asyncio.current_task():
+            return "skipped", {}
+        await self._cancel_process_startup()
+        return "ok", {}
 
     async def _shutdown_reconnect_phase(self) -> tuple[str, dict[str, object]]:
         reconnect_task = getattr(self, "reconnect_task", None)
@@ -589,9 +632,10 @@ class BanBot(
             if self._shutdown_complete:
                 return
 
-            await self._cancel_process_startup()
             runner = LifecyclePhaseRunner(observer=self._observe_shutdown_phase)
             phases = (
+                ("restart", self._shutdown_restart_phase),
+                ("process_startup", self._shutdown_process_startup_phase),
                 ("reconnect", self._shutdown_reconnect_phase),
                 ("redaction", self._shutdown_redaction_phase),
                 ("background_tasks", self._shutdown_background_phase),
@@ -1054,7 +1098,10 @@ def main() -> None:
         arm_startup_timeout(xmpp.loop)
 
     shutdown_signal: int | None = None
-    previous_signal_handlers: dict[int, object] = {}
+    previous_signal_handlers: dict[
+        int,
+        int | signal.Handlers | Callable[[int, FrameType | None], object] | None,
+    ] = {}
 
     def request_shutdown(signum: int, _frame) -> None:
         nonlocal shutdown_signal
@@ -1088,11 +1135,15 @@ def main() -> None:
         shutdown_signal = signal.SIGINT
         log.info("Bot stopped manually.")
     finally:
-        for signum, previous in previous_signal_handlers.items():
+        for registered_signum, previous in previous_signal_handlers.items():
             try:
-                signal.signal(signum, previous)
+                signal.signal(registered_signum, previous)
             except (OSError, RuntimeError, ValueError) as exc:
-                log.debug("Failed to restore signal handler for %s: %s", signum, exc)
+                log.debug(
+                    "Failed to restore signal handler for %s: %s",
+                    registered_signum,
+                    exc,
+                )
 
         shutdown = getattr(xmpp, "shutdown", None)
         if callable(shutdown):

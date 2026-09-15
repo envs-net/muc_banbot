@@ -4,6 +4,8 @@ import asyncio
 import inspect
 import logging
 import os
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.pagination import format_page
 from envs_xmpp_core.presentation import (
@@ -25,7 +27,17 @@ log = logging.getLogger(__name__)
 SUPERVISOR_RESTART_EXIT_CODE = 75
 
 
-class CommandRuntimeMixin:
+if TYPE_CHECKING:
+    from ..contracts import CommandRuntimeMixinHost
+
+    class _CommandRuntimeMixinContract(CommandRuntimeMixinHost):
+        pass
+else:
+    class _CommandRuntimeMixinContract:
+        pass
+
+
+class CommandRuntimeMixin(_CommandRuntimeMixinContract):
     async def _dispatch_runtime_admin_command(
         self,
         room: str,
@@ -195,21 +207,82 @@ class CommandRuntimeMixin:
             )
             return
 
-        await self.bot_send_message(
-            mto=room,
-            mbody="♻️ Restart confirmed. Shutting down now; supervisor should restart the bot.",
-            mtype="groupchat",
-            encrypted=False,
+        # Serialize the check/reply/schedule sequence so two command handlers
+        # cannot both observe an empty restart slot while the first one yields
+        # to outbound message I/O. The restart task is still created only after
+        # the confirmation reply has been handed to the messaging layer.
+        async with self._restart_schedule_lock:
+            if self._shutdown_started():
+                await self.bot_send_message(
+                    mto=room,
+                    mbody="ℹ️ Shutdown is already in progress; no additional restart was scheduled.",
+                    mtype="groupchat",
+                    encrypted=False,
+                )
+                return
+
+            if self._restart_task_pending():
+                await self.bot_send_message(
+                    mto=room,
+                    mbody="ℹ️ A restart is already scheduled or in progress.",
+                    mtype="groupchat",
+                    encrypted=False,
+                )
+                return
+
+            await self.bot_send_message(
+                mto=room,
+                mbody="♻️ Restart confirmed. Shutting down now; supervisor should restart the bot.",
+                mtype="groupchat",
+                encrypted=False,
+            )
+
+            if not self._schedule_restart_task(self._restart_process, name="process-restart"):
+                log.info("Restart became pending while confirmation was being sent")
+
+    def _shutdown_started(self) -> bool:
+        """Return whether final process shutdown has already begun."""
+        return bool(
+            getattr(self, "_shutdown_in_progress", False)
+            or getattr(self, "_shutdown_complete", False)
         )
 
+    def _restart_task_pending(self) -> bool:
+        """Return whether one process restart task is already active."""
+        task = getattr(self, "_restart_task", None)
+        if task is None:
+            return False
+        done = getattr(task, "done", None)
+        if not callable(done):
+            # Compatibility with lightweight task doubles: an opaque stored
+            # value still reserves the restart slot rather than permitting a
+            # second shutdown sequence.
+            return True
+        try:
+            return not bool(done())
+        except Exception:
+            return True
+
+    def _schedule_restart_task(
+        self,
+        operation: Callable[[], Awaitable[None]],
+        *,
+        name: str,
+    ) -> bool:
+        """Schedule exactly one tracked restart operation for this process."""
+        if self._shutdown_started() or self._restart_task_pending():
+            return False
+
         asyncio_module = commands_module_attr("asyncio", asyncio)
-        restart_task = asyncio_module.create_task(self._restart_process())
+        restart_task = asyncio_module.create_task(operation())
         self._restart_task = restart_task
 
         if isinstance(restart_task, asyncio.Task):
+            restart_task.set_name(name)
             restart_task.add_done_callback(self._clear_restart_task)
+        return True
 
-    def _clear_restart_task(self, task: asyncio.Task) -> None:
+    def _clear_restart_task(self, task: asyncio.Task[Any]) -> None:
         """Drop the stored restart task reference once it has completed."""
         if getattr(self, "_restart_task", None) is task:
             self._restart_task = None
