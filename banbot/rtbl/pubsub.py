@@ -1,8 +1,11 @@
 """Inbound RTBL PubSub subscribe/fetch/event/refresh handling."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp import iq_error_summary
 from slixmpp.exceptions import IqError, IqTimeout
@@ -14,7 +17,17 @@ from .utils import RTBL_PUBLISH_SANITY_CHECK_REASON, _is_domain, _is_sha256
 log = logging.getLogger(__name__)
 
 
-class RtblPubSubMixin:
+if TYPE_CHECKING:
+    from ..contracts import RtblPubSubMixinHost
+
+    class _RtblPubSubMixinContract(RtblPubSubMixinHost):
+        pass
+else:
+    class _RtblPubSubMixinContract:
+        pass
+
+
+class RtblPubSubMixin(_RtblPubSubMixinContract):
     def _rtbl_is_own_publish_sanity_item(self, service_jid: str, node: str, reason: str | None) -> bool:
         """Return True for temporary sanity-check items from our own publish nodes."""
         if reason != RTBL_PUBLISH_SANITY_CHECK_REASON:
@@ -112,6 +125,7 @@ class RtblPubSubMixin:
 
         status_key = (service_jid.lower(), node)
         fetch_error: str | None = None
+        db = self._require_db()
 
         while True:
             try:
@@ -197,7 +211,7 @@ class RtblPubSubMixin:
                 if _is_sha256(item_id):
                     seen_hashes.add(item_id)
 
-                    async with self.db.execute(
+                    async with db.execute(
                         """
                         SELECT reason FROM rtbl_hashes
                         WHERE hash = ? AND service_jid = ? AND node = ?
@@ -211,7 +225,7 @@ class RtblPubSubMixin:
                     elif existing[0] != reason:
                         updated_hash_count += 1
 
-                    await self.db.execute(
+                    await db.execute(
                         """
                         INSERT INTO rtbl_hashes (hash, service_jid, node, reason)
                         VALUES (?, ?, ?, ?)
@@ -226,7 +240,7 @@ class RtblPubSubMixin:
                     domain = item_id.lstrip("*.").lower()
                     seen_domains.add(domain)
 
-                    async with self.db.execute(
+                    async with db.execute(
                         """
                         SELECT reason FROM rtbl_domains
                         WHERE domain = ? AND service_jid = ? AND node = ?
@@ -240,7 +254,7 @@ class RtblPubSubMixin:
                     elif existing[0] != reason:
                         updated_domain_count += 1
 
-                    await self.db.execute(
+                    await db.execute(
                         """
                         INSERT INTO rtbl_domains (domain, service_jid, node, reason)
                         VALUES (?, ?, ?, ?)
@@ -259,7 +273,7 @@ class RtblPubSubMixin:
                         node,
                     )
 
-            await self.db.commit()
+            await db.commit()
 
             page += 1
             last_id = items[-1].get("id") if items else None
@@ -314,7 +328,7 @@ class RtblPubSubMixin:
             last_id = rsm_last
 
         if fetch_successful and not fetch_failed:
-            async with self.db.execute(
+            async with db.execute(
                 """
                 SELECT hash FROM rtbl_hashes
                 WHERE service_jid = ? AND node = ?
@@ -325,7 +339,7 @@ class RtblPubSubMixin:
 
             stale_hashes = existing_hashes - seen_hashes
             for stale_hash in stale_hashes:
-                await self.db.execute(
+                await db.execute(
                     """
                     DELETE FROM rtbl_hashes
                     WHERE hash = ? AND service_jid = ? AND node = ?
@@ -334,7 +348,7 @@ class RtblPubSubMixin:
                 )
                 removed_hash_count += 1
 
-            async with self.db.execute(
+            async with db.execute(
                 """
                 SELECT domain FROM rtbl_domains
                 WHERE service_jid = ? AND node = ?
@@ -345,7 +359,7 @@ class RtblPubSubMixin:
 
             stale_domains = existing_domains - seen_domains
             for stale_domain in stale_domains:
-                await self.db.execute(
+                await db.execute(
                     """
                     DELETE FROM rtbl_domains
                     WHERE domain = ? AND service_jid = ? AND node = ?
@@ -355,7 +369,7 @@ class RtblPubSubMixin:
                 removed_domain_count += 1
 
             if removed_hash_count or removed_domain_count:
-                await self.db.commit()
+                await db.commit()
                 log.info(
                     (
                         "RTBL: Snapshot reconciliation for '%s' @ %s — "
@@ -462,7 +476,7 @@ class RtblPubSubMixin:
 
         return fetch_successful and not fetch_failed
 
-    async def _on_rtbl_publish(self, msg) -> None:
+    async def _on_rtbl_publish(self, msg: Any) -> None:
         """
         Handle an incoming PubSub publish event.
 
@@ -471,6 +485,8 @@ class RtblPubSubMixin:
         """
         if not getattr(self, "rtbl_enabled", False):
             return
+
+        db = self._require_db()
 
         try:
             node = msg["pubsub_event"]["items"]["node"]
@@ -504,7 +520,7 @@ class RtblPubSubMixin:
                 continue
 
             if _is_sha256(item_id):
-                await self.db.execute(
+                await db.execute(
                     """
                     INSERT INTO rtbl_hashes (hash, service_jid, node, reason)
                     VALUES (?, ?, ?, ?)
@@ -513,7 +529,7 @@ class RtblPubSubMixin:
                     """,
                     (item_id, service_jid, node, reason),
                 )
-                await self.db.commit()
+                await db.commit()
 
                 self.rtbl_last_change[status_key] = time.time()
                 self.rtbl_last_error[status_key] = None
@@ -533,7 +549,7 @@ class RtblPubSubMixin:
             elif _is_domain(item_id):
                 domain = item_id.lstrip("*.").lower()
 
-                await self.db.execute(
+                await db.execute(
                     """
                     INSERT INTO rtbl_domains (domain, service_jid, node, reason)
                     VALUES (?, ?, ?, ?)
@@ -542,7 +558,7 @@ class RtblPubSubMixin:
                     """,
                     (domain, service_jid, node, reason),
                 )
-                await self.db.commit()
+                await db.commit()
 
                 self.rtbl_last_change[status_key] = time.time()
                 self.rtbl_last_error[status_key] = None
@@ -567,7 +583,7 @@ class RtblPubSubMixin:
                     node,
                 )
 
-    async def _on_rtbl_retract(self, msg) -> None:
+    async def _on_rtbl_retract(self, msg: Any) -> None:
         """
         Handle a PubSub retract event.
 
@@ -576,6 +592,8 @@ class RtblPubSubMixin:
         """
         if not getattr(self, "rtbl_enabled", False):
             return
+
+        db = self._require_db()
 
         try:
             node = msg["pubsub_event"]["items"]["node"]
@@ -599,16 +617,16 @@ class RtblPubSubMixin:
                 continue
 
             if _is_sha256(item_id):
-                await self.db.execute(
+                await db.execute(
                     "DELETE FROM rtbl_hashes WHERE hash = ? AND service_jid = ? AND node = ?",
                     (item_id, service_jid, node),
                 )
-                await self.db.commit()
+                await db.commit()
 
                 self.rtbl_last_change[status_key] = time.time()
                 self.rtbl_last_error[status_key] = None
 
-                async with self.db.execute(
+                async with db.execute(
                     "SELECT 1 FROM rtbl_hashes WHERE hash = ? LIMIT 1",
                     (item_id,),
                 ) as cursor:
@@ -620,16 +638,16 @@ class RtblPubSubMixin:
             elif _is_domain(item_id):
                 domain = item_id.lstrip("*.").lower()
 
-                await self.db.execute(
+                await db.execute(
                     "DELETE FROM rtbl_domains WHERE domain = ? AND service_jid = ? AND node = ?",
                     (domain, service_jid, node),
                 )
-                await self.db.commit()
+                await db.commit()
 
                 self.rtbl_last_change[status_key] = time.time()
                 self.rtbl_last_error[status_key] = None
 
-                async with self.db.execute(
+                async with db.execute(
                     "SELECT 1 FROM rtbl_domains WHERE domain = ? LIMIT 1",
                     (domain,),
                 ) as cursor:

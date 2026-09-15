@@ -1,11 +1,24 @@
 """RTBL database schema setup, subscription loading, and in-memory caches."""
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 log = logging.getLogger(__name__)
 
 
-class RtblDatabaseMixin:
+if TYPE_CHECKING:
+    from ..contracts import RtblDatabaseMixinHost
+
+    class _RtblDatabaseMixinContract(RtblDatabaseMixinHost):
+        pass
+else:
+    class _RtblDatabaseMixinContract:
+        pass
+
+
+class RtblDatabaseMixin(_RtblDatabaseMixinContract):
     async def setup_rtbl(self) -> None:
         """
         Create RTBL tables, load subscriptions and cached entries from DB,
@@ -17,7 +30,9 @@ class RtblDatabaseMixin:
         if not getattr(self, "rtbl_enabled", False):
             return
 
-        await self.db.execute("""
+        db = self._require_db()
+
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS rtbl_subscriptions (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 service_jid TEXT    NOT NULL,
@@ -26,7 +41,7 @@ class RtblDatabaseMixin:
                 UNIQUE(service_jid, node)
             )
         """)
-        await self.db.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS rtbl_hashes (
                 hash        TEXT    NOT NULL,
                 service_jid TEXT    NOT NULL,
@@ -36,10 +51,10 @@ class RtblDatabaseMixin:
                 PRIMARY KEY (hash, service_jid, node)
             )
         """)
-        await self.db.execute(
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_rtbl_hashes_hash ON rtbl_hashes(hash)"
         )
-        await self.db.execute("""
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS rtbl_domains (
                 domain      TEXT    NOT NULL,
                 service_jid TEXT    NOT NULL,
@@ -49,10 +64,10 @@ class RtblDatabaseMixin:
                 PRIMARY KEY (domain, service_jid, node)
             )
         """)
-        await self.db.execute(
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_rtbl_domains_domain ON rtbl_domains(domain)"
         )
-        await self.db.commit()
+        await db.commit()
 
         # Register handlers only once — they survive reconnects
         if not getattr(self, "_rtbl_handlers_registered", False):
@@ -68,7 +83,8 @@ class RtblDatabaseMixin:
 
     async def _load_rtbl_subscriptions_from_db(self) -> None:
         """Load subscription list from DB and rebuild in-memory caches."""
-        async with self.db.execute(
+        db = self._require_db()
+        async with db.execute(
             "SELECT service_jid, node FROM rtbl_subscriptions ORDER BY created_at"
         ) as cursor:
             rows = await cursor.fetchall()
@@ -88,14 +104,15 @@ class RtblDatabaseMixin:
         When the same entry appears in multiple subscriptions the most
         recently stored reason is kept (DB iteration order).
         """
+        db = self._require_db()
         hash_cache: dict[str, str | None] = {}
-        async with self.db.execute("SELECT hash, reason FROM rtbl_hashes") as cursor:
+        async with db.execute("SELECT hash, reason FROM rtbl_hashes") as cursor:
             async for hash_val, reason in cursor:
                 hash_cache[hash_val] = reason
         self.rtbl_hash_cache = hash_cache
 
         domain_cache: dict[str, str | None] = {}
-        async with self.db.execute("SELECT domain, reason FROM rtbl_domains") as cursor:
+        async with db.execute("SELECT domain, reason FROM rtbl_domains") as cursor:
             async for domain, reason in cursor:
                 domain_cache[domain] = reason
         self.rtbl_domain_cache = domain_cache

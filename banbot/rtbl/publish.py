@@ -1,9 +1,12 @@
 """Own outbound RTBL publish-feed setup and item publish/retract helpers."""
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import logging
 import uuid
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp import iq_error_condition, iq_error_summary
 from slixmpp.exceptions import IqError, IqTimeout
@@ -17,7 +20,17 @@ RTBL_PUBLISH_MIN_MAX_ITEMS = 1000
 RTBL_PUBLISH_MAX_ITEMS_STEP = 1000
 
 
-class RtblPublishMixin:
+if TYPE_CHECKING:
+    from ..contracts import RtblPublishMixinHost
+
+    class _RtblPublishMixinContract(RtblPublishMixinHost):
+        pass
+else:
+    class _RtblPublishMixinContract:
+        pass
+
+
+class RtblPublishMixin(_RtblPublishMixinContract):
     def _rtbl_is_own_publish_node(self, service_jid: str, node: str) -> bool:
         """Return True if service/node is one of our own RTBL publish nodes."""
         if not getattr(self, "rtbl_publish_enabled", False):
@@ -38,7 +51,8 @@ class RtblPublishMixin:
 
     async def _rtbl_count_active_publish_bans(self) -> tuple[int, int]:
         """Return the number of active local bans mirrored into the own publish feed."""
-        async with self.db.execute(
+        db = self._require_db()
+        async with db.execute(
             """SELECT COUNT(*) FROM bans
                WHERE target_type = 'jid' AND jid IS NOT NULL
                  AND (until = 0 OR until > strftime('%s','now'))
@@ -47,7 +61,7 @@ class RtblPublishMixin:
             row = await cursor.fetchone()
             jid_count = int(row[0] or 0) if row else 0
 
-        async with self.db.execute(
+        async with db.execute(
             """SELECT COUNT(*) FROM bans
                WHERE target_type = 'domain'
                  AND (until = 0 OR until > strftime('%s','now'))
@@ -317,7 +331,7 @@ class RtblPublishMixin:
         return f"banbot-publish-check-{uuid.uuid4().hex}.invalid"
 
 
-    def _rtbl_pubsub_result_contains_item(self, result, item_id: str) -> bool:
+    def _rtbl_pubsub_result_contains_item(self, result: Any, item_id: str) -> bool:
         """Best-effort check whether a PubSub get_items result contains item_id."""
         if result is None:
             return False
@@ -349,7 +363,7 @@ class RtblPublishMixin:
         return item_id in str(result)
 
 
-    async def _rtbl_get_sanity_item(self, node: str, item_id: str):
+    async def _rtbl_get_sanity_item(self, node: str, item_id: str) -> Any:
         """Fetch a just-published sanity-check item from a publish node."""
         try:
             return await self.plugin["xep_0060"].get_items(
@@ -465,8 +479,9 @@ class RtblPublishMixin:
         domain_count = 0
         jid_failures = 0
         domain_failures = 0
+        db = self._require_db()
 
-        async with self.db.execute(
+        async with db.execute(
             """SELECT jid, comment FROM bans
                WHERE target_type = 'jid' AND jid IS NOT NULL
                  AND (until = 0 OR until > strftime('%s','now'))
@@ -483,7 +498,7 @@ class RtblPublishMixin:
             else:
                 jid_failures += 1
 
-        async with self.db.execute(
+        async with db.execute(
             """SELECT target, comment FROM bans
                WHERE target_type = 'domain'
                  AND (until = 0 OR until > strftime('%s','now'))

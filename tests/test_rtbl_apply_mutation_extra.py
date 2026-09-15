@@ -394,7 +394,11 @@ class LockedRtblMutationBot(RtblApplyMixin):
         self.audit_events = []
         self.removed_domains = []
         self.unbanned = []
+        self.failed_unbans = set()
         self.fail_apply_for = set()
+
+    def _require_db(self):
+        return self.db
 
     def bare_jid(self, jid):
         return bare_jid(jid)
@@ -486,6 +490,7 @@ class LockedRtblMutationBot(RtblApplyMixin):
 
     async def unban_all(self, target, issuer="rtbl_cleanup"):
         self.unbanned.append((target, issuer))
+        return target not in self.failed_unbans
 
 
 @pytest.mark.asyncio
@@ -796,6 +801,26 @@ async def test_cleanup_locked_returns_zero_without_logging_when_everything_is_co
 
     assert removed == 0
     assert bot.unbanned == []
+    assert "Removed" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cleanup_locked_does_not_count_failed_unbans_as_removed(caplog):
+    bot = LockedRtblMutationBot()
+    bot.db.cleanup_rows = [
+        ("*.legacy.example",),
+        ("gone@example.test",),
+    ]
+    bot.failed_unbans = {"*.legacy.example", "gone@example.test"}
+
+    with caplog.at_level("INFO", logger="banbot.rtbl.apply"):
+        removed = await bot._rtbl_cleanup_stale_persisted_bans_locked("cleanup-test")
+
+    assert removed == 0
+    assert bot.unbanned == [
+        ("*.legacy.example", "cleanup-test"),
+        ("gone@example.test", "cleanup-test"),
+    ]
     assert "Removed" not in caplog.text
 
 @pytest.mark.asyncio

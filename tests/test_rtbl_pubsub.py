@@ -59,6 +59,9 @@ class RtblBot(RtblDatabaseMixin, RtblPubSubMixin):
         self.rtbl_publish_jid_node = "node"
         self.rtbl_publish_domain_node = "domains"
 
+    def _require_db(self):
+        return self.db
+
     def _rtbl_is_own_publish_node(self, service_jid: str, node: str) -> bool:
         return (
             self.rtbl_publish_enabled

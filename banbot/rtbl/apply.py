@@ -1,6 +1,9 @@
 """RTBL lookup checks, occupant scans, and ban application."""
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 from ..locks import ban_state_lock
 from ..utils import domain_matches
@@ -8,7 +11,17 @@ from ..utils import domain_matches
 log = logging.getLogger(__name__)
 
 
-class RtblApplyMixin:
+if TYPE_CHECKING:
+    from ..contracts import RtblApplyMixinHost
+
+    class _RtblApplyMixinContract(RtblApplyMixinHost):
+        pass
+else:
+    class _RtblApplyMixinContract:
+        pass
+
+
+class RtblApplyMixin(_RtblApplyMixinContract):
     async def check_jid_against_rtbl(self, jid: str, nick: str) -> bool:
         """
         Check a joining user against both in-memory RTBL caches.
@@ -75,7 +88,7 @@ class RtblApplyMixin:
 
         matched_jids: set[str] = set()
         matched_domain_occupants: set[tuple[str, str]] = set()
-        domains_to_apply: dict[str, tuple[str | None, str | None, str | None]] = {}
+        domains_to_apply: dict[str, tuple[str | None, str, str]] = {}
 
         for room, occupants in list(self.occupants.items()):
             if room not in self.protected_rooms:
@@ -115,9 +128,9 @@ class RtblApplyMixin:
                         domains_to_apply.setdefault(banned_domain, (reason, nick, bare))
                         break
 
-        for banned_domain, (reason, nick, bare) in domains_to_apply.items():
+        for banned_domain, (reason, matched_nick, matched_bare) in domains_to_apply.items():
             await self._rtbl_apply_ban_domain(
-                banned_domain, reason, nick=nick, jid=bare
+                banned_domain, reason, nick=matched_nick, jid=matched_bare
             )
 
         if matched_jids or matched_domain_occupants:
@@ -254,7 +267,7 @@ class RtblApplyMixin:
         await self.upsert_ban_db(
             jid=jid, nick=nick, until=0, issuer="rtbl", comment=comment
         )
-        await self.db.commit()
+        await self._require_db().commit()
         log.debug("RTBL: Persisted JID ban for %s to bans table", jid)
 
         if self.rtbl_announce:
@@ -387,7 +400,8 @@ class RtblApplyMixin:
 
         # Remove legacy persisted wildcard RTBL bans from older versions. RTBL
         # domain entries are now represented locally as concrete JID bans.
-        await self.db.execute(
+        db = self._require_db()
+        await db.execute(
             "DELETE FROM bans WHERE issuer = 'rtbl' AND target_type = 'domain' AND target = ?",
             (domain,),
         )
@@ -398,7 +412,7 @@ class RtblApplyMixin:
             await self.upsert_ban_db(
                 jid=bare, nick=matched_nick, until=0, issuer="rtbl", comment=comment
             )
-        await self.db.commit()
+        await db.commit()
         log.debug(
             "RTBL: Persisted %d concrete JID ban(s) for domain *.%s",
             len(matched), domain,
@@ -475,7 +489,8 @@ class RtblApplyMixin:
         removes legacy wildcard-domain RTBL bans because domain RTBL matches are
         now stored locally as concrete JID bans.
         """
-        async with self.db.execute(
+        db = self._require_db()
+        async with db.execute(
             "SELECT jid FROM bans WHERE issuer = 'rtbl'"
         ) as cursor:
             rows = [row[0] for row in await cursor.fetchall()]
@@ -486,13 +501,13 @@ class RtblApplyMixin:
                 continue
 
             if banned_jid.startswith("*."):
-                await self.unban_all(banned_jid, issuer=issuer)
-                removed += 1
+                if await self.unban_all(banned_jid, issuer=issuer):
+                    removed += 1
                 continue
 
             if not await self._rtbl_ban_is_still_covered(banned_jid):
-                await self.unban_all(banned_jid, issuer=issuer)
-                removed += 1
+                if await self.unban_all(banned_jid, issuer=issuer):
+                    removed += 1
 
         if removed:
             log.info("RTBL: Removed %d stale persisted RTBL ban(s)", removed)

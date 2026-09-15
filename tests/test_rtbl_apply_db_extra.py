@@ -68,6 +68,7 @@ class RtblDbBot(RtblApplyMixin, DatabaseMixin, CacheMixin):
         self.unbanned.append((target, issuer))
         await self.delete_ban_db(target)
         await self.load_bans_from_db()
+        return True
 
     async def bot_send_message(self, *, mto, mbody, mtype):
         self.sent.append({"mto": mto, "mbody": mbody, "mtype": mtype})
