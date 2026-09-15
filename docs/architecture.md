@@ -615,3 +615,29 @@ for only a short window and explicit admin synchronization/refresh invalidates
 the relevant cache, reducing repeated IQ traffic without turning cached
 membership into long-lived authorization state. Query failures and rooms that
 forbid full affiliation lists keep the previous live-occupant fallback policy.
+
+### Release state, managed files, and lightweight CLI contracts
+
+Release-state persistence now has an explicit typed database host boundary instead
+of reaching through an untyped bot object. Repository operations snapshot the
+current SQLite connection once, and startup distinguishes a successfully loaded
+empty release state from a release-state read failure. If preparation cannot read
+the persisted baseline, finalization retries the read and refuses to manufacture
+an empty baseline when that retry also fails; an older version or pending upgrade
+announcement therefore cannot be silently overwritten by a transient startup DB
+error. Legacy `bot_metadata` cleanup is also retried when shared release state
+already exists, repairing interrupted migrations without changing the canonical
+state.
+
+BanBot's managed-file facade continues to delegate catalog, resolution and
+retention semantics to `envs_xmpp_core`, but applies the application policy that
+backup/export entries must be real contained files rather than symlinks. Resolution
+revalidates the selected path after catalog lookup so replacing a previously
+cataloged file with a symlink cannot make a later show/import/restore operation
+follow it outside the managed directory.
+
+The package console entry point is now a strict lightweight argparse boundary.
+`--help` and `--version` remain config-free, while unknown or malformed arguments
+are rejected before `banbot.bot` is imported. Operator typos therefore cannot
+silently fall through into starting the production XMPP service. Release-state,
+managed-file and CLI modules are all part of the mandatory mypy gate.

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import aiosqlite
+from envs_xmpp_core.release.state import ReleaseState
 from slixmpp import JID
 
 from .cache import BanTuple
@@ -1589,10 +1590,16 @@ class OutboxMixinHost(Protocol):
     ) -> Any: ...
 
 
-class UpdateMixinHost(Protocol):
-    """Process/version state required by update checks and startup notices."""
+class ReleaseStateHost(Protocol):
+    """Database lifecycle state required by release-state persistence."""
 
     db: aiosqlite.Connection | None
+
+
+class UpdateMixinHost(ReleaseStateHost, Protocol):
+    """Process/version state required by update checks and startup notices."""
+
+    _startup_release_state: ReleaseState | None
     version_check_enabled: bool
     version_check_interval: float
     version_check_url: str | None

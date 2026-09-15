@@ -48,6 +48,7 @@ class UpdateMixin(_UpdateMixinContract):
     last_version_check_result: str | None
     last_update_notified_version: str | None
     previous_startup_version: str | None
+    _startup_release_state: ReleaseState | None
 
     def _parse_version_tuple(self, version: str) -> tuple[int, ...]:
         return parse_version_tuple(version)
@@ -62,7 +63,11 @@ class UpdateMixin(_UpdateMixinContract):
     async def prepare_startup_version_notice(self, *, reconnecting: bool) -> str | None:
         """Load the shared release state before startup completes."""
         self.previous_startup_version = None
-        self._startup_release_state = ReleaseState()
+        # ``None`` means that no trustworthy snapshot was loaded.  Keep that
+        # distinct from a successfully loaded empty ReleaseState (first start),
+        # otherwise a transient read failure could later overwrite persisted
+        # pending-release state with a fabricated empty baseline.
+        self._startup_release_state = None
         if reconnecting or not getattr(self, "db", None):
             return None
 
@@ -85,13 +90,17 @@ class UpdateMixin(_UpdateMixinContract):
 
         repository = release_state_repository(self)
         current_version = __version__.lstrip("v").strip()
-        state = getattr(self, "_startup_release_state", None)
-        if not isinstance(state, ReleaseState):
+        state: ReleaseState | None = getattr(self, "_startup_release_state", None)
+        if state is None:
             try:
+                await repository.setup()
                 state = await load_release_state_with_legacy_migration(self, repository)
             except Exception as exc:
+                # Do not manufacture an empty baseline here.  Persisting one
+                # after a failed read could erase an older version or pending
+                # update announcement that is still safely stored in SQLite.
                 log.warning("Could not load startup release state: %s", exc)
-                state = ReleaseState()
+                return False
 
         previous_version = state.version
         current_transition = version_transition(previous_version, current_version)

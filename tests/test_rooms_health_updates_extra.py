@@ -942,6 +942,72 @@ async def test_startup_version_notice_is_persisted_and_announced_after_upgrade(
 
 
 @pytest.mark.asyncio
+async def test_startup_version_notice_read_failure_does_not_overwrite_persisted_state(
+    temp_db_path, monkeypatch
+):
+    updates_module = importlib.import_module("banbot.updates")
+    bot = RoomHealthBot()
+    bot.announce_startup = True
+    await bot.setup_db()
+    try:
+        await bot.db.execute(
+            "INSERT INTO release_state (id, version, pending_from, pending_to) "
+            "VALUES (1, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "version=excluded.version, pending_from=excluded.pending_from, pending_to=excluded.pending_to",
+            ("2.5.9", "2.5.8", "2.5.9"),
+        )
+        await bot.db.commit()
+
+        async def fail_release_state_load(*args, **kwargs):
+            raise RuntimeError("simulated release-state read failure")
+
+        monkeypatch.setattr(
+            updates_module,
+            "load_release_state_with_legacy_migration",
+            fail_release_state_load,
+        )
+        monkeypatch.setattr(updates_module, "__version__", "2.6.1")
+
+        assert await bot.prepare_startup_version_notice(reconnecting=False) is None
+        assert await bot.finalize_startup_version_notice(reconnecting=False) is False
+
+        async with bot.db.execute(
+            "SELECT version, pending_from, pending_to FROM release_state WHERE id = 1"
+        ) as cursor:
+            assert await cursor.fetchone() == ("2.5.9", "2.5.8", "2.5.9")
+        assert bot.sent == []
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_existing_release_state_cleans_stale_legacy_metadata(temp_db_path):
+    release_module = importlib.import_module("banbot.release_state")
+    bot = RoomHealthBot()
+    await bot.setup_db()
+    try:
+        repository = release_module.release_state_repository(bot)
+        await repository.save(release_module.ReleaseState(version="2.6.1"))
+        await bot.db.execute(
+            "INSERT INTO bot_metadata (key, value) VALUES (?, ?)",
+            ("last_successful_start_version", "2.5.9"),
+        )
+        await bot.db.commit()
+
+        state = await release_module.load_release_state_with_legacy_migration(bot, repository)
+
+        assert state == release_module.ReleaseState(version="2.6.1")
+        async with bot.db.execute(
+            "SELECT value FROM bot_metadata WHERE key = ?",
+            ("last_successful_start_version",),
+        ) as cursor:
+            assert await cursor.fetchone() is None
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_startup_version_notice_migrates_legacy_metadata(
     temp_db_path, monkeypatch
 ):

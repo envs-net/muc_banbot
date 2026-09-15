@@ -3,8 +3,9 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from banbot import cli as cli_module
+import pytest
 
+from banbot import cli as cli_module
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -51,6 +52,34 @@ def test_cli_short_version_is_supported(monkeypatch, capsys) -> None:
 
     assert cli_module.main(["-V"]) == 0
     assert capsys.readouterr().out.startswith("muc_banbot ")
+    assert calls == []
+
+
+def test_cli_help_does_not_start_runtime(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(cli_module, "_run_bot", lambda: calls.append("run"))
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_module.main(["--help"])
+
+    assert exc_info.value.code == 0
+    assert "usage: muc_banbot" in capsys.readouterr().out
+    assert calls == []
+
+
+def test_cli_rejects_unknown_or_malformed_metadata_args(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(cli_module, "_run_bot", lambda: calls.append("run"))
+
+    with pytest.raises(SystemExit) as unknown:
+        cli_module.main(["--hepl"])
+    assert unknown.value.code == 2
+
+    with pytest.raises(SystemExit) as malformed_version:
+        cli_module.main(["--version", "unexpected"])
+    assert malformed_version.value.code == 2
+
+    assert "unrecognized arguments" in capsys.readouterr().err
     assert calls == []
 
 

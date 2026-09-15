@@ -128,7 +128,9 @@ successful process start.
 | `updated_at` | INTEGER | Last update timestamp |
 
 Older releases stored `last_successful_start_version` here. The value is migrated automatically
-to `release_state` on first use and the legacy row is removed afterwards.
+to `release_state` on first use and the legacy row is removed afterwards. If the shared state was
+committed but legacy cleanup was interrupted, a later startup retries only the stale-row cleanup
+without replacing the canonical `release_state` value.
 
 ## RTBL Tables
 

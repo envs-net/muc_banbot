@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 import pytest
 
@@ -108,3 +108,26 @@ async def test_prune_managed_files_deletes_companions(tmp_path: Path):
     assert not old.exists()
     assert not companion.exists()
     assert new.exists()
+
+
+def test_managed_files_reject_symlinks_and_revalidate_stale_catalog(tmp_path: Path):
+    managed_dir = tmp_path / "managed"
+    managed_dir.mkdir()
+    outside = tmp_path / "outside.csv"
+    outside.write_text("outside", encoding="utf-8")
+
+    linked = managed_dir / "bans_export_link.csv"
+    linked.symlink_to(outside)
+    assert list_managed_files(managed_dir, "bans_export_*.csv") == []
+
+    safe = managed_dir / "bans_export_safe.csv"
+    safe.write_text("safe", encoding="utf-8")
+    files = list_managed_files(managed_dir, "bans_export_*.csv")
+    assert [item.name for item in files] == ["bans_export_safe.csv"]
+
+    # The file can change after the catalog was built.  Resolution must not trust
+    # the stale ManagedFile entry and follow a replacement symlink outside the
+    # managed directory.
+    safe.unlink()
+    safe.symlink_to(outside)
+    assert resolve_managed_file(managed_dir, safe.name, files) is None
