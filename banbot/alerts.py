@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.runtime.alerts import AlertTracker
 from envs_xmpp_core.runtime.diagnostics import exception_summary
@@ -13,8 +13,17 @@ from config import ADMIN_ROOM
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from .contracts import AlertMixinHost
 
-class AlertMixin:
+    class _AlertMixinContract(AlertMixinHost):
+        pass
+else:
+    class _AlertMixinContract:
+        pass
+
+
+class AlertMixin(_AlertMixinContract):
     """Small deduplicated ADMIN_ROOM alert layer."""
 
     def init_alert_state(self) -> None:

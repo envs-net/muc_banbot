@@ -950,6 +950,7 @@ async def test_shutdown_cancels_pending_reconnect_before_disconnect(monkeypatch)
     assert bot.reconnect_task is None
     assert [phase.name for phase in bot._last_shutdown_phases] == [
         "restart",
+        "session_startup",
         "process_startup",
         "reconnect",
         "redaction",
@@ -1311,3 +1312,116 @@ async def test_late_completion_from_old_session_generation_is_rejected(monkeypat
         await stale_phase
     assert bot.session_lifecycle.snapshot().generation == second_generation
     assert bot.session_lifecycle.snapshot().state == "starting"
+
+@pytest.mark.asyncio
+async def test_failed_session_startup_rolls_back_reconnect_scoped_workers(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    cleanup_calls = 0
+    services_started = False
+
+    async def ok_phase(*_args, **_kwargs):
+        return "ok", {}
+
+    async def services_phase(*_args, **_kwargs):
+        nonlocal services_started
+        services_started = True
+        return "ok", {}
+
+    async def identity_phase(*_args, **_kwargs):
+        assert services_started is True
+        raise RuntimeError("synthetic identity failure")
+
+    async def stop_background_tasks():
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+
+    bot._startup_session_phase = ok_phase
+    bot._startup_process_phase = ok_phase
+    bot._startup_transport_phase = ok_phase
+    bot._startup_rooms_phase = ok_phase
+    bot._startup_synchronization_phase = ok_phase
+    bot._startup_services_phase = services_phase
+    bot._startup_identity_phase = identity_phase
+    bot._startup_readiness_phase = ok_phase
+    bot.stop_background_tasks = stop_background_tasks
+
+    with pytest.raises(RuntimeError, match="synthetic identity failure"):
+        await bot.start(None)
+
+    assert cleanup_calls == 1
+    assert bot.session_lifecycle.snapshot().state == "failed"
+    assert bot._last_startup_phases[-1].name == "identity"
+    assert bot._last_startup_phases[-1].status == "failed"
+
+@pytest.mark.asyncio
+async def test_cancelled_session_startup_rolls_back_reconnect_scoped_workers(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    cleanup_calls = 0
+    identity_started = asyncio.Event()
+
+    async def ok_phase(*_args, **_kwargs):
+        return "ok", {}
+
+    async def identity_phase(*_args, **_kwargs):
+        identity_started.set()
+        await asyncio.Event().wait()
+
+    async def stop_background_tasks():
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+
+    bot._startup_session_phase = ok_phase
+    bot._startup_process_phase = ok_phase
+    bot._startup_transport_phase = ok_phase
+    bot._startup_rooms_phase = ok_phase
+    bot._startup_synchronization_phase = ok_phase
+    bot._startup_services_phase = ok_phase
+    bot._startup_identity_phase = identity_phase
+    bot._startup_readiness_phase = ok_phase
+    bot.stop_background_tasks = stop_background_tasks
+
+    task = asyncio.create_task(bot.start(None))
+    await asyncio.wait_for(identity_started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert cleanup_calls == 1
+    assert bot._startup_task is None
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_incomplete_session_startup_before_teardown(monkeypatch):
+    _patch_lightweight_init(monkeypatch)
+    bot = bot_module.BanBot("bot@example.org", "secret")
+    startup_started = asyncio.Event()
+
+    async def blocked_startup():
+        startup_started.set()
+        await asyncio.Event().wait()
+
+    bot._startup_task = asyncio.create_task(blocked_startup())
+    await asyncio.wait_for(startup_started.wait(), timeout=1)
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    disconnect_calls = []
+    bot.flush_redaction_index = noop
+    bot.stop_background_tasks = noop
+    bot.runtime_watchdog.stop = noop
+    bot.tasks.cancel_all = noop
+    bot.disconnect = lambda **kwargs: disconnect_calls.append(kwargs)
+
+    startup_task = bot._startup_task
+    await asyncio.wait_for(bot.shutdown(), timeout=1)
+
+    assert startup_task is not None
+    assert startup_task.cancelled()
+    assert bot._startup_task is None
+    session_phase = next(
+        phase for phase in bot._last_shutdown_phases if phase.name == "session_startup"
+    )
+    assert session_phase.status == "ok"
+    assert disconnect_calls == [{"wait": False}]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 from envs_xmpp_core.runtime.diagnostics import exception_summary
@@ -17,8 +17,17 @@ from envs_xmpp_core.storage.outbox import (
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from .contracts import OutboxMixinHost
 
-class OutboxMixin:
+    class _OutboxMixinContract(OutboxMixinHost):
+        pass
+else:
+    class _OutboxMixinContract:
+        pass
+
+
+class OutboxMixin(_OutboxMixinContract):
     """Persist proactive messages and retry them until delivered or dead."""
 
     def init_outbox_state(self) -> None:
@@ -113,6 +122,31 @@ class OutboxMixin:
             maximum=int(getattr(self, "outbox_retry_max_seconds", 1800) or 1800),
         )
 
+    async def _defer_interrupted_outbox_message(
+        self,
+        store: OutboxStore,
+        message_id: int,
+        *,
+        reason: str,
+    ) -> None:
+        """Best-effort return of one claimed row without masking cancellation."""
+        try:
+            await store.defer(
+                message_id,
+                retry_delay_seconds=1,
+                reason=reason,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - cancellation cleanup
+            summary = exception_summary(exc)
+            self.outbox_last_error = f"{type(exc).__name__}: {summary}"
+            log.warning(
+                "Could not defer outbox message %s during interruption: %s",
+                message_id,
+                summary,
+            )
+
     async def run_outbox_once(self) -> int:
         """Attempt one bounded batch and return the number of claimed rows."""
         store = getattr(self, "outbox_store", None)
@@ -131,10 +165,10 @@ class OutboxMixin:
                     raise_on_failure=True,
                 )
             except asyncio.CancelledError:
-                await store.defer(
+                await self._defer_interrupted_outbox_message(
+                    store,
                     queued.id,
-                    retry_delay_seconds=1,
-                    reason="worker cancelled",
+                    reason="worker cancelled during transport",
                 )
                 raise
             except Exception as exc:  # noqa: BLE001 - transport retry boundary
@@ -157,14 +191,44 @@ class OutboxMixin:
                 else:
                     log.warning("Outbox delivery %s failed: %s", queued.id, summary)
                 continue
-            await store.mark_sent(queued.id)
+            try:
+                await store.mark_sent(queued.id)
+            except asyncio.CancelledError:
+                await self._defer_interrupted_outbox_message(
+                    store,
+                    queued.id,
+                    reason="worker cancelled while acknowledging delivery",
+                )
+                raise
             self.outbox_delivered += 1
             self.outbox_last_error = None
         return len(batch)
 
+    async def _recover_outbox_inflight(
+        self,
+        *,
+        older_than_seconds: int = 300,
+    ) -> int:
+        """Return stale delivery claims to pending without stealing live work."""
+        store = getattr(self, "outbox_store", None)
+        if store is None or not bool(getattr(self, "outbox_enabled", True)):
+            return 0
+        recovered = await store.recover_inflight(
+            older_than_seconds=max(0, int(older_than_seconds))
+        )
+        if recovered:
+            log.info("Recovered %s stale inflight outbox message(s)", recovered)
+        return recovered
+
     async def outbox_worker(self) -> None:
         """Retry durable messages until the reconnect-scoped task is cancelled."""
         while True:
+            # Reconnects replace this worker without reopening process-scoped
+            # outbox storage. Normally cancellation returns a claimed row to
+            # pending immediately. Periodic stale recovery is the final safety
+            # net for interruption during SQLite acknowledgement/cleanup, while
+            # the age threshold avoids stealing work from a slow old generation.
+            await self._recover_outbox_inflight()
             heartbeat = getattr(getattr(self, "tasks", None), "heartbeat", None)
             if callable(heartbeat):
                 heartbeat("_core", "outbox-worker")

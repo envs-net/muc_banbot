@@ -1504,3 +1504,134 @@ class CommandOmemoMixinHost(Protocol):
         room: str,
         actor: str | None = None,
     ) -> None: ...
+
+
+class HealthCheckMixinHost(Protocol):
+    """Runtime state and recovery hooks required by periodic health checks."""
+
+    protected_rooms: set[str]
+    occupants: dict[str, dict[str, dict[str, Any]]]
+    bot_admin_state: dict[str, bool]
+    reconnecting: bool
+    reconnect_task: asyncio.Task[Any] | None
+    last_audit_cleanup_run: float
+    health_check_interval: float
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        **kwargs: Any,
+    ) -> Any: ...
+
+    async def send_operational_alert(
+        self,
+        key: str,
+        title: str,
+        message: str,
+        *,
+        enabled: bool = True,
+        details: dict[str, Any] | None = None,
+    ) -> bool: ...
+
+    async def record_alert_failure(
+        self,
+        key: str,
+        title: str,
+        message: str,
+        *,
+        enabled: bool = True,
+        threshold: int = 1,
+        details: dict[str, Any] | None = None,
+    ) -> bool: ...
+
+    def record_alert_success(self, key: str) -> None: ...
+
+    async def ensure_muc_joined(
+        self,
+        room: str,
+        *,
+        force: bool = False,
+        retries: int | None = None,
+    ) -> bool: ...
+
+    async def sync_bans_to_rooms_for_single_room(self, room: str) -> None: ...
+
+    def is_bot_admin_or_owner(
+        self,
+        room: str,
+        *,
+        log_missing: bool = True,
+    ) -> bool: ...
+
+    async def cleanup_old_audit_logs(self) -> int: ...
+
+    async def get_db_stats(self) -> dict[str, Any]: ...
+
+
+class OutboxMixinHost(Protocol):
+    """Outbound transport hook required by the durable outbox worker."""
+
+    tasks: Any
+
+    async def _send_message_transport(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str,
+        encrypted: bool | None,
+        raise_on_failure: bool = False,
+        **kwargs: Any,
+    ) -> Any: ...
+
+
+class UpdateMixinHost(Protocol):
+    """Process/version state required by update checks and startup notices."""
+
+    db: aiosqlite.Connection | None
+    version_check_enabled: bool
+    version_check_interval: float
+    version_check_url: str | None
+    last_version_check_result: str | None
+    last_update_notified_version: str | None
+    previous_startup_version: str | None
+    announce_startup: bool
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        **kwargs: Any,
+    ) -> Any: ...
+
+
+class AlertMixinHost(Protocol):
+    """Messaging/audit hooks required by operational alert delivery."""
+
+    async def bot_send_message(
+        self,
+        *,
+        mto: str,
+        mbody: str,
+        mtype: str = "groupchat",
+        **kwargs: Any,
+    ) -> Any: ...
+
+    async def audit_event(
+        self,
+        event_type: str,
+        actor: str | None = None,
+        room: str | None = None,
+        target_type: str | None = None,
+        target: str | None = None,
+        jid: str | None = None,
+        nick: str | None = None,
+        until: int | None = None,
+        comment: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None: ...

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 
@@ -13,11 +14,23 @@ from .task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from .contracts import HealthCheckMixinHost
+
+    class _HealthCheckMixinContract(HealthCheckMixinHost):
+        pass
+else:
+    class _HealthCheckMixinContract:
+        pass
+
+
 ROOM_REJOIN_RETRY_DELAYS = (60, 120, 240, 300)
 
 
-class HealthCheckMixin:
-    def _health_bot_occupant_entry(self, room: str) -> tuple[str | None, dict | None]:
+class HealthCheckMixin(_HealthCheckMixinContract):
+    def _health_bot_occupant_entry(
+        self, room: str
+    ) -> tuple[str | None, dict[str, Any] | None]:
         """Return the bot's live room entry for full and lightweight mixin users."""
         bot_entry = getattr(self, "_bot_occupant_entry", None)
         if bot_entry is not None:
@@ -86,7 +99,24 @@ class HealthCheckMixin:
                 return False
 
             _bot_nick, bot_info = self._health_bot_occupant_entry(room)
-            is_admin = bool(bot_info and occupant_is_admin_or_owner(bot_info))
+            if bot_info is None:
+                log.warning(
+                    "Health check rejoin for %s completed without confirmed bot presence",
+                    room,
+                )
+                await self._health_send_alert(
+                    f"health_not_in_room:{room}",
+                    "Health check warning",
+                    (
+                        f"Bot rejoin for {room} returned successfully, but its room "
+                        "presence is still unconfirmed"
+                    ),
+                    enabled=getattr(self, "alert_on_health_check_failure", True),
+                    details={"room": room, "reason": "rejoin_presence_unconfirmed"},
+                )
+                return False
+
+            is_admin = occupant_is_admin_or_owner(bot_info)
             admin_state = getattr(self, "bot_admin_state", None)
             if admin_state is None:
                 admin_state = {}
@@ -222,7 +252,7 @@ class HealthCheckMixin:
                 all_rooms_joined = await self._run_health_check_cycle()
                 if all_rooms_joined is False:
                     consecutive_rejoin_failures += 1
-                    delay = self._health_rejoin_retry_delay(consecutive_rejoin_failures)
+                    delay: float = self._health_rejoin_retry_delay(consecutive_rejoin_failures)
                     log.warning(
                         "Room health recovery remains pending; retrying in %s seconds",
                         delay,

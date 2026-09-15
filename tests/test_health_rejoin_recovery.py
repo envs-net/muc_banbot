@@ -135,3 +135,26 @@ async def test_health_worker_restarts_backoff_for_a_new_missing_room(monkeypatch
         await bot.health_check_worker()
 
     assert delays == [60, 120, 600, 60]
+
+@pytest.mark.asyncio
+async def test_health_rejoin_requires_confirmed_bot_presence_before_success() -> None:
+    bot = RecoveryBot()
+
+    async def join_without_presence(
+        room: str,
+        *,
+        force: bool = False,
+        retries: int | None = None,
+    ) -> bool:
+        assert room == ROOM
+        assert force is True
+        assert retries == 1
+        return True
+
+    bot.ensure_muc_joined = join_without_presence
+
+    assert await bot._health_check_room(ROOM) is False
+    assert bot.bot_admin_state == {}
+    assert bot.synced == []
+    assert any("presence is still unconfirmed" in item["mbody"] for item in bot.sent)
+    assert not any("Automatic room rejoin succeeded" in item["mbody"] for item in bot.sent)

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import urllib.request
+from typing import TYPE_CHECKING
 
 from envs_xmpp_core.release.checks import evaluate_release_check
 from envs_xmpp_core.release.github import (
@@ -30,8 +31,24 @@ from .task_supervisor import sleep_with_heartbeat
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from .contracts import UpdateMixinHost
 
-class UpdateMixin:
+    class _UpdateMixinContract(UpdateMixinHost):
+        pass
+else:
+    class _UpdateMixinContract:
+        pass
+
+
+class UpdateMixin(_UpdateMixinContract):
+    version_check_enabled: bool
+    version_check_interval: float
+    version_check_url: str | None
+    last_version_check_result: str | None
+    last_update_notified_version: str | None
+    previous_startup_version: str | None
+
     def _parse_version_tuple(self, version: str) -> tuple[int, ...]:
         return parse_version_tuple(version)
 

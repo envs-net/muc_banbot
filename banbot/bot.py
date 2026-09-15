@@ -536,6 +536,17 @@ class BanBot(
             self._restart_task = None
         return status, details
 
+    async def _shutdown_session_startup_phase(self) -> tuple[str, dict[str, object]]:
+        """Cancel an in-flight XMPP session startup before process teardown."""
+        cancel_startup = getattr(self, "_cancel_incomplete_startup", None)
+        if not callable(cancel_startup):
+            return "skipped", {}
+        cancelled = await cancel_startup(
+            "final shutdown",
+            exclude=asyncio.current_task(),
+        )
+        return ("ok" if cancelled else "skipped"), {"cancelled": bool(cancelled)}
+
     async def _shutdown_process_startup_phase(self) -> tuple[str, dict[str, object]]:
         """Cancel process initialization without blocking later shutdown phases."""
         task = getattr(self, "_process_startup_task", None)
@@ -635,6 +646,7 @@ class BanBot(
             runner = LifecyclePhaseRunner(observer=self._observe_shutdown_phase)
             phases = (
                 ("restart", self._shutdown_restart_phase),
+                ("session_startup", self._shutdown_session_startup_phase),
                 ("process_startup", self._shutdown_process_startup_phase),
                 ("reconnect", self._shutdown_reconnect_phase),
                 ("redaction", self._shutdown_redaction_phase),
@@ -971,6 +983,17 @@ class BanBot(
         status = "partial" if context.missing_rooms else "ok"
         return status, {"missing_rooms": context.missing_rooms}
 
+    async def _cleanup_incomplete_session_startup(self) -> None:
+        """Stop reconnect-scoped workers left behind by failed startup."""
+        try:
+            await self.stop_background_tasks()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - rollback boundary
+            # Startup must still report its original failure. A cleanup problem
+            # is observable in logs and final shutdown will retry cancellation.
+            log.warning("Failed to clean up incomplete session startup: %s", exc)
+
     async def _startup_readiness_phase(
         self,
         context: _StartupContext,
@@ -1052,9 +1075,11 @@ class BanBot(
             await runner.run_all(phases)
             self.session_lifecycle.mark_ready(generation)
         except asyncio.CancelledError:
+            await self._cleanup_incomplete_session_startup()
             raise
         except Exception as exc:
             self.session_lifecycle.mark_failed(generation, exc)
+            await self._cleanup_incomplete_session_startup()
             raise
         finally:
             self._last_startup_phases = runner.results

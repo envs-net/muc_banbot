@@ -497,6 +497,18 @@ failed phase without preventing watchdog, database, or XMPP cleanup. Legacy
 unmanaged background-task draining also never cancels the task currently running
 shutdown.
 
+Health, operational-alert, durable-outbox and update-check workers now sit inside
+the same explicit typed host-contract boundary. Session startup rolls back the
+reconnect-scoped worker group when a later startup phase fails or is cancelled,
+so a partially initialized session cannot leave unban, RTBL, outbox, redaction,
+version-check or health services running behind a failed readiness transition.
+Room health recovery only reports success after the bot's own occupant presence
+is visible again, even when the join helper itself returned successfully. The
+durable outbox also returns claimed rows to pending on cancellation during both
+transport and post-send acknowledgement; a periodic stale-inflight repair is a
+last-resort safety net for interrupted SQLite bookkeeping without immediately
+stealing work from a previous worker generation.
+
 ### Deployment and health ownership
 
 The deploy frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` and adds
