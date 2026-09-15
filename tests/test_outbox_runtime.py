@@ -172,3 +172,76 @@ async def test_outbox_cancellation_during_delivery_ack_requeues_claim(tmp_path, 
     assert state["inflight"] == 0
     assert deferred_reasons == ["worker cancelled while acknowledging delivery"]
     await bot.close_outbox_storage()
+
+@pytest.mark.asyncio
+async def test_outbox_cancellation_requeues_unprocessed_claimed_batch_tail(tmp_path, monkeypatch) -> None:
+    bot = OutboxBot()
+    await bot.setup_outbox_storage(str(tmp_path / "banbot.db"))
+    for index in range(3):
+        await bot.enqueue_durable_message(
+            destination="admin@example.test",
+            body=f"queued-{index}",
+            message_type="groupchat",
+        )
+
+    transport_started = asyncio.Event()
+
+    async def blocked_transport(**_kwargs):
+        transport_started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(bot, "_send_message_transport", blocked_transport)
+
+    task = asyncio.create_task(bot.run_outbox_once())
+    await asyncio.wait_for(transport_started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    state = await bot.outbox_runtime_state()
+    assert state["pending"] == 3
+    assert state["inflight"] == 0
+    await bot.close_outbox_storage()
+
+@pytest.mark.asyncio
+async def test_outbox_ack_cancellation_requeues_remaining_claimed_batch_tail(tmp_path, monkeypatch) -> None:
+    bot = OutboxBot()
+    await bot.setup_outbox_storage(str(tmp_path / "banbot.db"))
+    for index in range(3):
+        await bot.enqueue_durable_message(
+            destination="admin@example.test",
+            body=f"ack-tail-{index}",
+            message_type="groupchat",
+        )
+    assert bot.outbox_store is not None
+
+    mark_started = asyncio.Event()
+    original_defer = bot.outbox_store.defer
+    deferred: list[tuple[int, str | None]] = []
+
+    async def blocked_mark_sent(_message_id: int) -> None:
+        mark_started.set()
+        await asyncio.Event().wait()
+
+    async def recording_defer(message_id: int, **kwargs) -> None:
+        deferred.append((message_id, kwargs.get("reason")))
+        await original_defer(message_id, **kwargs)
+
+    monkeypatch.setattr(bot.outbox_store, "mark_sent", blocked_mark_sent)
+    monkeypatch.setattr(bot.outbox_store, "defer", recording_defer)
+
+    task = asyncio.create_task(bot.run_outbox_once())
+    await asyncio.wait_for(mark_started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    state = await bot.outbox_runtime_state()
+    assert state["pending"] == 3
+    assert state["inflight"] == 0
+    assert [reason for _message_id, reason in deferred] == [
+        "worker cancelled while acknowledging delivery",
+        "worker cancelled before delivery",
+        "worker cancelled before delivery",
+    ]
+    await bot.close_outbox_storage()

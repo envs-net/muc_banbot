@@ -228,3 +228,46 @@ async def test_admin_protection_checks_managed_rooms_concurrently(monkeypatch):
 
     assert protected is True
     assert reason == f"offline-owner@example.test is admin/owner in {protected_room}"
+
+@pytest.mark.asyncio
+async def test_explicit_affiliation_refresh_reprobes_room_after_forbidden():
+    class FakeIqError(Exception):
+        condition = "forbidden"
+        text = ""
+
+    class RecoveringMucPlugin:
+        def __init__(self):
+            self.forbidden = True
+            self.calls: list[tuple[str, str]] = []
+
+        async def get_users_by_affiliation(self, room, affiliation):
+            self.calls.append((room, affiliation))
+            if self.forbidden:
+                raise FakeIqError("forbidden")
+            if affiliation == "owner":
+                return ["owner@example.test"]
+            if affiliation == "admin":
+                return ["admin@example.test"]
+            return []
+
+    bot = AdminBot()
+    plugin = RecoveringMucPlugin()
+    bot.plugin["xep_0045"] = plugin
+    room = "room@conference.example.test"
+
+    assert await bot.get_room_admin_owner_jids(room) == set()
+    assert room in bot.admin_affiliation_query_forbidden_rooms
+    first_call_count = len(plugin.calls)
+
+    plugin.forbidden = False
+    assert await bot.get_room_admin_owner_jids(room) == set()
+    assert len(plugin.calls) == first_call_count
+
+    refreshed = await bot.get_room_admin_owner_jids(room, refresh=True)
+
+    assert refreshed == {"owner@example.test", "admin@example.test"}
+    assert room not in bot.admin_affiliation_query_forbidden_rooms
+    assert plugin.calls[first_call_count:] == [
+        (room, "owner"),
+        (room, "admin"),
+    ]

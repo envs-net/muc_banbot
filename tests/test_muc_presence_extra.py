@@ -879,3 +879,104 @@ async def test_delayed_reconnect_stops_before_connect_when_shutdown_begins(monke
     await bot._delayed_reconnect()
 
     assert connect_mock.call_count == 0
+
+@pytest.mark.asyncio
+async def test_muc_offline_recovers_status_301_from_presence_when_cache_entry_is_missing(temp_db_path):
+    bot = MucBotFixture(temp_db_path)
+    await bot.setup_db()
+    bot.occupants = {ROOM_JID: {}}
+    try:
+        await bot.muc_offline(
+            FakePresence(
+                room=ROOM_JID,
+                nick=USER_NICK,
+                jid=USER_JID_RESOURCE,
+                status_codes={MUC_STATUS_BANNED},
+                reason=MANUAL_BAN_REASON,
+            )
+        )
+
+        await bot.load_bans_from_db()
+        assert USER_BARE_JID in bot.ban_index_by_jid
+        assert bot.manual_redactions == [
+            (USER_BARE_JID, MANUAL_BAN_REASON, MANUAL_BAN_ACTOR)
+        ]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_manual_muc_ban_recovery_never_persists_bots_own_jid(temp_db_path):
+    bot = MucBotFixture(temp_db_path)
+    bot.boundjid = SimpleNamespace(bare="bot@example.test")
+    await bot.setup_db()
+    try:
+        await bot._handle_manual_muc_ban_presence(
+            ROOM_JID,
+            BOT_NICK,
+            BOT_JID_RESOURCE,
+            "bot removed from room",
+        )
+
+        await bot.load_bans_from_db()
+        assert "bot@example.test" not in bot.ban_index_by_jid
+        assert bot.manual_redactions == []
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_muc_offline_clears_stale_self_join_state_without_cached_occupant():
+    bot = MucBotFixture()
+    bot.room_bot_nicks = {ROOM_JID: BOT_NICK}
+    bot.room_join_events = {ROOM_JID: asyncio.Event()}
+    bot.room_join_events[ROOM_JID].set()
+    bot.bot_admin_state[ROOM_JID] = True
+    bot.occupants = {ROOM_JID: {}}
+
+    await bot.muc_offline(
+        FakePresence(
+            room=ROOM_JID,
+            nick=BOT_NICK,
+            jid=BOT_JID_RESOURCE,
+        )
+    )
+
+    assert ROOM_JID not in bot.room_bot_nicks
+    assert ROOM_JID not in bot.bot_admin_state
+    assert bot.room_join_events[ROOM_JID].is_set() is False
+
+@pytest.mark.asyncio
+async def test_self_affiliation_change_invalidates_remembered_query_capability():
+    bot = MucBotFixture()
+    bot.boundjid = SimpleNamespace(bare="bot@example.test")
+    bot.admin_affiliation_query_forbidden_rooms = {ROOM_JID}
+    bot._admin_affiliation_cache_entries = {
+        ROOM_JID.casefold(): (float("inf"), frozenset({"old-admin@example.test"}))
+    }
+    bot.room_bot_nicks = {ROOM_JID: BOT_NICK}
+    bot.occupants = {
+        ROOM_JID: {
+            BOT_NICK: {
+                "jid": BOT_JID_RESOURCE,
+                "affiliation": "admin",
+                "role": "moderator",
+            }
+        }
+    }
+    invalidated: list[str] = []
+    bot._invalidate_room_admin_owner_cache = invalidated.append
+
+    await bot.on_muc_presence(
+        FakePresence(
+            room=ROOM_JID,
+            nick=BOT_NICK,
+            jid=BOT_JID_RESOURCE,
+            affiliation="owner",
+            role="moderator",
+            status_codes={"110"},
+        )
+    )
+
+    assert ROOM_JID not in bot.admin_affiliation_query_forbidden_rooms
+    assert invalidated == [ROOM_JID]

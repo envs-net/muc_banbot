@@ -151,15 +151,19 @@ class AdminMixin(BotOccupantMixin, _AdminMixinContract):
 
         Successful results are cached only briefly; this keeps consecutive ban
         commands off the network without turning the cache into long-lived
-        authorization state.  A room that rejects full affiliation lists with
-        ``forbidden`` is remembered exactly as before and falls back to live
-        occupant data.
+        authorization state. A room that rejects full affiliation lists with
+        ``forbidden`` falls back to live occupant data until an explicit refresh
+        or a change in BanBot's own room affiliation triggers a re-probe.
         """
-        if room in self.admin_affiliation_query_forbidden_rooms:
-            return set()
-
         if refresh:
+            # ``forbidden`` is a capability observation, not a permanent room
+            # property. An explicit refresh (or a self-affiliation change; see
+            # MucMixin) must be able to re-probe after the bot is promoted from
+            # admin to owner or server policy changes.
+            self.admin_affiliation_query_forbidden_rooms.discard(room)
             self._invalidate_room_admin_owner_cache(room)
+        elif room in self.admin_affiliation_query_forbidden_rooms:
+            return set()
         else:
             cached = self._cached_room_admin_owner_jids(room)
             if cached is not None:

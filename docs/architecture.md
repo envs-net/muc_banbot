@@ -665,3 +665,32 @@ checkers. The destructive live-protection smoke tool is also part of the quality
 gate; its environment-default overloads preserve precise numeric option types,
 and an explicitly supplied empty argv is no longer replaced with the parent
 process command line.
+
+### Final structural audit hardening
+
+The post-typing structural audit focuses on state that crosses reconnect, room
+presence, server-affiliation and worker-generation boundaries rather than adding
+new feature surface. Durable outbox cancellation now returns the whole unhandled
+claimed batch to `pending`, including cancellation while acknowledging a
+successful send, so a reconnect cannot strand the remaining rows as `inflight`
+for the stale-claim timeout.
+
+Admin synchronization treats a successful server owner/admin snapshot as
+authoritative for privileged cached occupants: stale owner/admin entries are
+removed when a user is demoted while unrelated live occupants are preserved.
+A remembered `forbidden` full-affiliation query is treated as a capability
+observation under the bot's current room privileges, not a permanent property;
+an explicit refresh or a change in BanBot's own affiliation permits a bounded
+re-probe and invalidates the short-lived admin snapshot cache.
+
+Manual status-301 recovery no longer depends on an existing occupant-cache row.
+When the cached real JID is missing it falls back to the unavailable presence,
+which keeps server/manual bans recoverable after cache loss. The same path
+explicitly refuses to persist BanBot's own JID if the bot itself is banned from
+a managed room. Self-unavailable presence also clears tracked join/admin state
+even when the occupant entry was already absent, preventing stale joined/admin
+health state after unusual presence ordering.
+
+The audit also removed the unused cache tuple builder left behind by earlier
+cache consolidation. No shared-core behavior is required for these fixes, so the
+`envs-xmpp` dependency remains at 1.1.1.

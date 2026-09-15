@@ -155,7 +155,7 @@ class OutboxMixin(_OutboxMixinContract):
         batch = await store.claim_due(
             limit=max(1, int(getattr(self, "outbox_batch_size", 20) or 20))
         )
-        for queued in batch:
+        for index, queued in enumerate(batch):
             try:
                 await self._send_message_transport(
                     mto=queued.destination,
@@ -165,11 +165,16 @@ class OutboxMixin(_OutboxMixinContract):
                     raise_on_failure=True,
                 )
             except asyncio.CancelledError:
-                await self._defer_interrupted_outbox_message(
-                    store,
-                    queued.id,
-                    reason="worker cancelled during transport",
-                )
+                # claim_due() marks the whole batch inflight up front. Return
+                # the interrupted row *and every row we have not processed yet*
+                # immediately; otherwise a reconnect can strand the tail of the
+                # batch until stale-claim recovery runs several minutes later.
+                for interrupted in batch[index:]:
+                    await self._defer_interrupted_outbox_message(
+                        store,
+                        interrupted.id,
+                        reason="worker cancelled during transport",
+                    )
                 raise
             except Exception as exc:  # noqa: BLE001 - transport retry boundary
                 self.outbox_failed_attempts += 1
@@ -194,11 +199,16 @@ class OutboxMixin(_OutboxMixinContract):
             try:
                 await store.mark_sent(queued.id)
             except asyncio.CancelledError:
-                await self._defer_interrupted_outbox_message(
-                    store,
-                    queued.id,
-                    reason="worker cancelled while acknowledging delivery",
-                )
+                for interrupted in batch[index:]:
+                    await self._defer_interrupted_outbox_message(
+                        store,
+                        interrupted.id,
+                        reason=(
+                            "worker cancelled while acknowledging delivery"
+                            if interrupted.id == queued.id
+                            else "worker cancelled before delivery"
+                        ),
+                    )
                 raise
             self.outbox_delivered += 1
             self.outbox_last_error = None
@@ -224,10 +234,9 @@ class OutboxMixin(_OutboxMixinContract):
         """Retry durable messages until the reconnect-scoped task is cancelled."""
         while True:
             # Reconnects replace this worker without reopening process-scoped
-            # outbox storage. Normally cancellation returns a claimed row to
-            # pending immediately. Periodic stale recovery is the final safety
-            # net for interruption during SQLite acknowledgement/cleanup, while
-            # the age threshold avoids stealing work from a slow old generation.
+            # outbox storage. Normally cancellation returns the entire unhandled
+            # tail of a claimed batch to pending immediately. Periodic stale
+            # recovery remains the final safety net for process interruption.
             await self._recover_outbox_inflight()
             heartbeat = getattr(getattr(self, "tasks", None), "heartbeat", None)
             if callable(heartbeat):

@@ -746,31 +746,59 @@ class SyncMixin(_SyncMixinContract):
         owners, admins = affiliations
         self.last_admin_sync_ok = True
         self.last_admin_sync_error = None
-        self.occupants[room] = self.occupants.get(room, {})
+
+        # Treat a successful server affiliation query as authoritative for the
+        # admin/owner subset of the ADMIN_ROOM cache.  The previous merge-only
+        # behavior never removed demoted admins, so a stale synthetic/live
+        # occupant could continue to authorize room or direct-message commands
+        # after a later successful !syncadmins. Preserve ordinary occupants,
+        # then rebuild only the privileged entries from the fresh snapshot.
+        affiliation_by_jid: dict[str, str] = {}
+        for affiliation, entries in (("owner", owners), ("admin", admins)):
+            for jid in entries:
+                bare = self.bare_jid(str(jid))
+                if not bare:
+                    log.warning("Skipping admin affiliation entry without a valid JID: %r", jid)
+                    continue
+                affiliation_by_jid.setdefault(bare, affiliation)
+
+        existing_occupants = self.occupants.get(room, {})
+        reconciled_occupants = {
+            nick: info
+            for nick, info in existing_occupants.items()
+            if str(info.get("affiliation") or "").lower() not in {"owner", "admin"}
+        }
+
         admin_list: list[str] = []
         admin_log_list: list[str] = []
+        for bare, affiliation in affiliation_by_jid.items():
+            live_nick = None
+            live_info = None
+            for nick, info in existing_occupants.items():
+                cached_jid = self.bare_jid(str(info.get("jid") or ""))
+                if cached_jid == bare:
+                    live_nick = nick
+                    live_info = info
+                    # Prefer a real nick-shaped cache key over the synthetic
+                    # bare-JID key created for an offline administrator.
+                    if str(nick).casefold() != bare.casefold():
+                        break
 
-        for jid in owners + admins:
-            bare = self.bare_jid(str(jid))
-            if not bare:
-                log.warning("Skipping admin affiliation entry without a valid JID: %r", jid)
-                continue
-            nick = None
-
-            for n, info in self.occupants.get(room, {}).items():
-                if info.get("jid") and self.bare_jid(info["jid"]) == bare:
-                    nick = n
-                    break
-
-            aff = "owner" if jid in owners else "admin"
-            self.occupants[room][nick or bare] = {
-                "role": "moderator" if nick else "participant",
-                "affiliation": aff,
+            entry_key = live_nick or bare
+            role = (
+                str(live_info.get("role") or "moderator")
+                if live_info is not None and live_nick is not None
+                else "participant"
+            )
+            reconciled_occupants[entry_key] = {
+                "role": role,
+                "affiliation": affiliation,
                 "jid": bare,
             }
-
             admin_list.append(self.safe_jid(bare))
             admin_log_list.append(bare)
+
+        self.occupants[room] = reconciled_occupants
 
         cache_admins = getattr(self, "_cache_room_admin_owner_jids", None)
         if callable(cache_admins):

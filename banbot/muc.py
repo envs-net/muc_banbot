@@ -695,6 +695,24 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
                 room,
             )
             return
+
+        # A status-301 unavailable presence can also describe BanBot itself
+        # being removed from a managed room. Never turn that operational
+        # failure into a persisted ban of the bot's own account that would be
+        # propagated to every protected room on the next synchronization.
+        boundjid = getattr(self, "boundjid", None)
+        own_bare = (
+            self.bare_jid(str(boundjid.bare))
+            if boundjid is not None
+            else None
+        )
+        if own_bare and jid_bare == own_bare:
+            log.warning(
+                "Ignoring status-301 ban recovery for BanBot's own JID in %s",
+                room,
+            )
+            return
+
         is_domain_outcast = looks_like_domain(jid_bare)
         recovered_target = BanTarget.from_identifier(
             jid_bare,
@@ -751,30 +769,48 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
         nick = presence["muc"]["nick"]
 
         room_occ = self.occupants.get(room)
-        if room_occ and nick in room_occ:
-            info = room_occ.pop(nick)
-            jid = info.get("jid")
+        info = room_occ.pop(nick) if room_occ and nick in room_occ else None
+        cached_jid = info.get("jid") if info is not None else None
+        if info is not None:
             log.debug("⛔ %s went offline in %s (jid=%s, affiliation=%s, role=%s)",
                      nick,
                      room,
-                     jid or "unknown",
+                     cached_jid or "unknown",
                      info.get("affiliation", "none"),
                      info.get("role", "none"))
 
-            if getattr(self, "room_bot_nicks", {}).get(room) == nick:
-                self.room_bot_nicks.pop(room, None)
-                self.bot_admin_state.pop(room, None)
-                join_event = getattr(self, "room_join_events", {}).get(room)
-                if join_event is not None:
-                    join_event.clear()
+        # Clear self-presence tracking even if the occupant cache entry was
+        # already missing. A late unavailable presence must not leave a stale
+        # join event or bot nick behind.
+        if getattr(self, "room_bot_nicks", {}).get(room) == nick:
+            self.room_bot_nicks.pop(room, None)
+            self.bot_admin_state.pop(room, None)
+            join_event = getattr(self, "room_join_events", {}).get(room)
+            if join_event is not None:
+                join_event.clear()
 
-            if "301" in self._muc_presence_status_codes(presence):
-                await self._handle_manual_muc_ban_presence(
-                    room,
-                    nick,
-                    jid,
-                    self._muc_presence_ban_reason(presence),
-                )
+        if "301" in self._muc_presence_status_codes(presence):
+            # Prefer the cached real JID, but recover from the presence itself
+            # when the join event was missed or the cache was cleared before
+            # the unavailable stanza arrived.
+            presence_jid = None
+            try:
+                muc = presence["muc"]
+            except Exception:
+                muc = None
+            if muc is not None and hasattr(muc, "get"):
+                try:
+                    raw_jid = muc.get("jid")
+                except Exception:
+                    raw_jid = None
+                if raw_jid:
+                    presence_jid = str(raw_jid)
+            await self._handle_manual_muc_ban_presence(
+                room,
+                nick,
+                cached_jid or presence_jid,
+                self._muc_presence_ban_reason(presence),
+            )
 
 
     async def on_muc_presence(self, presence) -> None:
@@ -817,6 +853,26 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
 
         previous_info = self.occupants.get(room, {}).get(nick, {})
         previous_affiliation = previous_info.get("affiliation")
+
+        if previous_affiliation != affiliation:
+            # A remembered ``forbidden`` affiliation-list query is only valid
+            # for the bot's previous room privileges. Re-probe lazily after a
+            # promotion/demotion instead of keeping offline-admin protection
+            # disabled until the whole process restarts.
+            forbidden_rooms = getattr(
+                self,
+                "admin_affiliation_query_forbidden_rooms",
+                None,
+            )
+            if forbidden_rooms is not None:
+                forbidden_rooms.discard(room)
+            invalidate_admin_cache = getattr(
+                self,
+                "_invalidate_room_admin_owner_cache",
+                None,
+            )
+            if callable(invalidate_admin_cache):
+                invalidate_admin_cache(room)
 
         # Keep our own live occupant cache in sync.
         #

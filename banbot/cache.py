@@ -16,19 +16,6 @@ class CacheMixin:
     ban_index_by_domain: dict[str, list[BanTuple]]
     bare_jid: Callable[[str], str]
 
-    def _build_ban_tuple(
-        self,
-        jid: str | None,
-        nick: str | None,
-        until: int,
-        issuer: str | None,
-        comment: str | None,
-    ) -> BanTuple:
-        """Return a normalized ban tuple for caches and indexes."""
-        target = BanTarget.from_parts(jid, nick)
-        return (target.jid, target.nick, until, issuer, comment)
-
-
     def _cache_ban(
         self,
         jid: str | None,

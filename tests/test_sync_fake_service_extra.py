@@ -856,3 +856,44 @@ async def test_startup_room_outcast_prefetch_runs_rooms_concurrently(temp_db_pat
 
     assert snapshots[room_a] == ("ok", [("blocked-a@example.test", None)])
     assert snapshots[room_b] == ("ok", [("blocked-b@example.test", None)])
+
+@pytest.mark.asyncio
+async def test_sync_admins_removes_demoted_cached_admin_after_successful_refresh(
+    temp_db_path,
+    sync_module,
+):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    muc_service = FakeMucService(TEST_ADMIN_ROOM_OWNER_ADMIN_FLAT)
+    bot.plugin["xep_0045"] = muc_service
+    try:
+        async with admin_room_override(sync_module):
+            assert await bot.sync_admins(announce=False) is True
+
+        assert TEST_ADMIN_JID in {
+            info.get("jid") for info in bot.occupants[TEST_ADMIN_ROOM].values()
+        }
+
+        # The server now reports only the owner. Keep an unrelated live member
+        # while proving the old admin/owner cache is reconciled, not merge-only.
+        bot.occupants[TEST_ADMIN_ROOM]["Regular"] = {
+            "jid": "regular@example.test",
+            "affiliation": "member",
+            "role": "participant",
+        }
+        muc_service.affiliations = muc_service._normalize_affiliations(
+            {TEST_ADMIN_ROOM: {"owner": [TEST_OWNER_JID], "admin": []}}
+        )
+
+        async with admin_room_override(sync_module):
+            assert await bot.sync_admins(announce=False) is True
+
+        refreshed = bot.occupants[TEST_ADMIN_ROOM]
+        privileged_jids = {
+            info.get("jid")
+            for info in refreshed.values()
+            if info.get("affiliation") in {"owner", "admin"}
+        }
+        assert privileged_jids == {TEST_OWNER_JID}
+        assert refreshed["Regular"]["affiliation"] == "member"
+    finally:
+        await bot.db.close()
