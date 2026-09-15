@@ -221,7 +221,7 @@ Public commands are rate-limited with `PUBLIC_COMMAND_RATE_LIMIT_WINDOW` and `PU
 
 ## Direct Messages / MUC PMs
 
-When `ALLOW_ADMIN_COMMANDS_IN_DMS=True`, admins may use selected read-only admin commands via direct messages or MUC PMs. Mutating commands remain restricted to the admin room.
+When `ALLOW_ADMIN_COMMANDS_IN_DMS=True`, admins may use selected read-only admin commands via direct messages or MUC PMs. Authorization still comes exclusively from owner/admin affiliation in `ADMIN_ROOM`; being owner/admin in another protected room does not grant DM command access. Mutating commands remain restricted to the admin room.
 
 Allowed read-only DM/MUC-PM commands:
 

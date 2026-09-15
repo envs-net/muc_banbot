@@ -460,6 +460,16 @@ dispatcher methods. This turns command-table drift into an immediate startup or
 type-check failure instead of a latent error discovered only when an operator
 uses the affected command.
 
+The direct-message/MUC-PM entry point and centralized messaging layer are now
+inside the same typed boundary. DM authorization follows the documented admin-room
+trust model: a protected-room owner/admin is not an operator unless their real JID
+also resolves to an owner/admin occupant in `ADMIN_ROOM`. Sender JIDs and message
+fields are normalized before routing, so malformed DM stanzas are ignored rather
+than producing invalid reply targets. Task-local OMEMO reply preference now uses
+the same owner-task isolation principle as DM reply routing; background tasks
+spawned by an encrypted DM command therefore cannot inherit that command's forced
+encryption state.
+
 ### Deployment and health ownership
 
 The deploy frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` and adds

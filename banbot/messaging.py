@@ -6,30 +6,56 @@ transport-specific behavior, such as OMEMO encryption, can be added here
 without touching every command/mixin again.
 """
 
+import asyncio
 import logging
 from contextvars import ContextVar, Token
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp.messaging import ReplyRoute, TaskLocalReplyRoute
 
 log = logging.getLogger(__name__)
 
-_REPLY_ENCRYPTED: ContextVar[bool | None] = ContextVar("banbot_reply_encrypted", default=None)
+_EncryptionContext = tuple[object | None, bool | None]
+_REPLY_ENCRYPTED: ContextVar[_EncryptionContext | None] = ContextVar(
+    "banbot_reply_encrypted",
+    default=None,
+)
 _REPLY_ROUTES = TaskLocalReplyRoute("banbot_reply_target")
 
+if TYPE_CHECKING:
+    from .contracts import MessagingMixinHost
 
-class MessagingMixin:
-    def _set_reply_encryption_context(self, encrypted: bool | None) -> Token[bool | None]:
+    class _MessagingMixinContract(MessagingMixinHost):
+        pass
+else:
+    class _MessagingMixinContract:
+        pass
+
+
+class MessagingMixin(_MessagingMixinContract):
+    def _set_reply_encryption_context(
+        self,
+        encrypted: bool | None,
+    ) -> Token[_EncryptionContext | None]:
         """Set the encryption preference for replies created in the current task."""
-        return _REPLY_ENCRYPTED.set(encrypted)
+        return _REPLY_ENCRYPTED.set((asyncio.current_task(), encrypted))
 
-    def _reset_reply_encryption_context(self, token: Token[bool | None]) -> None:
+    def _reset_reply_encryption_context(
+        self,
+        token: Token[_EncryptionContext | None],
+    ) -> None:
         """Restore the previous reply encryption context."""
         _REPLY_ENCRYPTED.reset(token)
 
     def _get_reply_encryption_context(self) -> bool | None:
         """Return the current task's reply encryption preference, if any."""
-        return _REPLY_ENCRYPTED.get()
+        value = _REPLY_ENCRYPTED.get()
+        if value is None:
+            return None
+        owner_task, encrypted = value
+        if owner_task is not None and asyncio.current_task() is not owner_task:
+            return None
+        return encrypted
 
     def _set_reply_target_context(
         self,

@@ -1,7 +1,8 @@
 """Direct-message and MUC-PM policy for admin read-only commands."""
 
-import inspect
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp.messaging import is_muc_private_message
 from envs_xmpp_core.xmpp.occupants import (
@@ -18,66 +19,109 @@ from .utils import wants_all_pages, without_all_pages_arg
 LAST_PAGE_MARKER = -1
 VERSION_CHECK_URL = "https://github.com/envs-net/muc_banbot/releases/latest"
 
+if TYPE_CHECKING:
+    from .contracts import DirectMessageMixinHost
 
-class DirectMessageMixin:
-    def _direct_message_sender_info(self, msg) -> tuple[bool, str, str]:
-        """Return (is_admin, reply_to, sender_bare) for a DM or MUC-PM."""
-        sender = msg["from"].bare
-        sender_full = str(msg["from"])
-        sender_resource = msg["from"].resource
+    class _DirectMessageMixinContract(DirectMessageMixinHost):
+        pass
+else:
+    class _DirectMessageMixinContract:
+        pass
 
-        known_rooms = self.protected_rooms | {ADMIN_ROOM}
 
-        # A real MUC PM looks like: room@conference.example/Nick.
+class DirectMessageMixin(_DirectMessageMixinContract):
+    def _direct_message_room_occupants(
+        self,
+        room: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Return one room's occupant cache using case-insensitive JID matching."""
+        occupants = self.occupants.get(room)
+        if occupants is not None:
+            return occupants
+        room_key = room.casefold()
+        for cached_room, cached_occupants in self.occupants.items():
+            if cached_room.casefold() == room_key:
+                return cached_occupants
+        return {}
+
+    def _direct_message_sender_info(
+        self,
+        msg: Any,
+    ) -> tuple[bool, str, str] | None:
+        """Return ``(is_admin, reply_to, sender_bare)`` for a DM or MUC-PM.
+
+        DM authorization deliberately follows the same trust boundary as room
+        commands: the admin room is the single source of operator identity.
+        Being owner/admin in another protected room is not sufficient.
+        """
+        try:
+            from_jid = msg["from"]
+            message_type = msg["type"]
+        except Exception:
+            return None
+
+        sender = str(getattr(from_jid, "bare", "") or "").strip()
+        sender_full = str(from_jid or "").strip()
+        sender_resource = str(getattr(from_jid, "resource", "") or "").strip()
+        if not sender or not sender_full:
+            return None
+
+        known_rooms = {
+            str(room).strip().casefold()
+            for room in self.protected_rooms | {ADMIN_ROOM}
+            if str(room).strip()
+        }
+        sender_room_key = sender.casefold()
+
+        # A real MUC PM looks like: room@conference.example/Nick.  Compare the
+        # configured room set case-insensitively, then use the configured key
+        # for occupant-cache lookups.
         is_muc_pm = is_muc_private_message(
-            msg["type"],
-            sender,
+            message_type,
+            sender_room_key,
             sender_resource,
             known_rooms,
         )
-        reply_to = sender_full if is_muc_pm else sender
-        sender_bare = sender
-        is_admin = False
 
         if is_muc_pm:
             room = sender
-            nick = sender_resource
+            reply_to = sender_full
             occupant = find_occupant_by_nick(
-                self.occupants.get(room, {}),
-                nick,
+                self._direct_message_room_occupants(room),
+                sender_resource,
                 room=room,
             )
-            is_admin = bool(occupant and occupant_is_admin_or_owner(occupant))
+            real_bare = self.bare_jid(occupant.jid) if occupant is not None else None
+            sender_bare = real_bare or sender
 
-            # Optional fallback: if the PM came from another known room,
-            # also check whether this user's real JID is admin in ADMIN_ROOM.
-            real_bare = occupant.jid if occupant is not None else None
-
-            if real_bare:
-                sender_bare = real_bare
-
-            if not is_admin and real_bare:
+            if room.casefold() == ADMIN_ROOM.casefold():
+                is_admin = bool(occupant and occupant_is_admin_or_owner(occupant))
+            elif real_bare:
                 admin_occupant = find_occupant_by_jid(
-                    self.occupants.get(ADMIN_ROOM, {}),
+                    self._direct_message_room_occupants(ADMIN_ROOM),
                     real_bare,
                     room=ADMIN_ROOM,
                 )
                 is_admin = bool(
                     admin_occupant and occupant_is_admin_or_owner(admin_occupant)
                 )
+            else:
+                is_admin = False
 
-        else:
-            # Regular direct DM: user@example/resource or user@example
-            sender_bare = self.bare_jid(str(msg["from"]))
+            return is_admin, reply_to, sender_bare
 
-            admin_occupant = find_occupant_by_jid(
-                self.occupants.get(ADMIN_ROOM, {}),
-                sender_bare,
-                room=ADMIN_ROOM,
-            )
-            is_admin = bool(admin_occupant and occupant_is_admin_or_owner(admin_occupant))
+        # Regular direct DM: user@example/resource or user@example.
+        direct_bare = self.bare_jid(sender_full)
+        if not direct_bare:
+            return None
 
-        return is_admin, reply_to, sender_bare
+        admin_occupant = find_occupant_by_jid(
+            self._direct_message_room_occupants(ADMIN_ROOM),
+            direct_bare,
+            room=ADMIN_ROOM,
+        )
+        is_admin = bool(admin_occupant and occupant_is_admin_or_owner(admin_occupant))
+        return is_admin, direct_bare, direct_bare
 
 
     async def _send_direct_message(self, reply_to: str, body: str) -> None:
@@ -86,7 +130,7 @@ class DirectMessageMixin:
 
 
     @asynccontextmanager
-    async def _redirect_command_output_to_dm(self, reply_to: str):
+    async def _redirect_command_output_to_dm(self, reply_to: str) -> AsyncIterator[None]:
         """Route command output to a DM without mutating shared bot methods."""
         set_target = getattr(self, "_set_reply_target_context", None)
         reset_target = getattr(self, "_reset_reply_target_context", None)
@@ -151,11 +195,7 @@ class DirectMessageMixin:
                     )
                     return True
 
-                sig = inspect.signature(self._cmd_config)
-                if len(sig.parameters) >= 2:
-                    await self._cmd_config(reply_to, config_args)
-                else:
-                    await self._cmd_config(reply_to)
+                await self._cmd_config(reply_to, config_args)
                 return True
 
             if cmd in ("protections", "protection"):
@@ -198,12 +238,7 @@ class DirectMessageMixin:
                 return True
 
             if cmd == "status":
-                try:
-                    await self._cmd_status(reply_to, args)
-                except TypeError as exc:
-                    if args or "positional argument" not in str(exc):
-                        raise
-                    await self._cmd_status(reply_to)
+                await self._cmd_status(reply_to, args)
                 return True
 
             if cmd == "tasks":
@@ -423,34 +458,35 @@ class DirectMessageMixin:
                     return True
 
                 query = " ".join(query_args)
-                bansearch_params = inspect.signature(self.cmd_bansearch).parameters
-                if "reply_to" in bansearch_params:
-                    await self.cmd_bansearch(
-                        query,
-                        page=page,
-                        show_all=show_all,
-                        reply_to=reply_to,
-                    )
-                else:
-                    await self.cmd_bansearch(query, page=page, show_all=show_all)
+                await self.cmd_bansearch(query, page=page, show_all=show_all)
                 return True
 
         return False
 
 
-    async def on_direct_message(self, msg) -> None:
+    async def on_direct_message(self, msg: Any) -> None:
         """
         Handle regular DMs and MUC PMs.
 
         Admins may use a small read-only command subset in DMs when enabled.
         Mutating admin commands still require the admin room for auditability and safety.
         """
-        # Ignore own messages
-        if msg["from"].bare == self.boundjid.bare:
+        # Treat stanza sender/type fields as untrusted input at the DM boundary.
+        try:
+            sender_bare = self.bare_jid(getattr(msg["from"], "bare", None))
+            message_type = str(msg["type"] or "").strip().lower()
+        except Exception:
             return
 
-        # Only process direct messages
-        if msg["type"] not in ("chat", "normal"):
+        if not sender_bare:
+            return
+
+        own_bare = self.bare_jid(getattr(self.boundjid, "bare", None))
+        if own_bare and sender_bare == own_bare:
+            return
+
+        # Only process direct messages.
+        if message_type not in ("chat", "normal"):
             return
 
         # Direct MUC invites are normal/chat messages and are handled separately.
@@ -463,10 +499,13 @@ class DirectMessageMixin:
             if msg is None:
                 return
 
-        is_admin, reply_to, sender_bare = self._direct_message_sender_info(msg)
+        sender_info = self._direct_message_sender_info(msg)
+        if sender_info is None:
+            return
+        is_admin, reply_to, sender_bare = sender_info
 
         try:
-            body = msg["body"].strip()
+            body = str(msg["body"] or "").strip()
         except Exception:
             body = ""
 

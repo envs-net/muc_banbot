@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from banbot.messaging import MessagingMixin
@@ -73,3 +75,27 @@ async def test_bot_send_message_fallback_when_explicitly_enabled():
 
     assert result["plain"]["mbody"] == "secret"
     assert bot.sent
+
+
+@pytest.mark.asyncio
+async def test_reply_encryption_context_does_not_leak_to_child_tasks():
+    bot = MessagingBot()
+    child_started = asyncio.Event()
+
+    async def child_send():
+        child_started.set()
+        return await bot.bot_send_message(mto="room@example.org", mbody="background")
+
+    token = bot._set_reply_encryption_context(True)
+    try:
+        child = asyncio.create_task(child_send())
+        await asyncio.wait_for(child_started.wait(), timeout=1)
+        foreground = await bot.bot_send_message(mto="admin@example.org", mbody="reply")
+        background = await asyncio.wait_for(child, timeout=1)
+    finally:
+        bot._reset_reply_encryption_context(token)
+
+    assert foreground["encrypted"]["mbody"] == "reply"
+    assert background["plain"]["mbody"] == "background"
+    assert [item["mbody"] for item in bot.encrypted_sent] == ["reply"]
+    assert [item["mbody"] for item in bot.sent] == ["background"]

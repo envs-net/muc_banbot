@@ -5,9 +5,9 @@ import pytest
 
 from banbot.direct_messages import (
     ADMIN_ROOM,
-    DirectMessageMixin,
     LAST_PAGE_MARKER,
     VERSION_CHECK_URL,
+    DirectMessageMixin,
 )
 from banbot.messaging import MessagingMixin
 from banbot.utils import bare_jid
@@ -106,11 +106,13 @@ class DirectBot(MessagingMixin, DirectMessageMixin):
         self.sent.append(kwargs)
         return kwargs
 
-    async def _cmd_config(self, room):
+    async def _cmd_config(self, room, args=None, actor=None):
+        del args, actor
         self.calls.append(("config", room))
         await self.bot_send_message(mto=room, mbody="config output", mtype="chat")
 
-    async def _cmd_status(self, room):
+    async def _cmd_status(self, room, args=None):
+        del args
         self.calls.append(("status", room))
         await self.bot_send_message(mto=room, mbody="status output", mtype="chat")
 
@@ -250,6 +252,52 @@ async def test_muc_pm_admin_detection_falls_back_to_admin_room_real_jid():
     # in ADMIN_ROOM, so the fallback should treat the MUC PM as admin.
     assert bot.sent[0]["mto"] == "room@conference.example.org/Admin"
     assert "Admin DM support is read-only" in bot.sent[0]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_protected_room_admin_is_not_dm_admin_without_admin_room_membership():
+    bot = DirectBot()
+    bot.occupants["room@conference.example.org"]["Admin"] = {
+        "jid": "local-admin@example.org/res",
+        "affiliation": "owner",
+    }
+
+    await bot.on_direct_message(
+        FakeDirectMessage(
+            bare="room@conference.example.org",
+            resource="Admin",
+            body="!status",
+        )
+    )
+
+    assert bot.calls == []
+    assert bot.sent[-1]["mto"] == "room@conference.example.org/Admin"
+    assert "only listen to admins" in bot.sent[-1]["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_direct_message_ignores_sender_without_usable_bare_jid():
+    bot = DirectBot()
+
+    await bot.on_direct_message(FakeDirectMessage(bare="   ", resource="desktop", body="!status"))
+
+    assert bot.calls == []
+    assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_admin_room_muc_pm_authorization_tolerates_room_jid_case_changes():
+    bot = DirectBot()
+    cached = bot.occupants.pop(ADMIN_ROOM)
+    mixed_case_room = ADMIN_ROOM.upper()
+    bot.occupants[mixed_case_room] = cached
+
+    await bot.on_direct_message(
+        FakeDirectMessage(bare=mixed_case_room, resource="Admin", body="!status")
+    )
+
+    assert bot.calls == [("status", f"{mixed_case_room}/Admin")]
+    assert bot.sent[-1]["mto"] == f"{mixed_case_room}/Admin"
 
 
 @pytest.mark.asyncio
@@ -820,7 +868,8 @@ async def test_admin_dm_output_redirection_is_task_local() -> None:
     command_started = asyncio.Event()
     release_command = asyncio.Event()
 
-    async def slow_status(room):
+    async def slow_status(room, args=None):
+        del args
         command_started.set()
         await release_command.wait()
         await bot.bot_send_message(
@@ -862,7 +911,8 @@ async def test_admin_dm_reply_context_does_not_leak_to_child_tasks() -> None:
     bot = DirectBot()
     child_done = asyncio.Event()
 
-    async def status_with_child(room):
+    async def status_with_child(room, args=None):
+        del args
         async def background_send():
             await bot.bot_send_message(
                 mto=ADMIN_ROOM,
