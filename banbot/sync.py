@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from config import ADMIN_ROOM, NICK
 
@@ -20,6 +20,8 @@ _SYNC_AFFILIATION_QUERY_OPTIONS = AffiliationQueryOptions(
     attempts=2,
     retry_delay_seconds=1.0,
 )
+
+_SyncBanAction = Literal["apply", "already_outcast", "defer_nick"]
 
 from .ban_target import BanTarget
 from .locks import ban_state_lock
@@ -56,6 +58,77 @@ class SyncMixin(_SyncMixinContract):
             _nick, info = bot_entry(room)
             return bool(info and info.get("affiliation") in ("owner", "admin"))
         return bool(self.is_bot_admin_or_owner(room))
+
+    def _sync_ban_action_for_room(
+        self,
+        room: str,
+        ban_jid: str | None,
+        ban_nick: str | None,
+        outcasts_bare: set[str],
+    ) -> _SyncBanAction:
+        """Return how one active local ban should be reconciled in ``room``.
+
+        JID and domain bans have a persistent MUC representation and therefore
+        only need to be applied when the corresponding outcast is missing.
+        Nick-only bans have no affiliation representation.  They stay in the
+        local database/cache and are enforced by the presence handler when the
+        nick appears; during synchronization they are only actionable when the
+        nick is currently present in the room.
+        """
+        if ban_jid:
+            canonical_target = self._sync_canonical_outcast_target(ban_jid)
+            if canonical_target in outcasts_bare:
+                log.debug("✓ %s already banned in %s, skipping", canonical_target, room)
+                return "already_outcast"
+            return "apply"
+
+        if ban_nick:
+            nick_key = ban_nick.casefold()
+            room_occupants = getattr(self, "occupants", {}).get(room, {})
+            if any(str(candidate).casefold() == nick_key for candidate in room_occupants):
+                return "apply"
+            log.debug(
+                "Deferring nick-only ban for %s in %s: nick is not currently present",
+                ban_nick,
+                room,
+            )
+            return "defer_nick"
+
+        # Active bans are normalized through BanTarget before reaching this
+        # helper, so this is defensive only.  Do not turn malformed state into
+        # a phantom "applied" ban in synchronization statistics.
+        log.warning("Skipping malformed ban without JID/domain or nick while syncing %s", room)
+        return "defer_nick"
+
+    @staticmethod
+    def _sync_log_room_ban_result(
+        room: str,
+        *,
+        applied: int,
+        already_outcast: int,
+        deferred_nicks: int,
+    ) -> None:
+        """Log one accurate per-room reconciliation summary."""
+        if applied:
+            log.info(
+                "ℹ️ Applied %d new bans in %s (skipped %d already outcast, deferred %d inactive nick-only)",
+                applied,
+                room,
+                already_outcast,
+                deferred_nicks,
+            )
+            return
+
+        if deferred_nicks:
+            log.info(
+                "ℹ️ No ban changes needed in %s (%d already outcast, %d inactive nick-only deferred)",
+                room,
+                already_outcast,
+                deferred_nicks,
+            )
+            return
+
+        log.info("ℹ️ All bans already applied in %s, nothing to do", room)
 
 
     async def _sync_ensure_muc_joined(self, room: str, *, force: bool = False) -> bool:
@@ -159,29 +232,37 @@ class SyncMixin(_SyncMixinContract):
             # --- Fetch current outcasts in this room ---
             try:
                 outcast_entries = await self._sync_fetch_room_outcasts(room)
-                outcasts_bare = [self._sync_canonical_outcast_target(jid) for jid, _reason in outcast_entries]
+                outcasts_bare = {
+                    self._sync_canonical_outcast_target(jid)
+                    for jid, _reason in outcast_entries
+                }
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
-                outcasts_bare = []
+                outcasts_bare = set()
 
-            # --- Apply only MISSING bans ---
+            # --- Apply only actionable MISSING bans ---
             tasks = []
-            new_bans_count = 0
+            already_outcast_count = 0
+            deferred_nick_count = 0
 
             for ban_jid, ban_nick, comment in active_room_bans:
-                # Check if already outcast in this room
-                already_banned = False
+                action = self._sync_ban_action_for_room(
+                    room, ban_jid, ban_nick, outcasts_bare
+                )
+                if action == "already_outcast":
+                    already_outcast_count += 1
+                    continue
+                if action == "defer_nick":
+                    deferred_nick_count += 1
+                    continue
 
-                if ban_jid:
-                    ban_jid_bare = self.bare_jid(ban_jid)
-                    if ban_jid_bare in outcasts_bare:
-                        already_banned = True
-                        log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
+                tasks.append(
+                    self.apply_ban_to_room(
+                        room, ban_jid, ban_nick, comment, log_success=False
+                    )
+                )
 
-                if not already_banned:
-                    tasks.append(self.apply_ban_to_room(room, ban_jid, ban_nick, comment, log_success=False))
-                    new_bans_count += 1
-
+            applied_count = 0
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 failed_count = 0
@@ -195,18 +276,26 @@ class SyncMixin(_SyncMixinContract):
                         mbody=f"⚠️ Failed to apply {failed_count} bans in {room}",
                         mtype="groupchat"
                     )
-                log.info(
-                    "ℹ️ Applied %d new bans in %s (skipped %d already banned)",
-                    new_bans_count - failed_count,
-                    room,
-                    len(active_room_bans) - new_bans_count,
-                )
-            else:
-                log.info("ℹ️ All bans already applied in %s, nothing to do", room)
+                applied_count = len(tasks) - failed_count
 
+            self._sync_log_room_ban_result(
+                room,
+                applied=applied_count,
+                already_outcast=already_outcast_count,
+                deferred_nicks=deferred_nick_count,
+            )
+
+            deferred_suffix = (
+                f", {deferred_nick_count} inactive nick-only deferred"
+                if deferred_nick_count
+                else ""
+            )
             await self.bot_send_message(
                 mto=ADMIN_ROOM,
-                mbody=f"✅ Finished syncing room {room} ({idx}/{total_rooms}) - {new_bans_count} new bans applied",
+                mbody=(
+                    f"✅ Finished syncing room {room} ({idx}/{total_rooms}) - "
+                    f"{applied_count} new bans applied{deferred_suffix}"
+                ),
                 mtype="groupchat"
             )
 
@@ -594,11 +683,14 @@ class SyncMixin(_SyncMixinContract):
             # --- Fetch current outcasts in the room ---
             try:
                 outcast_entries = await self._sync_fetch_room_outcasts(room)
-                outcasts_bare = [self._sync_canonical_outcast_target(jid) for jid, _reason in outcast_entries]
+                outcasts_bare = {
+                    self._sync_canonical_outcast_target(jid)
+                    for jid, _reason in outcast_entries
+                }
             except Exception as e:
                 log.warning("⚠️ Failed to fetch outcasts for %s: %s", room, e)
                 outcast_entries = []
-                outcasts_bare = []
+                outcasts_bare = set()
 
             # --- Add orphan outcasts to DB ---
             # Important: do not promote expired tempbans that are still present
@@ -643,41 +735,49 @@ class SyncMixin(_SyncMixinContract):
                     await self.upsert_ban_db(jid_bare, nick, until_value, issuer_value, comment_value)
                 log.info("✅ Added %d orphan outcasts to DB for room %s", len(to_insert), room)
 
-            # --- Apply only MISSING bans in this room ---
+            # --- Apply only actionable MISSING bans in this room ---
             tasks = []
-            new_bans_count = 0
+            already_outcast_count = 0
+            deferred_nick_count = 0
 
             for ban_jid, ban_nick, _until, comment in active_bans:
-                # Check if already outcast in this room
-                already_banned = False
+                action = self._sync_ban_action_for_room(
+                    room, ban_jid, ban_nick, outcasts_bare
+                )
+                if action == "already_outcast":
+                    already_outcast_count += 1
+                    continue
+                if action == "defer_nick":
+                    deferred_nick_count += 1
+                    continue
 
-                if ban_jid:
-                    ban_jid_bare = self.bare_jid(ban_jid)
-                    if ban_jid_bare in outcasts_bare:
-                        already_banned = True
-                        log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
-
-                if not already_banned:
-                    tasks.append(
-                        self.apply_ban_to_room(
-                            room,
-                            ban_jid,
-                            ban_nick,
-                            comment,
-                            announce_missing_rights=False,
-                            log_success=False,
-                        )
+                tasks.append(
+                    self.apply_ban_to_room(
+                        room,
+                        ban_jid,
+                        ban_nick,
+                        comment,
+                        announce_missing_rights=False,
+                        log_success=False,
                     )
-                    new_bans_count += 1
+                )
 
             if tasks:
                 await asyncio.gather(*tasks)
-                log.info("ℹ️ Applied %d new bans in %s (skipped %d already banned)",
-                        new_bans_count, room, len(active_bans) - new_bans_count)
-            else:
-                log.info("ℹ️ All bans already applied in %s, nothing to do", room)
 
-            log.info("✅ Ban sync completed for room %s (%d new bans applied)", room, new_bans_count)
+            applied_count = len(tasks)
+            self._sync_log_room_ban_result(
+                room,
+                applied=applied_count,
+                already_outcast=already_outcast_count,
+                deferred_nicks=deferred_nick_count,
+            )
+            log.info(
+                "✅ Ban sync completed for room %s (%d new bans applied, %d inactive nick-only deferred)",
+                room,
+                applied_count,
+                deferred_nick_count,
+            )
 
         except Exception as e:
             log.warning("⚠️ Failed to sync bans for room %s: %s", room, e)
@@ -915,10 +1015,10 @@ class SyncMixin(_SyncMixinContract):
                     )
                 continue
 
-            outcasts_bare = [
+            outcasts_bare = {
                 self._sync_canonical_outcast_target(jid)
                 for jid, _reason in outcast_entries
-            ]
+            }
 
             # --- Add orphan outcasts to DB ---
             # Important: do not promote expired tempbans that are still present
@@ -964,45 +1064,59 @@ class SyncMixin(_SyncMixinContract):
                 active_bans.extend(orphan_bans)
                 log.info("✅ Added %d orphan outcasts to DB for room %s", len(orphan_bans), room)
 
-            # --- Apply only MISSING bans in parallel ---
+            # --- Apply only actionable MISSING bans in parallel ---
             tasks = []
-            new_bans_count = 0
+            scheduled_bans: list[tuple[str | None, str | None]] = []
+            already_outcast_count = 0
+            deferred_nick_count = 0
 
             for ban_jid, ban_nick, comment in active_bans:
-                # Check if already outcast in this room
-                already_banned = False
+                action = self._sync_ban_action_for_room(
+                    room, ban_jid, ban_nick, outcasts_bare
+                )
+                if action == "already_outcast":
+                    already_outcast_count += 1
+                    continue
+                if action == "defer_nick":
+                    deferred_nick_count += 1
+                    continue
 
-                if ban_jid:
-                    ban_jid_bare = self.bare_jid(ban_jid)
-                    if ban_jid_bare in outcasts_bare:
-                        already_banned = True
-                        log.debug("✓ %s already banned in %s, skipping", ban_jid_bare, room)
-
-                if not already_banned:
-                    tasks.append(
-                        self.apply_ban_to_room(
-                            room,
-                            ban_jid,
-                            ban_nick,
-                            comment,
-                            announce_missing_rights=False,
-                            log_success=False,
-                        )
+                tasks.append(
+                    self.apply_ban_to_room(
+                        room,
+                        ban_jid,
+                        ban_nick,
+                        comment,
+                        announce_missing_rights=False,
+                        log_success=False,
                     )
-                    applied_bans_set.add((ban_jid, ban_nick))
-                    new_bans_count += 1
+                )
+                scheduled_bans.append((ban_jid, ban_nick))
 
             if tasks:
                 await asyncio.gather(*tasks)
-                log.info("ℹ️ Applied %d new bans in %s (skipped %d already banned)",
-                        new_bans_count, room, len(active_bans) - new_bans_count)
-            else:
-                log.info("ℹ️ All bans already applied in %s, nothing to do", room)
+                applied_bans_set.update(scheduled_bans)
+
+            applied_count = len(tasks)
+            self._sync_log_room_ban_result(
+                room,
+                applied=applied_count,
+                already_outcast=already_outcast_count,
+                deferred_nicks=deferred_nick_count,
+            )
 
             if announce_progress:
+                deferred_suffix = (
+                    f", {deferred_nick_count} inactive nick-only deferred"
+                    if deferred_nick_count
+                    else ""
+                )
                 await self.bot_send_message(
                     mto=ADMIN_ROOM,
-                    mbody=f"✅ Finished syncing room {room} ({idx}/{len(self.protected_rooms)}) - {new_bans_count} new bans applied",
+                    mbody=(
+                        f"✅ Finished syncing room {room} ({idx}/{len(self.protected_rooms)}) - "
+                        f"{applied_count} new bans applied{deferred_suffix}"
+                    ),
                     mtype="groupchat"
                 )
 

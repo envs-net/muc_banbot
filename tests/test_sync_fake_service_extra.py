@@ -371,6 +371,50 @@ async def test_sync_bans_to_rooms_applies_only_missing_bans(temp_db_path, sync_m
 
 
 @pytest.mark.asyncio
+async def test_startup_sync_defers_absent_nick_only_ban_without_counting_it_applied(
+    temp_db_path,
+    caplog,
+):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    try:
+        await bot.upsert_ban_db(None, "GhostNick", 0, "tester", "nick only")
+
+        with caplog.at_level("INFO", logger="banbot.sync"):
+            await bot.sync_bans_to_rooms(startup=True, announce_progress=True)
+
+        assert bot.applied == []
+        assert "0 unique bans applied" in caplog.text
+        assert "1 inactive nick-only deferred" in caplog.text
+        assert any(
+            "0 new bans applied, 1 inactive nick-only deferred" in msg["mbody"]
+            for msg in bot.sent
+        )
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_startup_sync_applies_present_nick_only_ban_case_insensitively(temp_db_path):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    room = "room@conference.example.test"
+    bot.occupants[room]["GhOsTnIcK"] = {
+        "jid": "ghost@example.test/resource",
+        "affiliation": "member",
+        "role": "participant",
+    }
+    try:
+        await bot.upsert_ban_db(None, "ghostnick", 0, "tester", "nick only")
+
+        await bot.sync_bans_to_rooms(startup=True, announce_progress=False)
+
+        assert bot.applied == [
+            (room, None, "ghostnick", "nick only", False),
+        ]
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
 async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
     bot = await initialize_sync_bot_for_test(temp_db_path)
     bot.plugin["xep_0045"] = FakeMucService(
@@ -382,6 +426,21 @@ async def test_sync_single_room_recovers_orphan_outcast(temp_db_path):
 
         assert "orphan@example.test" in bot.ban_index_by_jid
         assert bot.applied == []  # recovered outcast was already present in the room
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_single_room_defers_absent_nick_only_ban(temp_db_path, caplog):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    try:
+        await bot.upsert_ban_db(None, "GhostNick", 0, "tester", "nick only")
+
+        with caplog.at_level("INFO", logger="banbot.sync"):
+            await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+
+        assert bot.applied == []
+        assert "0 new bans applied, 1 inactive nick-only deferred" in caplog.text
     finally:
         await bot.db.close()
 
@@ -667,6 +726,30 @@ async def test_sync_rooms_sets_join_time_on_success(temp_db_path, monkeypatch, s
         await bot.sync_rooms_and_bans()
 
         assert room in bot.room_join_time
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_rooms_and_bans_defers_absent_nick_only_ban(
+    temp_db_path,
+    monkeypatch,
+    sync_module,
+    noop_sleep_fn,
+):
+    monkeypatch.setattr(sync_module.asyncio, "sleep", noop_sleep_fn)
+    room = "room@conference.example.test"
+    bot = await create_and_configure_bot_for_room_sync(temp_db_path, sync_module, room)
+    try:
+        await bot.upsert_ban_db(None, "GhostNick", 0, "tester", "nick only")
+
+        await bot.sync_rooms_and_bans()
+
+        assert bot.applied == []
+        assert any(
+            "0 new bans applied, 1 inactive nick-only deferred" in msg["mbody"]
+            for msg in bot.sent
+        )
     finally:
         await bot.db.close()
 
