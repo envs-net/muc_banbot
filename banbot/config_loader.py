@@ -15,6 +15,7 @@ import os
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 
 CONFIG_ENV_VAR = "MUC_BANBOT_CONFIG"
 
@@ -59,7 +60,7 @@ def _exec_config_file(module: ModuleType, config_path: Path) -> None:
     module.__package__ = spec.parent
     module.__spec__ = spec
     if spec.cached is not None:
-        module.__cached__ = spec.cached
+        cast(Any, module).__cached__ = spec.cached
 
     source = config_path.read_bytes()
     code = compile(source, str(config_path), "exec")
@@ -76,8 +77,8 @@ def load_config_module() -> ModuleType:
     if existing is not None:
         return existing
 
-    builtins.true = True
-    builtins.false = False
+    cast(Any, builtins).true = True
+    cast(Any, builtins).false = False
 
     candidates = _config_candidates()
     if os.environ.get(CONFIG_ENV_VAR):
@@ -125,9 +126,9 @@ def _active_config_path(module: ModuleType | None = None) -> Path:
         if candidate.is_file():
             return candidate
     else:
-        candidate = next((path for path in candidates if path.is_file()), None)
-        if candidate is not None:
-            return candidate
+        discovered = next((path for path in candidates if path.is_file()), None)
+        if discovered is not None:
+            return discovered
 
     attempted = ", ".join(str(path) for path in candidates)
     exc = ModuleNotFoundError(f"No module named 'config' (looked in: {attempted})")
@@ -150,8 +151,8 @@ def reload_config_module(module: ModuleType | None = None) -> ModuleType:
     if module is None:
         return load_config_module()
 
-    builtins.true = True
-    builtins.false = False
+    cast(Any, builtins).true = True
+    cast(Any, builtins).false = False
     config_path = _active_config_path(module)
     if not config_path.is_file():
         exc = ModuleNotFoundError(

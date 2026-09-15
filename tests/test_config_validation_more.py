@@ -327,3 +327,32 @@ def test_validate_config_rejects_invalid_output_modes(monkeypatch):
 
     assert "CONFIG_OUTPUT_MODE must be one of all, paginate" in errors
     assert "HELP_OUTPUT_MODE must be one of all, paginate" in errors
+
+
+def test_validate_config_rejects_boolean_values_for_integer_only_special_fields(monkeypatch):
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "CONNECT_PORT", True, raising=False)
+    monkeypatch.setattr(config, "RTBL_REFRESH_INTERVAL", True, raising=False)
+    monkeypatch.setattr(config, "REDACTION_INDEX_RETENTION_DAYS", True, raising=False)
+
+    errors, _warnings = ConfigValidationBot()._validate_config()
+
+    assert "CONNECT_PORT must be an integer between 1 and 65535" in errors
+    assert "RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)" in errors
+    assert (
+        "REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)"
+        in errors
+    )
+
+
+def test_validate_config_rejects_invalid_outbox_poll_interval(monkeypatch):
+    set_valid_config(monkeypatch)
+    monkeypatch.setattr(config, "OUTBOX_POLL_SECONDS", True, raising=False)
+
+    errors, _warnings = ConfigValidationBot()._validate_config()
+
+    assert "OUTBOX_POLL_SECONDS must be a number" in errors
+
+    monkeypatch.setattr(config, "OUTBOX_POLL_SECONDS", 0.5, raising=False)
+    errors, _warnings = ConfigValidationBot()._validate_config()
+    assert "OUTBOX_POLL_SECONDS must be between 1 and 3600" in errors

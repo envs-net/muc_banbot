@@ -546,6 +546,22 @@ and the SQLite commit is treated as the point of no return: cache recovery or
 automatic-redaction failures after commit are reported as post-commit problems
 without pretending the already-persisted import rolled back.
 
+Runtime configuration loading, snapshots and admin config commands now sit inside
+the same typed host-contract boundary. Runtime reload shares the canonical
+DB/file-operation lock with chat edits, backups, restores and managed exports,
+so a reload cannot race a config rewrite or backup snapshot. The active config
+module is snapshotted as an exact namespace before validation/application;
+validation failures, live-apply failures and cancellation restore that exact
+last-known-good namespace as well as the already-mutated runtime settings.
+Selective startup-only restoration preserves missing attributes instead of
+turning them into explicit `None` values and restores both `RESOURCE` and the
+legacy `RESSOURCE` alias, keeping old deployments internally consistent until a
+restart activates startup-only edits. Config validation also treats booleans as
+invalid for integer-only port/refresh/retention settings and validates the
+numeric outbox poll interval, preventing Python's `bool`-as-`int` behavior from
+silently turning those options into 1-second/port-1 values. The config loader,
+config package and config command surface are part of the mandatory mypy gate.
+
 ### Deployment and health ownership
 
 The deploy frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` and adds

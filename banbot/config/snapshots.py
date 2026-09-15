@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from envs_xmpp_core.config.changes import config_value_changes
 
@@ -12,7 +14,19 @@ from .imports import get_config_resource
 
 log = logging.getLogger(__name__)
 
-class ConfigSnapshotMixin:
+_CONFIG_MISSING = object()
+
+if TYPE_CHECKING:
+    from ..contracts import ConfigSnapshotMixinHost
+
+    class _ConfigSnapshotMixinContract(ConfigSnapshotMixinHost):
+        pass
+else:
+    class _ConfigSnapshotMixinContract:
+        pass
+
+
+class ConfigSnapshotMixin(_ConfigSnapshotMixinContract):
 
     def _runtime_config_snapshot(self) -> dict[str, object]:
         """Return the currently effective runtime config values."""
@@ -121,9 +135,15 @@ class ConfigSnapshotMixin:
             )
         ]
 
+    def _snapshot_config_values(self, keys: Iterable[str]) -> dict[str, object]:
+        """Capture config attributes while preserving whether each key exists."""
+        return {key: getattr(config, key, _CONFIG_MISSING) for key in keys}
+
     def _restore_config_values(self, values: dict[str, object]) -> None:
-        """Restore selected config module values to the last known good values."""
+        """Restore selected config attributes, including previously missing keys."""
         for key, value in values.items():
-            if value is None and key == "RESOURCE" and not hasattr(config, "RESOURCE"):
+            if value is _CONFIG_MISSING:
+                if hasattr(config, key):
+                    delattr(config, key)
                 continue
             setattr(config, key, value)

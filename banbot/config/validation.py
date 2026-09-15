@@ -163,6 +163,18 @@ class ConfigValidationMixin:
         ):
             errors.append("WATCHDOG_LAG_FAILURE_SECONDS must be >= WATCHDOG_LAG_WARNING_SECONDS")
 
+        outbox_poll_field = CONFIG_FIELDS["OUTBOX_POLL_SECONDS"]
+        outbox_poll = config_value("OUTBOX_POLL_SECONDS", outbox_poll_field.default)
+        outbox_poll_violation = schema_value_violation(
+            outbox_poll,
+            outbox_poll_field,
+            none_is_valid=False,
+        )
+        if outbox_poll_violation == "type":
+            errors.append("OUTBOX_POLL_SECONDS must be a number")
+        elif outbox_poll_violation in {"minimum", "minimum_exclusive", "maximum"}:
+            errors.append("OUTBOX_POLL_SECONDS must be between 1 and 3600")
+
         version_url = str(config_value("VERSION_CHECK_URL", "")).strip()
         if config_value("VERSION_CHECK_ENABLED", False) and not version_url:
             errors.append("VERSION_CHECK_URL must not be empty when VERSION_CHECK_ENABLED=True")
@@ -220,17 +232,29 @@ class ConfigValidationMixin:
             errors.append("CONNECT_HOST must be a string or None")
 
         connect_port = config_value("CONNECT_PORT", 5222)
-        if not isinstance(connect_port, int) or not (1 <= connect_port <= 65535):
+        if (
+            not isinstance(connect_port, int)
+            or isinstance(connect_port, bool)
+            or not (1 <= connect_port <= 65535)
+        ):
             errors.append("CONNECT_PORT must be an integer between 1 and 65535")
 
         # --- RTBL ---
         rtbl_refresh = config_value("RTBL_REFRESH_INTERVAL", 3600)
-        if not isinstance(rtbl_refresh, int) or rtbl_refresh < 0:
+        if (
+            not isinstance(rtbl_refresh, int)
+            or isinstance(rtbl_refresh, bool)
+            or rtbl_refresh < 0
+        ):
             errors.append("RTBL_REFRESH_INTERVAL must be a non-negative integer (0 = disabled)")
 
         # --- Redaction ---
         redaction_retention = config_value("REDACTION_INDEX_RETENTION_DAYS", 30)
-        if not isinstance(redaction_retention, int) or redaction_retention < 0:
+        if (
+            not isinstance(redaction_retention, int)
+            or isinstance(redaction_retention, bool)
+            or redaction_retention < 0
+        ):
             errors.append("REDACTION_INDEX_RETENTION_DAYS must be a non-negative integer (0 = keep forever)")
         redaction_concurrency = config_value("REDACTION_RETRACT_CONCURRENCY", 10)
         if not isinstance(redaction_concurrency, int) or isinstance(redaction_concurrency, bool) or not 1 <= redaction_concurrency <= 20:

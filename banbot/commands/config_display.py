@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import pathlib
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.config.changes import config_value_changes
 
@@ -17,8 +17,17 @@ log = logging.getLogger(__name__)
 
 _CONFIG_ASSIGNMENT_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=")
 
+if TYPE_CHECKING:
+    from ..contracts import ConfigCommandMixinHost
 
-class ConfigCommandMixin(ConfigMixin):
+    class _ConfigCommandMixinContract(ConfigCommandMixinHost):
+        pass
+else:
+    class _ConfigCommandMixinContract:
+        pass
+
+
+class ConfigCommandMixin(ConfigMixin, _ConfigCommandMixinContract):
     # Inherit ConfigMixin helpers directly. This keeps lightweight test doubles working
     # without duplicating helper attributes on the mixin class.
     CONFIG_SAMPLE_SECTION_TITLES = {

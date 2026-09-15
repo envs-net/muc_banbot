@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pprint
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.config.changes import config_value_changes
 from envs_xmpp_core.config.literals import parse_literal
@@ -19,10 +19,23 @@ import config
 
 from ..config_loader import format_config_import_error, reload_config_module
 from ..locks import database_file_lock
+from .imports import restore_config_module_state, snapshot_config_module_state
 
 log = logging.getLogger(__name__)
 
-class ConfigRuntimeMixin:
+if TYPE_CHECKING:
+    from ..contracts import ConfigRuntimeMixinHost
+
+    class _ConfigRuntimeMixinContract(ConfigRuntimeMixinHost):
+        pass
+else:
+    class _ConfigRuntimeMixinContract:
+        pass
+
+
+class ConfigRuntimeMixin(_ConfigRuntimeMixinContract):
+    muc_write_limit: int
+    muc_write_semaphore: asyncio.Semaphore
 
     def _format_config_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
         return [
@@ -187,13 +200,15 @@ class ConfigRuntimeMixin:
 
         old_value = getattr(config, key, None)
         new_value = self.parse_config_value(raw_value)
-        restore_keys = (*self.CONFIG_KEYS, *self.STARTUP_ONLY_CONFIG_KEYS)
-        previous_module_values = {name: getattr(config, name, None) for name in restore_keys}
+        previous_module_state = snapshot_config_module_state()
 
         setattr(config, key, new_value)
-        errors, warnings = self._validate_config()
-        for name, value in previous_module_values.items():
-            setattr(config, name, value)
+        try:
+            errors, warnings = self._validate_config()
+        except Exception as exc:
+            return False, f"Failed to validate config value: {exc}"
+        finally:
+            restore_config_module_state(previous_module_state)
         if errors:
             return False, "Invalid value; config.py was not changed.\n" + self._format_config_validation(errors, warnings)
 
@@ -222,15 +237,20 @@ class ConfigRuntimeMixin:
             await self.update_vcard()
 
         async def rollback_runtime(file_restored: bool) -> None:
-            if not file_restored:
-                self._restore_config_values(previous_module_values)
-                return
-            try:
-                reload_config_module(config)
-                self.apply_runtime_config()
-            except Exception:
-                self._restore_config_values(previous_module_values)
-                raise
+            if file_restored:
+                try:
+                    reload_config_module(config)
+                except Exception:
+                    # Keep runtime state recoverable even if reloading the
+                    # restored file itself unexpectedly fails.
+                    restore_config_module_state(previous_module_state)
+                    self.apply_runtime_config()
+                    raise
+            else:
+                restore_config_module_state(previous_module_state)
+
+            self.apply_runtime_config()
+            await self.update_vcard()
 
         try:
             await apply_config_edit_transaction(
@@ -283,46 +303,82 @@ class ConfigRuntimeMixin:
         )
 
     async def reload_runtime_config(self) -> tuple[list[str], list[str], list[str]]:
-        """Reload config.py, validate it, apply reloadable settings, and return (changes, errors, warnings).
+        """Reload and atomically apply runtime configuration.
 
-        Startup-only settings (bot identity, admin room, DB file, RTBL enable/publish
-        setup, and OMEMO setup) are intentionally not applied at runtime. If they
-        changed, the old in-memory
-        values remain active and a restart warning is returned.
+        Config reload shares the canonical database/file lock with chat edits,
+        backups, restores and managed exports so an operator reload cannot read
+        a half-transitioned config state. Startup-only settings remain at their
+        last-known-good in-process values until restart. If live application is
+        cancelled or fails after validation, both the config module namespace
+        and already-mutated runtime attributes are restored before returning.
         """
-        before = self._runtime_config_snapshot()
-        startup_before = self._startup_config_snapshot()
-        restore_keys = self.CONFIG_KEYS + self.STARTUP_ONLY_CONFIG_KEYS
-        previous_module_values = {key: getattr(config, key, None) for key in restore_keys}
+        async with database_file_lock(self):
+            before = self._runtime_config_snapshot()
+            startup_before = self._startup_config_snapshot()
+            previous_module_state = snapshot_config_module_state()
+            startup_restore_keys = (*self.STARTUP_ONLY_CONFIG_KEYS, "RESSOURCE")
+            previous_startup_values = self._snapshot_config_values(startup_restore_keys)
 
-        try:
-            reload_config_module(config)
-        except Exception as e:
-            # Keep the last known good config module values for code paths that read config directly.
-            self._restore_config_values(previous_module_values)
-            return [], [format_config_import_error(e)], []
+            try:
+                reload_config_module(config)
+            except Exception as exc:
+                # The loader itself is transactional, but restore the exact
+                # namespace as an additional invariant for injected/custom
+                # loaders and lightweight test doubles.
+                restore_config_module_state(previous_module_state)
+                return [], [format_config_import_error(exc)], []
 
-        errors, warnings = self._validate_config()
-        if errors:
-            # Keep the last known good config module values for code paths that read config directly.
-            self._restore_config_values(previous_module_values)
-            return [], errors, warnings
+            try:
+                errors, warnings = self._validate_config()
+            except Exception as exc:
+                restore_config_module_state(previous_module_state)
+                return [], [f"Config validation failed: {exc}"], []
+            if errors:
+                restore_config_module_state(previous_module_state)
+                return [], errors, warnings
 
-        startup_after = self._startup_config_snapshot()
-        startup_changes = self._format_startup_only_changes(startup_before, startup_after)
-        if startup_changes:
-            warnings.append(
-                "Startup-only config changes detected and NOT applied. Restart the bot to activate:\n"
-                + "\n".join(startup_changes)
-            )
-            # Restore startup-only values so the running process stays internally consistent.
-            for key in self.STARTUP_ONLY_CONFIG_KEYS:
-                if key in previous_module_values:
-                    setattr(config, key, previous_module_values[key])
+            startup_after = self._startup_config_snapshot()
+            startup_changes = self._format_startup_only_changes(startup_before, startup_after)
+            if startup_changes:
+                warnings.append(
+                    "Startup-only config changes detected and NOT applied. Restart the bot to activate:\n"
+                    + "\n".join(startup_changes)
+                )
+                # RESOURCE historically existed as the misspelled RESSOURCE.
+                # Restore both names so legacy configurations remain internally
+                # consistent when a reload changes only startup identity.
+                self._restore_config_values(previous_startup_values)
 
-        self.apply_runtime_config()
-        await self.update_vcard()
+            async def rollback_live_state() -> list[str]:
+                rollback_errors: list[str] = []
+                restore_config_module_state(previous_module_state)
+                try:
+                    self.apply_runtime_config()
+                except Exception as rollback_exc:
+                    rollback_errors.append(
+                        "runtime rollback failed: " + format_config_import_error(rollback_exc)
+                    )
+                try:
+                    await self.update_vcard()
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"vCard rollback failed: {rollback_exc}")
+                return rollback_errors
 
-        after = self._runtime_config_snapshot()
-        changes = self._format_config_changes(before, after)
-        return changes, [], warnings
+            try:
+                self.apply_runtime_config()
+                await self.update_vcard()
+            except asyncio.CancelledError as exc:
+                rollback_errors = await rollback_live_state()
+                for rollback_error in rollback_errors:
+                    exc.add_note(rollback_error)
+                raise
+            except Exception as exc:
+                rollback_errors = await rollback_live_state()
+                message = f"Failed to apply reloaded config: {exc}"
+                if rollback_errors:
+                    message += "; " + "; ".join(rollback_errors)
+                return [], [message], warnings
+
+            after = self._runtime_config_snapshot()
+            changes = self._format_config_changes(before, after)
+            return changes, [], warnings

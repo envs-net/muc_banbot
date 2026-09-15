@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import logging
 import pathlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.config.schema import schema_python_sample_defaults
 
@@ -16,7 +16,17 @@ from .spec import CONFIG_FIELDS
 
 log = logging.getLogger(__name__)
 
-class ConfigDisplayMixin:
+if TYPE_CHECKING:
+    from ..contracts import ConfigDisplayMixinHost
+
+    class _ConfigDisplayMixinContract(ConfigDisplayMixinHost):
+        pass
+else:
+    class _ConfigDisplayMixinContract:
+        pass
+
+
+class ConfigDisplayMixin(_ConfigDisplayMixinContract):
 
     def _config_file_path(self) -> pathlib.Path:
         path = getattr(config, "__file__", None)
