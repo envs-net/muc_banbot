@@ -81,7 +81,13 @@ Storage hints are diagnostic only. They may be stale and are not guaranteed to b
 
 `!omemo reset confirm` moves the current OMEMO storage and identity metadata to timestamped `.bak-*` files and writes fresh identity metadata for the current bot identity.
 
-Restart the bot afterwards so the OMEMO plugin creates and publishes fresh state.
+BanBot normally schedules a process restart after the confirmed reset so the
+OMEMO plugin can create and publish fresh state. If the runtime has no restart
+helper available, restart the bot manually.
+
+A reset is a recovery action, not normal maintenance. It replaces the active
+local cryptographic identity/session state, so remote clients may need to
+discover or trust the fresh device state again.
 
 ## MUC Recipients
 
@@ -127,6 +133,23 @@ Managed ZIP backups include OMEMO storage when all of these are true:
 The archive entry is stored as `omemo.json` and described in `manifest.json`.
 
 Because OMEMO storage contains identity/session material, backup archives should be treated as secrets.
+
+### Older backup / rollback recovery
+
+OMEMO storage is stateful. If an entire system or BanBot installation is rolled
+back to an older backup, the restored `omemo.json` can contain session state
+from before later encrypted traffic occurred. Remote devices may already have
+advanced beyond that restored state.
+
+After such a rollback, restart BanBot first and test OMEMO. If encrypted
+commands/replies still fail, inspect `!omemo status` and use
+`!omemo reset confirm` to rotate the stale state to `.bak-*` files and create
+fresh local OMEMO state.
+
+Do not automatically delete `omemo.json` on every restore. A recent valid
+backup or host migration should retain its existing OMEMO identity when
+possible, while an explicit reset is available for genuinely stale or unusable
+state.
 
 See [Backups and Restore](backups.md).
 

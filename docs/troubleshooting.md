@@ -200,6 +200,27 @@ Check:
 * `OMEMO_PLAINTEXT_FALLBACK=False` means failed encrypted replies are not resent as plaintext.
 * If the bot JID, resource, or MUC nick changed, keep `OMEMO_RESET_ON_IDENTITY_CHANGE=True` so stale OMEMO storage is backed up and regenerated automatically on restart.
 
+## OMEMO stops working after restoring an older backup
+
+A restored `omemo.json` contains the identity/session state from the time the
+backup was created. If remote devices exchanged encrypted traffic after that
+backup, their session state may be newer than the restored local state.
+
+Recovery:
+
+1. Restart BanBot after the restore.
+2. Run `!omemo status`.
+3. Test an encrypted command/reply.
+4. If OMEMO is still unusable, run `!omemo reset confirm`.
+
+The reset command moves the current OMEMO storage and identity metadata to
+timestamped `.bak-*` files and normally schedules a process restart so fresh
+state can be created and published.
+
+Do not delete or reset `omemo.json` pre-emptively for every restore. Preserve a
+valid restored identity when it still works; reset only when the restored state
+is stale or broken.
+
 ## OMEMO storage permission problems
 
 The OMEMO storage file contains identity/session state and should be private to the bot user. Recommended permissions:

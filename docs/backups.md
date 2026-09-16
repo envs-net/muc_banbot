@@ -131,6 +131,26 @@ Restore behavior:
 
 If verification fails, restore is aborted before active files are replaced.
 
+### Restoring older OMEMO state
+
+When a backup contains `omemo.json`, restore intentionally puts that OMEMO
+identity/session state back in place together with the other managed files.
+This is useful for current backups and host migrations, but an older backup can
+contain session state that is behind the state already used by remote OMEMO
+devices.
+
+After restoring a backup that contains OMEMO state:
+
+1. Restart BanBot before testing encrypted commands/replies.
+2. Check `!omemo status` if OMEMO still does not work.
+3. If the restored state is stale or unusable, run `!omemo reset confirm`.
+
+`!omemo reset confirm` rotates the current OMEMO storage and identity metadata
+to timestamped `.bak-*` files before fresh local OMEMO state is created. Do not
+reset OMEMO routinely after every restore: a reset changes the bot's local
+cryptographic identity/session state and remote clients may need to discover or
+trust the fresh device state again.
+
 ## Safety Backups
 
 Before restore and write imports, BanBot creates a managed safety backup using the same ZIP archive format. These safety backups appear in `!backup list` and follow the same retention rules.
