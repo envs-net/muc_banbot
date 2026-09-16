@@ -190,7 +190,7 @@ The script announces each scenario in the admin room before it starts. It curren
 
 Operational notes:
 
-* `SimilarMessageProtection` temporarily disables `FloodSpamProtection` and `JoinWaveShortCircuitProtection` so similar-message detection can win the test race.
+* `SimilarMessageProtection` temporarily disables `FloodSpamProtection` and `JoinWaveShortCircuitProtection` so similar-message detection can win the isolated live-test race. Real overlap arbitration is covered by offline regression tests: automated protections may strengthen/extend a ban but must not downgrade a permanent ban, shorten a tempban, or lose meaningful reasons/provenance.
 * `JoinWaveShortCircuitProtection` can change room configuration when its action is `lockdown`; the smoke script disables joinwave again during cleanup.
 * Redaction summaries depend on messages being indexed by BanBot after redaction indexing was enabled. Older messages or already-redacted messages may produce a “no redactable indexed stanza IDs” summary.
 * The final output is the admin-room transcript. Review it for expected protection notifications and cleanup messages.

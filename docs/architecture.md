@@ -198,7 +198,7 @@ ban_state_lock
 
 The administrator acknowledgement is sent as soon as the local ban is safely committed. Potentially slow room, PubSub, and bulk-redaction network operations are not allowed to delay that acknowledgement. Room enforcement has priority over auto-redaction traffic, and per-room writes remain bounded by the shared MUC write semaphore.
 
-`banbot.moderation` owns applying and removing bans in rooms and the tempban expiry worker. `banbot.sync` reconciles persisted bans with room affiliation state after startup, reconnects, manual syncs, and room recovery. `banbot.ban_queries` serves list, search, history, details, and edit operations. Manual and automatic unbans keep the database row until server-side removal succeeds in every protected room, so a partial failure cannot be mistaken for a completed unban or recovered as a new permanent ban.
+`banbot.moderation` owns applying and removing bans in rooms and the tempban expiry worker. `banbot.sync` reconciles persisted bans with room affiliation state after startup, reconnects, manual syncs, and room recovery. `banbot.ban_queries` serves list, search, history, details, and edit operations. Manual and automatic unbans keep the database row until server-side removal succeeds in every protected room, so a partial failure cannot be mistaken for a completed unban or recovered as a new permanent ban. Sync adopts genuinely unknown room outcasts with the placeholder reason `Recovered from room`; an already known ban is not treated as unknown merely because its comment is empty. Later reason enrichment preserves the existing issuer and tempban expiry instead of silently turning recovered state into a new permanent ban.
 
 The main in-memory indexes are:
 
@@ -237,7 +237,9 @@ Some MUC services reject affiliation-list queries for non-owners. Such rooms are
 - `presentation.py` — shared status formatting
 - `manager.py` — runtime state and subsystem composition
 
-Protection configuration is loaded from defaults plus persisted overrides. Observe mode runs detection and reporting without executing the configured enforcement action.
+Protection configuration is loaded from defaults plus persisted overrides. Observe mode runs detection and reporting without executing the configured enforcement action. Observe-only matches fall through to later protection checks and do not consume the punitive-action cooldown.
+
+When protections overlap, enforcement is strength-aware (`kick < tempban < ban`). Equal/weaker duplicate actions inside the short cooldown are suppressed, while a stronger action can still proceed. Once a protection reaches the moderation layer, automatic `protection:*` updates are monotonic: they cannot turn a permanent ban into a tempban or shorten a tempban. Distinct protection reasons may be merged, while meaningful human/RTBL provenance remains authoritative.
 
 Protection actions should use existing moderation, redaction, audit, and messaging helpers. They should not implement a separate ban persistence path.
 

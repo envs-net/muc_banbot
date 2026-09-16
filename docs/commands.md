@@ -113,8 +113,8 @@ See [Public Policy / Rules](policy.md).
 
 | Command | Description |
 | --- | --- |
-| `!ban <jid\|nick\|*.domain.tld> [comment]` | Adds a permanent ban or updates the reason of an existing permanent ban |
-| `!tempban <jid\|nick> <10m\|2h\|1d> [comment]` | Adds or updates a temporary ban; without a comment, the existing reason is preserved |
+| `!ban <jid\|nick\|*.domain.tld> [comment]` | Adds a permanent ban, promotes an existing tempban to permanent, or updates its reason |
+| `!tempban <jid\|nick> <10m\|2h\|1d> [comment]` | Adds or updates a temporary ban; an explicit human command may convert a permanent ban to temporary, and an omitted comment preserves the old reason |
 | `!unban <jid\|nick\|domain.tld\|*.domain.tld>` | Removes a ban only after server-side removal succeeds in all protected rooms; a dotted nick still resolves as a nick when no exact domain ban exists |
 | `!banedit <target> reason <text>` | Updates the reason of an existing ban |
 | `!banedit <target> duration <duration>` | Resets a tempban duration from now |

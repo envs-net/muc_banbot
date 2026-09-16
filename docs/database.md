@@ -21,6 +21,14 @@ The database path is configured with `DB_FILE` in `config.py`. Manual database c
 | `created_at` | INTEGER | Creation timestamp |
 | `updated_at` | INTEGER | Last update timestamp |
 
+### Ban target normalization and metadata recovery
+
+`target_type` + normalized `target` is the canonical identity of a ban. Database setup normalizes existing rows through the same ban-target rules used at runtime and collapses duplicate canonical targets when necessary.
+
+When duplicate rows are merged, the stronger duration wins (permanent over temporary; otherwise the later temporary expiry). Meaningful metadata is preserved: a selected row whose reason is only `Recovered from room` can inherit a real reason and issuer from its duplicate instead of losing that provenance.
+
+`Recovered from room` is intentionally only a fallback for an outcast discovered on the XMPP server when BanBot has no better local metadata. Sync does not overwrite a known ban simply because its comment is `NULL`, and later reason enrichment keeps the existing issuer and temporary expiry unless a stronger moderation action explicitly changes the ban.
+
 ### `rooms`
 
 | Column | Type | Description |

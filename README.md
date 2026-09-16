@@ -21,7 +21,7 @@ It provides admin-room based moderation, protects configured MUCs from unwanted 
 * ❌ Ban, temporary ban, unban, banlist, bansearch, why, and redaction commands
 * 🌐 Domain-based bans (`*.domain.tld`) to ban all users from a domain
 * ⏱️ Automatic temporary ban expiration with human-readable durations
-* 📊 Smart duplicate ban handling with automatic conversion between permanent and temporary bans
+* 📊 Smart duplicate-ban handling with monotonic automated-protection arbitration; explicit admin moderation can still convert between permanent and temporary bans
 * 🐞 Nick-only ban support with best-effort JID upgrade when the user rejoins
 * ⚠️ Admin/owner protection for direct, nick-based, and domain-based bans
 * 🚫 Global ignorelist/whitelist for exact JIDs and domain-based ban protection
@@ -52,7 +52,7 @@ Verify the installed application and shared core without connecting to XMPP:
 
 ```bash
 muc_banbot --version
-# muc_banbot 3.0.0 (envs-xmpp 1.2.0)
+# muc_banbot 3.1.0 (envs-xmpp 1.2.0)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -282,8 +282,8 @@ Examples assume the default command prefix `!`.
 | `!room invite list [all/page/last]` | List pending room invites |
 | `!room invite accept/decline/remove/delete/del/rm <id>` | Accept or decline a pending room invite |
 | `!policy` / `!rules show/set/clear/delete/remove/enable/disable` | Manage public room policy text |
-| `!ban <jid/nick/domain> [comment]` | Add a permanent ban or update an existing ban reason |
-| `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add or update a temporary ban; omitted comments preserve the old reason |
+| `!ban <jid/nick/domain> [comment]` | Add a permanent ban, promote a tempban to permanent, or update an existing reason |
+| `!tempban <jid/nick> <10m/2h/1d> [comment]` | Add/update a temporary ban; explicit human moderation may convert permanent → temporary, while omitted comments preserve the old reason |
 | `!unban <jid/nick/domain>` | Remove a ban |
 | `!redact <jid> [reason]` / `!redact id ...` / `!redact cleanup` | Redact indexed messages or clean old redaction index entries |
 | `!protections list [all/page/last]` | List protection enabled/disabled and observe state |
@@ -341,7 +341,9 @@ Currently available protections cover flood spam, repeated/similar messages, fir
 
 Use conservative settings first and enable individual protections per need. For active rooms, `notify` or short `tempban` settings are useful while tuning thresholds; stronger actions such as permanent bans should only be enabled after the behavior is verified for your community.
 
-See [docs/protections.md](docs/protections.md) for all protection names, aliases, actions, configuration keys, and operational notes.
+Overlapping automated protections are monotonic: a later protection may strengthen or extend an existing ban, but it cannot downgrade a permanent ban or shorten a temporary one. Distinct protection reasons are retained, while human and RTBL reasons remain authoritative. The short message-action cooldown suppresses equal/weaker duplicate actions but allows a stronger action to proceed, and observe-only matches do not consume that enforcement cooldown.
+
+See [docs/protections.md](docs/protections.md) for all protection names, aliases, actions, arbitration rules, configuration keys, and operational notes.
 
 ## OMEMO
 

@@ -145,7 +145,7 @@ Set `ROOM_INVITE_MAX_AGE_DAYS = 0` to keep pending invites indefinitely until ac
 
 * `!sync` rejoins protected rooms, checks rights, and reapplies active bans.
 * `!syncadmins` refreshes admin-room admin/owner state.
-* `!syncbans` adopts room outcasts into the database and enforces known active bans.
+* `!syncbans` adopts genuinely unknown room outcasts into the database and enforces known active bans. Unknown outcasts use `Recovered from room` only as a fallback; existing issuer/reason/temporary-expiry metadata is preserved, and placeholder reasons may later be enriched when a real reason becomes available.
 
 `SYNC_BATCH_SIZE` controls how many rooms are processed concurrently during sync operations.
 

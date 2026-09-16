@@ -62,7 +62,23 @@ Message protections support these actions:
 | `tempban` | Add a temporary global ban through the existing ban system |
 | `ban` | Add a permanent global ban through the existing ban system |
 
-When `redact=True` and `REDACTION_ENABLED=True`, message protections first try to retract the triggering message and punitive actions (`kick`, `tempban`, `ban`) also run the normal indexed JID redaction path with an admin-room summary. A short `action_cooldown_seconds` window suppresses repeated punitive actions for the same room/target during message bursts.
+When `redact=True` and `REDACTION_ENABLED=True`, message protections first try to retract the triggering message and punitive actions (`kick`, `tempban`, `ban`) also run the normal indexed JID redaction path with an admin-room summary.
+
+## Overlapping protections and ban arbitration
+
+Multiple protections may match the same sender during a spam wave. BanBot deliberately makes automated protection updates monotonic so one detector cannot accidentally weaken another:
+
+* punitive action strength is `kick < tempban < ban`;
+* the short `action_cooldown_seconds` window suppresses equal or weaker duplicate actions for the same room/target, but a stronger action bypasses that cooldown;
+* observe-only matches do not create an enforcement cooldown and do not stop a later enforcing protection from evaluating the same message;
+* an automated protection never converts an existing permanent ban to a tempban;
+* an automated protection never shortens an existing tempban; it may extend it or promote it to permanent;
+* distinct meaningful reasons from protection actors are merged once (for example `spam/flood detected | repeated/similar spam detected`) instead of replacing each other;
+* a meaningful human or RTBL reason/issuer remains authoritative when a protection later matches the same target.
+
+These rules apply to automatic `protection:*` actors. Explicit human moderation keeps the normal command semantics, including intentional permanent/tempban conversion.
+
+`Recovered from room` is a synchronization fallback for an outcast whose original metadata is unavailable. If a later protection supplies a real reason for such a placeholder row, BanBot may enrich that metadata without shortening the ban.
 
 ## Examples
 
