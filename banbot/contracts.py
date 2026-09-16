@@ -397,7 +397,7 @@ class ProtectionActionsMixinHost(Protocol):
     plugin: Any
     muc_write_semaphore: Any
     redaction_enabled: bool
-    protection_action_cooldowns: dict[tuple[str, str], float]
+    protection_action_cooldowns: dict[tuple[str, str], tuple[float, int]]
 
     def _require_db(self) -> aiosqlite.Connection: ...
 

@@ -11,6 +11,7 @@ from slixmpp.exceptions import IqError, IqTimeout
 
 from config import ADMIN_ROOM
 
+from .ban_metadata import is_placeholder_ban_reason, merge_ban_reasons
 from .ban_target import BanTarget
 from .locks import ban_state_lock, is_maintenance_mode
 from .task_supervisor import sleep_with_heartbeat
@@ -487,81 +488,192 @@ class ModerationMixin(_ModerationMixinContract):
             existing_jid, existing_nick, existing_until, existing_issuer, existing_comment = self.ban_cache[db_key]
             existing_is_permanent = existing_until <= 0
             new_is_permanent = ts <= 0
+            incoming_is_protection = str(issuer).startswith("protection:")
 
-            # Re-running a moderation command without a comment must not erase
-            # the existing reason. A supplied comment is an explicit reason
-            # update, including while changing a tempban duration/type.
-            effective_comment = comment if comment is not None else existing_comment
-            reason_changed = comment is not None and comment != existing_comment
-            update_details.update(
-                {
-                    "old_until": existing_until,
-                    "new_until": ts,
-                    "old_comment": existing_comment,
-                    "new_comment": effective_comment,
-                }
-            )
-            comment = effective_comment
+            # Automated protections are monotonic: they may strengthen/extend an
+            # existing ban and enrich its reason, but may never downgrade a
+            # permanent ban or shorten a temporary one. Human moderation keeps
+            # the existing explicit conversion semantics below.
+            if incoming_is_protection:
+                requested_until = ts
+                # Preserve the actor that established the existing ban unless
+                # this protection actually promotes it to a stronger state or
+                # replaces synthetic recovery metadata.
+                db_issuer = existing_issuer
+                existing_is_protection = str(existing_issuer or "").startswith("protection:")
+                if existing_is_protection or is_placeholder_ban_reason(existing_comment):
+                    merged_comment = merge_ban_reasons(existing_comment, comment)
+                else:
+                    # Human/RTBL provenance is authoritative. Protections still
+                    # emit their own audit event, but do not rewrite that reason.
+                    merged_comment = existing_comment
+                if existing_is_permanent:
+                    ts = existing_until
+                elif new_is_permanent:
+                    ts = 0
+                    if existing_is_protection or is_placeholder_ban_reason(existing_comment):
+                        db_issuer = issuer
+                else:
+                    ts = max(existing_until, ts)
 
-            if existing_is_permanent and new_is_permanent:
-                if not reason_changed:
-                    await self.bot_send_message(
-                        mto=ADMIN_ROOM,
-                        mbody=f"ℹ️ Ban already exists for {identifier} (permanent)",
-                        mtype="groupchat"
+                if is_placeholder_ban_reason(existing_comment) and comment:
+                    db_issuer = issuer
+
+                comment = merged_comment
+                reason_changed = comment != existing_comment
+                duration_changed = ts != existing_until
+                update_details.update(
+                    {
+                        "old_until": existing_until,
+                        "requested_until": requested_until,
+                        "new_until": ts,
+                        "old_comment": existing_comment,
+                        "new_comment": comment,
+                        "arbitration": "protection_monotonic",
+                    }
+                )
+
+                if not duration_changed and not reason_changed:
+                    log.info(
+                        "Protection ban update ignored for %s: existing ban is equal or stronger",
+                        identifier,
                     )
-                    self.log_event(logging.INFO, "ban_duplicate_ignored", actor=issuer, identifier=identifier, target_type=target_type, target=target)
+                    self.log_event(
+                        logging.INFO,
+                        "ban_update_ignored",
+                        actor=issuer,
+                        identifier=identifier,
+                        target_type=target_type,
+                        target=target,
+                        reason="existing ban is equal or stronger",
+                    )
                     await self.audit_event(
-                        "ban_duplicate_ignored",
+                        "ban_update_ignored",
                         actor=issuer,
                         target_type=target_type,
                         target=target,
                         jid=normalized_jid,
                         nick=normalized_nick,
-                        comment=comment,
+                        until=existing_until,
+                        comment=existing_comment,
+                        details=update_details,
                     )
                     return
 
-                # A reason-only update keeps the original ban issuer and its
-                # permanent status. The current actor is recorded in audit.
-                db_issuer = existing_issuer
-                log.info("🔄 Updating permanent ban reason for %s", identifier)
-                await self.bot_send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=f"🔄 Ban reason updated for {identifier}: {existing_comment or '—'} → {comment or '—'}",
-                    mtype="groupchat",
-                )
-                skip_final_message = True
-            elif existing_is_permanent and not new_is_permanent:
-                log.info("🔄 Converting permanent ban to tempban for %s", identifier)
-                await self.bot_send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=f"🔄 Converting permanent ban to tempban for {identifier} ({human_time(ts - int(time.time()))})",
-                    mtype="groupchat"
-                )
-                skip_final_message = True
-            elif not existing_is_permanent and new_is_permanent:
-                log.info("🔄 Converting tempban to permanent ban for %s", identifier)
-                await self.bot_send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=f"🔄 Converting tempban to permanent ban for {identifier}",
-                    mtype="groupchat"
-                )
+                if existing_is_permanent:
+                    log.info(
+                        "Protection enriched permanent ban metadata for %s without weakening it",
+                        identifier,
+                    )
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=(
+                            f"🔄 Ban reason updated for {identifier}: "
+                            f"{existing_comment or '—'} → {comment or '—'}"
+                        ),
+                        mtype="groupchat",
+                    )
+                elif new_is_permanent:
+                    log.info("Protection upgraded tempban to permanent for %s", identifier)
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=f"🔄 Protection upgraded tempban to permanent ban for {identifier}",
+                        mtype="groupchat",
+                    )
+                else:
+                    old_duration = human_time(max(0, existing_until - int(time.time())))
+                    new_duration = human_time(max(0, ts - int(time.time())))
+                    log.info(
+                        "Protection updated tempban for %s: %s → %s",
+                        identifier,
+                        old_duration,
+                        new_duration,
+                    )
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=(
+                            f"🔄 Protection updated tempban for {identifier}: "
+                            f"{old_duration} → {new_duration}"
+                            + (" and preserved both reasons" if reason_changed else "")
+                        ),
+                        mtype="groupchat",
+                    )
                 skip_final_message = True
             else:
-                new_duration = human_time(ts - int(time.time()))
-                old_duration = human_time(max(0, existing_until - int(time.time())))
-                log.info("🔄 Updating tempban for %s: %s → %s", identifier, old_duration, new_duration)
-                reason_suffix = " and reason" if reason_changed else ""
-                await self.bot_send_message(
-                    mto=ADMIN_ROOM,
-                    mbody=(
-                        f"🔄 Ban updated: {identifier}'s tempban duration changed "
-                        f"from {old_duration} to {new_duration}{reason_suffix}"
-                    ),
-                    mtype="groupchat"
+                # Re-running a moderation command without a comment must not erase
+                # the existing reason. A supplied comment is an explicit reason
+                # update, including while changing a tempban duration/type.
+                effective_comment = comment if comment is not None else existing_comment
+                reason_changed = comment is not None and comment != existing_comment
+                update_details.update(
+                    {
+                        "old_until": existing_until,
+                        "new_until": ts,
+                        "old_comment": existing_comment,
+                        "new_comment": effective_comment,
+                    }
                 )
-                skip_final_message = True
+                comment = effective_comment
+
+                if existing_is_permanent and new_is_permanent:
+                    if not reason_changed:
+                        await self.bot_send_message(
+                            mto=ADMIN_ROOM,
+                            mbody=f"ℹ️ Ban already exists for {identifier} (permanent)",
+                            mtype="groupchat"
+                        )
+                        self.log_event(logging.INFO, "ban_duplicate_ignored", actor=issuer, identifier=identifier, target_type=target_type, target=target)
+                        await self.audit_event(
+                            "ban_duplicate_ignored",
+                            actor=issuer,
+                            target_type=target_type,
+                            target=target,
+                            jid=normalized_jid,
+                            nick=normalized_nick,
+                            comment=comment,
+                        )
+                        return
+
+                    # A reason-only update keeps the original ban issuer and its
+                    # permanent status. The current actor is recorded in audit.
+                    db_issuer = existing_issuer
+                    log.info("🔄 Updating permanent ban reason for %s", identifier)
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=f"🔄 Ban reason updated for {identifier}: {existing_comment or '—'} → {comment or '—'}",
+                        mtype="groupchat",
+                    )
+                    skip_final_message = True
+                elif existing_is_permanent and not new_is_permanent:
+                    log.info("🔄 Converting permanent ban to tempban for %s", identifier)
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=f"🔄 Converting permanent ban to tempban for {identifier} ({human_time(ts - int(time.time()))})",
+                        mtype="groupchat"
+                    )
+                    skip_final_message = True
+                elif not existing_is_permanent and new_is_permanent:
+                    log.info("🔄 Converting tempban to permanent ban for %s", identifier)
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=f"🔄 Converting tempban to permanent ban for {identifier}",
+                        mtype="groupchat"
+                    )
+                    skip_final_message = True
+                else:
+                    new_duration = human_time(ts - int(time.time()))
+                    old_duration = human_time(max(0, existing_until - int(time.time())))
+                    log.info("🔄 Updating tempban for %s: %s → %s", identifier, old_duration, new_duration)
+                    reason_suffix = " and reason" if reason_changed else ""
+                    await self.bot_send_message(
+                        mto=ADMIN_ROOM,
+                        mbody=(
+                            f"🔄 Ban updated: {identifier}'s tempban duration changed "
+                            f"from {old_duration} to {new_duration}{reason_suffix}"
+                        ),
+                        mtype="groupchat"
+                    )
+                    skip_final_message = True
 
         protected, reason = await self.is_protected_admin_target(
             identifier,

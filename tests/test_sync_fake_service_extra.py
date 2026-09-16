@@ -980,3 +980,99 @@ async def test_sync_admins_removes_demoted_cached_admin_after_successful_refresh
         assert refreshed["Regular"]["affiliation"] == "member"
     finally:
         await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_sync_single_room_does_not_recover_known_outcast_when_comment_is_null(temp_db_path):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): ["known@example.test"]}
+    )
+    try:
+        await bot.upsert_ban_db("known@example.test", None, 0, "original-actor", None)
+
+        await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+
+        async with bot.db.execute(
+            "SELECT issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("known@example.test",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == ("original-actor", None)
+        assert bot.applied == []
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_reason_enrichment_preserves_original_issuer(temp_db_path):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): [("known@example.test", "spam/flood detected")]}
+    )
+    try:
+        await bot.upsert_ban_db(
+            "known@example.test",
+            None,
+            0,
+            "protection:FloodSpamProtection",
+            "Recovered from room",
+        )
+
+        await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+
+        async with bot.db.execute(
+            "SELECT issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("known@example.test",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == ("protection:FloodSpamProtection", "spam/flood detected")
+    finally:
+        await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_sync_reason_enrichment_preserves_tempban_expiry(temp_db_path):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): [("known@example.test", "spam/flood detected")]}
+    )
+    until = int(time.time()) + 3600
+    try:
+        await bot.upsert_ban_db(
+            "known@example.test",
+            None,
+            until,
+            "protection:FloodSpamProtection",
+            "Recovered from room",
+        )
+
+        await bot.sync_bans_to_rooms_for_single_room("room@conference.example.test")
+
+        async with bot.db.execute(
+            "SELECT until, issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("known@example.test",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (until, "protection:FloodSpamProtection", "spam/flood detected")
+    finally:
+        await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_startup_sync_does_not_recover_known_outcast_when_comment_is_null(temp_db_path):
+    bot = await initialize_sync_bot_for_test(temp_db_path)
+    bot.plugin["xep_0045"] = FakeMucService(
+        {("room@conference.example.test", "outcast"): ["known@example.test"]}
+    )
+    try:
+        await bot.upsert_ban_db("known@example.test", None, 0, "original-actor", None)
+
+        await bot.sync_bans_to_rooms(startup=True, announce_progress=False)
+
+        async with bot.db.execute(
+            "SELECT issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("known@example.test",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == ("original-actor", None)
+        assert bot.applied == []
+    finally:
+        await bot.db.close()

@@ -322,3 +322,48 @@ async def test_upsert_zero_width_jid_uses_canonical_storage_key(temp_db_path):
         assert rows == [("bulk_be49a07335@jabber.vg", "bulk_be49a07335@jabber.vg")]
     finally:
         await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_setup_db_keeps_meaningful_reason_when_recovered_duplicate_is_seen_first(temp_db_path):
+    db = await aiosqlite.connect(temp_db_path)
+    try:
+        await create_legacy_bans_table(db)
+        await insert_legacy_ban(
+            db,
+            target="bulk_be49a07335@jabber.vg",
+            jid="bulk_be49a07335@jabber.vg",
+            nick=None,
+            until=0,
+            issuer="syncbans",
+            comment="Recovered from room",
+        )
+        await insert_legacy_ban(
+            db,
+            target="bulk_be49a07335@\u200bjabber.vg",
+            jid="bulk_be49a07335@\u200bjabber.vg",
+            nick=None,
+            until=0,
+            issuer="protection:FloodSpamProtection",
+            comment="spam/flood detected",
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    bot = DbBot()
+    await bot.setup_db()
+    try:
+        async with bot.db.execute(
+            "SELECT target, until, issuer, comment FROM bans"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        assert rows == [
+            (
+                "bulk_be49a07335@jabber.vg",
+                0,
+                "protection:FloodSpamProtection",
+                "spam/flood detected",
+            )
+        ]
+    finally:
+        await bot.db.close()

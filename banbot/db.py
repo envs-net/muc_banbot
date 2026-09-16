@@ -9,6 +9,7 @@ from envs_xmpp_core.release.state import RELEASE_STATE_TABLE_SQL
 
 from config import DB_FILE
 
+from .ban_metadata import is_placeholder_ban_reason
 from .ban_target import BanTarget
 from .utils import looks_like_domain, normalize_actor
 
@@ -41,24 +42,36 @@ def _stronger_ban_row(
     previous: _NormalizedBanRow | None,
     current: _NormalizedBanRow,
 ) -> _NormalizedBanRow:
-    """Return the stronger ban row when normalizing duplicate ban targets."""
+    """Return the stronger duplicate while preserving the best known metadata."""
     if previous is None:
         return current
 
     previous_until = int(previous["until"] or 0)
     current_until = int(current["until"] or 0)
 
-    # Permanent bans are stronger than temporary bans.
+    # Permanent bans are stronger than temporary bans. Otherwise, for two
+    # temporary bans, prefer the later expiration.
     if previous_until <= 0:
-        return previous
-    if current_until <= 0:
-        return current
+        selected, other = previous, current
+    elif current_until <= 0 or current_until > previous_until:
+        selected, other = current, previous
+    else:
+        selected, other = previous, current
 
-    # For temporary bans, keep the later expiration.
-    if current_until > previous_until:
-        return current
+    # Canonicalization must never make useful provenance disappear merely
+    # because the stronger/earlier row contains the synthetic recovery reason.
+    # Copy the meaningful reason together with its issuer onto the selected row.
+    if (
+        is_placeholder_ban_reason(selected["comment"])
+        and not is_placeholder_ban_reason(other["comment"])
+    ):
+        selected = selected.copy()
+        selected["comment"] = other["comment"]
+        if other["issuer"]:
+            selected["issuer"] = other["issuer"]
+        selected["updated_at"] = max(selected["updated_at"], other["updated_at"])
 
-    return previous
+    return selected
 
 
 class DatabaseMixin(_DatabaseMixinContract):

@@ -767,3 +767,115 @@ async def test_joinwave_observe_mode_does_not_lock_room(monkeypatch):
     assert "Action: observe (would lock down)" in bot.sent[-1][1]
     assert "Lockdown applied: no" in bot.sent[-1][1]
     assert bot.audit[-1][1]["details"]["observe"] is True
+
+@pytest.mark.asyncio
+async def test_stronger_protection_action_bypasses_weaker_action_cooldown(monkeypatch) -> None:
+    bot = DummyProtections()
+    bot.protections["SimilarMessageProtection"].update({"action": "tempban", "redact": False})
+    bot.protections["FloodSpamProtection"].update({"action": "ban", "redact": False})
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+
+    await bot._protection_apply_action(
+        protection="SimilarMessageProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+    await bot._protection_apply_action(
+        protection="FloodSpamProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+
+    assert [entry[2] for entry in bot.bans] == [
+        "protection:SimilarMessageProtection",
+        "protection:FloodSpamProtection",
+    ]
+    assert bot.bans[-1][1] is None
+
+
+@pytest.mark.asyncio
+async def test_weaker_protection_action_is_suppressed_after_stronger_action(monkeypatch) -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update({"action": "ban", "redact": False})
+    bot.protections["SimilarMessageProtection"].update({"action": "tempban", "redact": False})
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+
+    await bot._protection_apply_action(
+        protection="FloodSpamProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+    await bot._protection_apply_action(
+        protection="SimilarMessageProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+
+    assert bot.bans == [
+        ("spam@example.org", None, "protection:FloodSpamProtection", "spam/flood detected")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_observe_only_protection_does_not_create_enforcement_cooldown(monkeypatch) -> None:
+    bot = DummyProtections()
+    bot.protections["SimilarMessageProtection"].update(
+        {"observe": True, "action": "tempban", "redact": False}
+    )
+    bot.protections["MentionLimitProtection"].update(
+        {"observe": False, "action": "tempban", "redact": False}
+    )
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+
+    await bot._protection_apply_action(
+        protection="SimilarMessageProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+    await bot._protection_apply_action(
+        protection="MentionLimitProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+
+    assert bot.bans == [
+        ("spam@example.org", 3700, "protection:MentionLimitProtection", "too many mentions")
+    ]
+
+@pytest.mark.asyncio
+async def test_observe_match_falls_through_to_later_enforcing_protection(fake_msg_factory, monkeypatch) -> None:
+    bot = DummyProtections()
+    bot.protections["SimilarMessageProtection"].update(
+        {
+            "enabled": True,
+            "observe": True,
+            "max_similar": 3,
+            "min_length": 5,
+            "min_words": 1,
+            "action": "tempban",
+            "redact": False,
+        }
+    )
+    bot.protections["WordListNewJoinerProtection"].update(
+        {
+            "enabled": False,
+            "observe": False,
+            "words": ["spamword"],
+            "action": "tempban",
+            "redact": False,
+        }
+    )
+    bot.protection_joined_at[(ROOM, "spam@example.org")] = 99.0
+    monkeypatch.setattr("banbot.protections.checks.time.time", lambda: 100.0)
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="spamword repeated payload")
+
+    assert await bot.protections_on_message(msg, ROOM, "Spammer", "spamword repeated payload") is False
+    assert await bot.protections_on_message(msg, ROOM, "Spammer", "spamword repeated payload") is False
+    bot.protections["WordListNewJoinerProtection"]["enabled"] = True
+
+    handled = await bot.protections_on_message(msg, ROOM, "Spammer", "spamword repeated payload")
+
+    assert handled is True
+    assert bot.bans[-1][2] == "protection:WordListNewJoinerProtection"
+    assert any("SimilarMessageProtection observe match" in body for _to, body, _type in bot.sent)

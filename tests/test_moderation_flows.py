@@ -827,3 +827,117 @@ async def test_unban_plain_domain_prefers_existing_domain_over_same_named_nick(t
         ]
     finally:
         await bot.db.close()
+
+@pytest.mark.asyncio
+async def test_protection_tempban_never_downgrades_existing_permanent_protection_ban(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        await bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="protection:FloodSpamProtection",
+            comment="spam/flood detected",
+            auto_redact=False,
+        )
+        bot.sent.clear()
+        bot.audit_events.clear()
+
+        await bot.ban_all(
+            "user@example.org",
+            int(time.time()) + 86400,
+            issuer="protection:SimilarMessageProtection",
+            comment="repeated/similar spam detected",
+            auto_redact=False,
+        )
+
+        async with bot.db.execute(
+            "SELECT until, issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("user@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (
+            0,
+            "protection:FloodSpamProtection",
+            "spam/flood detected | repeated/similar spam detected",
+        )
+        assert any("Ban reason updated" in msg["mbody"] for msg in bot.sent)
+        assert bot.audit_events[-1][0] == "ban_updated"
+        assert bot.audit_events[-1][1]["details"]["arbitration"] == "protection_monotonic"
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_protection_tempban_does_not_rewrite_existing_rtbl_permanent_ban(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        await bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="rtbl",
+            comment="RTBL ban",
+            auto_redact=False,
+        )
+        bot.sent.clear()
+        bot.audit_events.clear()
+
+        await bot.ban_all(
+            "user@example.org",
+            int(time.time()) + 86400,
+            issuer="protection:SimilarMessageProtection",
+            comment="repeated/similar spam detected",
+            auto_redact=False,
+        )
+
+        async with bot.db.execute(
+            "SELECT until, issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("user@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (0, "rtbl", "RTBL ban")
+        assert not bot.sent
+        assert bot.audit_events[-1][0] == "ban_update_ignored"
+    finally:
+        await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_stronger_protection_promotes_tempban_and_preserves_both_protection_reasons(temp_db_path, monkeypatch):
+    moderation_module = importlib.import_module("banbot.moderation")
+    monkeypatch.setattr(moderation_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = await make_bot()
+    try:
+        await bot.ban_all(
+            "user@example.org",
+            int(time.time()) + 86400,
+            issuer="protection:SimilarMessageProtection",
+            comment="repeated/similar spam detected",
+            auto_redact=False,
+        )
+        bot.sent.clear()
+
+        await bot.ban_all(
+            "user@example.org",
+            None,
+            issuer="protection:FloodSpamProtection",
+            comment="spam/flood detected",
+            auto_redact=False,
+        )
+
+        async with bot.db.execute(
+            "SELECT until, issuer, comment FROM bans WHERE target_type = 'jid' AND target = ?",
+            ("user@example.org",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row == (
+            0,
+            "protection:FloodSpamProtection",
+            "repeated/similar spam detected | spam/flood detected",
+        )
+        assert any("upgraded tempban to permanent" in msg["mbody"] for msg in bot.sent)
+    finally:
+        await bot.db.close()

@@ -99,27 +99,62 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         """Return the short duplicate-action cooldown for message bursts."""
         return max(0, int(config.get("action_cooldown_seconds", 5) or 0))
 
-    def _protection_action_on_cooldown(self, room: str, target: str, now: float) -> bool:
-        """Return True when this target recently received a protection action."""
+    @staticmethod
+    def _protection_action_strength(action: str) -> int:
+        """Return an ordering where stronger punitive actions have larger values."""
+        return {"kick": 1, "tempban": 2, "ban": 3}.get(action, 0)
+
+    def _protection_action_on_cooldown(
+        self,
+        room: str,
+        target: str,
+        action: str,
+        now: float,
+    ) -> bool:
+        """Suppress duplicate/weaker actions but never hide a stronger action."""
         key = (room, str(target).lower())
-        until = getattr(self, "protection_action_cooldowns", {}).get(key, 0)
-        if until > now:
+        entry = getattr(self, "protection_action_cooldowns", {}).get(key)
+        if not entry:
+            return False
+
+        until, previous_strength = entry
+        if until <= now:
+            self.protection_action_cooldowns.pop(key, None)
+            return False
+
+        current_strength = self._protection_action_strength(action)
+        if current_strength > previous_strength:
             log.debug(
-                "Protection action suppressed in %s for %s: cooldown active for %.1fs",
+                "Protection action in %s for %s bypasses cooldown: stronger action %s",
                 room,
                 target,
-                until - now,
+                action,
             )
-            return True
-        if until:
-            self.protection_action_cooldowns.pop(key, None)
-        return False
+            return False
 
-    def _protection_set_action_cooldown(self, room: str, target: str, seconds: int, now: float) -> None:
+        log.debug(
+            "Protection action suppressed in %s for %s: cooldown active for %.1fs",
+            room,
+            target,
+            until - now,
+        )
+        return True
+
+    def _protection_set_action_cooldown(
+        self,
+        room: str,
+        target: str,
+        action: str,
+        seconds: int,
+        now: float,
+    ) -> None:
         """Set a short duplicate-action cooldown for this room/target pair."""
         if seconds <= 0:
             return
-        self.protection_action_cooldowns[(room, str(target).lower())] = now + seconds
+        self.protection_action_cooldowns[(room, str(target).lower())] = (
+            now + seconds,
+            self._protection_action_strength(action),
+        )
 
     async def _protection_redact_target_messages(
         self,
@@ -175,11 +210,16 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         now = time.time()
         punitive_action = action in {"kick", "tempban", "ban"}
         observe = bool(config.get("observe", False))
-        if punitive_action:
+        # Observe-only matches must never suppress a real protection action.
+        # For enforcing actions, the cooldown de-duplicates equal/weaker work
+        # while allowing a stronger action (for example ban after tempban).
+        if punitive_action and not observe:
             cooldown_seconds = self._protection_action_cooldown_seconds(config)
-            if self._protection_action_on_cooldown(room, target, now):
+            if self._protection_action_on_cooldown(room, target, action, now):
                 return
-            self._protection_set_action_cooldown(room, target, cooldown_seconds, now)
+            self._protection_set_action_cooldown(
+                room, target, action, cooldown_seconds, now
+            )
 
         if observe:
             await self.bot_send_message(

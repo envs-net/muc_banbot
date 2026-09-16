@@ -23,6 +23,7 @@ _SYNC_AFFILIATION_QUERY_OPTIONS = AffiliationQueryOptions(
 
 _SyncBanAction = Literal["apply", "already_outcast", "defer_nick"]
 
+from .ban_metadata import RECOVERED_BAN_REASON, is_placeholder_ban_reason
 from .ban_target import BanTarget
 from .locks import ban_state_lock
 from .utils import looks_like_domain
@@ -532,7 +533,7 @@ class SyncMixin(_SyncMixinContract):
         db = self._require_db()
         async with db.execute(
             """
-            SELECT comment FROM bans
+            SELECT until, issuer, comment FROM bans
             WHERE target_type = ?
               AND (target = ? OR jid = ?)
             LIMIT 1
@@ -541,11 +542,21 @@ class SyncMixin(_SyncMixinContract):
         ) as cursor:
             row = await cursor.fetchone()
 
-        current_comment = (row[0] if row else None)
-        if current_comment and current_comment != "Recovered from room":
+        current_until = int(row[0] or 0) if row else 0
+        current_issuer = row[1] if row else None
+        current_comment = row[2] if row else None
+        if not is_placeholder_ban_reason(current_comment):
             return current_comment
 
-        await self.upsert_ban_db(canonical, None, 0, issuer, reason)
+        # Enrich only the synthetic/missing reason. Keep the original actor so
+        # a sync pass can never rewrite protection/manual provenance as sync*.
+        await self.upsert_ban_db(
+            canonical,
+            None,
+            current_until,
+            current_issuer or issuer,
+            reason,
+        )
         return reason
 
 
@@ -698,17 +709,18 @@ class SyncMixin(_SyncMixinContract):
             to_insert = []
             for jid_bare, room_reason in outcast_entries:
                 canonical_outcast = self._sync_canonical_outcast_target(jid_bare)
-                existing_comment = next(
+                existing_ban = next(
                     (
-                        comment
+                        (comment,)
                         for ban_jid, _nick, _until, comment in active_bans
                         if ban_jid and self.bare_jid(ban_jid) == canonical_outcast
                     ),
                     None,
                 )
-                if existing_comment is not None:
+                if existing_ban is not None:
+                    existing_comment = existing_ban[0]
                     if room_reason:
-                        should_auto_redact_updated_reason = existing_comment == "Recovered from room"
+                        should_auto_redact_updated_reason = is_placeholder_ban_reason(existing_comment)
                         await self._sync_maybe_update_recovered_ban_reason(
                             jid_bare, room_reason, issuer_tag
                         )
@@ -725,7 +737,7 @@ class SyncMixin(_SyncMixinContract):
                     await self.unban_all(jid_bare, issuer="system", notify_policy=False)
                     continue
 
-                comment_value = room_reason or "Recovered from room"
+                comment_value = room_reason or RECOVERED_BAN_REASON
                 to_insert.append((canonical_outcast, None, 0, issuer_tag, comment_value))
                 active_bans.append((canonical_outcast, None, 0, comment_value))
                 await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
@@ -1027,17 +1039,18 @@ class SyncMixin(_SyncMixinContract):
             issuer_tag = "sync_startup" if startup else "syncbans"
             for jid_bare, room_reason in outcast_entries:
                 canonical_outcast = self._sync_canonical_outcast_target(jid_bare)
-                existing_comment = next(
+                existing_ban = next(
                     (
-                        comment
+                        (comment,)
                         for ban_jid, _nick, comment in active_bans
                         if ban_jid and self.bare_jid(ban_jid) == canonical_outcast
                     ),
                     None,
                 )
-                if existing_comment is not None:
+                if existing_ban is not None:
+                    existing_comment = existing_ban[0]
                     if room_reason:
-                        should_auto_redact_updated_reason = existing_comment == "Recovered from room"
+                        should_auto_redact_updated_reason = is_placeholder_ban_reason(existing_comment)
                         await self._sync_maybe_update_recovered_ban_reason(
                             jid_bare, room_reason, issuer_tag
                         )
@@ -1054,7 +1067,7 @@ class SyncMixin(_SyncMixinContract):
                     await self.unban_all(jid_bare, issuer="system", notify_policy=False)
                     continue
 
-                comment = room_reason or "Recovered from room"
+                comment = room_reason or RECOVERED_BAN_REASON
                 orphan_bans.append((canonical_outcast, None, comment))
                 await self._sync_maybe_auto_redact_manual_ban(jid_bare, room_reason, issuer_tag)
 

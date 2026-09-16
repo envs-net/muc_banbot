@@ -161,10 +161,9 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
                 nick,
             )
 
-        # Stop after the first matching protection.  A single message should
-        # never apply multiple punitive actions to the same target because that
-        # can produce noisy duplicate moderation output such as a successful ban
-        # followed by "Ban already exists" from a second protection path.
+        # Stop after the first *enforcing* protection. Observe-only matches are
+        # allowed to fall through so an observing rule cannot hide a later real
+        # enforcement rule for the same message.
         if await self._protection_check_flood(msg, room, nick, subject, now):
             return True
         if await self._protection_check_first_media(msg, room, nick, subject, protection_body, now):
@@ -199,7 +198,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             details={"messages": len(hits), "window_seconds": window},
         )
         hits.clear()
-        return True
+        return not bool(config.get("observe", False))
 
     async def _protection_check_first_media(self, msg, room: str, nick: str, subject: str, body: str, now: float) -> bool:
         protection = "FirstMessageMediaProtection"
@@ -227,7 +226,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             msg=msg,
             details={"first_message": True},
         )
-        return True
+        return not bool(config.get("observe", False))
 
 
     async def _protection_check_similar_messages(
@@ -276,7 +275,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             },
         )
         entries.clear()
-        return True
+        return not bool(config.get("observe", False))
 
     async def _protection_check_mentions(self, msg, room: str, nick: str, body: str) -> bool:
         protection = "MentionLimitProtection"
@@ -308,7 +307,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             msg=msg,
             details={"mention_count": mention_count, "max_mentions": limit},
         )
-        return True
+        return not bool(config.get("observe", False))
 
     async def _protection_check_wordlist(self, msg, room: str, nick: str, subject: str, body: str, now: float) -> bool:
         protection = "WordListNewJoinerProtection"
@@ -336,4 +335,4 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             reason=reason,
             details={"word": word},
         )
-        return True
+        return not bool(config.get("observe", False))
