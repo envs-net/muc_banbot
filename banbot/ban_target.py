@@ -11,23 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from envs_xmpp_core.xmpp.jid import bare_jid
+from envs_xmpp_core.xmpp.jid import bare_jid, normalize_jid_text
 
 BanTargetKind = Literal["jid", "nick", "domain"]
-
-# U+200B ZERO WIDTH SPACE and U+FEFF ZERO WIDTH NO-BREAK SPACE/BOM
-# can be introduced by copied/pasted presentation text. They are not part of
-# the logical BanBot JID/domain identity, so remove them before canonicalizing
-# those target kinds. Keep this deliberately narrow instead of stripping every
-# Unicode format character, because some format-code points have contextual
-# meaning in internationalized identifiers.
-_INVISIBLE_IDENTITY_TRANSLATION = str.maketrans({"\u200b": None, "\ufeff": None})
-
-
-def _canonical_identity_text(value: object | None) -> str:
-    """Return normalized text for a JID/domain identity input."""
-    return str(value or "").translate(_INVISIBLE_IDENTITY_TRANSLATION).strip().lower()
-
 
 @dataclass(frozen=True, slots=True)
 class BanTarget:
@@ -65,7 +51,7 @@ class BanTarget:
         nick: str | None = None,
     ) -> BanTarget:
         """Build a canonical target from the database/API JID+nick shape."""
-        raw_jid = _canonical_identity_text(jid)
+        raw_jid = (normalize_jid_text(jid) or "").lower()
         normalized_nick = str(nick).strip().lower() if nick else None
 
         if raw_jid.startswith("*."):
@@ -112,7 +98,7 @@ class BanTarget:
         """Rebuild a canonical target from BanBot's persisted row shape."""
         normalized_kind = str(kind).strip().lower()
         if normalized_kind == "domain":
-            raw_domain = _canonical_identity_text(value)
+            raw_domain = (normalize_jid_text(value) or "").lower()
             if raw_domain.startswith("*."):
                 raw = raw_domain
             else:
@@ -139,7 +125,7 @@ class BanTarget:
         ``plain_domain=True``.
         """
         raw_value = str(identifier or "").strip().lower()
-        value = _canonical_identity_text(raw_value)
+        value = (normalize_jid_text(raw_value) or "").lower()
         if not value:
             raise ValueError("Ban target identifier must not be empty")
         if value.startswith("*."):

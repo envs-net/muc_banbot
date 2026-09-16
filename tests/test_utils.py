@@ -43,8 +43,10 @@ def test_human_time(seconds, expected):
 
 def test_bare_and_safe_jid():
     assert bare_jid("User@Example.org/Resource") == "user@example.org"
+    assert bare_jid("User@\u200bExample.org/Resource") == "user@example.org"
     assert bare_jid(None) is None
     assert safe_jid("user@example.org") == "user@\u200bexample.org"
+    assert bare_jid(safe_jid("user@example.org")) == "user@example.org"
 
 
 @pytest.mark.parametrize(
