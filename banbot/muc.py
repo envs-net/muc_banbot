@@ -6,6 +6,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from envs_xmpp_core.runtime.reconnect import run_reconnect_loop
 from envs_xmpp_core.xmpp.muc_join import join_muc_confirmed
 from envs_xmpp_core.xmpp.occupants import (
     normalize_affiliation,
@@ -362,89 +363,26 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
     async def _delayed_reconnect(self) -> None:
         """Reconnect until session_start confirms that the connection is usable."""
         current_task = asyncio.current_task()
-        success_event = self._get_reconnect_success_event()
-        had_completed_startup = bool(
-            getattr(self, "_startup_completed_once", False)
-        )
-        delay = 5
-
         try:
-            while True:
-                if getattr(self, "_shutdown_in_progress", False) or getattr(self, "_shutdown_complete", False):
-                    log.debug("Reconnect loop stopped because shutdown is in progress")
-                    return
-
-                log.info("🔄 Attempting reconnect in %ds...", delay)
-                await asyncio.sleep(delay)
-                if getattr(self, "_shutdown_in_progress", False) or getattr(self, "_shutdown_complete", False):
-                    log.debug("Reconnect attempt suppressed because shutdown is in progress")
-                    return
-
-                # A pre-session disconnect event can race with a session_start
-                # that was already queued by Slixmpp. Never open a second
-                # connection while that session is already running its startup
-                # path; wait for the normal full-startup success signal instead.
-                if bool(getattr(self, "_session_start_received", False)):
-                    try:
-                        await asyncio.wait_for(
-                            success_event.wait(),
-                            timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
-                        )
-                        if had_completed_startup:
-                            log.info("🔄 Reconnect completed during backoff")
-                        else:
-                            log.info(
-                                "✅ Initial XMPP startup completed during reconnect backoff"
-                            )
-                        return
-                    except TimeoutError:
-                        log.warning(
-                            "Session startup did not complete within %ss; "
-                            "disconnecting partial session before retry",
-                            _RECONNECT_STARTUP_TIMEOUT_SECONDS,
-                        )
-                        await self._disconnect_partial_reconnect(
-                            "session startup timeout"
-                        )
-                        delay = min(delay * 2, 60)
-                        continue
-
-                success_event.clear()
-
-                try:
-                    connect_with_config = getattr(self, "connect_with_config", None)
-                    if connect_with_config:
-                        connected = connect_with_config()
-                    else:
-                        connected = self.connect()
-                    if connected is False:
-                        raise ConnectionError("Reconnect initiation returned False")
-
-                    log.info("🔌 Reconnect initiated")
-                except Exception as e:
-                    log.error("Reconnect error: %s", e)
-                    delay = min(delay * 2, 60)
-                    continue
-
-                try:
-                    await asyncio.wait_for(
-                        success_event.wait(),
-                        timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
-                    )
-                    if had_completed_startup:
-                        log.info("🔄 Reconnect completed")
-                    else:
-                        log.info("✅ Initial XMPP startup completed after retry")
-                    return
-                except TimeoutError:
-                    log.warning(
-                        "Reconnect startup did not complete within %ss; "
-                        "disconnecting partial session before retry",
-                        _RECONNECT_STARTUP_TIMEOUT_SECONDS,
-                    )
-                    await self._disconnect_partial_reconnect("startup timeout")
-                    delay = min(delay * 2, 60)
-
+            await run_reconnect_loop(
+                connect=lambda: self.connect_with_config(),
+                disconnect_partial=self._disconnect_partial_reconnect,
+                ready_event=self._get_reconnect_success_event(),
+                session_started=lambda: bool(
+                    getattr(self, "_session_start_received", False)
+                ),
+                shutdown_requested=lambda: bool(
+                    getattr(self, "_shutdown_in_progress", False)
+                    or getattr(self, "_shutdown_complete", False)
+                ),
+                startup_completed=lambda: bool(
+                    getattr(self, "_startup_completed_once", False)
+                ),
+                logger=log,
+                initial_delay=5,
+                max_delay=60,
+                startup_timeout=_RECONNECT_STARTUP_TIMEOUT_SECONDS,
+            )
         except asyncio.CancelledError:
             log.info("Reconnect task cancelled")
             raise

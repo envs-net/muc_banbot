@@ -389,7 +389,8 @@ Use the module that already owns the responsibility:
 - process startup, shared state, event registration: `banbot.bot`
 - config loading: `banbot.config_loader`
 - config validation/runtime mutation: `banbot.config/*`
-- MUC joins, reconnects, and presence: shared helpers in `envs_xmpp_core.xmpp`, runtime policy in `banbot.muc`
+- MUC joins and presence: shared helpers in `envs_xmpp_core.xmpp`, runtime policy in `banbot.muc`
+- reconnect retry/backoff transaction: `envs_xmpp_core.runtime.run_reconnect_loop()`, with BanBot-owned room/admin cleanup and readiness policy
 - bot occupant identity and room status: `banbot.occupants`
 - authorization and admin protection: `banbot.admin`
 - command parsing/routing: `banbot.commands/*`
@@ -696,4 +697,4 @@ health state after unusual presence ordering.
 The audit also removed the unused cache tuple builder left behind by earlier
 cache consolidation. Those fixes required no shared-core behavior. Phase 42
 subsequently moved shared JID presentation-artifact normalization into
-`envs-xmpp`, so the dependency floor is now 1.2.0.
+`envs-xmpp`, so the dependency floor is now 1.3.0.
