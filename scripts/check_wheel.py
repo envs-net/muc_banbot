@@ -56,7 +56,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="muc-banbot-wheel-") as temp_name:
         temp = Path(temp_name)
         env_dir = temp / "venv"
-        venv.EnvBuilder(with_pip=True, system_site_packages=True).create(env_dir)
+        venv.EnvBuilder(with_pip=True).create(env_dir)
         python = env_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         subprocess.run(
             [
@@ -65,10 +65,14 @@ def main() -> int:
                 "pip",
                 "install",
                 "--disable-pip-version-check",
-                "--no-deps",
                 "--force-reinstall",
                 str(wheel),
             ],
+            cwd=temp,
+            check=True,
+        )
+        subprocess.run(
+            [str(python), "-m", "pip", "check"],
             cwd=temp,
             check=True,
         )
@@ -86,10 +90,20 @@ print("Wheel asset smoke test passed.")
         result = subprocess.run(
             [str(executable), "--version"],
             cwd=temp,
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
         )
+        if result.returncode != 0:
+            print(
+                f"Installed muc_banbot --version failed with exit code {result.returncode}",
+                file=sys.stderr,
+            )
+            if result.stdout:
+                print(result.stdout, file=sys.stderr, end="")
+            if result.stderr:
+                print(result.stderr, file=sys.stderr, end="")
+            return 1
         if not result.stdout.strip().startswith("muc_banbot ") or "(envs-xmpp " not in result.stdout:
             print(f"Unexpected muc_banbot --version output: {result.stdout!r}", file=sys.stderr)
             return 1
