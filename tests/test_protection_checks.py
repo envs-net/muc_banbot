@@ -164,6 +164,62 @@ async def test_flood_triggers_only_after_threshold_and_clears_window(fake_msg_fa
     assert list(bot.protection_message_windows[key]) == []
 
 
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ({"action": "notify"}, False),
+        ({"action": "warn"}, False),
+        ({"action": "kick"}, True),
+        ({"action": "tempban"}, True),
+        ({"action": "ban"}, True),
+        ({"action": "ban", "observe": True}, False),
+        ({"action": "invalid"}, False),
+    ],
+)
+def test_message_protection_stop_policy_only_stops_for_punitive_actions(
+    config: dict[str, object], expected: bool
+) -> None:
+    assert DummyProtections._protection_match_stops_processing(config) is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["notify", "warn"])
+async def test_non_punitive_flood_match_falls_through_to_later_ban(
+    fake_msg_factory, action: str
+) -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update({
+        "enabled": True,
+        "max_messages": 1,
+        "window_seconds": 60,
+        "action": action,
+        "redact": False,
+    })
+    bot.protections["MentionLimitProtection"].update({
+        "enabled": True,
+        "max_mentions": 1,
+        "action": "ban",
+        "redact": False,
+    })
+    first = fake_msg_factory(room=ROOM, nick="Spammer", body="warmup")
+    second = fake_msg_factory(room=ROOM, nick="Spammer", body="hi @Alice @Bob")
+
+    assert await bot.protections_on_message(first, ROOM, "Spammer", "warmup") is False
+    handled = await bot.protections_on_message(
+        second, ROOM, "Spammer", "hi @Alice @Bob"
+    )
+
+    assert handled is True
+    assert bot.bans == [
+        ("spam@example.org", None, "protection:MentionLimitProtection", "too many mentions")
+    ]
+    assert any(
+        f"Action: {action}" in body
+        for room, body, _mtype in bot.sent
+        if room == ADMIN_ROOM
+    )
+
+
 @pytest.mark.asyncio
 async def test_flood_window_expires_old_hits(fake_msg_factory, monkeypatch) -> None:
     bot = DummyProtections()
@@ -385,7 +441,7 @@ async def test_mention_limit_triggers_on_more_than_limit(fake_msg_factory) -> No
 
     handled = await bot.protections_on_message(msg, ROOM, "Spammer", "hi @Alice ~Bob Carol")
 
-    assert handled is True
+    assert handled is False
     assert "MentionLimitProtection triggered" in last_body(bot)
     assert "Action: notify" in last_body(bot)
 
@@ -710,7 +766,7 @@ async def test_similar_message_normalizes_changing_urls(fake_msg_factory) -> Non
     second = fake_msg_factory(room=ROOM, nick="Spammer", body=second_body)
 
     assert await bot.protections_on_message(first, ROOM, "Alice", first_body) is False
-    assert await bot.protections_on_message(second, ROOM, "Spammer", second_body) is True
+    assert await bot.protections_on_message(second, ROOM, "Spammer", second_body) is False
 
     assert "SimilarMessageProtection triggered" in last_body(bot)
     assert "Action: notify" in last_body(bot)

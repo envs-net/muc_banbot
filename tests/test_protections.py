@@ -156,7 +156,7 @@ async def test_first_media_triggers_with_observed_join(fake_msg_factory: Callabl
         "https://upload.example.org/spam.jpg",
     )
 
-    assert handled is True
+    assert handled is False
 
 
 @pytest.mark.asyncio
@@ -256,7 +256,7 @@ async def test_mention_limit_counts_prefixed_display_nicks(fake_msg_factory: Cal
         "hi ~creme adminbot_dev @fab",
     )
 
-    assert handled is True
+    assert handled is False
     assert "MentionLimitProtection triggered" in bot.sent[-1][1]
 
 
@@ -294,5 +294,5 @@ async def test_mention_limit_uses_xep0045_roster_cache(fake_msg_factory: Callabl
         "hi ~creme adminbot_dev @fab",
     )
 
-    assert handled is True
+    assert handled is False
     assert "MentionLimitProtection triggered" in bot.sent[-1][1]

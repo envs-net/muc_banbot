@@ -103,6 +103,19 @@ Pending room invites are persisted so they survive bot restarts. Entries are rem
 
 Protection defaults live in code. This table stores only the current enabled state and configured overrides changed through `!protections`.
 
+### `protection_known_participants`
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `room` | TEXT | Protected room bare JID |
+| `jid` | TEXT | Verified participant bare JID |
+| `first_seen_at` | INTEGER | Timestamp when the participant was first established |
+
+The `(room, jid)` pair is the primary key. Only verified bare JIDs are persisted.
+The table lets newcomer-focused protections distinguish established participants
+from genuinely new joins across reconnects and bot restarts without trusting
+reusable nicknames as long-term identity.
+
 ### `public_policy`
 
 | Column | Type | Description |

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from config import ADMIN_ROOM
 
+from .definitions import PROTECTION_PUNITIVE_ACTIONS
 from .detection import (
     body_contains_blocked_word,
     count_mentions,
@@ -32,6 +33,19 @@ else:
 
 
 class ProtectionChecksMixin(_ProtectionChecksMixinContract):
+    @staticmethod
+    def _protection_match_stops_processing(config: dict[str, Any]) -> bool:
+        """Return whether a matched rule should suppress later message protections.
+
+        Observe, notify, and warn matches intentionally fall through so a
+        non-punitive rule cannot hide a later kick/tempban/ban rule that also
+        matches the same message.
+        """
+        if bool(config.get("observe", False)):
+            return False
+        action = str(config.get("action", "notify") or "notify").lower().strip()
+        return action in PROTECTION_PUNITIVE_ACTIONS
+
     async def protection_on_join(self, room: str, nick: str, jid: str | None = None) -> None:
         """Run join-based protections for a MUC presence join."""
         if self._protection_is_exempt(room, nick, jid):
@@ -248,7 +262,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             details={"messages": len(hits), "window_seconds": window},
         )
         hits.clear()
-        return not bool(config.get("observe", False))
+        return self._protection_match_stops_processing(config)
 
     async def _protection_check_first_media(
         self,
@@ -287,7 +301,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             msg=msg,
             details={"first_message": True},
         )
-        return not bool(config.get("observe", False)), False
+        return self._protection_match_stops_processing(config), False
 
 
     async def _protection_check_similar_messages(
@@ -336,7 +350,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             },
         )
         entries.clear()
-        return not bool(config.get("observe", False))
+        return self._protection_match_stops_processing(config)
 
     async def _protection_check_mentions(
         self, msg, room: str, nick: str, body: str
@@ -370,7 +384,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             msg=msg,
             details={"mention_count": mention_count, "max_mentions": limit},
         )
-        return not bool(config.get("observe", False)), True
+        return self._protection_match_stops_processing(config), True
 
     async def _protection_check_wordlist(
         self, msg, room: str, nick: str, subject: str, body: str, now: float
@@ -403,4 +417,4 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             reason=reason,
             details={"word": word},
         )
-        return not bool(config.get("observe", False)), True
+        return self._protection_match_stops_processing(config), True

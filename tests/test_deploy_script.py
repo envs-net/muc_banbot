@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,68 @@ def test_deploy_shell_wrapper_is_executable_and_defaults_to_help():
     assert os.access(wrapper, os.X_OK)
     assert result.returncode == 0
     assert "{status,check,install,update}" in result.stdout
+
+
+def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
+    dist_info = "envs_xmpp-1.3.0.dist-info"
+    files = {
+        "envs_xmpp_ops/__init__.py": (
+            '__version__ = "1.3.0"\n'
+            'from .deploy import DeploymentTarget\n'
+            'def inspect_dependency_drift(*args, **kwargs):\n'
+            '    return None\n'
+        ),
+        "envs_xmpp_ops/deploy.py": "class DeploymentTarget:\n    pass\n",
+        f"{dist_info}/METADATA": (
+            "Metadata-Version: 2.1\n"
+            "Name: envs-xmpp\n"
+            "Version: 1.3.0\n"
+        ),
+        f"{dist_info}/WHEEL": (
+            "Wheel-Version: 1.0\n"
+            "Generator: muc_banbot-test\n"
+            "Root-Is-Purelib: true\n"
+            "Tag: py3-none-any\n"
+        ),
+    }
+    record = "".join(f"{name},,\n" for name in [*files, f"{dist_info}/RECORD"])
+    files[f"{dist_info}/RECORD"] = record
+    with zipfile.ZipFile(path, "w") as wheel:
+        for name, content in files.items():
+            wheel.writestr(name, content)
+
+
+def test_fresh_deploy_wrapper_bootstraps_before_shared_imports(tmp_path):
+    wheel = tmp_path / "envs_xmpp-1.3.0-py3-none-any.whl"
+    _write_minimal_envs_xmpp_wheel(wheel)
+
+    no_site_python = tmp_path / "python-no-site"
+    no_site_python.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" -S "$@"\n',
+        encoding="utf-8",
+    )
+    no_site_python.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update({
+        "MUC_BANBOT_DEPLOY_PYTHON": str(no_site_python),
+        "XDG_CACHE_HOME": str(tmp_path / "cache"),
+        "ENVS_XMPP_DEPLOY_SOURCE": str(wheel),
+        "PIP_NO_INDEX": "1",
+    })
+    result = subprocess.run(
+        [str(ROOT / "scripts" / "deploy.sh"), "status", "--to", "v0.0.0"],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "--to is only valid with update" in result.stderr
+    deploy_python = tmp_path / "cache" / "envs-xmpp" / "deploy" / "1.3.0" / "bin" / "python"
+    assert deploy_python.is_file()
 
 
 def test_hardened_unit_separates_code_config_and_data(tmp_path):

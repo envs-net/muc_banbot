@@ -31,7 +31,7 @@ else:
     PROTECTION_IQ_EXCEPTIONS = (_slixmpp_exceptions.IqError, _slixmpp_exceptions.IqTimeout)
 
 from ..utils import safe_jid
-from .definitions import PROTECTION_ALLOWED_ACTIONS
+from .definitions import PROTECTION_ALLOWED_ACTIONS, PROTECTION_PUNITIVE_ACTIONS
 
 log = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         actor = f"protection:{protection}"
         target = explicit_target_jid or jid or normalized_nick
         now = time.time()
-        punitive_action = action in {"kick", "tempban", "ban"}
+        punitive_action = action in PROTECTION_PUNITIVE_ACTIONS
         observe = bool(config.get("observe", False))
         # Observe-only matches must never suppress a real protection action.
         # For enforcing actions, the cooldown de-duplicates equal/weaker work

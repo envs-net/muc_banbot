@@ -28,7 +28,83 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="./scripts/deploy.sh",
+        description=(
+            "Interactive, preservation-first muc_banbot deployment helper. "
+            "Running it without a command only shows this help."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  ./scripts/deploy.sh status
+  ./scripts/deploy.sh check
+  ./scripts/deploy.sh install --dry-run
+  sudo ./scripts/deploy.sh install
+  sudo ./scripts/deploy.sh update
+  sudo ./scripts/deploy.sh update --to v2.6.3
+
+New installations default to:
+  config: /etc/muc_banbot/config.py
+  data:   /var/lib/muc_banbot
+
+Existing source-tree installations remain supported and are auto-detected when
+possible. Override custom layouts with --root, --venv, --config, --data-dir,
+--service, --user, --group and --unit.
+
+Safety rules:
+  * install/update require explicit confirmation;
+  * stopping and starting systemd are confirmed separately;
+  * existing config, database/data directory and systemd unit are preserved;
+  * an existing systemd unit is never replaced automatically;
+  * update refuses a dirty tracked Git worktree;
+  * automatic updates select stable vX.Y.Z release tags only and never main;
+  * explicit downgrades require --allow-downgrade and extra confirmation;
+  * a failed update after stopping the service leaves it stopped.
+""",
+    )
+    parser.add_argument("command", nargs="?", choices=("status", "check", "install", "update"))
+    parser.add_argument("--root", type=Path, help="application checkout")
+    parser.add_argument("--venv", type=Path, help="virtualenv path (default: ROOT/venv)")
+    parser.add_argument("--config", type=Path, help="runtime config path")
+    parser.add_argument("--data-dir", type=Path, help="mutable data directory")
+    parser.add_argument(
+        "--service",
+        default=os.environ.get("MUC_BANBOT_SERVICE", "muc_banbot.service"),
+        help="systemd service name (default: muc_banbot.service)",
+    )
+    parser.add_argument("--user", help="systemd service user")
+    parser.add_argument("--group", help="systemd service group")
+    parser.add_argument("--unit", type=Path, help="systemd unit path")
+    parser.add_argument(
+        "--python",
+        default=os.environ.get("MUC_BANBOT_DEPLOY_BASE_PYTHON", "python3"),
+        help="base interpreter used to create a missing virtualenv",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="show the plan without changing anything")
+    parser.add_argument("--to", metavar="TAG", help="explicit release tag for update")
+    parser.add_argument(
+        "--allow-downgrade",
+        action="store_true",
+        help="allow an explicit older --to TAG after an extra confirmation",
+    )
+    return parser
+
+
 from _envs_xmpp_bootstrap import ensure_envs_xmpp  # noqa: E402
+
+# Parse the stdlib-only CLI surface before importing shared deployment modules.
+# A bare/help invocation stays dependency-free; real deploy commands bootstrap
+# the exact envs-xmpp version and re-exec before envs_xmpp_ops is imported.
+if __name__ == "__main__":
+    _bootstrap_parser = _build_parser()
+    _bootstrap_options = _bootstrap_parser.parse_args()
+    if _bootstrap_options.command is None:
+        _bootstrap_parser.print_help()
+        raise SystemExit(0)
+    ensure_envs_xmpp()
+
 from envs_xmpp_ops import inspect_dependency_drift  # noqa: E402
 from envs_xmpp_ops.deploy import DeploymentTarget  # noqa: E402
 
@@ -125,69 +201,6 @@ def _default_account(service: str, prop: str, fallback: str) -> str:
         discovered=_systemd_property(service, prop),
         fallback=fallback,
     )
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="./scripts/deploy.sh",
-        description=(
-            "Interactive, preservation-first muc_banbot deployment helper. "
-            "Running it without a command only shows this help."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""Examples:
-  ./scripts/deploy.sh status
-  ./scripts/deploy.sh check
-  ./scripts/deploy.sh install --dry-run
-  sudo ./scripts/deploy.sh install
-  sudo ./scripts/deploy.sh update
-  sudo ./scripts/deploy.sh update --to v2.6.3
-
-New installations default to:
-  config: /etc/muc_banbot/config.py
-  data:   /var/lib/muc_banbot
-
-Existing source-tree installations remain supported and are auto-detected when
-possible. Override custom layouts with --root, --venv, --config, --data-dir,
---service, --user, --group and --unit.
-
-Safety rules:
-  * install/update require explicit confirmation;
-  * stopping and starting systemd are confirmed separately;
-  * existing config, database/data directory and systemd unit are preserved;
-  * an existing systemd unit is never replaced automatically;
-  * update refuses a dirty tracked Git worktree;
-  * automatic updates select stable vX.Y.Z release tags only and never main;
-  * explicit downgrades require --allow-downgrade and extra confirmation;
-  * a failed update after stopping the service leaves it stopped.
-""",
-    )
-    parser.add_argument("command", nargs="?", choices=("status", "check", "install", "update"))
-    parser.add_argument("--root", type=Path, help="application checkout")
-    parser.add_argument("--venv", type=Path, help="virtualenv path (default: ROOT/venv)")
-    parser.add_argument("--config", type=Path, help="runtime config path")
-    parser.add_argument("--data-dir", type=Path, help="mutable data directory")
-    parser.add_argument(
-        "--service",
-        default=os.environ.get("MUC_BANBOT_SERVICE", "muc_banbot.service"),
-        help="systemd service name (default: muc_banbot.service)",
-    )
-    parser.add_argument("--user", help="systemd service user")
-    parser.add_argument("--group", help="systemd service group")
-    parser.add_argument("--unit", type=Path, help="systemd unit path")
-    parser.add_argument(
-        "--python",
-        default=os.environ.get("MUC_BANBOT_DEPLOY_BASE_PYTHON", "python3"),
-        help="base interpreter used to create a missing virtualenv",
-    )
-    parser.add_argument("--dry-run", action="store_true", help="show the plan without changing anything")
-    parser.add_argument("--to", metavar="TAG", help="explicit release tag for update")
-    parser.add_argument(
-        "--allow-downgrade",
-        action="store_true",
-        help="allow an explicit older --to TAG after an extra confirmation",
-    )
-    return parser
 
 
 def _deployment(options: argparse.Namespace) -> Deployment:

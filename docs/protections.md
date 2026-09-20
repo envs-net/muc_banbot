@@ -64,6 +64,8 @@ Message protections support these actions:
 
 When `redact=True` and `REDACTION_ENABLED=True`, message protections first try to retract the triggering message and punitive actions (`kick`, `tempban`, `ban`) also run the normal indexed JID redaction path with an admin-room summary.
 
+`observe`, `notify`, and `warn` matches do not stop evaluation of later message protections. This prevents a tuning/notification rule from masking a later `kick`, `tempban`, or `ban` rule that also matches the same message. Punitive matches stop the message-protection chain after they run.
+
 ## Overlapping protections and ban arbitration
 
 Multiple protections may match the same sender during a spam wave. BanBot deliberately makes automated protection updates monotonic so one detector cannot accidentally weaken another:

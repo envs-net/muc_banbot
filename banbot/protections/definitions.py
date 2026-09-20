@@ -164,6 +164,7 @@ PROTECTION_ALIASES = {
 }
 
 PROTECTION_ALLOWED_ACTIONS = {"notify", "warn", "kick", "tempban", "ban"}
+PROTECTION_PUNITIVE_ACTIONS = {"kick", "tempban", "ban"}
 
 # Protection-specific action restrictions used by command validation.
 # Protections not listed here accept PROTECTION_ALLOWED_ACTIONS.
