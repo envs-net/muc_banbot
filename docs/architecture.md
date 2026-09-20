@@ -663,6 +663,14 @@ all command surfaces that consume it, so `commands.CommandMixin` itself type
 checks as a complete cooperative MRO rather than only checking its component
 files independently.
 
+The host-contract surface is organized as a package instead of one monolithic
+`banbot/contracts.py`. Domain modules cover moderation, protections, RTBL,
+rooms, messaging, OMEMO, runtime operations, status, redaction, backups and
+configuration, with the cross-domain actor resolver isolated in `common.py`.
+`banbot.contracts` re-exports the historical Protocol names unchanged, so
+existing type-only imports keep the same public API while each contract domain
+can evolve independently.
+
 The package-level `BanBot` export remains lazy at runtime but is explicit to type
 checkers. The destructive live-protection smoke tool is also part of the quality
 gate; its environment-default overloads preserve precise numeric option types,
