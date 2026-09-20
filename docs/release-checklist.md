@@ -123,13 +123,19 @@ create the stable tag from that release commit:
 
 ```bash
 git checkout main
-git pull --ff-only
-git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git pull --ff-only origin main
 git push origin main
+git push github main
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
+git push github vX.Y.Z
 ```
 
-Pushing a `vX.Y.Z` tag starts `.github/workflows/release.yml`. The workflow tests
+The `github` remote must point to `envs-net/muc_banbot`. Push the reviewed `main`
+commit to both remotes before tagging; push the tag to `origin` first and to `github`
+last. The GitHub tag push is the publication trigger.
+
+Pushing a `vX.Y.Z` tag to `github` starts `.github/workflows/release.yml`. The workflow tests
 Python 3.12 and 3.13, rejects a tag that does not exactly match
 `banbot/_version.py`, builds sdist/wheel distributions, runs `twine check`,
 smoke-tests the installed wheel and bundled avatar, and publishes to PyPI through

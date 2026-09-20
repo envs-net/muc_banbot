@@ -52,7 +52,7 @@ Verify the installed application and shared core without connecting to XMPP:
 
 ```bash
 muc_banbot --version
-# muc_banbot 3.1.1 (envs-xmpp 1.3.0)
+# muc_banbot 3.2.0 (envs-xmpp 1.3.0)
 ```
 
 For a structured 72-hour post-release observation checklist, see
