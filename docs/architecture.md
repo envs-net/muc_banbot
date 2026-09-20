@@ -151,7 +151,7 @@ focused command mixin / subsystem
 messaging.bot_send_message
 ```
 
-Protections run before command dispatch. A triggered protection can consume the message after applying its configured action.
+Protections run before command dispatch. Message detections are converted into neutral `ProtectionMatch` records before enforcement. The action layer then arbitrates each match into a `ProtectionDecision` (including cooldown suppression) and only afterwards performs side effects such as notifications, redaction, kicks, or bans. The established ordering is preserved: non-punitive and suppressed matches fall through, while the first punitive match that actually executes consumes the message and stops later protection checks.
 
 ### Direct messages and MUC private messages
 

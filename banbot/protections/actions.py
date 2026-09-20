@@ -31,11 +31,13 @@ else:
     PROTECTION_IQ_EXCEPTIONS = (_slixmpp_exceptions.IqError, _slixmpp_exceptions.IqTimeout)
 
 from ..utils import safe_jid
-from .definitions import (
-    PROTECTION_ALLOWED_ACTIONS,
-    PROTECTION_PUNITIVE_ACTIONS,
-    ProtectionActionOutcome,
+from .decision import (
+    ProtectionDecision,
+    ProtectionMatch,
+    arbitrate_protection_match,
+    protection_action_strength,
 )
+from .definitions import PROTECTION_ALLOWED_ACTIONS, ProtectionActionOutcome
 
 log = logging.getLogger(__name__)
 
@@ -106,43 +108,24 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
     @staticmethod
     def _protection_action_strength(action: str) -> int:
         """Return an ordering where stronger punitive actions have larger values."""
-        return {"kick": 1, "tempban": 2, "ban": 3}.get(action, 0)
+        return protection_action_strength(action)
 
-    def _protection_action_on_cooldown(
+    def _protection_action_cooldown_entry(
         self,
         room: str,
         target: str,
-        action: str,
         now: float,
-    ) -> bool:
-        """Suppress duplicate/weaker actions but never hide a stronger action."""
+    ) -> tuple[float, int] | None:
+        """Return an active cooldown entry, dropping expired state eagerly."""
         key = (room, str(target).lower())
         entry = getattr(self, "protection_action_cooldowns", {}).get(key)
-        if not entry:
-            return False
-
-        until, previous_strength = entry
+        if entry is None:
+            return None
+        until, _previous_strength = entry
         if until <= now:
             self.protection_action_cooldowns.pop(key, None)
-            return False
-
-        current_strength = self._protection_action_strength(action)
-        if current_strength > previous_strength:
-            log.debug(
-                "Protection action in %s for %s bypasses cooldown: stronger action %s",
-                room,
-                target,
-                action,
-            )
-            return False
-
-        log.debug(
-            "Protection action suppressed in %s for %s: cooldown active for %.1fs",
-            room,
-            target,
-            until - now,
-        )
-        return True
+            return None
+        return entry
 
     def _protection_set_action_cooldown(
         self,
@@ -187,6 +170,185 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         except Exception as exc:
             log.warning("Protection target redaction failed for %s: %s", target, exc)
 
+    def _protection_build_match(
+        self,
+        *,
+        protection: str,
+        room: str,
+        nick: str,
+        msg=None,
+        target_jid: str | None = None,
+        action: str | None = None,
+        reason: str | None = None,
+        tempban_seconds: int | None = None,
+        redact: bool | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> ProtectionMatch:
+        """Snapshot a matched protection before arbitration or execution."""
+        config = self.protection_config(protection)
+        configured_action = str(action or config.get("action", "notify")).lower().strip()
+        if configured_action not in PROTECTION_ALLOWED_ACTIONS:
+            configured_action = "notify"
+        configured_reason = str(reason or config.get("reason") or protection).strip()
+        configured_tempban = int(
+            tempban_seconds or config.get("tempban_seconds", 3600) or 3600
+        )
+        redact_enabled = bool(config.get("redact", False) if redact is None else redact)
+        jid, normalized_nick = self._protection_subject(room, nick)
+        explicit_target_jid = self._protection_stable_jid(target_jid)
+        target = explicit_target_jid or jid or normalized_nick
+        return ProtectionMatch(
+            protection=protection,
+            room=room,
+            nick=nick,
+            target=target,
+            action=configured_action,
+            reason=configured_reason,
+            tempban_seconds=configured_tempban,
+            redact=redact_enabled,
+            observe=bool(config.get("observe", False)),
+            msg=msg,
+            details=dict(details or {}),
+        )
+
+    def _protection_decide_match(
+        self,
+        match: ProtectionMatch,
+        *,
+        now: float | None = None,
+    ) -> ProtectionDecision:
+        """Arbitrate one neutral match and update cooldown state when it wins."""
+        decision_time = time.time() if now is None else now
+        cooldown_entry = self._protection_action_cooldown_entry(
+            match.room, match.target, decision_time
+        )
+        decision = arbitrate_protection_match(
+            match,
+            cooldown_entry=cooldown_entry,
+            now=decision_time,
+        )
+        if decision.outcome is ProtectionActionOutcome.PUNITIVE_SUPPRESSED:
+            if cooldown_entry is not None:
+                until, _strength = cooldown_entry
+                log.debug(
+                    "Protection action suppressed in %s for %s: cooldown active for %.1fs",
+                    match.room,
+                    match.target,
+                    until - decision_time,
+                )
+            return decision
+
+        if decision.outcome is ProtectionActionOutcome.PUNITIVE_EXECUTED:
+            cooldown_seconds = self._protection_action_cooldown_seconds(
+                self.protection_config(match.protection)
+            )
+            self._protection_set_action_cooldown(
+                match.room,
+                match.target,
+                match.action,
+                cooldown_seconds,
+                decision_time,
+            )
+        return decision
+
+    async def _protection_execute_match(
+        self,
+        match: ProtectionMatch,
+        decision: ProtectionDecision,
+    ) -> ProtectionActionOutcome:
+        """Execute one already-arbitrated match and return its stable outcome."""
+        if not decision.should_execute:
+            return decision.outcome
+
+        actor = f"protection:{match.protection}"
+        if match.observe:
+            await self.bot_send_message(
+                mto=ADMIN_ROOM,
+                mbody=(
+                    f"👁️ {match.protection} observe match\n"
+                    f"Room: {match.room}\n"
+                    f"Target: {safe_jid(match.target)}\n"
+                    f"Would perform: {match.action}\n"
+                    f"Would redact: {'yes' if match.redact else 'no'}\n"
+                    f"Reason: {match.reason}"
+                ),
+                mtype="groupchat",
+            )
+            await self._audit_protection_event(
+                match.protection,
+                match.room,
+                match.target,
+                "observe",
+                match.reason,
+                details={
+                    "would_action": match.action,
+                    "would_redact": match.redact,
+                    "observe": True,
+                    **match.details,
+                },
+            )
+            return decision.outcome
+
+        if match.redact and match.msg is not None:
+            await self._protection_redact_message(match.msg, match.reason, actor)
+
+        if match.action in {"notify", "warn"}:
+            await self.bot_send_message(
+                mto=ADMIN_ROOM,
+                mbody=(
+                    f"🛡️ {match.protection} triggered\n"
+                    f"Room: {match.room}\n"
+                    f"Target: {safe_jid(match.target)}\n"
+                    f"Action: {match.action}\n"
+                    f"Reason: {match.reason}"
+                ),
+                mtype="groupchat",
+            )
+            if match.action == "warn":
+                await self.bot_send_message(
+                    mto=match.room,
+                    mbody=f"⚠️ {match.nick}: {match.reason}",
+                    mtype="groupchat",
+                )
+        elif match.action == "kick":
+            await self._protection_kick(match.room, match.nick, match.reason)
+        elif match.action == "tempban":
+            until = int(time.time()) + max(1, match.tempban_seconds)
+            await self.ban_all(match.target, until, actor, match.reason, auto_redact=False)
+        elif match.action == "ban":
+            await self.ban_all(match.target, None, actor, match.reason, auto_redact=False)
+
+        if match.redact and match.punitive:
+            title = (
+                "Auto-redaction completed after ban"
+                if match.action in {"tempban", "ban"}
+                else "Auto-redaction completed after protection action"
+            )
+            await self._protection_redact_target_messages(
+                match.target,
+                match.reason,
+                actor,
+                title=title,
+            )
+
+        await self._audit_protection_event(
+            match.protection,
+            match.room,
+            match.target,
+            match.action,
+            match.reason,
+            details=match.details,
+        )
+        return decision.outcome
+
+    async def _protection_process_match(
+        self,
+        match: ProtectionMatch,
+    ) -> ProtectionActionOutcome:
+        """Arbitrate and execute one neutral match."""
+        decision = self._protection_decide_match(match)
+        return await self._protection_execute_match(match, decision)
+
     async def _protection_apply_action(
         self,
         *,
@@ -201,104 +363,20 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         redact: bool | None = None,
         details: dict[str, Any] | None = None,
     ) -> ProtectionActionOutcome:
-        """Apply a configured protection action to one sender and report its outcome."""
-        config = self.protection_config(protection)
-        action = str(action or config.get("action", "notify")).lower().strip()
-        if action not in PROTECTION_ALLOWED_ACTIONS:
-            action = "notify"
-        reason = str(reason or config.get("reason") or protection).strip()
-        tempban_seconds = int(tempban_seconds or config.get("tempban_seconds", 3600) or 3600)
-        redact_enabled = bool(config.get("redact", False) if redact is None else redact)
-        jid, normalized_nick = self._protection_subject(room, nick)
-        explicit_target_jid = self._protection_stable_jid(target_jid)
-        actor = f"protection:{protection}"
-        target = explicit_target_jid or jid or normalized_nick
-        now = time.time()
-        punitive_action = action in PROTECTION_PUNITIVE_ACTIONS
-        observe = bool(config.get("observe", False))
-        # Observe-only matches must never suppress a real protection action.
-        # For enforcing actions, the cooldown de-duplicates equal/weaker work
-        # while allowing a stronger action (for example ban after tempban).
-        if punitive_action and not observe:
-            cooldown_seconds = self._protection_action_cooldown_seconds(config)
-            if self._protection_action_on_cooldown(room, target, action, now):
-                return ProtectionActionOutcome.PUNITIVE_SUPPRESSED
-            self._protection_set_action_cooldown(
-                room, target, action, cooldown_seconds, now
-            )
-
-        if observe:
-            await self.bot_send_message(
-                mto=ADMIN_ROOM,
-                mbody=(
-                    f"👁️ {protection} observe match\n"
-                    f"Room: {room}\n"
-                    f"Target: {safe_jid(target)}\n"
-                    f"Would perform: {action}\n"
-                    f"Would redact: {'yes' if redact_enabled else 'no'}\n"
-                    f"Reason: {reason}"
-                ),
-                mtype="groupchat",
-            )
-            await self._audit_protection_event(
-                protection, room, target, "observe", reason,
-                details={"would_action": action, "would_redact": redact_enabled, "observe": True, **(details or {})},
-            )
-            return ProtectionActionOutcome.NON_PUNITIVE
-
-        if redact_enabled and msg is not None:
-            await self._protection_redact_message(msg, reason, actor)
-
-        if action in {"notify", "warn"}:
-            await self.bot_send_message(
-                mto=ADMIN_ROOM,
-                mbody=(
-                    f"🛡️ {protection} triggered\n"
-                    f"Room: {room}\n"
-                    f"Target: {safe_jid(target)}\n"
-                    f"Action: {action}\n"
-                    f"Reason: {reason}"
-                ),
-                mtype="groupchat",
-            )
-            if action == "warn":
-                await self.bot_send_message(
-                    mto=room,
-                    mbody=f"⚠️ {nick}: {reason}",
-                    mtype="groupchat",
-                )
-        elif action == "kick":
-            await self._protection_kick(room, nick, reason)
-        elif action == "tempban":
-            until = int(time.time()) + max(1, tempban_seconds)
-            await self.ban_all(target, until, actor, reason, auto_redact=False)
-        elif action == "ban":
-            await self.ban_all(target, None, actor, reason, auto_redact=False)
-
-        if redact_enabled and punitive_action:
-            title = (
-                "Auto-redaction completed after ban"
-                if action in {"tempban", "ban"}
-                else "Auto-redaction completed after protection action"
-            )
-            await self._protection_redact_target_messages(
-                target,
-                reason,
-                actor,
-                title=title,
-            )
-
-        await self._audit_protection_event(
-            protection,
-            room,
-            target,
-            action,
-            reason,
-            details=details or {},
+        """Compatibility wrapper for direct protection-action callers."""
+        match = self._protection_build_match(
+            protection=protection,
+            room=room,
+            nick=nick,
+            msg=msg,
+            target_jid=target_jid,
+            action=action,
+            reason=reason,
+            tempban_seconds=tempban_seconds,
+            redact=redact,
+            details=details,
         )
-        if punitive_action:
-            return ProtectionActionOutcome.PUNITIVE_EXECUTED
-        return ProtectionActionOutcome.NON_PUNITIVE
+        return await self._protection_process_match(match)
 
     async def _audit_protection_event(
         self,

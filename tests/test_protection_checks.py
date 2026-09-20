@@ -1064,6 +1064,71 @@ async def test_observe_match_falls_through_to_later_enforcing_protection(fake_ms
 
 
 @pytest.mark.asyncio
+async def test_executed_punitive_match_preserves_existing_short_circuit_state(
+    fake_msg_factory, monkeypatch
+) -> None:
+    """Later detectors must remain untouched after the first executed punishment."""
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update(
+        {"enabled": True, "max_messages": 1, "action": "ban", "redact": False}
+    )
+    bot.protections["SimilarMessageProtection"].update(
+        {
+            "enabled": True,
+            "max_similar": 2,
+            "min_length": 5,
+            "min_words": 1,
+            "action": "ban",
+            "redact": False,
+        }
+    )
+    monkeypatch.setattr("banbot.protections.checks.time.time", lambda: 100.0)
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="repeated payload")
+
+    assert await bot.protections_on_message(msg, ROOM, "Spammer", "repeated payload") is False
+    assert len(bot.protection_similar_messages[ROOM]) == 1
+
+    handled = await bot.protections_on_message(
+        msg, ROOM, "Spammer", "repeated payload"
+    )
+
+    assert handled is True
+    assert bot.bans[-1][2] == "protection:FloodSpamProtection"
+    assert len(bot.protection_similar_messages[ROOM]) == 1
+
+
+@pytest.mark.asyncio
+async def test_detection_match_is_side_effect_free_until_processed(
+    fake_msg_factory, monkeypatch
+) -> None:
+    bot = DummyProtections()
+    bot.protections["MentionLimitProtection"].update(
+        {"enabled": True, "max_mentions": 1, "action": "ban", "redact": False}
+    )
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="hi @Alice @Bob")
+
+    match = bot._protection_evaluate_mentions(
+        msg, ROOM, "Spammer", "hi @Alice @Bob"
+    )
+
+    assert match is not None
+    assert match.protection == "MentionLimitProtection"
+    assert match.target == "spam@example.org"
+    assert bot.bans == []
+    assert bot.sent == []
+    assert bot.protection_action_cooldowns == {}
+
+    outcome = await bot._protection_process_match(match)
+
+    assert outcome is ProtectionActionOutcome.PUNITIVE_EXECUTED
+    assert bot.bans == [
+        ("spam@example.org", None, "protection:MentionLimitProtection", "too many mentions")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_first_media_nick_only_identity_is_not_trusted_across_rejoin(fake_msg_factory) -> None:
     bot = DummyProtections()
     bot.occupants[ROOM]["NickOnly"] = {

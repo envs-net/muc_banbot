@@ -10,6 +10,7 @@ import aiosqlite
 from .common import ActorJidResolverHost
 
 if TYPE_CHECKING:
+    from ..protections.decision import ProtectionMatch
     from ..protections.definitions import ProtectionActionOutcome
 
 
@@ -151,6 +152,26 @@ class ProtectionChecksMixinHost(ProtectionCoordinatorHost, Protocol):
         nick: str,
         jid: str | None = None,
     ) -> bool: ...
+
+    def _protection_build_match(
+        self,
+        *,
+        protection: str,
+        room: str,
+        nick: str,
+        msg: Any = None,
+        target_jid: str | None = None,
+        action: str | None = None,
+        reason: str | None = None,
+        tempban_seconds: int | None = None,
+        redact: bool | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> ProtectionMatch: ...
+
+    async def _protection_process_match(
+        self,
+        match: ProtectionMatch,
+    ) -> ProtectionActionOutcome: ...
 
     async def _protection_apply_action(
         self,
