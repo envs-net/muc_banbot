@@ -239,7 +239,7 @@ Some MUC services reject affiliation-list queries for non-owners. Such rooms are
 
 Protection configuration is loaded from defaults plus persisted overrides. Observe mode runs detection and reporting without executing the configured enforcement action. Observe-only matches fall through to later protection checks and do not consume the punitive-action cooldown.
 
-When protections overlap, enforcement is strength-aware (`kick < tempban < ban`). Equal/weaker duplicate actions inside the short cooldown are suppressed, while a stronger action can still proceed. Once a protection reaches the moderation layer, automatic `protection:*` updates are monotonic: they cannot turn a permanent ban into a tempban or shorten a tempban. Distinct protection reasons may be merged, while meaningful human/RTBL provenance remains authoritative.
+When protections overlap, enforcement is strength-aware (`kick < tempban < ban`). Equal/weaker duplicate actions inside the short cooldown are suppressed, while a stronger action can still proceed. A cooldown-suppressed punitive match therefore continues through the remaining protection checks, but still blocks ordinary command handling if no stronger punitive action executes. Once a protection reaches the moderation layer, automatic `protection:*` updates are monotonic: they cannot turn a permanent ban into a tempban or shorten a tempban. Distinct protection reasons may be merged, while meaningful human/RTBL provenance remains authoritative.
 
 Protection actions should use existing moderation, redaction, audit, and messaging helpers. They should not implement a separate ban persistence path.
 

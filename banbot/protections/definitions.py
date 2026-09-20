@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from enum import StrEnum
 from typing import Any
 
 PROTECTION_ORDER = (
@@ -162,6 +163,21 @@ PROTECTION_ALIASES = {
     "policychangenotification": "PolicyChangeNotification",
     "notifications": "PolicyChangeNotification",
 }
+
+class ProtectionActionOutcome(StrEnum):
+    """Result of a matched message-protection action.
+
+    ``PUNITIVE_SUPPRESSED`` is intentionally distinct from ``NON_PUNITIVE``:
+    later protections must still be evaluated so a stronger action can win,
+    while normal command handling must remain suppressed for the matched
+    punitive rule if no stronger protection ultimately executes.
+    """
+
+    NO_MATCH = "no_match"
+    NON_PUNITIVE = "non_punitive"
+    PUNITIVE_SUPPRESSED = "punitive_suppressed"
+    PUNITIVE_EXECUTED = "punitive_executed"
+
 
 PROTECTION_ALLOWED_ACTIONS = {"notify", "warn", "kick", "tempban", "ban"}
 PROTECTION_PUNITIVE_ACTIONS = {"kick", "tempban", "ban"}

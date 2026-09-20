@@ -12,13 +12,16 @@ import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import aiosqlite
 from envs_xmpp_core.release.state import ReleaseState
 from slixmpp import JID
 
 from .cache import BanTuple
+
+if TYPE_CHECKING:
+    from .protections.definitions import ProtectionActionOutcome
 
 
 class ActorJidResolverHost(Protocol):
@@ -523,7 +526,7 @@ class ProtectionChecksMixinHost(ProtectionCoordinatorHost, Protocol):
         tempban_seconds: int | None = None,
         redact: bool | None = None,
         details: dict[str, Any] | None = None,
-    ) -> None: ...
+    ) -> ProtectionActionOutcome: ...
 
     async def _protection_lockdown_room(
         self,
@@ -596,7 +599,7 @@ class ProtectionCommandsMixinHost(ActorJidResolverHost, Protocol):
         tempban_seconds: int | None = None,
         redact: bool | None = None,
         details: dict[str, Any] | None = None,
-    ) -> None: ...
+    ) -> ProtectionActionOutcome: ...
 
     async def bot_send_message(
         self,

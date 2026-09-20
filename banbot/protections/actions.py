@@ -31,7 +31,11 @@ else:
     PROTECTION_IQ_EXCEPTIONS = (_slixmpp_exceptions.IqError, _slixmpp_exceptions.IqTimeout)
 
 from ..utils import safe_jid
-from .definitions import PROTECTION_ALLOWED_ACTIONS, PROTECTION_PUNITIVE_ACTIONS
+from .definitions import (
+    PROTECTION_ALLOWED_ACTIONS,
+    PROTECTION_PUNITIVE_ACTIONS,
+    ProtectionActionOutcome,
+)
 
 log = logging.getLogger(__name__)
 
@@ -196,8 +200,8 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         tempban_seconds: int | None = None,
         redact: bool | None = None,
         details: dict[str, Any] | None = None,
-    ) -> None:
-        """Apply a configured protection action to one sender."""
+    ) -> ProtectionActionOutcome:
+        """Apply a configured protection action to one sender and report its outcome."""
         config = self.protection_config(protection)
         action = str(action or config.get("action", "notify")).lower().strip()
         if action not in PROTECTION_ALLOWED_ACTIONS:
@@ -218,7 +222,7 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         if punitive_action and not observe:
             cooldown_seconds = self._protection_action_cooldown_seconds(config)
             if self._protection_action_on_cooldown(room, target, action, now):
-                return
+                return ProtectionActionOutcome.PUNITIVE_SUPPRESSED
             self._protection_set_action_cooldown(
                 room, target, action, cooldown_seconds, now
             )
@@ -240,7 +244,7 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
                 protection, room, target, "observe", reason,
                 details={"would_action": action, "would_redact": redact_enabled, "observe": True, **(details or {})},
             )
-            return
+            return ProtectionActionOutcome.NON_PUNITIVE
 
         if redact_enabled and msg is not None:
             await self._protection_redact_message(msg, reason, actor)
@@ -292,6 +296,9 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
             reason,
             details=details or {},
         )
+        if punitive_action:
+            return ProtectionActionOutcome.PUNITIVE_EXECUTED
+        return ProtectionActionOutcome.NON_PUNITIVE
 
     async def _audit_protection_event(
         self,

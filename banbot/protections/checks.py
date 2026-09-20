@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from config import ADMIN_ROOM
 
-from .definitions import PROTECTION_PUNITIVE_ACTIONS
+from .definitions import ProtectionActionOutcome
 from .detection import (
     body_contains_blocked_word,
     count_mentions,
@@ -33,19 +33,6 @@ else:
 
 
 class ProtectionChecksMixin(_ProtectionChecksMixinContract):
-    @staticmethod
-    def _protection_match_stops_processing(config: dict[str, Any]) -> bool:
-        """Return whether a matched rule should suppress later message protections.
-
-        Observe, notify, and warn matches intentionally fall through so a
-        non-punitive rule cannot hide a later kick/tempban/ban rule that also
-        matches the same message.
-        """
-        if bool(config.get("observe", False)):
-            return False
-        action = str(config.get("action", "notify") or "notify").lower().strip()
-        return action in PROTECTION_PUNITIVE_ACTIONS
-
     async def protection_on_join(self, room: str, nick: str, jid: str | None = None) -> None:
         """Run join-based protections for a MUC presence join."""
         if self._protection_is_exempt(room, nick, jid):
@@ -191,7 +178,12 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         )
 
     async def protections_on_message(self, msg, room: str, nick: str, body: str) -> bool:
-        """Run message-based protections. Return True when command handling should stop."""
+        """Run message protections and report whether command handling must stop.
+
+        A cooldown-suppressed punitive match does not stop later protection
+        checks because a stronger action may still apply.  It does, however,
+        suppress normal command handling if no later punitive action executes.
+        """
         jid, normalized_nick = self._protection_subject(room, nick)
         if self._protection_is_exempt(room, nick, jid):
             return False
@@ -205,12 +197,21 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
                 nick,
             )
 
-        # Stop after the first *enforcing* protection. Observe-only matches are
-        # allowed to fall through so an observing rule cannot hide a later real
-        # enforcement rule for the same message.
-        if await self._protection_check_flood(msg, room, nick, subject, now):
+        any_match = False
+        suppressed_punitive = False
+
+        def record(outcome: ProtectionActionOutcome) -> bool:
+            nonlocal any_match, suppressed_punitive
+            if outcome is not ProtectionActionOutcome.NO_MATCH:
+                any_match = True
+            if outcome is ProtectionActionOutcome.PUNITIVE_SUPPRESSED:
+                suppressed_punitive = True
+            return outcome is ProtectionActionOutcome.PUNITIVE_EXECUTED
+
+        if record(await self._protection_check_flood(msg, room, nick, subject, now)):
             return True
-        first_media_stop, remember_participant = await self._protection_check_first_media(
+
+        first_media_outcome, remember_participant = await self._protection_check_first_media(
             msg,
             room,
             nick,
@@ -218,32 +219,45 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             protection_body,
             now,
         )
-        if first_media_stop:
+        if record(first_media_outcome):
             return True
-        if await self._protection_check_similar_messages(msg, room, nick, subject, protection_body, now):
+
+        if record(
+            await self._protection_check_similar_messages(
+                msg, room, nick, subject, protection_body, now
+            )
+        ):
             return True
-        mention_stop, mention_matched = await self._protection_check_mentions(
-            msg, room, nick, protection_body
-        )
-        if mention_stop:
+
+        if record(await self._protection_check_mentions(msg, room, nick, protection_body)):
             return True
-        wordlist_stop, wordlist_matched = await self._protection_check_wordlist(
-            msg, room, nick, subject, protection_body, now
-        )
-        if wordlist_stop:
+
+        if record(
+            await self._protection_check_wordlist(
+                msg, room, nick, subject, protection_body, now
+            )
+        ):
             return True
-        if remember_participant and not mention_matched and not wordlist_matched:
+
+        # A first/new participant is established only by a message that did
+        # not match any protection.  This lets an observe-mode newcomer match
+        # remain unknown for that message while a later clean message can
+        # establish the stable bare JID normally.
+        if remember_participant and not any_match:
             await self.remember_protection_participant(
                 room,
                 subject,
                 persistent=jid is not None,
             )
-        return False
 
-    async def _protection_check_flood(self, msg, room: str, nick: str, subject: str, now: float) -> bool:
+        return suppressed_punitive
+
+    async def _protection_check_flood(
+        self, msg, room: str, nick: str, subject: str, now: float
+    ) -> ProtectionActionOutcome:
         protection = "FloodSpamProtection"
         if not self.protection_enabled(protection):
-            return False
+            return ProtectionActionOutcome.NO_MATCH
         config = self.protection_config(protection)
         window = max(1, int(config.get("window_seconds", 60) or 60))
         max_messages = max(1, int(config.get("max_messages", 10) or 10))
@@ -253,8 +267,8 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         while hits and now - hits[0] > window:
             hits.popleft()
         if len(hits) <= max_messages:
-            return False
-        await self._protection_apply_action(
+            return ProtectionActionOutcome.NO_MATCH
+        outcome = await self._protection_apply_action(
             protection=protection,
             room=room,
             nick=nick,
@@ -262,7 +276,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             details={"messages": len(hits), "window_seconds": window},
         )
         hits.clear()
-        return self._protection_match_stops_processing(config)
+        return outcome
 
     async def _protection_check_first_media(
         self,
@@ -272,36 +286,36 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         subject: str,
         body: str,
         now: float,
-    ) -> tuple[bool, bool]:
-        """Return ``(stop_processing, remember_participant)`` for first-media checks."""
+    ) -> tuple[ProtectionActionOutcome, bool]:
+        """Return ``(action_outcome, remember_participant)`` for first-media checks."""
         protection = "FirstMessageMediaProtection"
         key = (room, subject)
         already_seen = key in self.protection_first_message_seen
         if not already_seen:
             self.protection_first_message_seen.add(key)
         if self._protection_participant_is_known(room, subject):
-            return False, not already_seen
+            return ProtectionActionOutcome.NO_MATCH, not already_seen
         if not self.protection_enabled(protection):
-            return False, not already_seen
+            return ProtectionActionOutcome.NO_MATCH, True
         if already_seen:
-            return False, False
+            return ProtectionActionOutcome.NO_MATCH, True
         joined_at = self.protection_joined_at.get(key)
         if joined_at is None:
-            return False, True
+            return ProtectionActionOutcome.NO_MATCH, True
         config = self.protection_config(protection)
         grace = max(0, int(config.get("join_grace_seconds", 600) or 0))
         if grace and now - joined_at > grace:
-            return False, True
+            return ProtectionActionOutcome.NO_MATCH, True
         if not message_looks_like_media(body):
-            return False, True
-        await self._protection_apply_action(
+            return ProtectionActionOutcome.NO_MATCH, True
+        outcome = await self._protection_apply_action(
             protection=protection,
             room=room,
             nick=nick,
             msg=msg,
             details={"first_message": True},
         )
-        return self._protection_match_stops_processing(config), False
+        return outcome, False
 
 
     async def _protection_check_similar_messages(
@@ -312,16 +326,16 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         subject: str,
         body: str,
         now: float,
-    ) -> bool:
+    ) -> ProtectionActionOutcome:
         protection = "SimilarMessageProtection"
         if not self.protection_enabled(protection):
-            return False
+            return ProtectionActionOutcome.NO_MATCH
         config = self.protection_config(protection)
         normalized = normalize_spam_body(body)
         min_length = max(1, int(config.get("min_length", 20) or 20))
         min_words = max(1, int(config.get("min_words", 3) or 3))
         if len(normalized) < min_length or normalized_word_count(normalized) < min_words:
-            return False
+            return ProtectionActionOutcome.NO_MATCH
 
         window = max(1, int(config.get("window_seconds", 120) or 120))
         max_similar = max(2, int(config.get("max_similar", 3) or 3))
@@ -336,9 +350,9 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             if messages_are_similar(normalized, entry[2], similarity_percent=similarity_percent)
         ]
         if len(similar_entries) < max_similar:
-            return False
+            return ProtectionActionOutcome.NO_MATCH
 
-        await self._protection_apply_action(
+        outcome = await self._protection_apply_action(
             protection=protection,
             room=room,
             nick=nick,
@@ -350,14 +364,14 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             },
         )
         entries.clear()
-        return self._protection_match_stops_processing(config)
+        return outcome
 
     async def _protection_check_mentions(
         self, msg, room: str, nick: str, body: str
-    ) -> tuple[bool, bool]:
+    ) -> ProtectionActionOutcome:
         protection = "MentionLimitProtection"
         if not self.protection_enabled(protection):
-            return False, False
+            return ProtectionActionOutcome.NO_MATCH
         config = self.protection_config(protection)
         limit = max(1, int(config.get("max_mentions", 5) or 5))
         nicks = [
@@ -376,40 +390,40 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             len(nicks),
         )
         if mention_count <= limit:
-            return False, False
-        await self._protection_apply_action(
+            return ProtectionActionOutcome.NO_MATCH
+        outcome = await self._protection_apply_action(
             protection=protection,
             room=room,
             nick=nick,
             msg=msg,
             details={"mention_count": mention_count, "max_mentions": limit},
         )
-        return self._protection_match_stops_processing(config), True
+        return outcome
 
     async def _protection_check_wordlist(
         self, msg, room: str, nick: str, subject: str, body: str, now: float
-    ) -> tuple[bool, bool]:
+    ) -> ProtectionActionOutcome:
         protection = "WordListNewJoinerProtection"
         if not self.protection_enabled(protection):
-            return False, False
+            return ProtectionActionOutcome.NO_MATCH
         config = self.protection_config(protection)
         words = list(config.get("words", []) or [])
         if not words:
-            return False, False
+            return ProtectionActionOutcome.NO_MATCH
         key = (room, subject)
         if key in self.protection_established_at_join:
-            return False, False
+            return ProtectionActionOutcome.NO_MATCH
         joined_at = self.protection_joined_at.get(key)
         if joined_at is None:
-            return False, False
+            return ProtectionActionOutcome.NO_MATCH
         grace = max(0, int(config.get("join_grace_seconds", 900) or 0))
         if grace and now - joined_at > grace:
-            return False, False
+            return ProtectionActionOutcome.NO_MATCH
         word = body_contains_blocked_word(body, words)
         if not word:
-            return False, False
+            return ProtectionActionOutcome.NO_MATCH
         reason = f"{config.get('reason') or 'blocked word from new joiner'}: {word}"
-        await self._protection_apply_action(
+        outcome = await self._protection_apply_action(
             protection=protection,
             room=room,
             nick=nick,
@@ -417,4 +431,4 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             reason=reason,
             details={"word": word},
         )
-        return self._protection_match_stops_processing(config), True
+        return outcome

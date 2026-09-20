@@ -64,7 +64,7 @@ Message protections support these actions:
 
 When `redact=True` and `REDACTION_ENABLED=True`, message protections first try to retract the triggering message and punitive actions (`kick`, `tempban`, `ban`) also run the normal indexed JID redaction path with an admin-room summary.
 
-`observe`, `notify`, and `warn` matches do not stop evaluation of later message protections. This prevents a tuning/notification rule from masking a later `kick`, `tempban`, or `ban` rule that also matches the same message. Punitive matches stop the message-protection chain after they run.
+`observe`, `notify`, and `warn` matches do not stop evaluation of later message protections. This prevents a tuning/notification rule from masking a later `kick`, `tempban`, or `ban` rule that also matches the same message. A punitive action that actually executes stops the protection chain. If an equal/weaker punitive action is suppressed by the short action cooldown, later protections still run so a stronger action can win; normal command handling remains blocked if no stronger punitive action executes.
 
 ## Overlapping protections and ban arbitration
 
@@ -148,7 +148,7 @@ See [Testing and CI](testing.md#live-protection-smoke-test) for setup, environme
 
 `SimilarMessageProtection` normalizes URLs and email addresses before comparison, so repeated spam with changing tracking URLs can still be detected. Short messages are ignored through `min_length` and `min_words` to avoid false positives from normal chatter.
 
-`FirstMessageMediaProtection` only treats a participant as new until BanBot has seen a clean first message from that participant. Known bare JIDs are persisted in SQLite, so an established user who leaves and later rejoins is ignored by this protection instead of being treated as a fresh account again. Nick-only identities are deliberately *not* trusted across joins because another occupant can reuse the same nick. Occupants already present when BanBot joins a room are treated as established for that runtime when a real JID is visible. Observe-mode matches from new-user protections do not establish/whitelist the sender.
+`FirstMessageMediaProtection` treats a participant as unknown until BanBot has seen a clean message from that participant. Known bare JIDs are persisted in SQLite, so an established user who leaves and later rejoins is ignored by this protection instead of being treated as a fresh account again. Nick-only identities are deliberately *not* trusted across joins because another occupant can reuse the same nick. Occupants already present when BanBot joins a room are treated as established for that runtime when a real JID is visible. Observe-mode matches from new-user protections do not establish/whitelist the sender; a later clean message can establish the participant normally.
 
 `WordListNewJoinerProtection` acts only on users whose join was observed by the running bot **and who were not already established before that join**. A genuinely new participant remains under the word-list grace window even after a clean first message; becoming known during the current session does not end that grace period early. Initial room population is ignored so a bot restart does not make existing occupants look like new joiners.
 

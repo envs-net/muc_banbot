@@ -6,6 +6,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from banbot.protections import ProtectionMixin
+from banbot.protections.definitions import ProtectionActionOutcome
 from banbot.protections.detection import count_mentions
 
 ROOM = "room@conference.example.org"
@@ -162,24 +163,6 @@ async def test_flood_triggers_only_after_threshold_and_clears_window(fake_msg_fa
     assert bot.bans == [("spam@example.org", None, "protection:FloodSpamProtection", "spam/flood detected")]
     key = ("FloodSpamProtection", ROOM, "spam@example.org")
     assert list(bot.protection_message_windows[key]) == []
-
-
-@pytest.mark.parametrize(
-    ("config", "expected"),
-    [
-        ({"action": "notify"}, False),
-        ({"action": "warn"}, False),
-        ({"action": "kick"}, True),
-        ({"action": "tempban"}, True),
-        ({"action": "ban"}, True),
-        ({"action": "ban", "observe": True}, False),
-        ({"action": "invalid"}, False),
-    ],
-)
-def test_message_protection_stop_policy_only_stops_for_punitive_actions(
-    config: dict[str, object], expected: bool
-) -> None:
-    assert DummyProtections._protection_match_stops_processing(config) is expected
 
 
 @pytest.mark.asyncio
@@ -396,6 +379,12 @@ async def test_first_media_observe_match_does_not_make_participant_known(fake_ms
 
     assert handled is False
     assert (ROOM, "spam@example.org") not in bot.protection_known_participants
+
+    clean = fake_msg_factory(room=ROOM, nick="Spammer", body="hello after observe")
+    assert await bot.protections_on_message(
+        clean, ROOM, "Spammer", "hello after observe"
+    ) is False
+    assert (ROOM, "spam@example.org") in bot.protection_known_participants
 
 
 @pytest.mark.asyncio
@@ -940,6 +929,76 @@ async def test_weaker_protection_action_is_suppressed_after_stronger_action(monk
 
 
 @pytest.mark.asyncio
+async def test_suppressed_punitive_match_falls_through_to_stronger_protection(
+    fake_msg_factory, monkeypatch
+) -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update(
+        {"enabled": True, "max_messages": 1, "action": "tempban", "redact": False}
+    )
+    bot.protections["MentionLimitProtection"].update(
+        {"enabled": True, "max_mentions": 1, "action": "ban", "redact": False}
+    )
+    bot.protection_action_cooldowns[(ROOM, "spam@example.org")] = (200.0, 2)
+    monkeypatch.setattr("banbot.protections.checks.time.time", lambda: 100.0)
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+
+    warmup = fake_msg_factory(room=ROOM, nick="Spammer", body="warmup")
+    triggering = fake_msg_factory(room=ROOM, nick="Spammer", body="hi @Alice @Bob")
+
+    assert await bot.protections_on_message(warmup, ROOM, "Spammer", "warmup") is False
+    handled = await bot.protections_on_message(
+        triggering, ROOM, "Spammer", "hi @Alice @Bob"
+    )
+
+    assert handled is True
+    assert bot.bans == [
+        ("spam@example.org", None, "protection:MentionLimitProtection", "too many mentions")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_suppressed_punitive_match_still_blocks_command_handling(
+    fake_msg_factory, monkeypatch
+) -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update(
+        {"enabled": True, "max_messages": 1, "action": "ban", "redact": False}
+    )
+    bot.protection_action_cooldowns[(ROOM, "spam@example.org")] = (200.0, 3)
+    monkeypatch.setattr("banbot.protections.checks.time.time", lambda: 100.0)
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+
+    warmup = fake_msg_factory(room=ROOM, nick="Spammer", body="warmup")
+    triggering = fake_msg_factory(room=ROOM, nick="Spammer", body="spam again")
+
+    assert await bot.protections_on_message(warmup, ROOM, "Spammer", "warmup") is False
+    handled = await bot.protections_on_message(
+        triggering, ROOM, "Spammer", "spam again"
+    )
+
+    assert handled is True
+    assert bot.bans == []
+
+
+@pytest.mark.asyncio
+async def test_apply_action_reports_cooldown_suppression(monkeypatch) -> None:
+    bot = DummyProtections()
+    bot.protections["FloodSpamProtection"].update({"action": "ban", "redact": False})
+    bot.protection_action_cooldowns[(ROOM, "spam@example.org")] = (200.0, 3)
+    monkeypatch.setattr("banbot.protections.actions.time.time", lambda: 100.0)
+
+    outcome = await bot._protection_apply_action(
+        protection="FloodSpamProtection",
+        room=ROOM,
+        nick="Spammer",
+    )
+
+    assert outcome is ProtectionActionOutcome.PUNITIVE_SUPPRESSED
+    assert bot.bans == []
+
+
+@pytest.mark.asyncio
 async def test_observe_only_protection_does_not_create_enforcement_cooldown(monkeypatch) -> None:
     bot = DummyProtections()
     bot.protections["SimilarMessageProtection"].update(
@@ -1095,6 +1154,12 @@ async def test_wordlist_observe_match_does_not_establish_first_message_sender(fa
     assert handled is False
     assert bot.bans == []
     assert (ROOM, "spam@example.org") not in bot.protection_known_participants
+
+    clean = fake_msg_factory(room=ROOM, nick="Spammer", body="clean follow-up")
+    assert await bot.protections_on_message(
+        clean, ROOM, "Spammer", "clean follow-up"
+    ) is False
+    assert (ROOM, "spam@example.org") in bot.protection_known_participants
 
 
 @pytest.mark.asyncio
