@@ -26,7 +26,12 @@ class DummyProtections(ProtectionMixin):
                 "Alice": {"jid": "alice@example.test", "role": "participant", "affiliation": "member"},
                 "Bob": {"jid": "bob@example.test", "role": "participant", "affiliation": "member"},
                 "Spammer": {"jid": "spam@example.test", "role": "participant", "affiliation": "member"},
-            }
+            },
+            ADMIN_ROOM: {
+                "Admin": {"jid": "admin@example.test", "role": "moderator", "affiliation": "owner"},
+                "Alice": {"jid": "alice@example.test", "role": "participant", "affiliation": "member"},
+                "Bob": {"jid": "bob@example.test", "role": "participant", "affiliation": "member"},
+            },
         }
         self.db = None
         self.init_protection_state()
@@ -296,7 +301,7 @@ async def test_report_threshold_ignores_duplicate_reporter_and_then_triggers_act
     assert until <= after + tempban_seconds + 2
     assert issuer == "protection:TrustedReporters"
     assert comment == "spam"
-    assert (ROOM, "spammer") not in bot.protection_trusted_reports
+    assert (ROOM, "spam@example.test") not in bot.protection_trusted_reports
 
 
 @pytest.mark.asyncio
@@ -370,3 +375,82 @@ async def test_enable_same_state_is_noop() -> None:
     assert bot.persisted == []
     assert bot.audit == []
     assert "already enabled" in last_body(bot)
+
+
+@pytest.mark.asyncio
+async def test_reports_do_not_carry_over_when_nick_changes_owner() -> None:
+    bot = DummyProtections()
+    bot.protections["TrustedReporters"].update({
+        "enabled": True,
+        "reporters": ["alice@example.test", "bob@example.test"],
+        "threshold": 2,
+        "action": "tempban",
+    })
+
+    await bot.cmd_protection_report(ROOM, "Alice", ["Spammer", "first report"])
+    assert bot.bans == []
+    assert len(bot.protection_trusted_reports[(ROOM, "spam@example.test")]) == 1
+
+    bot.occupants[ROOM]["Spammer"]["jid"] = "replacement@example.test/resource"
+    await bot.cmd_protection_report(ROOM, "Bob", ["Spammer", "second report"])
+
+    assert bot.bans == []
+    assert len(bot.protection_trusted_reports[(ROOM, "spam@example.test")]) == 1
+    assert len(bot.protection_trusted_reports[(ROOM, "replacement@example.test")]) == 1
+
+
+@pytest.mark.asyncio
+async def test_report_rejects_ambiguous_nick_across_protected_rooms() -> None:
+    bot = DummyProtections()
+    other_room = "other@conference.example.test"
+    bot.protected_rooms.add(other_room)
+    bot.occupants[other_room] = {
+        "Spammer": {"jid": "other-spammer@example.test", "role": "participant", "affiliation": "none"}
+    }
+    bot.protections["TrustedReporters"].update({
+        "enabled": True,
+        "reporters": ["alice@example.test"],
+        "threshold": 1,
+        "action": "tempban",
+    })
+
+    await bot.cmd_protection_report(ROOM, "Alice", ["Spammer", "spam"])
+
+    assert bot.bans == []
+    assert bot.protection_trusted_reports == {}
+    assert "ambiguous" in last_body(bot).lower()
+    assert "bare jid" in last_body(bot).lower()
+
+
+@pytest.mark.asyncio
+async def test_report_rejects_reporter_without_verified_jid_in_origin_room() -> None:
+    bot = DummyProtections()
+    bot.protections["TrustedReporters"].update({
+        "enabled": True,
+        "reporters": ["alice@example.test"],
+        "threshold": 1,
+        "action": "tempban",
+    })
+    bot.occupants[ROOM]["Alice"]["jid"] = None
+
+    await bot.cmd_protection_report(ROOM, "Alice", ["Spammer", "spam"])
+
+    assert bot.bans == []
+    assert "could not be verified" in last_body(bot).lower()
+
+
+@pytest.mark.asyncio
+async def test_report_by_nick_rejects_target_without_verified_jid() -> None:
+    bot = DummyProtections()
+    bot.protections["TrustedReporters"].update({
+        "enabled": True,
+        "reporters": ["alice@example.test"],
+        "threshold": 1,
+        "action": "tempban",
+    })
+    bot.occupants[ROOM]["Spammer"]["jid"] = None
+
+    await bot.cmd_protection_report(ROOM, "Alice", ["Spammer", "spam"])
+
+    assert bot.bans == []
+    assert "bare jid" in last_body(bot).lower()

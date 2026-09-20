@@ -6,6 +6,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from banbot.protections import ProtectionMixin
+from banbot.protections.detection import count_mentions
 
 ROOM = "room@conference.example.org"
 ADMIN_ROOM = "admin@conference.example.org"
@@ -393,9 +394,9 @@ async def test_mention_limit_triggers_on_more_than_limit(fake_msg_factory) -> No
 async def test_mention_limit_equal_limit_does_not_trigger(fake_msg_factory) -> None:
     bot = DummyProtections()
     bot.protections["MentionLimitProtection"].update({"enabled": True, "max_mentions": 2, "action": "notify"})
-    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="hi Alice Bob")
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="hi Alice @Bob")
 
-    handled = await bot.protections_on_message(msg, ROOM, "Spammer", "hi Alice Bob")
+    handled = await bot.protections_on_message(msg, ROOM, "Spammer", "hi Alice @Bob")
 
     assert handled is False
     assert bot.sent == []
@@ -547,6 +548,7 @@ async def test_recent_rejoin_subjects_expire(monkeypatch) -> None:
         "enabled": True,
         "max_joins": 1,
         "rejoin_grace_seconds": 10,
+        "ignore_known_participants": False,
     })
     bot.occupants[ROOM]["Recent"] = {
         "jid": "recent@example.org",
@@ -636,7 +638,7 @@ async def test_join_wave_triggers_at_configured_threshold() -> None:
             "submit",
         )
     ]
-    assert "Joins in window: 2" in last_body(bot)
+    assert "Unique joins in window: 2" in last_body(bot)
 
 
 @pytest.mark.asyncio
@@ -757,9 +759,9 @@ async def test_tempban_protection_redacts_target_messages_even_when_reason_is_no
         "tempban_seconds": 120,
         "redact": True,
     })
-    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="hi Alice Bob")
+    msg = fake_msg_factory(room=ROOM, nick="Spammer", body="hi Alice @Bob")
 
-    handled = await bot.protections_on_message(msg, ROOM, "Spammer", "hi Alice Bob")
+    handled = await bot.protections_on_message(msg, ROOM, "Spammer", "hi Alice @Bob")
 
     assert handled is True
     assert bot.bans[0][0] == "spam@example.org"
@@ -944,3 +946,163 @@ async def test_observe_match_falls_through_to_later_enforcing_protection(fake_ms
     assert handled is True
     assert bot.bans[-1][2] == "protection:WordListNewJoinerProtection"
     assert any("SimilarMessageProtection observe match" in body for _to, body, _type in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_first_media_nick_only_identity_is_not_trusted_across_rejoin(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.occupants[ROOM]["NickOnly"] = {
+        "jid": None,
+        "role": "participant",
+        "affiliation": "none",
+    }
+    bot.protections["FirstMessageMediaProtection"].update({"enabled": True, "action": "ban"})
+
+    await bot.protection_on_join(ROOM, "NickOnly", None)
+    hello = fake_msg_factory(room=ROOM, nick="NickOnly", body="hello")
+    assert await bot.protections_on_message(hello, ROOM, "NickOnly", "hello") is False
+    assert (ROOM, "nickonly") not in bot.protection_known_participants
+
+    await bot.protection_on_join(ROOM, "NickOnly", None)
+    media = fake_msg_factory(room=ROOM, nick="NickOnly", body="https://upload.example.org/rejoin.jpg")
+
+    handled = await bot.protections_on_message(
+        media,
+        ROOM,
+        "NickOnly",
+        "https://upload.example.org/rejoin.jpg",
+    )
+
+    assert handled is True
+    assert bot.bans[-1][0] == "nickonly"
+
+
+@pytest.mark.asyncio
+async def test_wordlist_ignores_established_participant_after_rejoin(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["WordListNewJoinerProtection"].update(
+        {"enabled": True, "words": ["spamword"], "action": "ban"}
+    )
+
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+    hello = fake_msg_factory(room=ROOM, nick="Spammer", body="hello")
+    assert await bot.protections_on_message(hello, ROOM, "Spammer", "hello") is False
+    assert (ROOM, "spam@example.org") in bot.protection_known_participants
+
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/other")
+    blocked = fake_msg_factory(room=ROOM, nick="Spammer", body="spamword")
+
+    handled = await bot.protections_on_message(blocked, ROOM, "Spammer", "spamword")
+
+    assert handled is False
+    assert bot.bans == []
+    assert (ROOM, "spam@example.org") in bot.protection_established_at_join
+
+
+@pytest.mark.asyncio
+async def test_wordlist_keeps_new_joiner_protected_after_clean_first_message(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["WordListNewJoinerProtection"].update(
+        {"enabled": True, "words": ["spamword"], "action": "ban"}
+    )
+
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+    hello = fake_msg_factory(room=ROOM, nick="Spammer", body="hello")
+    assert await bot.protections_on_message(hello, ROOM, "Spammer", "hello") is False
+    assert (ROOM, "spam@example.org") in bot.protection_known_participants
+    assert (ROOM, "spam@example.org") not in bot.protection_established_at_join
+
+    blocked = fake_msg_factory(room=ROOM, nick="Spammer", body="spamword")
+    handled = await bot.protections_on_message(blocked, ROOM, "Spammer", "spamword")
+
+    assert handled is True
+    assert bot.bans[-1][2] == "protection:WordListNewJoinerProtection"
+
+
+@pytest.mark.asyncio
+async def test_wordlist_observe_match_does_not_establish_first_message_sender(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["WordListNewJoinerProtection"].update(
+        {
+            "enabled": True,
+            "observe": True,
+            "words": ["spamword"],
+            "action": "tempban",
+        }
+    )
+
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+    blocked = fake_msg_factory(room=ROOM, nick="Spammer", body="spamword")
+
+    handled = await bot.protections_on_message(blocked, ROOM, "Spammer", "spamword")
+
+    assert handled is False
+    assert bot.bans == []
+    assert (ROOM, "spam@example.org") not in bot.protection_known_participants
+
+
+@pytest.mark.asyncio
+async def test_join_wave_counts_same_subject_only_once_within_window() -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"].update(
+        {
+            "enabled": True,
+            "max_joins": 2,
+            "window_seconds": 60,
+            "ignore_member_affiliations": False,
+        }
+    )
+
+    await bot.protection_on_join(ROOM, "Reconnect1", "same@example.org/one")
+    await bot.protection_on_join(ROOM, "Reconnect2", "same@example.org/two")
+
+    assert bot.muc_plugin.room_configs == []
+    assert list(bot.protection_join_windows[ROOM])[-1][1] == "same@example.org"
+    assert len(bot.protection_join_windows[ROOM]) == 1
+
+
+@pytest.mark.asyncio
+async def test_join_wave_ignores_established_participant_by_default() -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"].update(
+        {"enabled": True, "max_joins": 1, "ignore_member_affiliations": False}
+    )
+    bot.protection_known_participants.add((ROOM, "known@example.org"))
+
+    await bot.protection_on_join(ROOM, "Known", "known@example.org/resource")
+
+    assert bot.muc_plugin.room_configs == []
+    assert list(bot.protection_join_windows[ROOM]) == []
+
+
+@pytest.mark.asyncio
+async def test_join_wave_can_count_established_participant_when_configured() -> None:
+    bot = DummyProtections()
+    bot.protections["JoinWaveShortCircuitProtection"].update(
+        {
+            "enabled": True,
+            "max_joins": 1,
+            "ignore_member_affiliations": False,
+            "ignore_known_participants": False,
+        }
+    )
+    bot.protection_known_participants.add((ROOM, "known@example.org"))
+
+    await bot.protection_on_join(ROOM, "Known", "known@example.org/resource")
+
+    assert bot.muc_plugin.room_configs
+
+
+def test_count_mentions_collapses_prefixed_aliases() -> None:
+    assert count_mentions("hello @Bob", ["Bob", "~Bob"]) == 1
+
+
+def test_count_mentions_ignores_short_plain_word_nicks_in_normal_prose() -> None:
+    assert count_mentions(
+        "the cat is in the room and you know it",
+        ["the", "in", "room", "and", "you", "it"],
+    ) == 0
+
+
+def test_count_mentions_still_counts_explicit_short_nicks() -> None:
+    assert count_mentions("ping @bob and ~sam", ["bob", "sam"]) == 2

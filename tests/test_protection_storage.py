@@ -192,3 +192,18 @@ async def test_remember_protection_participant_persists_real_jid_once(monkeypatc
 
     assert ("room@conference.example.org", "known@example.org") in bot.protection_known_participants
     assert db.known_persisted == {("room@conference.example.org", "known@example.org")}
+
+
+@pytest.mark.asyncio
+async def test_nick_only_participant_is_not_remembered_across_sessions() -> None:
+    db = FakeDb()
+    bot = DummyStorage(db=db)
+
+    await bot.remember_protection_participant(
+        "room@conference.example.org",
+        "ReusableNick",
+        persistent=False,
+    )
+
+    assert bot.protection_known_participants == set()
+    assert db.known_persisted == set()

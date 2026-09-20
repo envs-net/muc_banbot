@@ -35,9 +35,10 @@ class ProtectionMixin(
         self.protections: dict[str, dict[str, Any]] = default_protection_config()
         self.protection_message_windows: dict[tuple[str, str, str], deque[float]] = defaultdict(deque)
         self.protection_similar_messages: dict[str, deque[tuple[float, str, str]]] = defaultdict(deque)
-        self.protection_join_windows: dict[str, deque[float]] = defaultdict(deque)
+        self.protection_join_windows: dict[str, deque[tuple[float, str]]] = defaultdict(deque)
         self.protection_joined_at: dict[tuple[str, str], float] = {}
         self.protection_first_message_seen: set[tuple[str, str]] = set()
+        self.protection_established_at_join: set[tuple[str, str]] = set()
         self.protection_known_participants: set[tuple[str, str]] = set()
         self.protection_persisted_known_participants: set[tuple[str, str]] = set()
         self._protection_storage_ready = False
@@ -54,17 +55,25 @@ class ProtectionMixin(
         """Return the effective mutable config for a protection."""
         return self.protections.setdefault(name, dict(PROTECTION_DEFAULTS[name]))
 
+    @staticmethod
+    def _protection_stable_jid(jid: str | None) -> str | None:
+        """Return a usable bare JID, or ``None`` for nick-only identities."""
+        normalized = bare_jid(jid) if jid else None
+        normalized_text = str(normalized or "").strip()
+        if not normalized_text or "@" not in normalized_text:
+            return None
+        return normalized_text.lower()
+
     def _protection_join_subject(self, nick: str, jid: str | None = None) -> str:
-        """Return the stable subject key used for join/rejoin tracking."""
-        normalized_jid = bare_jid(jid) if jid else None
-        return normalized_jid or str(nick or "").lower()
+        """Return the best subject key used for join/rejoin tracking."""
+        return self._protection_stable_jid(jid) or str(nick or "").lower()
 
     def _protection_participant_key(self, room: str, subject: str) -> tuple[str, str]:
         """Return the normalized key used for known-participant tracking."""
         return str(room or "").strip().lower(), str(subject or "").strip().lower()
 
     def _protection_participant_is_known(self, room: str, subject: str) -> bool:
-        """Return whether FirstMessageMediaProtection already knows this participant."""
+        """Return whether this stable participant identity is already established."""
         return self._protection_participant_key(room, subject) in self.protection_known_participants
 
     def _protection_mark_participant_known(self, room: str, subject: str) -> bool:
@@ -100,10 +109,13 @@ class ProtectionMixin(
                 if not isinstance(info, dict):
                     continue
                 jid = info.get("jid")
-                subject = self._protection_join_subject(str(nick), str(jid) if jid else None)
+                jid_text = str(jid) if jid else None
+                subject = self._protection_join_subject(str(nick), jid_text)
                 if subject:
                     remembered[subject] = now
-                    self._protection_mark_participant_known(room, subject)
+                stable_jid = self._protection_stable_jid(jid_text)
+                if stable_jid:
+                    self._protection_mark_participant_known(room, stable_jid)
 
             cutoff = now - grace
             for subject, seen_at in list(remembered.items()):
@@ -140,7 +152,7 @@ class ProtectionMixin(
 
     def _protection_subject(self, room: str, nick: str) -> tuple[str | None, str]:
         info = getattr(self, "occupants", {}).get(room, {}).get(nick, {})
-        jid = bare_jid(info.get("jid")) if info.get("jid") else None
+        jid = self._protection_stable_jid(info.get("jid"))
         return jid, nick.lower()
 
     def _protection_known_nicks(self, room: str) -> list[str]:

@@ -92,16 +92,18 @@ class ProtectionStorageMixin(_ProtectionStorageMixinContract):
         *,
         persistent: bool,
     ) -> None:
-        """Remember a participant for future FirstMessageMediaProtection checks.
+        """Remember a participant for protections that distinguish established users.
 
-        Real JIDs are persisted so ordinary leave/rejoin cycles and bot restarts
-        do not make an established room participant look new again.  Nick-only
-        identities are kept in memory only because a nick is not a stable or
-        trustworthy cross-session identity.
+        Only verified bare JIDs are remembered across joins.  Nick-only identities
+        intentionally stay session-local via ``protection_first_message_seen``; a
+        later occupant can reuse the same nick and must not inherit trust.
         """
+        if not persistent:
+            return
+
         key = self._protection_participant_key(room, subject)
         self._protection_mark_participant_known(*key)
-        if not persistent or key in self.protection_persisted_known_participants:
+        if key in self.protection_persisted_known_participants:
             return
 
         db = getattr(self, "db", None)

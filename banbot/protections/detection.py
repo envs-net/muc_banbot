@@ -127,48 +127,51 @@ def message_looks_like_media(body: str) -> bool:
     return False
 
 
-def _nick_match_variants(nick: str) -> set[str]:
-    """Return conservative body-match variants for a MUC nick."""
-    nick_text = str(nick or "").strip()
-    if not nick_text:
-        return set()
-
-    variants = {nick_text.lower()}
-
-    # Some clients display affiliation prefixes such as ~creme/@alice.  The
-    # actual MUC nick in the occupant cache may or may not contain that prefix,
-    # so allow both forms for mention detection.
-    stripped = nick_text.lstrip("~&@%+").strip()
-    if stripped:
-        variants.add(stripped.lower())
-
-    # Common textual mention form.
-    for variant in list(variants):
-        variants.add(f"@{variant}")
-
-    return {variant for variant in variants if variant}
+def _canonical_nick(nick: str) -> str:
+    """Return a conservative canonical nick used to collapse display aliases."""
+    return str(nick or "").strip().lstrip("~&@%+").strip().lower()
 
 
 def count_mentions(body: str, known_nicks: list[str]) -> int:
-    """Count how many distinct known MUC nicks are mentioned in a message."""
+    """Count distinct room occupants conservatively mentioned in ``body``.
+
+    Affiliation/display prefixes are collapsed so aliases such as ``Bob`` and
+    ``~Bob`` cannot count the same person twice.  Short plain-word nicks are
+    only counted when they use an explicit mention-style prefix; this avoids
+    treating ordinary prose words such as ``the``, ``in`` or ``room`` as mass
+    mentions merely because an occupant happens to use that nick.
+    """
     text_lower = str(body or "").lower()
+    if not text_lower:
+        return 0
+
+    canonical_nicks = {
+        canonical
+        for raw_nick in known_nicks
+        if (canonical := _canonical_nick(raw_nick))
+    }
     count = 0
-    seen: set[str] = set()
+    matched_spans: set[tuple[int, int]] = set()
 
-    for nick in known_nicks:
-        nick_text = str(nick or "").strip()
-        if not nick_text:
-            continue
-        nick_key = nick_text.lower()
-        if nick_key in seen:
-            continue
+    for canonical in canonical_nicks:
+        explicit_patterns = [
+            rf"(?<!\w){re.escape(prefix + canonical)}(?!\w)"
+            for prefix in ("@", "~", "&", "%", "+")
+        ]
+        patterns = list(explicit_patterns)
+        if len(canonical) >= 5:
+            patterns.append(rf"(?<!\w){re.escape(canonical)}(?!\w)")
 
-        for variant in _nick_match_variants(nick_text):
-            pattern = rf"(?<!\w){re.escape(variant)}(?!\w)"
-            if re.search(pattern, text_lower):
-                count += 1
-                seen.add(nick_key)
+        found_span: tuple[int, int] | None = None
+        for pattern in patterns:
+            match = re.search(pattern, text_lower)
+            if match and match.span() not in matched_spans:
+                found_span = match.span()
                 break
+        if found_span is None:
+            continue
+        matched_spans.add(found_span)
+        count += 1
 
     return count
 

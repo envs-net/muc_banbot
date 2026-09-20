@@ -49,9 +49,9 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         ))
         room_join_time = getattr(self, "room_join_time", {}).get(room)
         if room_join_time and join_grace and now - float(room_join_time) < join_grace:
-            subject = self._protection_join_subject(nick, jid)
-            if subject:
-                self._protection_mark_participant_known(room, subject)
+            stable_jid = self._protection_stable_jid(jid)
+            if stable_jid:
+                self._protection_mark_participant_known(room, stable_jid)
             log.debug(
                 "Skipping protection join hook during initial room population in %s: nick=%s",
                 room,
@@ -60,6 +60,16 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             return
 
         subject = self._protection_join_subject(nick, jid)
+        stable_jid = self._protection_stable_jid(jid)
+        known_before_join = bool(
+            stable_jid and self._protection_participant_is_known(room, stable_jid)
+        )
+        join_key = (room, subject)
+        if known_before_join:
+            self.protection_established_at_join.add(join_key)
+        else:
+            self.protection_established_at_join.discard(join_key)
+
         if self._protection_is_recent_rejoin(room, subject, now):
             log.debug(
                 "Skipping protection join hook for recent rejoin in %s: nick=%s subject=%s",
@@ -69,13 +79,22 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             )
             return
 
-        self.protection_joined_at[(room, subject)] = now
-        self.protection_first_message_seen.discard((room, subject))
+        self.protection_joined_at[join_key] = now
+        self.protection_first_message_seen.discard(join_key)
 
         protection = "JoinWaveShortCircuitProtection"
         if not self.protection_enabled(protection):
             return
         config = self.protection_config(protection)
+        if known_before_join and bool(config.get("ignore_known_participants", True)):
+            log.debug(
+                "Skipping %s count for established participant in %s: nick=%s subject=%s",
+                protection,
+                room,
+                nick,
+                subject,
+            )
+            return
         affiliation = str(
             getattr(self, "occupants", {}).get(room, {}).get(nick, {}).get("affiliation") or ""
         ).lower()
@@ -91,9 +110,17 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         window = max(1, int(config.get("window_seconds", 60) or 60))
         max_joins = max(1, int(config.get("max_joins", 8) or 8))
         joins = self.protection_join_windows[room]
-        joins.append(now)
-        while joins and now - joins[0] > window:
+        while joins and now - joins[0][0] > window:
             joins.popleft()
+        if any(existing_subject == subject for _seen_at, existing_subject in joins):
+            log.debug(
+                "Skipping duplicate %s subject within active window in %s: %s",
+                protection,
+                room,
+                subject,
+            )
+            return
+        joins.append((now, subject))
         if len(joins) >= max_joins:
             await self._protection_handle_join_wave(room, len(joins), config)
 
@@ -132,7 +159,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             mbody=(
                 f"🚨 {protection} triggered\n"
                 f"Room: {room}\n"
-                f"Joins in window: {join_count}\n"
+                f"Unique joins in window: {join_count}\n"
                 f"Action: {action_text}\n"
                 f"Lockdown applied: {'yes' if lockdown_applied else 'no'}\n"
                 f"Cooldown: {cooldown_seconds}s\n"
@@ -181,11 +208,17 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             return True
         if await self._protection_check_similar_messages(msg, room, nick, subject, protection_body, now):
             return True
-        if await self._protection_check_mentions(msg, room, nick, protection_body):
+        mention_stop, mention_matched = await self._protection_check_mentions(
+            msg, room, nick, protection_body
+        )
+        if mention_stop:
             return True
-        if await self._protection_check_wordlist(msg, room, nick, subject, protection_body, now):
+        wordlist_stop, wordlist_matched = await self._protection_check_wordlist(
+            msg, room, nick, subject, protection_body, now
+        )
+        if wordlist_stop:
             return True
-        if remember_participant:
+        if remember_participant and not mention_matched and not wordlist_matched:
             await self.remember_protection_participant(
                 room,
                 subject,
@@ -305,10 +338,12 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         entries.clear()
         return not bool(config.get("observe", False))
 
-    async def _protection_check_mentions(self, msg, room: str, nick: str, body: str) -> bool:
+    async def _protection_check_mentions(
+        self, msg, room: str, nick: str, body: str
+    ) -> tuple[bool, bool]:
         protection = "MentionLimitProtection"
         if not self.protection_enabled(protection):
-            return False
+            return False, False
         config = self.protection_config(protection)
         limit = max(1, int(config.get("max_mentions", 5) or 5))
         nicks = [
@@ -327,7 +362,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             len(nicks),
         )
         if mention_count <= limit:
-            return False
+            return False, False
         await self._protection_apply_action(
             protection=protection,
             room=room,
@@ -335,25 +370,30 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             msg=msg,
             details={"mention_count": mention_count, "max_mentions": limit},
         )
-        return not bool(config.get("observe", False))
+        return not bool(config.get("observe", False)), True
 
-    async def _protection_check_wordlist(self, msg, room: str, nick: str, subject: str, body: str, now: float) -> bool:
+    async def _protection_check_wordlist(
+        self, msg, room: str, nick: str, subject: str, body: str, now: float
+    ) -> tuple[bool, bool]:
         protection = "WordListNewJoinerProtection"
         if not self.protection_enabled(protection):
-            return False
+            return False, False
         config = self.protection_config(protection)
         words = list(config.get("words", []) or [])
         if not words:
-            return False
-        joined_at = self.protection_joined_at.get((room, subject))
+            return False, False
+        key = (room, subject)
+        if key in self.protection_established_at_join:
+            return False, False
+        joined_at = self.protection_joined_at.get(key)
         if joined_at is None:
-            return False
+            return False, False
         grace = max(0, int(config.get("join_grace_seconds", 900) or 0))
         if grace and now - joined_at > grace:
-            return False
+            return False, False
         word = body_contains_blocked_word(body, words)
         if not word:
-            return False
+            return False, False
         reason = f"{config.get('reason') or 'blocked word from new joiner'}: {word}"
         await self._protection_apply_action(
             protection=protection,
@@ -363,4 +403,4 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             reason=reason,
             details={"word": word},
         )
-        return not bool(config.get("observe", False))
+        return not bool(config.get("observe", False)), True

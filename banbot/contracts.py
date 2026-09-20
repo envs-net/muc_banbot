@@ -407,6 +407,8 @@ class ProtectionActionsMixinHost(Protocol):
 
     def _protection_subject(self, room: str, nick: str) -> tuple[str | None, str]: ...
 
+    def _protection_stable_jid(self, jid: str | None) -> str | None: ...
+
     async def bot_send_message(
         self,
         *,
@@ -467,9 +469,10 @@ class ProtectionChecksMixinHost(ProtectionCoordinatorHost, Protocol):
     occupants: dict[str, dict[str, dict[str, Any]]]
     protection_message_windows: dict[tuple[str, str, str], deque[float]]
     protection_similar_messages: dict[str, deque[tuple[float, str, str]]]
-    protection_join_windows: dict[str, deque[float]]
+    protection_join_windows: dict[str, deque[tuple[float, str]]]
     protection_joined_at: dict[tuple[str, str], float]
     protection_first_message_seen: set[tuple[str, str]]
+    protection_established_at_join: set[tuple[str, str]]
     protection_known_participants: set[tuple[str, str]]
     protection_persisted_known_participants: set[tuple[str, str]]
     protection_room_lockdown_until: dict[str, float]
@@ -477,6 +480,8 @@ class ProtectionChecksMixinHost(ProtectionCoordinatorHost, Protocol):
     def protection_enabled(self, name: str) -> bool: ...
 
     def protection_config(self, name: str) -> dict[str, Any]: ...
+
+    def _protection_stable_jid(self, jid: str | None) -> str | None: ...
 
     def _protection_join_subject(self, nick: str, jid: str | None = None) -> str: ...
 
@@ -512,6 +517,7 @@ class ProtectionChecksMixinHost(ProtectionCoordinatorHost, Protocol):
         room: str,
         nick: str,
         msg: Any = None,
+        target_jid: str | None = None,
         action: str | None = None,
         reason: str | None = None,
         tempban_seconds: int | None = None,
@@ -561,6 +567,8 @@ class ProtectionCommandsMixinHost(ActorJidResolverHost, Protocol):
 
     def _protection_actor_jid(self, room: str, nick: str) -> str | None: ...
 
+    def _protection_stable_jid(self, jid: str | None) -> str | None: ...
+
     def _protection_is_exempt(
         self,
         room: str,
@@ -582,6 +590,7 @@ class ProtectionCommandsMixinHost(ActorJidResolverHost, Protocol):
         room: str,
         nick: str,
         msg: Any = None,
+        target_jid: str | None = None,
         action: str | None = None,
         reason: str | None = None,
         tempban_seconds: int | None = None,

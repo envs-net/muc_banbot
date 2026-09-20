@@ -58,6 +58,7 @@ PROTECTION_BOOL_VALIDATION_KEYS = {
     "notify_config",
     "observe",
     "ignore_member_affiliations",
+    "ignore_known_participants",
 }
 PROTECTION_LIST_OF_STR_VALIDATION_KEYS = {"words", "reporters"}
 
@@ -73,6 +74,99 @@ else:
 
 
 class ProtectionCommandsMixin(_ProtectionCommandsMixinContract):
+    def _trusted_reporter_jid(self, room: str, nick: str) -> str | None:
+        """Resolve a reporter only from the room where the report was sent."""
+        room_occupants = self.occupants.get(room, {})
+        info = room_occupants.get(nick, {})
+        if not info:
+            for current_nick, current_info in room_occupants.items():
+                if str(current_nick).lower() == str(nick).lower():
+                    info = current_info
+                    break
+        jid = self._protection_stable_jid(info.get("jid") if isinstance(info, dict) else None)
+        return jid
+
+    def _resolve_trusted_report_target(
+        self,
+        report_room: str,
+        raw_target: str,
+    ) -> tuple[str | None, str | None, str | None, str | None]:
+        """Resolve a report target to ``(jid, nick, room, error)``.
+
+        Nick reports are accepted only when the nick maps unambiguously to one
+        verified bare JID across the reporting/protected rooms.  This prevents
+        reports for an old nick owner from carrying over to somebody who later
+        reuses the same nick.
+        """
+        target_text = str(raw_target or "").strip()
+        if not target_text:
+            return None, None, None, "❌ Report target is empty."
+
+        rooms_to_scan: list[str] = []
+        for current_room in [report_room, *sorted(getattr(self, "protected_rooms", set()))]:
+            if current_room not in rooms_to_scan:
+                rooms_to_scan.append(current_room)
+
+        if "@" in target_text:
+            target_jid = self._protection_stable_jid(target_text)
+            if target_jid is None:
+                return None, None, None, "❌ Invalid target JID."
+            matches: list[tuple[str, str]] = []
+            for current_room in rooms_to_scan:
+                for current_nick, info in self.occupants.get(current_room, {}).items():
+                    if not isinstance(info, dict):
+                        continue
+                    occupant_jid = self._protection_stable_jid(info.get("jid"))
+                    if occupant_jid == target_jid:
+                        matches.append((current_room, str(current_nick)))
+            if matches:
+                preferred_jid_match = next(
+                    (match for match in matches if match[0] == report_room),
+                    matches[0],
+                )
+                return target_jid, preferred_jid_match[1], preferred_jid_match[0], None
+            return target_jid, target_jid, report_room, None
+
+        nick_matches: list[tuple[str, str, str]] = []
+        unresolved_nick_seen = False
+        for current_room in rooms_to_scan:
+            for current_nick, info in self.occupants.get(current_room, {}).items():
+                if str(current_nick).lower() != target_text.lower():
+                    continue
+                if not isinstance(info, dict):
+                    unresolved_nick_seen = True
+                    continue
+                target_jid = self._protection_stable_jid(info.get("jid"))
+                if target_jid is None:
+                    unresolved_nick_seen = True
+                    continue
+                nick_matches.append((current_room, str(current_nick), target_jid))
+
+        unique_jids = {match[2] for match in nick_matches}
+        if len(unique_jids) > 1:
+            return (
+                None,
+                None,
+                None,
+                f"❌ Nick {safe_jid(target_text)} is ambiguous across rooms; report the bare JID instead.",
+            )
+        if not unique_jids:
+            detail = "cannot be verified to a real JID" if unresolved_nick_seen else "is not currently resolvable"
+            return (
+                None,
+                None,
+                None,
+                f"❌ Nick {safe_jid(target_text)} {detail}; report the bare JID instead.",
+            )
+
+        target_jid = next(iter(unique_jids))
+        matching_identity = [match for match in nick_matches if match[2] == target_jid]
+        preferred_nick_match = next(
+            (match for match in matching_identity if match[0] == report_room),
+            matching_identity[0],
+        )
+        return target_jid, preferred_nick_match[1], preferred_nick_match[0], None
+
     async def cmd_protection_report(self, room: str, nick: str, args: list[str]) -> None:
         """Public/admin trusted reporter command: !report <nick|jid> [reason]."""
         protection = "TrustedReporters"
@@ -85,77 +179,63 @@ class ProtectionCommandsMixin(_ProtectionCommandsMixinContract):
                 mtype="groupchat",
             )
             return
-        rooms_to_scan = [room, *sorted(getattr(self, "protected_rooms", set()))]
 
-        # _protection_actor_jid is provided by the shared protection/base mixin layer.
-        # It resolves the real actor JID for permission checks when nick differs from JID.
-        reporter = self._protection_actor_jid(room, nick)
-        if not reporter or "@" not in str(reporter):
-            for current_room in rooms_to_scan:
-                info = self.occupants.get(current_room, {}).get(nick, {})
-                if info.get("jid"):
-                    reporter = info.get("jid")
-                    break
-
+        reporter = self._trusted_reporter_jid(room, nick)
         config = self.protection_config(protection)
         reporter_values = [str(item).strip() for item in config.get("reporters", [])]
-        reporters = {bare_jid(item) for item in reporter_values if item}
-        if bare_jid(str(reporter)) not in reporters:
+        reporters = {
+            normalized
+            for item in reporter_values
+            if (normalized := self._protection_stable_jid(item))
+        }
+        if reporter is None:
+            await self.bot_send_message(
+                mto=room,
+                mbody="❌ Your real JID could not be verified in this room; report rejected.",
+                mtype="groupchat",
+            )
+            return
+        if reporter not in reporters:
             await self.bot_send_message(mto=room, mbody="❌ You are not a trusted reporter.", mtype="groupchat")
             return
+
         raw_target = args[0].strip()
-        target = raw_target.lower() if "@" in raw_target else raw_target
+        target_jid, target_nick, action_room, resolve_error = self._resolve_trusted_report_target(
+            room,
+            raw_target,
+        )
+        if resolve_error or target_jid is None or target_nick is None or action_room is None:
+            await self.bot_send_message(
+                mto=room,
+                mbody=resolve_error or "❌ Target could not be resolved to a stable JID.",
+                mtype="groupchat",
+            )
+            return
+
         reason = " ".join(args[1:]).strip() or str(config.get("reason") or "trusted report")
-        key = (room, target.lower())
+        key = (room, target_jid.lower())
         now = time.time()
         window = max(1, int(config.get("window_seconds", 900) or 900))
         reports = [entry for entry in self.protection_trusted_reports[key] if now - entry[0] <= window]
-        if not any(entry[1] == bare_jid(str(reporter)) for entry in reports):
-            reports.append((now, bare_jid(str(reporter)) or str(reporter), reason))
+        if not any(entry[1] == reporter for entry in reports):
+            reports.append((now, reporter, reason))
         self.protection_trusted_reports[key] = reports
         threshold = max(1, int(config.get("threshold", 2) or 2))
         if len(reports) < threshold:
             await self.bot_send_message(
                 mto=room,
-                mbody=f"✅ Report recorded for {safe_jid(target)} ({len(reports)}/{threshold}).",
+                mbody=f"✅ Report recorded for {safe_jid(target_jid)} ({len(reports)}/{threshold}).",
                 mtype="groupchat",
             )
             return
-        target_nick = target
-        target_jid = target if "@" in target else None
-        action_room = room
-
-        # Prefer current nick casing and JID when a reported nick/JID can be
-        # resolved from live occupants. Reports are often sent in the admin room,
-        # so scan protected rooms as well as the reporting room.
-        seen_rooms: set[str] = set()
-        for current_room in rooms_to_scan:
-            if current_room in seen_rooms:
-                continue
-            seen_rooms.add(current_room)
-            for n, info in self.occupants.get(current_room, {}).items():
-                if "@" in target:
-                    if info.get("jid") and bare_jid(info.get("jid")) == bare_jid(target):
-                        target_nick = n
-                        target_jid = info.get("jid")
-                        action_room = current_room
-                        break
-                elif n.lower() == target.lower():
-                    target_nick = n
-                    target_jid = info.get("jid")
-                    action_room = current_room
-                    break
-            else:
-                continue
-            break
 
         protected = False
         protect_reason = None
         admin_target_check = getattr(self, "is_protected_admin_target", None)
         if callable(admin_target_check):
             protected, protect_reason = await admin_target_check(
-                target,
-                nick=target_nick if target_nick != target else None,
+                target_jid,
+                nick=target_nick if target_nick != target_jid else None,
                 jid=target_jid,
             )
         elif action_room in getattr(self, "protected_rooms", set()):
@@ -164,8 +244,18 @@ class ProtectionCommandsMixin(_ProtectionCommandsMixinContract):
         if protected:
             await self.bot_send_message(
                 mto=room,
-                mbody=f"❌ Target {safe_jid(target)} is exempt from protection actions."
+                mbody=f"❌ Target {safe_jid(target_jid)} is exempt from protection actions."
                 + (f" ({protect_reason})" if protect_reason else ""),
+                mtype="groupchat",
+            )
+            self.protection_trusted_reports.pop(key, None)
+            return
+
+        action = str(config.get("action", "tempban"))
+        if action.lower() == "kick" and target_nick == target_jid:
+            await self.bot_send_message(
+                mto=room,
+                mbody=f"❌ Target {safe_jid(target_jid)} is not currently present, so it cannot be kicked.",
                 mtype="groupchat",
             )
             self.protection_trusted_reports.pop(key, None)
@@ -175,11 +265,12 @@ class ProtectionCommandsMixin(_ProtectionCommandsMixinContract):
             protection=protection,
             room=action_room,
             nick=target_nick,
+            target_jid=target_jid,
             reason=reason,
-            action=str(config.get("action", "tempban")),
+            action=action,
             tempban_seconds=int(config.get("tempban_seconds", 86400) or 86400),
             redact=bool(config.get("redact", True)),
-            details={"reports": len(reports), "threshold": threshold},
+            details={"reports": len(reports), "threshold": threshold, "target_jid": target_jid},
         )
         self.protection_trusted_reports.pop(key, None)
 

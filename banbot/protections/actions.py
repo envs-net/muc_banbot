@@ -190,6 +190,7 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         room: str,
         nick: str,
         msg=None,
+        target_jid: str | None = None,
         action: str | None = None,
         reason: str | None = None,
         tempban_seconds: int | None = None,
@@ -205,8 +206,9 @@ class ProtectionActionsMixin(_ProtectionActionsMixinContract):
         tempban_seconds = int(tempban_seconds or config.get("tempban_seconds", 3600) or 3600)
         redact_enabled = bool(config.get("redact", False) if redact is None else redact)
         jid, normalized_nick = self._protection_subject(room, nick)
+        explicit_target_jid = self._protection_stable_jid(target_jid)
         actor = f"protection:{protection}"
-        target = jid or normalized_nick
+        target = explicit_target_jid or jid or normalized_nick
         now = time.time()
         punitive_action = action in {"kick", "tempban", "ban"}
         observe = bool(config.get("observe", False))

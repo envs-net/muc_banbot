@@ -246,14 +246,14 @@ async def test_mention_limit_counts_prefixed_display_nicks(fake_msg_factory: Cal
     msg = fake_msg_factory(
         room="room@conference.example.org",
         nick="Spammer",
-        body="hi ~creme adminbot_dev fab",
+        body="hi ~creme adminbot_dev @fab",
     )
 
     handled = await bot.protections_on_message(
         msg,
         "room@conference.example.org",
         "Spammer",
-        "hi ~creme adminbot_dev fab",
+        "hi ~creme adminbot_dev @fab",
     )
 
     assert handled is True
@@ -284,14 +284,14 @@ async def test_mention_limit_uses_xep0045_roster_cache(fake_msg_factory: Callabl
     msg = fake_msg_factory(
         room="room@conference.example.org",
         nick="Spammer",
-        body="hi ~creme adminbot_dev fab",
+        body="hi ~creme adminbot_dev @fab",
     )
 
     handled = await bot.protections_on_message(
         msg,
         "room@conference.example.org",
         "Spammer",
-        "hi ~creme adminbot_dev fab",
+        "hi ~creme adminbot_dev @fab",
     )
 
     assert handled is True
