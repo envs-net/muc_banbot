@@ -470,6 +470,8 @@ class ProtectionChecksMixinHost(ProtectionCoordinatorHost, Protocol):
     protection_join_windows: dict[str, deque[float]]
     protection_joined_at: dict[tuple[str, str], float]
     protection_first_message_seen: set[tuple[str, str]]
+    protection_known_participants: set[tuple[str, str]]
+    protection_persisted_known_participants: set[tuple[str, str]]
     protection_room_lockdown_until: dict[str, float]
 
     def protection_enabled(self, name: str) -> bool: ...
@@ -480,9 +482,21 @@ class ProtectionChecksMixinHost(ProtectionCoordinatorHost, Protocol):
 
     def _protection_is_recent_rejoin(self, room: str, subject: str, now: float) -> bool: ...
 
+    def _protection_participant_is_known(self, room: str, subject: str) -> bool: ...
+
+    def _protection_mark_participant_known(self, room: str, subject: str) -> bool: ...
+
     def _protection_subject(self, room: str, nick: str) -> tuple[str | None, str]: ...
 
     def _protection_known_nicks(self, room: str) -> list[str]: ...
+
+    async def remember_protection_participant(
+        self,
+        room: str,
+        subject: str,
+        *,
+        persistent: bool,
+    ) -> None: ...
 
     def _protection_is_exempt(
         self,
@@ -621,8 +635,15 @@ class ProtectionStorageMixinHost(Protocol):
 
     db: aiosqlite.Connection | None
     protections: dict[str, dict[str, Any]]
+    protection_known_participants: set[tuple[str, str]]
+    protection_persisted_known_participants: set[tuple[str, str]]
+    _protection_storage_ready: bool
 
     def init_protection_state(self) -> None: ...
+
+    def _protection_participant_key(self, room: str, subject: str) -> tuple[str, str]: ...
+
+    def _protection_mark_participant_known(self, room: str, subject: str) -> bool: ...
 
 
 class CommandRtblMixinHost(ActorJidResolverHost, Protocol):

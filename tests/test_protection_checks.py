@@ -298,6 +298,70 @@ async def test_first_media_does_not_trigger_on_second_message(fake_msg_factory) 
 
 
 @pytest.mark.asyncio
+async def test_first_media_ignores_known_participant_after_rejoin(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["FirstMessageMediaProtection"].update({"enabled": True, "action": "ban"})
+
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+    first = fake_msg_factory(room=ROOM, nick="Spammer", body="hello")
+    assert await bot.protections_on_message(first, ROOM, "Spammer", "hello") is False
+    assert (ROOM, "spam@example.org") in bot.protection_known_participants
+
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource-2")
+    media = fake_msg_factory(room=ROOM, nick="Spammer", body="https://upload.example.org/file.jpg")
+
+    handled = await bot.protections_on_message(
+        media,
+        ROOM,
+        "Spammer",
+        "https://upload.example.org/file.jpg",
+    )
+
+    assert handled is False
+    assert bot.bans == []
+
+
+@pytest.mark.asyncio
+async def test_first_media_observe_match_does_not_make_participant_known(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["FirstMessageMediaProtection"].update(
+        {"enabled": True, "observe": True, "action": "tempban"}
+    )
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+    media = fake_msg_factory(room=ROOM, nick="Spammer", body="https://upload.example.org/file.jpg")
+
+    handled = await bot.protections_on_message(
+        media,
+        ROOM,
+        "Spammer",
+        "https://upload.example.org/file.jpg",
+    )
+
+    assert handled is False
+    assert (ROOM, "spam@example.org") not in bot.protection_known_participants
+
+
+@pytest.mark.asyncio
+async def test_first_media_loaded_known_participant_is_ignored(fake_msg_factory) -> None:
+    bot = DummyProtections()
+    bot.protections["FirstMessageMediaProtection"].update({"enabled": True, "action": "ban"})
+    bot.protection_known_participants.add((ROOM, "spam@example.org"))
+
+    await bot.protection_on_join(ROOM, "Spammer", "spam@example.org/resource")
+    media = fake_msg_factory(room=ROOM, nick="Spammer", body="https://upload.example.org/file.jpg")
+
+    handled = await bot.protections_on_message(
+        media,
+        ROOM,
+        "Spammer",
+        "https://upload.example.org/file.jpg",
+    )
+
+    assert handled is False
+    assert bot.bans == []
+
+
+@pytest.mark.asyncio
 async def test_first_media_respects_join_grace(fake_msg_factory, monkeypatch) -> None:
     bot = DummyProtections()
     bot.protections["FirstMessageMediaProtection"].update({"enabled": True, "join_grace_seconds": 5, "action": "ban"})
@@ -590,6 +654,7 @@ async def test_join_hooks_ignore_initial_room_roster_population(fake_msg_factory
 
     assert bot.muc_plugin.room_configs == []
     assert (ROOM, "existing@example.org") not in bot.protection_joined_at
+    assert (ROOM, "existing@example.org") in bot.protection_known_participants
 
     bot.occupants[ROOM]["Existing"] = {"jid": "existing@example.org", "role": "participant", "affiliation": "member"}
     msg = fake_msg_factory(room=ROOM, nick="Existing", body="https://upload.example.org/existing.jpg")

@@ -38,7 +38,18 @@ class ProtectionStorageMixin(_ProtectionStorageMixinContract):
             )
             """
         )
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS protection_known_participants (
+                room TEXT NOT NULL,
+                jid TEXT NOT NULL,
+                first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                PRIMARY KEY (room, jid)
+            )
+            """
+        )
         await db.commit()
+        self._protection_storage_ready = True
 
     async def load_protections(self) -> None:
         """Load protection enabled state/config overrides from SQLite."""
@@ -64,6 +75,55 @@ class ProtectionStorageMixin(_ProtectionStorageMixinContract):
                 config.update(loaded)
             config["enabled"] = bool(enabled)
             self.protections[name] = config
+
+        async with db.execute(
+            "SELECT room, jid FROM protection_known_participants"
+        ) as cursor:
+            known_rows = await cursor.fetchall()
+        for room, jid in known_rows:
+            key = self._protection_participant_key(str(room), str(jid))
+            self._protection_mark_participant_known(*key)
+            self.protection_persisted_known_participants.add(key)
+
+    async def remember_protection_participant(
+        self,
+        room: str,
+        subject: str,
+        *,
+        persistent: bool,
+    ) -> None:
+        """Remember a participant for future FirstMessageMediaProtection checks.
+
+        Real JIDs are persisted so ordinary leave/rejoin cycles and bot restarts
+        do not make an established room participant look new again.  Nick-only
+        identities are kept in memory only because a nick is not a stable or
+        trustworthy cross-session identity.
+        """
+        key = self._protection_participant_key(room, subject)
+        self._protection_mark_participant_known(*key)
+        if not persistent or key in self.protection_persisted_known_participants:
+            return
+
+        db = getattr(self, "db", None)
+        if db is None:
+            return
+
+        if not getattr(self, "_protection_storage_ready", False):
+            await self.setup_protections_db()
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO protection_known_participants
+                (room, jid, first_seen_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                key[0],
+                key[1],
+                int(time.time()),
+            ),
+        )
+        await db.commit()
+        self.protection_persisted_known_participants.add(key)
 
     async def persist_protection(self, name: str) -> None:
         """Persist one protection config override."""

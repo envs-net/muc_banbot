@@ -49,6 +49,9 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         ))
         room_join_time = getattr(self, "room_join_time", {}).get(room)
         if room_join_time and join_grace and now - float(room_join_time) < join_grace:
+            subject = self._protection_join_subject(nick, jid)
+            if subject:
+                self._protection_mark_participant_known(room, subject)
             log.debug(
                 "Skipping protection join hook during initial room population in %s: nick=%s",
                 room,
@@ -166,7 +169,15 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         # enforcement rule for the same message.
         if await self._protection_check_flood(msg, room, nick, subject, now):
             return True
-        if await self._protection_check_first_media(msg, room, nick, subject, protection_body, now):
+        first_media_stop, remember_participant = await self._protection_check_first_media(
+            msg,
+            room,
+            nick,
+            subject,
+            protection_body,
+            now,
+        )
+        if first_media_stop:
             return True
         if await self._protection_check_similar_messages(msg, room, nick, subject, protection_body, now):
             return True
@@ -174,6 +185,12 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             return True
         if await self._protection_check_wordlist(msg, room, nick, subject, protection_body, now):
             return True
+        if remember_participant:
+            await self.remember_protection_participant(
+                room,
+                subject,
+                persistent=jid is not None,
+            )
         return False
 
     async def _protection_check_flood(self, msg, room: str, nick: str, subject: str, now: float) -> bool:
@@ -200,25 +217,36 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
         hits.clear()
         return not bool(config.get("observe", False))
 
-    async def _protection_check_first_media(self, msg, room: str, nick: str, subject: str, body: str, now: float) -> bool:
+    async def _protection_check_first_media(
+        self,
+        msg,
+        room: str,
+        nick: str,
+        subject: str,
+        body: str,
+        now: float,
+    ) -> tuple[bool, bool]:
+        """Return ``(stop_processing, remember_participant)`` for first-media checks."""
         protection = "FirstMessageMediaProtection"
         key = (room, subject)
         already_seen = key in self.protection_first_message_seen
         if not already_seen:
             self.protection_first_message_seen.add(key)
+        if self._protection_participant_is_known(room, subject):
+            return False, not already_seen
         if not self.protection_enabled(protection):
-            return False
+            return False, not already_seen
         if already_seen:
-            return False
+            return False, False
         joined_at = self.protection_joined_at.get(key)
         if joined_at is None:
-            return False
+            return False, True
         config = self.protection_config(protection)
         grace = max(0, int(config.get("join_grace_seconds", 600) or 0))
         if grace and now - joined_at > grace:
-            return False
+            return False, True
         if not message_looks_like_media(body):
-            return False
+            return False, True
         await self._protection_apply_action(
             protection=protection,
             room=room,
@@ -226,7 +254,7 @@ class ProtectionChecksMixin(_ProtectionChecksMixinContract):
             msg=msg,
             details={"first_message": True},
         )
-        return not bool(config.get("observe", False))
+        return not bool(config.get("observe", False)), False
 
 
     async def _protection_check_similar_messages(

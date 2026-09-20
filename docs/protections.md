@@ -28,7 +28,7 @@ Use `!protections <name> reset` to return a protection to its built-in defaults,
 | --- | --- | --- |
 | `FloodSpamProtection` | disabled | Detects too many messages from one user in a time window |
 | `SimilarMessageProtection` | disabled | Reacts when identical or highly similar messages appear repeatedly in a room |
-| `FirstMessageMediaProtection` | disabled | Reacts when a newly observed joiner sends media as their first message |
+| `FirstMessageMediaProtection` | disabled | Reacts when an unknown newly observed joiner sends media as their first message |
 | `MentionLimitProtection` | disabled | Reacts to messages mentioning too many current room occupants |
 | `WordListNewJoinerProtection` | disabled | Reacts to configured words/phrases from recent joiners |
 | `JoinWaveShortCircuitProtection` | disabled | Detects join waves and can set the room members-only and moderated |
@@ -43,7 +43,7 @@ Start with one protection at a time and use conservative actions until the behav
 | --- | --- | --- |
 | `FloodSpamProtection` | `notify` or short `tempban` | Tune `max_messages` and `window_seconds` from real room traffic before using permanent `ban` in busy rooms. |
 | `SimilarMessageProtection` | short `tempban` | Usually the highest-value spam detector. Keep `min_length` and `min_words` high enough to ignore normal short chatter. |
-| `FirstMessageMediaProtection` | short `tempban` | Useful for media-link spam from throwaway accounts; only acts after BanBot observed the join. |
+| `FirstMessageMediaProtection` | short `tempban` | Useful for media-link spam from throwaway accounts; established room participants are ignored. |
 | `MentionLimitProtection` | short `tempban` | Use a limit above normal room behavior; it counts known room occupants mentioned by display nick. |
 | `WordListNewJoinerProtection` | short `tempban` | Keep word lists specific to spam phrases; broad words can cause false positives for new users. |
 | `JoinWaveShortCircuitProtection` | `notify` first, then `lockdown` | Verify room-config support and bot rights before enabling lockdown in active rooms. |
@@ -146,7 +146,9 @@ See [Testing and CI](testing.md#live-protection-smoke-test) for setup, environme
 
 `SimilarMessageProtection` normalizes URLs and email addresses before comparison, so repeated spam with changing tracking URLs can still be detected. Short messages are ignored through `min_length` and `min_words` to avoid false positives from normal chatter.
 
-`FirstMessageMediaProtection` and `WordListNewJoinerProtection` only act on users whose join was observed by the running bot. This avoids false positives after a bot restart where existing occupants would otherwise look like new users.
+`FirstMessageMediaProtection` only treats a participant as new until BanBot has seen a non-matching first message from that participant. Known bare JIDs are persisted in SQLite, so an established user who leaves and later rejoins is ignored by this protection instead of being treated as a fresh account again. Nick-only identities are remembered only in memory because a nick is not a stable cross-session identity. Occupants already present when BanBot joins a room are also treated as known for that runtime.
+
+`WordListNewJoinerProtection` still acts only on users whose join was observed by the running bot. Initial room population is ignored so a bot restart does not make existing occupants look like new joiners.
 
 For XEP-0461 message replies, BanBot excludes the XEP-0428 reply fallback range before evaluating content-based protections. Quoted media URLs, mentions, blocked words, or similar text from the replied-to message therefore do not count as newly authored content; content written after the quote is still evaluated normally.
 

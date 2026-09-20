@@ -38,6 +38,9 @@ class ProtectionMixin(
         self.protection_join_windows: dict[str, deque[float]] = defaultdict(deque)
         self.protection_joined_at: dict[tuple[str, str], float] = {}
         self.protection_first_message_seen: set[tuple[str, str]] = set()
+        self.protection_known_participants: set[tuple[str, str]] = set()
+        self.protection_persisted_known_participants: set[tuple[str, str]] = set()
+        self._protection_storage_ready = False
         self.protection_trusted_reports: dict[tuple[str, str], list[tuple[float, str, str]]] = defaultdict(list)
         self.protection_room_lockdown_until: dict[str, float] = {}
         self.protection_recent_rejoin_subjects: dict[str, dict[str, float]] = defaultdict(dict)
@@ -55,6 +58,22 @@ class ProtectionMixin(
         """Return the stable subject key used for join/rejoin tracking."""
         normalized_jid = bare_jid(jid) if jid else None
         return normalized_jid or str(nick or "").lower()
+
+    def _protection_participant_key(self, room: str, subject: str) -> tuple[str, str]:
+        """Return the normalized key used for known-participant tracking."""
+        return str(room or "").strip().lower(), str(subject or "").strip().lower()
+
+    def _protection_participant_is_known(self, room: str, subject: str) -> bool:
+        """Return whether FirstMessageMediaProtection already knows this participant."""
+        return self._protection_participant_key(room, subject) in self.protection_known_participants
+
+    def _protection_mark_participant_known(self, room: str, subject: str) -> bool:
+        """Remember a participant in memory and report whether it was newly added."""
+        key = self._protection_participant_key(room, subject)
+        if not key[0] or not key[1] or key in self.protection_known_participants:
+            return False
+        self.protection_known_participants.add(key)
+        return True
 
     def protection_remember_current_occupants(self) -> None:
         """Remember current occupants so reconnect/restart waves do not look like raids.
@@ -84,6 +103,7 @@ class ProtectionMixin(
                 subject = self._protection_join_subject(str(nick), str(jid) if jid else None)
                 if subject:
                     remembered[subject] = now
+                    self._protection_mark_participant_known(room, subject)
 
             cutoff = now - grace
             for subject, seen_at in list(remembered.items()):

@@ -39,11 +39,13 @@ class FakeExecute:
 
 
 class FakeDb:
-    def __init__(self, rows=None) -> None:
+    def __init__(self, rows=None, known_rows=None) -> None:
         self.rows = list(rows or [])
+        self.known_rows = list(known_rows or [])
         self.executed: list[tuple[str, object]] = []
         self.commits = 0
         self.persisted: dict[str, tuple[int, str, int]] = {}
+        self.known_persisted: set[tuple[str, str]] = set()
 
     def execute(self, sql: str, params=None) -> FakeExecute:
         return FakeExecute(self, sql, params)
@@ -52,11 +54,17 @@ class FakeDb:
         self.executed.append((" ".join(sql.split()), params))
         normalized = sql.strip().upper()
         if normalized.startswith("SELECT"):
+            if "FROM PROTECTION_KNOWN_PARTICIPANTS" in normalized:
+                return FakeCursor(self.known_rows)
             return FakeCursor(self.rows)
         if normalized.startswith("INSERT INTO PROTECTIONS"):
             assert params is not None
             name, enabled, config_json, updated_at = params
             self.persisted[str(name)] = (int(enabled), str(config_json), int(updated_at))
+        if normalized.startswith("INSERT OR IGNORE INTO PROTECTION_KNOWN_PARTICIPANTS"):
+            assert params is not None
+            room, jid, _first_seen_at = params
+            self.known_persisted.add((str(room), str(jid)))
         return None
 
     async def commit(self) -> None:
@@ -92,6 +100,7 @@ async def test_setup_protections_db_creates_table_and_commits() -> None:
     await bot.setup_protections_db()
 
     assert any("CREATE TABLE IF NOT EXISTS protections" in sql for sql, _ in db.executed)
+    assert any("CREATE TABLE IF NOT EXISTS protection_known_participants" in sql for sql, _ in db.executed)
     assert db.commits == 1
 
 
@@ -151,3 +160,35 @@ async def test_load_protections_ignores_invalid_or_non_dict_config_json() -> Non
     assert bot.protections["MentionLimitProtection"]["max_mentions"] == 5
     assert bot.protections["PolicyChangeNotification"]["enabled"] is False
     assert bot.protections["PolicyChangeNotification"]["notify_bans"] is True
+
+
+@pytest.mark.asyncio
+async def test_load_protections_restores_known_participants() -> None:
+    room = "room@conference.example.org"
+    db = FakeDb(known_rows=[(room, "known@example.org")])
+    bot = DummyStorage(db=db)
+
+    await bot.load_protections()
+
+    assert (room, "known@example.org") in bot.protection_known_participants
+
+
+@pytest.mark.asyncio
+async def test_remember_protection_participant_persists_real_jid_once(monkeypatch) -> None:
+    db = FakeDb()
+    bot = DummyStorage(db=db)
+    monkeypatch.setattr("banbot.protections.storage.time.time", lambda: 1234.9)
+
+    await bot.remember_protection_participant(
+        "Room@Conference.Example.org",
+        "Known@Example.org",
+        persistent=True,
+    )
+    await bot.remember_protection_participant(
+        "Room@Conference.Example.org",
+        "Known@Example.org",
+        persistent=True,
+    )
+
+    assert ("room@conference.example.org", "known@example.org") in bot.protection_known_participants
+    assert db.known_persisted == {("room@conference.example.org", "known@example.org")}
