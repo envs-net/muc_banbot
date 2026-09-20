@@ -13,7 +13,7 @@ authors = [
     { name = "~creme", email = "creme@envs.net" },
 ]
 dependencies = [
-    "envs-xmpp>=1.3.0,<2.0",
+    "envs-xmpp>=1.4.0,<2.0",
     "slixmpp>=1.8,<2",
     "aiosqlite>=0.20,<1",
     "psutil>=5.9,<8",

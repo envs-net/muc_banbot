@@ -73,10 +73,10 @@ def test_deploy_shell_wrapper_is_executable_and_defaults_to_help():
 
 
 def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
-    dist_info = "envs_xmpp-1.3.0.dist-info"
+    dist_info = "envs_xmpp-1.4.0.dist-info"
     files = {
         "envs_xmpp_ops/__init__.py": (
-            '__version__ = "1.3.0"\n'
+            '__version__ = "1.4.0"\n'
             'from .deploy import DeploymentTarget\n'
             'def inspect_dependency_drift(*args, **kwargs):\n'
             '    return None\n'
@@ -85,7 +85,7 @@ def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
         f"{dist_info}/METADATA": (
             "Metadata-Version: 2.1\n"
             "Name: envs-xmpp\n"
-            "Version: 1.3.0\n"
+            "Version: 1.4.0\n"
         ),
         f"{dist_info}/WHEEL": (
             "Wheel-Version: 1.0\n"
@@ -102,7 +102,7 @@ def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
 
 
 def test_fresh_deploy_wrapper_bootstraps_before_shared_imports(tmp_path):
-    wheel = tmp_path / "envs_xmpp-1.3.0-py3-none-any.whl"
+    wheel = tmp_path / "envs_xmpp-1.4.0-py3-none-any.whl"
     _write_minimal_envs_xmpp_wheel(wheel)
 
     no_site_python = tmp_path / "python-no-site"
@@ -130,7 +130,7 @@ def test_fresh_deploy_wrapper_bootstraps_before_shared_imports(tmp_path):
 
     assert result.returncode == 2
     assert "--to is only valid with update" in result.stderr
-    deploy_python = tmp_path / "cache" / "envs-xmpp" / "deploy" / "1.3.0" / "bin" / "python"
+    deploy_python = tmp_path / "cache" / "envs-xmpp" / "deploy" / "1.4.0" / "bin" / "python"
     assert deploy_python.is_file()
 
 

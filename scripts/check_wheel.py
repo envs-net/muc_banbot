@@ -1,116 +1,36 @@
 #!/usr/bin/env python3
-"""Install the built wheel in isolation and verify packaged runtime assets."""
+"""Smoke-test the built BanBot wheel using shared release tooling."""
 
 from __future__ import annotations
 
-import hashlib
-import os
-import subprocess
-import sys
-import tempfile
-import venv
-import zipfile
 from pathlib import Path
 
+from _envs_xmpp_bootstrap import ensure_envs_xmpp
+
+ensure_envs_xmpp()
+
+from envs_xmpp_ops.release import WheelAsset, WheelCheckSpec, wheel_check_main  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
-ASSET = "avatar.png"
-
-
-def _digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def main() -> int:
-    wheels = sorted((ROOT / "dist").glob("muc_banbot-*.whl"))
-    if len(wheels) != 1:
-        print(f"Expected exactly one built muc-banbot wheel, found {len(wheels)}", file=sys.stderr)
-        return 1
-    wheel = wheels[0]
-
-    source_asset = ROOT / "banbot" / "bundled" / ASSET
-    expected = _digest(source_asset)
-    with zipfile.ZipFile(wheel) as archive:
-        names = set(archive.namelist())
-        member = f"banbot/bundled/{ASSET}"
-        if member not in names:
-            print(f"Wheel is missing packaged asset: {member}", file=sys.stderr)
-            return 1
-        actual = hashlib.sha256(archive.read(member)).hexdigest()
-        if actual != expected:
-            print("Wheel avatar differs from canonical bundled source", file=sys.stderr)
-            return 1
-
-        if "config_sample.py" not in names:
-            print("Wheel is missing operator sample: config_sample.py", file=sys.stderr)
-            return 1
-
-        entry_points = next((name for name in names if name.endswith(".dist-info/entry_points.txt")), None)
-        if entry_points is None:
-            print("Wheel is missing entry_points.txt", file=sys.stderr)
-            return 1
-        entry_text = archive.read(entry_points).decode("utf-8")
-        if "muc_banbot = banbot.cli:main" not in entry_text:
-            print("Wheel is missing the muc_banbot console entry point", file=sys.stderr)
-            return 1
-
-    with tempfile.TemporaryDirectory(prefix="muc-banbot-wheel-") as temp_name:
-        temp = Path(temp_name)
-        env_dir = temp / "venv"
-        venv.EnvBuilder(with_pip=True).create(env_dir)
-        python = env_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        subprocess.run(
-            [
-                str(python),
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "--force-reinstall",
-                str(wheel),
-            ],
-            cwd=temp,
-            check=True,
-        )
-        subprocess.run(
-            [str(python), "-m", "pip", "check"],
-            cwd=temp,
-            check=True,
-        )
-        code = """
-from banbot.bundled_assets import bundled_asset
-
-path = bundled_asset("avatar.png")
-assert path.is_file(), path
-assert "banbot/bundled/avatar.png" in path.as_posix(), path
-print("Wheel asset smoke test passed.")
-"""
-        subprocess.run([str(python), "-c", code], cwd=temp, check=True)
-
-        executable = env_dir / ("Scripts/muc_banbot.exe" if os.name == "nt" else "bin/muc_banbot")
-        result = subprocess.run(
-            [str(executable), "--version"],
-            cwd=temp,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(
-                f"Installed muc_banbot --version failed with exit code {result.returncode}",
-                file=sys.stderr,
-            )
-            if result.stdout:
-                print(result.stdout, file=sys.stderr, end="")
-            if result.stderr:
-                print(result.stderr, file=sys.stderr, end="")
-            return 1
-        if not result.stdout.strip().startswith("muc_banbot ") or "(envs-xmpp " not in result.stdout:
-            print(f"Unexpected muc_banbot --version output: {result.stdout!r}", file=sys.stderr)
-            return 1
-
-    print(f"Wheel smoke test passed: {wheel.name}")
-    return 0
+SPEC = WheelCheckSpec(
+    distribution="muc-banbot",
+    wheel_glob="muc_banbot-*.whl",
+    console_script="muc_banbot",
+    entry_point="banbot.cli:main",
+    version_prefix="muc_banbot ",
+    version_contains=("(envs-xmpp ",),
+    assets=(
+        WheelAsset(
+            source="banbot/bundled/avatar.png",
+            member="banbot/bundled/avatar.png",
+            resolver="banbot.bundled_assets:bundled_asset",
+            resolver_argument="avatar.png",
+            expected_runtime_fragment="banbot/bundled/avatar.png",
+        ),
+    ),
+    required_members=("config_sample.py",),
+)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(wheel_check_main(root=ROOT, spec=SPEC))
