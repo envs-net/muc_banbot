@@ -141,4 +141,4 @@ command = ["python", "-m", "envs_xmpp_ops.release_audit"]
 marker = "not integration"
 coverage-source = "banbot"
 coverage-report = "term-missing"
-coverage-fail-under = 55
+coverage-fail-under = 75

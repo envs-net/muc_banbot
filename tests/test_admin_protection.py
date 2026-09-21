@@ -42,6 +42,7 @@ class AdminBot(AdminMixin):
         self.admin_affiliation_query_forbidden_rooms = set()
         self.plugin = {"xep_0045": FakeMucPlugin()}
         self.boundjid = type("BoundJid", (), {"bare": "bot@example.test"})()
+        self.bot_admin_state = {}
         self.sent = []
 
     def bare_jid(self, jid):
@@ -271,3 +272,89 @@ async def test_explicit_affiliation_refresh_reprobes_room_after_forbidden():
         (room, "owner"),
         (room, "admin"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_check_bot_admin_rights_reports_success_when_joined_with_rights(monkeypatch):
+    admin_module = importlib.import_module("banbot.admin")
+    room = "room@conference.example.test"
+    monkeypatch.setattr(admin_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = AdminBot()
+    bot.occupants[room]["BanBot"] = {
+        "jid": "bot@example.test/resource",
+        "affiliation": "admin",
+        "role": "moderator",
+    }
+
+    await bot.check_bot_admin_rights()
+
+    assert bot.bot_admin_state == {room: True}
+    assert bot.sent == [
+        {
+            "mto": "admin@conference.example.test",
+            "mbody": "✅ Bot has admin/owner rights in all protected rooms.",
+            "mtype": "groupchat",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_check_bot_admin_rights_reports_not_joined_and_missing_rights(monkeypatch):
+    admin_module = importlib.import_module("banbot.admin")
+    admin_room = "admin@conference.example.test"
+    joined_room = "joined@conference.example.test"
+    missing_room = "missing@conference.example.test"
+    monkeypatch.setattr(admin_module, "ADMIN_ROOM", admin_room)
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(admin_module.asyncio, "sleep", no_sleep)
+    bot = AdminBot()
+    bot.protected_rooms = {joined_room, missing_room}
+    bot.occupants[joined_room] = {
+        "BanBot": {
+            "jid": "bot@example.test/resource",
+            "affiliation": "member",
+            "role": "participant",
+        }
+    }
+    bot.bot_admin_state[missing_room] = True
+
+    await bot.check_bot_admin_rights()
+
+    assert bot.bot_admin_state == {joined_room: False}
+    assert len(bot.sent) == 1
+    message = bot.sent[0]["mbody"]
+    assert "Not joined:\nmissing@conference.example.test" in message
+    assert "Joined without admin/owner rights:\njoined@conference.example.test" in message
+
+
+@pytest.mark.asyncio
+async def test_whoami_reports_admin_permissions_and_jid_in_admin_room(monkeypatch):
+    admin_module = importlib.import_module("banbot.admin")
+    admin_room = "admin@conference.example.test"
+    monkeypatch.setattr(admin_module, "ADMIN_ROOM", admin_room)
+    bot = AdminBot()
+
+    await bot._cmd_whoami(admin_room, "Root")
+
+    message = bot.sent[-1]["mbody"]
+    assert "JID: root@example.test" in message
+    assert "Affiliation: owner" in message
+    assert "✅ Can ban/kick users" in message
+    assert "✅ Can manage room" in message
+
+
+@pytest.mark.asyncio
+async def test_whoami_reports_regular_participant_without_exposing_jid_outside_admin_room(monkeypatch):
+    admin_module = importlib.import_module("banbot.admin")
+    monkeypatch.setattr(admin_module, "ADMIN_ROOM", "admin@conference.example.test")
+    bot = AdminBot()
+
+    await bot._cmd_whoami("room@conference.example.test", "Regular")
+
+    message = bot.sent[-1]["mbody"]
+    assert "❌ Regular participant" in message
+    assert "Affiliation: member" in message
+    assert "JID:" not in message

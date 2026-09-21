@@ -52,10 +52,16 @@ pytest --cov=banbot --cov-report=term-missing
 
 Coverage is intended as a regression guard, not as a goal by itself. Runtime-heavy modules that mostly wire Slixmpp or live XMPP behavior are better covered by focused regression tests and opt-in integration tests than by fragile mocks.
 
-Drone CI uses coverage and can enforce a minimum threshold, for example:
+The repository currently enforces a 75% branch-coverage floor. The threshold is
+kept deliberately below the measured full offline-suite baseline so ordinary
+refactoring has some headroom while meaningful coverage regressions still fail
+the gate. Raise it only after measuring the complete suite; do not add fragile
+tests merely to increase the percentage.
+
+Drone CI uses the same configured threshold, equivalent to:
 
 ```bash
-pytest --cov=banbot --cov-report=term-missing --cov-fail-under=55
+pytest --cov=banbot --cov-report=term-missing --cov-fail-under=75
 ```
 
 Runtime-heavy entrypoints such as `bot.py` may be excluded from coverage if they mainly wire Slixmpp runtime behavior.
