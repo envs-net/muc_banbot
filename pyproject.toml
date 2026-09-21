@@ -13,7 +13,7 @@ authors = [
     { name = "~creme", email = "creme@envs.net" },
 ]
 dependencies = [
-    "envs-xmpp>=1.4.0,<2.0",
+    "envs-xmpp>=1.5.0,<2.0",
     "slixmpp>=1.8,<2",
     "aiosqlite>=0.20,<1",
     "psutil>=5.9,<8",
@@ -42,7 +42,7 @@ muc_banbot = "banbot.cli:main"
 omemo = ["slixmpp-omemo>=2,<3"]
 dev = [
     "hypothesis>=6",
-    "mutmut>=3",
+    "mutmut==3.6.0",
     "mypy>=1.8,<2",
     "pip-audit>=2.7,<3",
     "ruff>=0.9,<1",
@@ -142,3 +142,8 @@ marker = "not integration"
 coverage-source = "banbot"
 coverage-report = "term-missing"
 coverage-fail-under = 75
+
+[tool.envs-xmpp.regression]
+baseline = "tests/regression-baseline.json"
+mutation-results = "mutants"
+coverage-json = ".coverage-regression.json"

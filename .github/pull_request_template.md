@@ -29,7 +29,8 @@ Describe what this pull request changes and why.
 - [ ] `pytest`
 - [ ] `pytest --cov=banbot --cov-report=term-missing`
 - [ ] `pytest -m property`
-- [ ] `PYTHONPATH="$PWD" mutmut run`
+- [ ] `./scripts/mutmut.sh run`
+- [ ] `./scripts/mutmut.sh check`
 - [ ] Live XMPP integration test
 - [ ] Not run, reason:
 

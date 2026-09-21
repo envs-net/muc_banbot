@@ -34,3 +34,5 @@ bans_import_*.csv
 import_*.csv
 
 *.log
+
+.coverage-regression.json

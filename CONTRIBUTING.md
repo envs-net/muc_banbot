@@ -56,7 +56,7 @@ pytest -m property
 Optional mutation testing:
 
 ```bash
-PYTHONPATH="$PWD" mutmut run
+./scripts/mutmut.sh run
 ```
 
 Live XMPP/OMEMO integration tests are opt-in and require a dedicated test environment. Do not run them against production rooms unless you know what you are doing.

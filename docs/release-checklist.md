@@ -19,8 +19,9 @@ The offline test suite should be green before tagging. Keep the configured cover
 Optional mutation run:
 
 ```bash
-PYTHONPATH="$PWD" mutmut run
-mutmut results
+./scripts/mutmut.sh fresh
+./scripts/mutmut.sh results
+./scripts/mutmut.sh check
 ```
 
 Optional live tests in a dedicated test environment:

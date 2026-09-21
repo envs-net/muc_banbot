@@ -119,12 +119,12 @@ When Hypothesis finds a failing example, it prints the smallest counterexample i
 Mutation testing is optional and slower. It is not part of Drone CI by default. Run it locally when changing critical parser, normalization, moderation, or RTBL logic.
 
 ```bash
-PYTHONPATH="$PWD" mutmut run
-mutmut results
+./scripts/mutmut.sh run
+./scripts/mutmut.sh results
 mutmut show <mutant-id>
 ```
 
-The explicit `PYTHONPATH` keeps the local `banbot` package importable inside mutmut's temporary `mutants/` workspace.
+The wrapper deliberately unsets an absolute repository `PYTHONPATH`; mutmut runs pytest inside its generated `mutants/` checkout, and the original checkout must not shadow mutated modules.
 
 The default mutmut configuration focuses on low-noise, high-value targets:
 
@@ -132,6 +132,8 @@ The default mutmut configuration focuses on low-noise, high-value targets:
 * `banbot/rtbl/apply.py`
 
 These modules have pure helper logic and RTBL business rules where mutation testing gives useful signal. Complex XMPP-heavy moderation flows are better covered by targeted regression tests and opt-in integration tests.
+
+After a completed run, execute `./scripts/mutmut.sh check`. The checked-in regression baseline accepts the currently reviewed survivors but rejects every new survivor. `no tests`, timeout, suspicious, and incomplete results always fail and cannot be accepted. Use `./scripts/mutmut.sh accept` only after intentionally reviewing a changed survivor set. The exact mutmut version is pinned and recorded in the baseline because mutant IDs are tool-version dependent; upgrade it only together with a fresh reviewed run and baseline update.
 
 Prioritize survived mutants as follows:
 

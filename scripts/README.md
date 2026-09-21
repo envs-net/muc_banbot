@@ -10,7 +10,7 @@ Run these helpers from the repository root inside the project virtualenv.
 | `deploy_profile.py` | Declarative envs-xmpp deployment profile used by the bootstrap deploy path. | Defines bot-specific defaults while shared deployment mechanics live in `envs_xmpp_ops`. |
 | `quality.sh` | Local release gate: compilation, config syntax, warning-strict tests, Ruff, focused mypy and dependency audit. | `./scripts/quality.sh`, `./scripts/quality.sh --fix` |
 | `test.sh` | Fast non-integration pytest wrapper with warnings treated as errors. | `./scripts/test.sh`, `./scripts/test.sh --coverage`, `./scripts/test.sh --last-failed` |
-| `check_release_tag.py` | Thin wrapper over `envs_xmpp_ops.release`; declares `banbot/_version.py` as the package version source. | `python scripts/check_release_tag.py v3.2.0` |
+| `check_release_tag.py` | Thin wrapper over `envs_xmpp_ops.release`; declares `banbot/_version.py` as the package version source. | `python scripts/check_release_tag.py v3.3.0` |
 | `check_wheel.py` | Thin wrapper over the shared wheel checker; declares the BanBot entry point, required members and runtime asset. | `rm -rf dist && python -m build && python scripts/check_wheel.py` |
 
 `quality.sh` and `test.sh` intentionally use the same shared runners as the
