@@ -7,7 +7,8 @@ Use this before tagging a new release.
 ```bash
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt -r requirements-dev.txt
+python -m pip install -c constraints/python313.txt -e ".[dev]"
+python -m pip check
 ./scripts/quality.sh
 ./scripts/test.sh --coverage
 ./scripts/deploy.sh status
@@ -16,7 +17,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 
 The offline test suite should be green before tagging. Keep the configured coverage threshold stable unless there is a deliberate reason to change it.
 
-Optional mutation run:
+Run the final mutation regression gate:
 
 ```bash
 ./scripts/mutmut.sh fresh

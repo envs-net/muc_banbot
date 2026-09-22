@@ -116,7 +116,7 @@ When Hypothesis finds a failing example, it prints the smallest counterexample i
 
 ## Mutation Testing
 
-Mutation testing is optional and slower. It is not part of Drone CI by default. Run it locally when changing critical parser, normalization, moderation, or RTBL logic.
+Mutation testing is slower than the regular suite. The curated mutation regression gate runs for release tags in CI and should also be run locally when changing critical parser, normalization, moderation, or RTBL logic.
 
 ```bash
 ./scripts/mutmut.sh run

@@ -15,9 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version:
-          - "3.12"
-          - "3.13"
+        include:
+          - python-version: "3.12"
+            constraints: constraints/python312.txt
+          - python-version: "3.13"
+            constraints: constraints/python313.txt
 
     steps:
       - uses: actions/checkout@v7
@@ -31,9 +33,10 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+            ${{ matrix.constraints }}
 
       - name: Install package and development tools
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -c ${{ matrix.constraints }} -e ".[dev]"
 
       - name: Verify dependency environment
         run: python -m pip check
@@ -45,9 +48,38 @@ jobs:
         if: matrix.python-version == '3.13'
         run: sh scripts/quality.sh --skip-tests
 
+  mutation:
+    name: Mutation regression gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            constraints/python313.txt
+
+      - name: Install package and development tools
+        run: python -m pip install -c constraints/python313.txt -e ".[dev]"
+
+      - name: Verify dependency environment
+        run: python -m pip check
+
+      - name: Run mutation regression gate
+        run: |
+          ./scripts/mutmut.sh fresh
+          ./scripts/mutmut.sh check
+
   build:
     name: Build release distributions
-    needs: test
+    needs: [test, mutation]
     runs-on: ubuntu-latest
 
     steps:
