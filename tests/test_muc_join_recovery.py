@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from types import SimpleNamespace
 
@@ -126,6 +127,26 @@ class FailingJoinPlugin:
         self.leave_calls.append((room, nick))
 
 
+class RejectedJoinPlugin(FailingJoinPlugin):
+    async def join_muc_wait(self, room, nick, **kwargs):
+        self.calls += 1
+
+        class XMPPError(Exception):
+            pass
+
+        class PresenceError(XMPPError):
+            condition = "registration-required"
+            text = "members only"
+
+        raise PresenceError()
+
+
+class UnexpectedJoinPlugin(FailingJoinPlugin):
+    async def join_muc_wait(self, room, nick, **kwargs):
+        self.calls += 1
+        raise KeyError("broken-room-state")
+
+
 def test_muc_uses_shared_bot_occupant_lookup():
     assert "_bot_occupant_entry" not in MucMixin.__dict__
     assert MucMixin._bot_occupant_entry is BotOccupantMixin._bot_occupant_entry
@@ -173,6 +194,56 @@ async def test_failed_wait_join_is_retried_and_consumed_without_orphaned_task():
     assert ROOM_JID not in bot.room_join_time
     assert ROOM_JID not in bot.room_join_events
     assert orphaned_errors == []
+
+
+@pytest.mark.asyncio
+async def test_failed_wait_join_logs_timeout_without_traceback(caplog):
+    bot = HealthRejoinBot()
+    plugin = FailingJoinPlugin()
+    bot.plugin = {"xep_0045": plugin}
+    caplog.set_level(logging.WARNING, logger="banbot.muc")
+
+    joined = await bot.ensure_muc_joined(ROOM_JID, timeout=0.1, retries=1)
+
+    assert joined is False
+    record = caplog.records[-1]
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is None
+    assert "MUC join timed out" in record.getMessage()
+
+
+@pytest.mark.asyncio
+async def test_failed_wait_join_logs_presence_rejection_compactly(caplog):
+    bot = HealthRejoinBot()
+    plugin = RejectedJoinPlugin()
+    bot.plugin = {"xep_0045": plugin}
+    caplog.set_level(logging.WARNING, logger="banbot.muc")
+
+    joined = await bot.ensure_muc_joined(ROOM_JID, timeout=0.1, retries=1)
+
+    assert joined is False
+    record = caplog.records[-1]
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is None
+    assert "MUC join rejected" in record.getMessage()
+    assert "registration-required: members only" in record.getMessage()
+
+
+@pytest.mark.asyncio
+async def test_failed_wait_join_preserves_traceback_for_unexpected_error(caplog):
+    bot = HealthRejoinBot()
+    plugin = UnexpectedJoinPlugin()
+    bot.plugin = {"xep_0045": plugin}
+    caplog.set_level(logging.ERROR, logger="banbot.muc")
+
+    joined = await bot.ensure_muc_joined(ROOM_JID, timeout=0.1, retries=1)
+
+    assert joined is False
+    record = caplog.records[-1]
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None
+    assert "MUC join failed" in record.getMessage()
+    assert "KeyError" in record.getMessage()
 
 @pytest.mark.asyncio
 async def test_join_uses_runtime_timeout_and_retry_settings():

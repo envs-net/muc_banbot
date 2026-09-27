@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING
 
 from envs_xmpp_core.runtime.reconnect import run_reconnect_loop
+from envs_xmpp_core.xmpp import muc_join_error_kind, muc_join_error_summary
 from envs_xmpp_core.xmpp.muc_join import join_muc_confirmed
 from envs_xmpp_core.xmpp.occupants import (
     normalize_affiliation,
@@ -220,13 +221,32 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
         error = result.error or TimeoutError(
             f"No self-presence received within {float(timeout):g}s"
         )
-        log.warning(
-            "⚠️ MUC join failed for %s via %s after %d attempt(s): %s",
-            room,
-            result.api_name,
-            result.attempts,
-            str(error).strip() or type(error).__name__,
-        )
+        kind = muc_join_error_kind(error)
+        detail = muc_join_error_summary(error)
+        if kind == "timeout":
+            log.warning(
+                "⚠️ MUC join timed out for %s via %s after %d attempt(s)",
+                room,
+                result.api_name,
+                result.attempts,
+            )
+        elif kind == "rejected":
+            log.warning(
+                "⚠️ MUC join rejected for %s via %s after %d attempt(s): %s",
+                room,
+                result.api_name,
+                result.attempts,
+                detail,
+            )
+        else:
+            log.error(
+                "❌ MUC join failed for %s via %s after %d attempt(s): %s",
+                room,
+                result.api_name,
+                result.attempts,
+                detail,
+                exc_info=(type(error), error, error.__traceback__),
+            )
         self.room_join_time.pop(room, None)
         getattr(self, "room_join_events", {}).pop(room, None)
         return False
