@@ -3,6 +3,7 @@ branch = True
 source = banbot
 omit =
     banbot/__pycache__/*
+    banbot/contracts/*
 
 [report]
 show_missing = True
