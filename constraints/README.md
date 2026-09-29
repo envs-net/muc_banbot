@@ -1,10 +1,21 @@
-# Constraints
+# Dependency constraints
 
-Use the file matching the interpreter when installing the bot. Snapshots are provided for Python 3.12, 3.13, and 3.14, for example:
+`python312.txt`, `python313.txt`, and `python314.txt` are fully resolved dependency
+snapshots for muc_banbot runtime and development dependencies, including the
+shared `envs-xmpp[omemo]` dependency closure.
 
-```sh
-python3 -m pip install -c constraints/python314.txt -e .
+After changing dependency ranges, refresh all supported Python snapshots on a
+networked development host and review the resulting diff:
+
+```bash
+scripts/update-constraints.sh 3.12 --refresh
+scripts/update-constraints.sh 3.13 --refresh
+scripts/update-constraints.sh 3.14 --refresh
 ```
 
-`envs-xmpp` is intentionally pinned exactly while the project dependency
-uses the compatible `>=1.6.0,<2.0` range.
+Reproduce an existing snapshot without deliberately upgrading dependencies by
+omitting `--refresh`. The update script installs into a clean virtualenv, writes
+the complete dependency closure, and validates it with
+`scripts/check_constraints.py`.
+
+Always use the snapshot matching the Python minor version.

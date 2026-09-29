@@ -57,8 +57,9 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
         self._configure_omemo_dependency_logging()
         if not omemo_package.OMEMO_AVAILABLE or omemo_package.XEP_0384Impl is None:
             log.warning(
-                "OMEMO: enabled but optional dependencies are missing; continuing with OMEMO disabled. "
-                "Install libsodium/libxeddsa, then pip install -r requirements-omemo.txt."
+                "OMEMO: enabled but the runtime is incomplete; continuing with OMEMO disabled. "
+                "Install libsodium/libxeddsa and reinstall the normal project dependencies; "
+                "requirements-omemo.txt remains a compatibility installer."
             )
             self.omemo_enabled = False
             return
@@ -126,7 +127,7 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
         if mtype == "groupchat":
             recipients = await self._omemo_recipients_for_room(mto)
         else:
-            recipients = JID(JID(mto).bare)
+            recipients = self._omemo_recipient_for_chat(mto)
         if isinstance(recipients, set) and not recipients:
             raise RuntimeError(f"No OMEMO recipients available for {mto}")
         return await encrypt_and_send(plugin, msg, recipients, mto=mto)
@@ -193,6 +194,39 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
                 msg["html"]["body"] = value
             else:
                 log.debug("OMEMO: ignoring unsupported message kwarg for encrypted send: %s", key)
+
+    def _omemo_recipient_for_chat(self, target: object) -> JID:
+        """Resolve a direct chat or MUC-PM target to the real bare JID."""
+        jid = JID(str(target))
+        room = normalize_bare_jid(jid.bare)
+        nick = str(jid.resource or "").strip()
+        if nick and room:
+            occupants = self.occupants.get(room)
+            if occupants is None:
+                occupants = next(
+                    (
+                        cached
+                        for cached_room, cached in self.occupants.items()
+                        if str(cached_room).casefold() == room.casefold()
+                    ),
+                    None,
+                )
+            if isinstance(occupants, dict):
+                info = occupants.get(nick)
+                if info is None:
+                    info = next(
+                        (
+                            cached_info
+                            for cached_nick, cached_info in occupants.items()
+                            if str(cached_nick).casefold() == nick.casefold()
+                        ),
+                        None,
+                    )
+                if isinstance(info, dict):
+                    real_bare = normalize_bare_jid(info.get("jid"))
+                    if real_bare:
+                        return JID(real_bare)
+        return JID(jid.bare)
 
     async def _omemo_recipients_for_room(self, room_jid: str) -> set[JID]:
         room = normalize_bare_jid(room_jid)

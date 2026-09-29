@@ -13,6 +13,7 @@ _BACKUP_MANIFEST_ENTRY = "manifest.json"
 _BACKUP_DATABASE_ENTRY = "database.sqlite3"
 _BACKUP_CONFIG_ENTRY = "config.py"
 _BACKUP_OMEMO_ENTRY = "omemo.json"
+_BACKUP_OMEMO_IDENTITY_ENTRY = "omemo.identity.json"
 
 DatabaseBackup = ManagedFile
 
@@ -25,4 +26,5 @@ __all__ = [
     "_BACKUP_DATABASE_ENTRY",
     "_BACKUP_CONFIG_ENTRY",
     "_BACKUP_OMEMO_ENTRY",
+    "_BACKUP_OMEMO_IDENTITY_ENTRY",
 ]

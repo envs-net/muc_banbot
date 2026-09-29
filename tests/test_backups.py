@@ -371,6 +371,11 @@ async def test_backup_verify_rejects_invalid_omemo_companion(backup_config, tmp_
     omemo_path = tmp_path / "data" / "omemo.json"
     omemo_path.parent.mkdir(parents=True)
     omemo_path.write_text('{"ok": true}', encoding="utf-8")
+    omemo_identity_path = omemo_path.with_name("omemo.identity.json")
+    omemo_identity_path.write_text(
+        '{"jid": "bot@example.org", "resource": "service", "nick": "BanBot"}',
+        encoding="utf-8",
+    )
     monkeypatch.setattr(backups_module.config, "DB_BACKUP_INCLUDE_OMEMO", True, raising=False)
     monkeypatch.setattr(backups_module.config, "OMEMO_STORAGE_FILE", str(omemo_path), raising=False)
 
@@ -382,6 +387,7 @@ async def test_backup_verify_rejects_invalid_omemo_companion(backup_config, tmp_
         omemo_backup = pathlib.Path(backup_path)
         with zipfile.ZipFile(omemo_backup) as archive:
             assert "omemo.json" in archive.namelist()
+            assert "omemo.identity.json" in archive.namelist()
         rewrite_zip_entry(omemo_backup, "omemo.json", "{not json")
 
         await bot.cmd_backup(["verify", "latest"], "admin@conference.example.org")
@@ -512,6 +518,7 @@ async def test_failed_restore_rolls_back_database_config_and_omemo(
 
     config_path = pathlib.Path(backups_module.config.__file__)
     omemo_path = tmp_path / "omemo.json"
+    omemo_identity_path = tmp_path / "omemo.identity.json"
     monkeypatch.setattr(backups_module.config, "OMEMO_STORAGE_FILE", str(omemo_path), raising=False)
     monkeypatch.setattr(backups_module.config, "DB_BACKUP_INCLUDE_OMEMO", True, raising=False)
 
@@ -522,6 +529,10 @@ async def test_failed_restore_rolls_back_database_config_and_omemo(
         await bot.db.commit()
         config_path.write_text('JID = "backup@example.org"\nPASSWORD = "backup-secret"\n', encoding="utf-8")
         omemo_path.write_text('{"state": "backup"}\n', encoding="utf-8")
+        omemo_identity_path.write_text(
+            '{"jid": "backup@example.org", "resource": "service", "nick": "BanBot"}\n',
+            encoding="utf-8",
+        )
 
         ok, backup_path = await bot.create_database_backup("manual", actor="admin@example.org")
         assert ok is True
@@ -531,8 +542,12 @@ async def test_failed_restore_rolls_back_database_config_and_omemo(
         await bot.db.commit()
         current_config = 'JID = "current@example.org"\nPASSWORD = "current-secret"\n'
         current_omemo = '{"state": "current"}\n'
+        current_omemo_identity = (
+            '{"jid": "current@example.org", "resource": "service", "nick": "BanBot"}\n'
+        )
         config_path.write_text(current_config, encoding="utf-8")
         omemo_path.write_text(current_omemo, encoding="utf-8")
+        omemo_identity_path.write_text(current_omemo_identity, encoding="utf-8")
 
         # The selected backup contains OMEMO, but the safety backup deliberately
         # does not. Rollback must therefore use the independent pre-restore file
@@ -566,6 +581,7 @@ async def test_failed_restore_rolls_back_database_config_and_omemo(
             assert await cursor.fetchall() == [("current@conference.example.org",)]
         assert config_path.read_text(encoding="utf-8") == current_config
         assert omemo_path.read_text(encoding="utf-8") == current_omemo
+        assert omemo_identity_path.read_text(encoding="utf-8") == current_omemo_identity
     finally:
         if bot.db:
             await bot.db.close()
@@ -747,3 +763,78 @@ async def test_restore_retains_safety_backup_even_when_keep_limit_is_one(
         assert [item.path for item in bot.list_database_backups()] == [pathlib.Path(next_path)]
     finally:
         await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_omemo_backup_and_restore_keep_storage_identity_pair(
+    backup_config,
+    tmp_path,
+    monkeypatch,
+):
+    backups_module = importlib.import_module("banbot.backups")
+    omemo_path = tmp_path / "omemo.json"
+    identity_path = tmp_path / "omemo.identity.json"
+    monkeypatch.setattr(
+        backups_module.config, "OMEMO_STORAGE_FILE", str(omemo_path), raising=False
+    )
+    monkeypatch.setattr(
+        backups_module.config, "DB_BACKUP_INCLUDE_OMEMO", True, raising=False
+    )
+    omemo_path.write_text('{"state": "backup"}\n', encoding="utf-8")
+    identity_path.write_text(
+        '{"jid": "backup@example.org", "resource": "service", "nick": "BanBot"}\n',
+        encoding="utf-8",
+    )
+
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, backup_path = await bot.create_database_backup("manual")
+        assert ok is True
+        with zipfile.ZipFile(backup_path) as archive:
+            assert {"omemo.json", "omemo.identity.json"} <= set(archive.namelist())
+
+        omemo_path.write_text('{"state": "current"}\n', encoding="utf-8")
+        identity_path.write_text(
+            '{"jid": "current@example.org", "resource": "service", "nick": "BanBot"}\n',
+            encoding="utf-8",
+        )
+
+        ok, message = await bot.restore_database_backup(pathlib.Path(backup_path).name)
+        assert ok is True
+        assert "storage and identity metadata were restored" in message
+        assert omemo_path.read_text(encoding="utf-8") == '{"state": "backup"}\n'
+        assert "backup@example.org" in identity_path.read_text(encoding="utf-8")
+    finally:
+        if bot.db:
+            await bot.db.close()
+
+
+@pytest.mark.asyncio
+async def test_omemo_backup_skips_incomplete_storage_identity_pair(
+    backup_config,
+    tmp_path,
+    monkeypatch,
+):
+    backups_module = importlib.import_module("banbot.backups")
+    omemo_path = tmp_path / "omemo.json"
+    omemo_path.write_text('{"state": "orphan"}\n', encoding="utf-8")
+    monkeypatch.setattr(
+        backups_module.config, "OMEMO_STORAGE_FILE", str(omemo_path), raising=False
+    )
+    monkeypatch.setattr(
+        backups_module.config, "DB_BACKUP_INCLUDE_OMEMO", True, raising=False
+    )
+
+    bot = BackupBot()
+    await bot.setup_db(create_startup_backup=False)
+    try:
+        ok, backup_path = await bot.create_database_backup("manual")
+        assert ok is True
+        with zipfile.ZipFile(backup_path) as archive:
+            names = set(archive.namelist())
+        assert "omemo.json" not in names
+        assert "omemo.identity.json" not in names
+    finally:
+        if bot.db:
+            await bot.db.close()

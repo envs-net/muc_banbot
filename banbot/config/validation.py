@@ -286,9 +286,10 @@ class ConfigValidationMixin:
         if omemo_enabled:
             if importlib.util.find_spec("slixmpp_omemo") is None or importlib.util.find_spec("omemo") is None:
                 warnings.append(
-                    "OMEMO_ENABLED=True but optional OMEMO dependencies are not installed; "
-                    "the bot will start with OMEMO disabled. Install requirements-omemo.txt "
-                    "after installing system libraries such as libsodium-dev and libxeddsa-dev."
+                    "OMEMO_ENABLED=True but the OMEMO runtime is incomplete; "
+                    "the bot will start with OMEMO disabled. Reinstall the normal project "
+                    "dependencies after installing system libraries such as libsodium-dev "
+                    "and libxeddsa-dev; requirements-omemo.txt remains a compatibility installer."
                 )
 
             omemo_storage_raw = str(config_value("OMEMO_STORAGE_FILE", "data/omemo.json")).strip()

@@ -94,6 +94,11 @@ class BackupVerifyMixin(_BackupVerifyMixinContract):
                     lines.append("ℹ️ config.py companion: not present")
 
                 omemo_source = sources.get("omemo")
+                omemo_identity_source = sources.get("omemo_identity")
+                if (omemo_source is None) != (omemo_identity_source is None):
+                    lines.append(
+                        "⚠️ OMEMO companion pair is incomplete; OMEMO state will not be restored"
+                    )
                 if omemo_source is not None:
                     try:
                         text = await run_blocking_io(omemo_source.read_text, encoding="utf-8")
@@ -105,6 +110,19 @@ class BackupVerifyMixin(_BackupVerifyMixinContract):
                         return False, "\n".join(lines)
                 else:
                     lines.append("ℹ️ OMEMO companion: not present")
+                if omemo_identity_source is not None:
+                    try:
+                        text = await run_blocking_io(
+                            omemo_identity_source.read_text, encoding="utf-8"
+                        )
+                        if text.strip():
+                            json.loads(text)
+                        lines.append("✅ OMEMO identity metadata: readable JSON")
+                    except Exception as exc:
+                        lines.append(f"❌ OMEMO identity metadata check failed: {exc}")
+                        return False, "\n".join(lines)
+                else:
+                    lines.append("ℹ️ OMEMO identity metadata: not present")
 
                 archive_verification = await run_blocking_io(
                     verify_backup_archive,
@@ -144,6 +162,11 @@ class BackupVerifyMixin(_BackupVerifyMixinContract):
             lines.append("ℹ️ config.py companion: not present")
 
         omemo_backup = self._omemo_backup_path_for(backup.path)
+        omemo_identity_backup = self._omemo_identity_backup_path_for(backup.path)
+        if omemo_backup.is_file() != omemo_identity_backup.is_file():
+            lines.append(
+                "⚠️ OMEMO companion pair is incomplete; OMEMO state will not be restored"
+            )
         if omemo_backup.is_file():
             try:
                 text = await run_blocking_io(omemo_backup.read_text, encoding="utf-8")
@@ -155,5 +178,18 @@ class BackupVerifyMixin(_BackupVerifyMixinContract):
                 return False, "\n".join(lines)
         else:
             lines.append("ℹ️ OMEMO companion: not present")
+        if omemo_identity_backup.is_file():
+            try:
+                text = await run_blocking_io(
+                    omemo_identity_backup.read_text, encoding="utf-8"
+                )
+                if text.strip():
+                    json.loads(text)
+                lines.append("✅ OMEMO identity metadata: readable JSON")
+            except Exception as exc:
+                lines.append(f"❌ OMEMO identity metadata check failed: {exc}")
+                return False, "\n".join(lines)
+        else:
+            lines.append("ℹ️ OMEMO identity metadata: not present")
 
         return True, "\n".join(lines)

@@ -311,7 +311,7 @@ def test_validate_config_warns_but_does_not_error_when_omemo_dependency_missing(
 
     assert "OMEMO_ENABLED=True requires optional dependency slixmpp-omemo>=2,<3" not in errors
     assert any(
-        "OMEMO_ENABLED=True but optional OMEMO dependencies are not installed"
+        "OMEMO_ENABLED=True but the OMEMO runtime is incomplete"
         in warning
         for warning in warnings
     )

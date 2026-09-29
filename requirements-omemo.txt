@@ -1,2 +1,2 @@
-# Optional OMEMO transport support via shared envs-xmpp core.
-envs-xmpp[omemo]>=1.6.0,<2.0
+# Compatibility installer: OMEMO is already part of the default bot runtime.
+envs-xmpp[omemo]>=1.6.1,<2.0

@@ -43,7 +43,8 @@ Typical archive contents:
 manifest.json
 database.sqlite3
 config.py       optional
-omemo.json      optional
+omemo.json             optional (paired)
+omemo.identity.json    optional (paired)
 ```
 
 The manifest describes the backup format and which files are part of the archive. It allows BanBot to verify that the file is really a BanBot backup before restore and makes future format upgrades possible.
@@ -63,7 +64,8 @@ Conceptual manifest structure:
   "files": {
     "database": "database.sqlite3",
     "config": "config.py",
-    "omemo": "omemo.json"
+    "omemo": "omemo.json",
+    "omemo_identity": "omemo.identity.json"
   }
 }
 ```
@@ -82,7 +84,7 @@ When a matching `config.py` companion is available, it is included as `config.py
 
 ### OMEMO Companion
 
-When OMEMO is enabled and `DB_BACKUP_INCLUDE_OMEMO=True`, the configured OMEMO storage file is included as `omemo.json` if it exists and is readable.
+When OMEMO is enabled and `DB_BACKUP_INCLUDE_OMEMO=True`, BanBot includes OMEMO state only as a complete pair: `omemo.json` plus the matching `omemo.identity.json`. If only one side exists, both are skipped to avoid creating a restore archive with ambiguous cryptographic identity.
 
 OMEMO storage contains identity/session material. Treat backup archives as private secrets.
 
@@ -100,6 +102,8 @@ Verification checks:
 * the SQLite database passes `PRAGMA integrity_check`
 * `config.py` compiles as valid Python when present
 * `omemo.json` parses as valid JSON when present
+* `omemo.identity.json` parses as valid JSON when present
+* an incomplete OMEMO pair is reported and is never restored
 
 Verification never replaces the active database.
 
@@ -133,7 +137,7 @@ If verification fails, restore is aborted before active files are replaced.
 
 ### Restoring older OMEMO state
 
-When a backup contains `omemo.json`, restore intentionally puts that OMEMO
+When a backup contains both `omemo.json` and `omemo.identity.json`, restore intentionally puts that OMEMO
 identity/session state back in place together with the other managed files.
 This is useful for current backups and host migrations, but an older backup can
 contain session state that is behind the state already used by remote OMEMO

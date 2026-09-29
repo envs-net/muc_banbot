@@ -7,10 +7,17 @@ import pathlib
 import zipfile
 from typing import Any
 
+from envs_xmpp_core.xmpp.omemo import identity_metadata_path
+
 import config
 
 from ..managed_files import ManagedFile, format_file_size, list_managed_files, resolve_managed_file
-from .common import _BACKUP_CONFIG_ENTRY, _BACKUP_OMEMO_ENTRY, _BACKUP_SAFE_RE
+from .common import (
+    _BACKUP_CONFIG_ENTRY,
+    _BACKUP_OMEMO_ENTRY,
+    _BACKUP_OMEMO_IDENTITY_ENTRY,
+    _BACKUP_SAFE_RE,
+)
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +68,11 @@ class BackupBaseMixin:
             return None
         return pathlib.Path(str(raw_path)).expanduser()
 
+    def _omemo_identity_path(self) -> pathlib.Path | None:
+        """Return identity metadata paired with the configured OMEMO store."""
+        storage = self._omemo_storage_path()
+        return identity_metadata_path(storage) if storage is not None else None
+
     def _config_backup_path_for(self, backup_path: pathlib.Path) -> pathlib.Path:
         """Return the legacy companion config.py backup path for a database snapshot."""
         return backup_path.with_name(f"{backup_path.name}.config.py")
@@ -68,6 +80,10 @@ class BackupBaseMixin:
     def _omemo_backup_path_for(self, backup_path: pathlib.Path) -> pathlib.Path:
         """Return the legacy companion OMEMO storage backup path for a database snapshot."""
         return backup_path.with_name(f"{backup_path.name}.omemo.json")
+
+    def _omemo_identity_backup_path_for(self, backup_path: pathlib.Path) -> pathlib.Path:
+        """Return the legacy companion OMEMO identity metadata backup path."""
+        return backup_path.with_name(f"{backup_path.name}.omemo.identity.json")
 
     def _is_backup_archive(self, backup_path: pathlib.Path) -> bool:
         """Return True when the managed backup is a ZIP archive."""
@@ -93,6 +109,11 @@ class BackupBaseMixin:
             return _BACKUP_OMEMO_ENTRY in self._backup_archive_names(backup_path)
         return self._omemo_backup_path_for(backup_path).is_file()
 
+    def _has_omemo_identity_backup(self, backup_path: pathlib.Path) -> bool:
+        if self._is_backup_archive(backup_path):
+            return _BACKUP_OMEMO_IDENTITY_ENTRY in self._backup_archive_names(backup_path)
+        return self._omemo_identity_backup_path_for(backup_path).is_file()
+
     def _is_backup_supported_database(self, db_path: pathlib.Path | None = None) -> bool:
         path = db_path or self._database_path()
         return str(path) not in ("", ":memory:")
@@ -110,6 +131,8 @@ class BackupBaseMixin:
             companions.append("config.py")
         if self._has_omemo_backup(backup_path):
             companions.append("omemo.json")
+        if self._has_omemo_identity_backup(backup_path):
+            companions.append("omemo.identity.json")
         return companions
 
     def _format_backup_entry(self, backup: ManagedFile, index: int | None = None) -> str:
@@ -119,14 +142,14 @@ class BackupBaseMixin:
         return f"{prefix}{backup.name} ({self._format_backup_size(backup.size)}, {backup.mtime_text}{companion_suffix})"
 
     def _is_database_backup_file(self, path: pathlib.Path) -> bool:
-        return path.is_file() and not path.name.endswith((".config.py", ".omemo.json"))
+        return path.is_file() and not path.name.endswith((".config.py", ".omemo.json", ".omemo.identity.json"))
 
     def list_database_backups(self) -> list[ManagedFile]:
         """Return managed backup files sorted newest first."""
         return list_managed_files(
             self._database_backup_dir(),
             self._database_backup_pattern(),
-            exclude_suffixes=(".config.py", ".omemo.json"),
+            exclude_suffixes=(".config.py", ".omemo.json", ".omemo.identity.json"),
             predicate=self._is_database_backup_file,
         )
 

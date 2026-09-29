@@ -2,7 +2,7 @@
 
 BanBot can optionally send OMEMO-encrypted replies for encrypted admin commands.
 
-OMEMO support is optional. The bot works normally without OMEMO dependencies installed.
+OMEMO transport is opt-in through configuration, while its Python dependencies are part of the normal BanBot runtime so enabling it cannot be forgotten during deployment.
 
 ## Configuration
 
@@ -30,13 +30,13 @@ Install system libraries required by the OMEMO stack. On Raspbian systems this i
 sudo apt install libsodium-dev libxeddsa-dev
 ```
 
-Then install optional OMEMO dependencies:
+For an older/manual environment that predates the default dependency, the compatibility installer is:
 
 ```bash
 pip install -r requirements-omemo.txt
 ```
 
-If optional dependencies are missing while `OMEMO_ENABLED=True`, BanBot starts with OMEMO disabled and logs a warning. Plaintext bot functionality is unaffected.
+If the OMEMO runtime is unexpectedly incomplete while `OMEMO_ENABLED=True`, BanBot starts with OMEMO disabled and logs a warning instead of failing open to encrypted traffic.
 
 ## Dynamic Reply Behavior
 
@@ -64,7 +64,7 @@ This avoids static encrypted/plaintext room lists and keeps normal room behavior
 `!omemo status` shows:
 
 * whether OMEMO is enabled in config
-* whether optional dependencies are available
+* whether the OMEMO runtime is available
 * whether the OMEMO plugin is ready
 * storage path and permissions
 * fallback behavior
@@ -130,14 +130,14 @@ Managed ZIP backups include OMEMO storage when all of these are true:
 * `DB_BACKUP_INCLUDE_OMEMO=True`
 * the file is readable
 
-The archive entry is stored as `omemo.json` and described in `manifest.json`.
+The archive stores the state as `omemo.json` together with its matching `omemo.identity.json`; both are described in `manifest.json`. The pair is atomic for backup/restore purposes: an incomplete legacy pair is not restored.
 
 Because OMEMO storage contains identity/session material, backup archives should be treated as secrets.
 
 ### Older backup / rollback recovery
 
 OMEMO storage is stateful. If an entire system or BanBot installation is rolled
-back to an older backup, the restored `omemo.json` can contain session state
+back to an older backup, the restored `omemo.json` and `omemo.identity.json` can contain identity/session state
 from before later encrypted traffic occurred. Remote devices may already have
 advanced beyond that restored state.
 
@@ -162,3 +162,8 @@ Third-party OMEMO libraries can emit many warnings for broken, empty, or forbidd
 * Real OMEMO interoperability depends on clients publishing valid device lists and bundles.
 * MUC OMEMO works best when occupant real JIDs are visible to the bot.
 * Full OMEMO live tests require real test accounts/devices and are opt-in.
+
+
+## Trust and protocol notes
+
+The shared XEP-0384 adapter uses Blind Trust Before Verification (BTBV): newly seen devices are accepted automatically. There is currently no interactive fingerprint verification workflow. The transport core recognizes both the legacy and OMEMO 2 payload namespaces, but actual wire-format support depends on the installed `slixmpp-omemo` backend; unsupported encrypted payloads are rejected fail-closed rather than interpreted as plaintext.

@@ -41,7 +41,7 @@ class OmemoStatusMixin(_OmemoStatusMixinContract):
 
         lines = [
             f"🔐 OMEMO enabled: {getattr(self, 'omemo_enabled', False)}",
-            f"📦 Optional dependencies available: {omemo_package.OMEMO_AVAILABLE}",
+            f"📦 OMEMO runtime available: {omemo_package.OMEMO_AVAILABLE}",
             f"✅ OMEMO ready: {bool(getattr(self, 'omemo_ready', None) and self.omemo_ready.is_set())}",
             f"📁 Storage file: {storage_path}",
             f"🪪 Identity reset on change: {getattr(self, 'omemo_reset_on_identity_change', True)}",

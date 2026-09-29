@@ -52,7 +52,7 @@ Verify the installed application and shared core without connecting to XMPP:
 
 ```bash
 muc_banbot --version
-# muc_banbot 3.3.0 (envs-xmpp 1.6.0)
+# muc_banbot 3.4.0 (envs-xmpp 1.6.1)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -123,8 +123,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install muc-banbot
 
-# Optional OMEMO support:
-# pip install "muc-banbot[omemo]"
+# OMEMO runtime support is included; enable it with OMEMO_ENABLED=True in config.py.
 
 python -m pip show muc-banbot
 ```
@@ -175,8 +174,7 @@ source venv/bin/activate
 python -m pip install --upgrade pip
 pip install -e .
 
-# Optional OMEMO support:
-# pip install -e ".[omemo]"
+# OMEMO runtime support is included; enable it with OMEMO_ENABLED=True in config.py.
 
 install -m 0600 config_sample.py config.py
 $EDITOR config.py
@@ -221,7 +219,7 @@ LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
 git checkout "$LATEST_TAG"
 source venv/bin/activate
 pip install -e .
-# Optional: pip install -e ".[omemo]"
+# The historical .[omemo] extra remains accepted as a compatibility alias.
 
 sudo systemctl restart muc_banbot
 ```
@@ -347,7 +345,7 @@ See [docs/protections.md](docs/protections.md) for all protection names, aliases
 
 ## OMEMO
 
-BanBot supports optional OMEMO replies. OMEMO dependencies are not required for normal plaintext operation. If `OMEMO_ENABLED=True` but the optional Python/system libraries are missing, BanBot starts with OMEMO disabled and logs a clear warning.
+BanBot supports opt-in OMEMO replies. The Python OMEMO stack is installed with the normal runtime; `OMEMO_ENABLED` controls whether encrypted transport is activated. If the runtime stack is incomplete, BanBot starts with OMEMO disabled and logs a clear warning.
 
 The behavior is dynamic:
 

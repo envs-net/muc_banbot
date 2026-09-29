@@ -355,7 +355,7 @@ Backup and restore operations use the database/file lock. Restore/import paths m
 
 ## OMEMO and Messaging
 
-OMEMO is optional. The transport mechanism (storage/identity helpers, XEP-0384 adapter, encryption/decryption, recipient filtering, and task-local encryption mode) lives in `envs-xmpp`. `banbot.omemo` remains the BanBot policy adapter and keeps admin-room behavior, device/status output, reset commands, and restart/audit integration local.
+OMEMO activation is optional. Its Python runtime is installed by default; the transport mechanism (storage/identity helpers, XEP-0384 adapter, encryption/decryption, recipient filtering, and task-local encryption mode) lives in `envs-xmpp`. `banbot.omemo` remains the BanBot policy adapter and keeps admin-room behavior, device/status output, reset commands, and restart/audit integration local.
 
 Incoming encrypted commands are decrypted before protection/command processing. A context token records whether the reply should be encrypted. `banbot.messaging` remains the common outbound message helper so groupchat, direct-message, OMEMO, and test behavior stay consistent.
 
@@ -705,4 +705,4 @@ health state after unusual presence ordering.
 The audit also removed the unused cache tuple builder left behind by earlier
 cache consolidation. Those fixes required no shared-core behavior. Phase 42
 subsequently moved shared JID presentation-artifact normalization into
-`envs-xmpp`, so the dependency floor is now 1.6.0.
+`envs-xmpp`, so the dependency floor is now 1.6.1.

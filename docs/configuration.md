@@ -185,7 +185,7 @@ DB_BACKUP_KEEP = 15
 DB_BACKUP_INCLUDE_OMEMO = True
 ```
 
-Managed backups are self-contained ZIP archives with `manifest.json`, `database.sqlite3`, and optional `config.py` / `omemo.json` entries.
+Managed backups are self-contained ZIP archives with `manifest.json`, `database.sqlite3`, and optional `config.py` and paired `omemo.json` / `omemo.identity.json` entries.
 
 See [Backups and Restore](backups.md).
 

@@ -16,7 +16,13 @@ from .._version import __version__
 from ..locks import database_file_lock
 from ..managed_files import prune_managed_files
 from ..managed_io import run_blocking_io, wait_for_completion_on_cancel
-from .common import _BACKUP_CONFIG_ENTRY, _BACKUP_DATABASE_ENTRY, _BACKUP_FORMAT, _BACKUP_OMEMO_ENTRY
+from .common import (
+    _BACKUP_CONFIG_ENTRY,
+    _BACKUP_DATABASE_ENTRY,
+    _BACKUP_FORMAT,
+    _BACKUP_OMEMO_ENTRY,
+    _BACKUP_OMEMO_IDENTITY_ENTRY,
+)
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +46,7 @@ class BackupCreateMixin(_BackupCreateMixinContract):
             return [
                 self._config_backup_path_for(path),
                 self._omemo_backup_path_for(path),
+                self._omemo_identity_backup_path_for(path),
             ]
 
         try:
@@ -168,12 +175,31 @@ class BackupCreateMixin(_BackupCreateMixinContract):
                     config_source = config_path
 
                 omemo_path = self._omemo_storage_path()
+                omemo_identity_path = self._omemo_identity_path()
                 omemo_source: pathlib.Path | None = None
+                omemo_identity_source: pathlib.Path | None = None
                 if self._database_backup_include_omemo():
-                    if omemo_path is not None and omemo_path.exists() and omemo_path.is_file():
+                    storage_ok = (
+                        omemo_path is not None
+                        and omemo_path.exists()
+                        and omemo_path.is_file()
+                    )
+                    identity_ok = (
+                        omemo_identity_path is not None
+                        and omemo_identity_path.exists()
+                        and omemo_identity_path.is_file()
+                    )
+                    if storage_ok and identity_ok:
                         omemo_source = omemo_path
+                        omemo_identity_source = omemo_identity_path
+                    elif storage_ok or identity_ok:
+                        log.warning(
+                            "OMEMO backup skipped: storage and identity metadata must both be present"
+                        )
                     else:
-                        log.debug("OMEMO backup skipped: storage file does not exist or is not configured")
+                        log.debug(
+                            "OMEMO backup skipped: storage/identity files do not exist or are not configured"
+                        )
 
                 manifest = {
                     "format": _BACKUP_FORMAT,
@@ -190,11 +216,17 @@ class BackupCreateMixin(_BackupCreateMixinContract):
                         "database": True,
                         "config": config_source is not None,
                         "omemo": omemo_source is not None,
+                        "omemo_identity": omemo_identity_source is not None,
                     },
                     "entries": {
                         "database": _BACKUP_DATABASE_ENTRY,
                         "config": _BACKUP_CONFIG_ENTRY if config_source is not None else None,
                         "omemo": _BACKUP_OMEMO_ENTRY if omemo_source is not None else None,
+                        "omemo_identity": (
+                            _BACKUP_OMEMO_IDENTITY_ENTRY
+                            if omemo_identity_source is not None
+                            else None
+                        ),
                     },
                 }
 
@@ -205,6 +237,7 @@ class BackupCreateMixin(_BackupCreateMixinContract):
                         database_path=database_copy,
                         config_path=config_source,
                         omemo_path=omemo_source,
+                        omemo_identity_path=omemo_identity_source,
                         manifest=manifest,
                     )
                 except asyncio.CancelledError:
@@ -221,6 +254,11 @@ class BackupCreateMixin(_BackupCreateMixinContract):
 
             config_backup = _BACKUP_CONFIG_ENTRY if self._has_config_backup(backup_path) else None
             omemo_backup = _BACKUP_OMEMO_ENTRY if self._has_omemo_backup(backup_path) else None
+            omemo_identity_backup = (
+                _BACKUP_OMEMO_IDENTITY_ENTRY
+                if self._has_omemo_identity_backup(backup_path)
+                else None
+            )
 
             log.info("Created database backup archive: %s", backup_path)
             if hasattr(self, "log_event"):
@@ -232,6 +270,7 @@ class BackupCreateMixin(_BackupCreateMixinContract):
                         backup=str(backup_path),
                         config_backup=config_backup,
                         omemo_backup=omemo_backup,
+                        omemo_identity_backup=omemo_identity_backup,
                         reason=reason_slug,
                     )
                 except Exception as exc:
@@ -242,6 +281,7 @@ class BackupCreateMixin(_BackupCreateMixinContract):
                 "backup_format": _BACKUP_FORMAT,
                 "config_backup": config_backup,
                 "omemo_backup": omemo_backup,
+                "omemo_identity_backup": omemo_identity_backup,
                 "reason": reason_slug,
             }
             if hasattr(self, "audit_event"):

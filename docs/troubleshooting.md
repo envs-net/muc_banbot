@@ -174,7 +174,7 @@ BanBot stores message metadata only, not message bodies. Old messages that were 
 
 ## OMEMO dependency installation fails
 
-OMEMO remains optional. Plaintext BanBot operation only needs `requirements.txt`; encrypted command/reply support is installed through the shared `envs-xmpp[omemo]` extra (via `requirements-omemo.txt`).
+OMEMO runtime dependencies are part of the normal BanBot installation. The `requirements-omemo.txt` file is retained as a compatibility installer for older/manual environments.
 
 If installing OMEMO fails with missing native headers or build errors, install the system libraries first. Raspbian example:
 
@@ -183,7 +183,7 @@ sudo apt install libsodium-dev libxeddsa-dev
 pip install -r requirements-omemo.txt
 ```
 
-If `OMEMO_ENABLED=True` but the optional OMEMO dependencies are not installed, BanBot starts with OMEMO disabled and logs a warning. Set `OMEMO_ENABLED=False` or install the optional dependencies to remove the warning.
+If `OMEMO_ENABLED=True` but the OMEMO runtime is incomplete, BanBot starts with OMEMO disabled and logs a warning. Reinstall the normal project dependencies (or use the compatibility `requirements-omemo.txt`) before enabling OMEMO again.
 
 ## OMEMO bundle warnings
 
@@ -202,7 +202,7 @@ Check:
 
 ## OMEMO stops working after restoring an older backup
 
-A restored `omemo.json` contains the identity/session state from the time the
+A restored `omemo.json` together with `omemo.identity.json` contains the identity/session state from the time the
 backup was created. If remote devices exchanged encrypted traffic after that
 backup, their session state may be newer than the restored local state.
 

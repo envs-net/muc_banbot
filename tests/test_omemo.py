@@ -10,7 +10,6 @@ slixmpp = pytest.importorskip("slixmpp")
 
 from banbot.omemo import OmemoMixin, _prepare_omemo_storage_file
 
-
 TEST_OMEMO_RESET_EXPECTED_RESTART_DELAY_SECONDS = 3
 TEST_DEVICE_HINT_ID = 813096472
 TEST_ADMINBOT_NESTED_DEVICE_HINT_ID = "9095"
@@ -553,7 +552,7 @@ def test_configure_omemo_missing_optional_dependencies_disables_feature(monkeypa
     assert bot.omemo_enabled is False
     assert bot.registered == []
     assert bot.handlers == []
-    assert "optional dependencies are missing" in caplog.text
+    assert "the runtime is incomplete" in caplog.text
     assert "requirements-omemo.txt" in caplog.text
 
 
@@ -686,7 +685,7 @@ def test_ensure_omemo_identity_metadata_keeps_storage_when_reset_disabled(tmp_pa
 @pytest.mark.omemo
 def test_omemo_storage_status_reports_missing_file_and_identity(monkeypatch, tmp_path):
     import config
-    from banbot.omemo import _write_omemo_identity_metadata, _omemo_identity_metadata_path
+    from banbot.omemo import _omemo_identity_metadata_path, _write_omemo_identity_metadata
 
     storage = tmp_path / "omemo.json"
     bot = OmemoProbe()
@@ -969,3 +968,23 @@ async def test_cmd_omemo_usage_for_unknown_action():
     assert "!omemo status" in body
     assert "!omemo devices" in body
     assert "!omemo reset [confirm]" in body
+
+
+@pytest.mark.omemo
+def test_omemo_muc_pm_recipient_resolves_real_occupant_jid():
+    bot = OmemoProbe()
+
+    recipient = bot._omemo_recipient_for_chat(
+        "room@conference.example.test/Alice"
+    )
+
+    assert recipient.bare == "alice@example.test"
+
+
+@pytest.mark.omemo
+def test_omemo_direct_recipient_keeps_direct_bare_jid():
+    bot = OmemoProbe()
+
+    recipient = bot._omemo_recipient_for_chat("carol@example.test/phone")
+
+    assert recipient.bare == "carol@example.test"

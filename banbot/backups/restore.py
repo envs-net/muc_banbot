@@ -168,8 +168,18 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
             config_will_restore = config_source is not None and config_path is not None
 
             omemo_source = sources.get("omemo")
+            omemo_identity_source = sources.get("omemo_identity")
             omemo_path = self._omemo_storage_path()
-            omemo_will_restore = omemo_source is not None and omemo_path is not None
+            omemo_identity_path = self._omemo_identity_path()
+            omemo_pair_present = (
+                omemo_source is not None and omemo_identity_source is not None
+            )
+            omemo_pair_incomplete = (omemo_source is None) != (omemo_identity_source is None)
+            omemo_will_restore = (
+                omemo_pair_present
+                and omemo_path is not None
+                and omemo_identity_path is not None
+            )
 
             restore_specs = [
                 RestoreFileSpec(
@@ -188,15 +198,30 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
                         mode=0o600,
                     )
                 )
-            if omemo_will_restore and omemo_source is not None and omemo_path is not None:
-                restore_specs.append(
-                    RestoreFileSpec(
-                        name="omemo",
-                        source=omemo_source,
-                        target=omemo_path,
-                        mode=0o600,
-                        parent_mode=0o700,
-                    )
+            if (
+                omemo_will_restore
+                and omemo_source is not None
+                and omemo_identity_source is not None
+                and omemo_path is not None
+                and omemo_identity_path is not None
+            ):
+                restore_specs.extend(
+                    [
+                        RestoreFileSpec(
+                            name="omemo",
+                            source=omemo_source,
+                            target=omemo_path,
+                            mode=0o600,
+                            parent_mode=0o700,
+                        ),
+                        RestoreFileSpec(
+                            name="omemo_identity",
+                            source=omemo_identity_source,
+                            target=omemo_identity_path,
+                            mode=0o600,
+                            parent_mode=0o700,
+                        ),
+                    ]
                 )
 
             try:
@@ -232,6 +257,7 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
                         safety_backup=safety_message if safety_ok else None,
                         config_restored=restored_config,
                         omemo_restored=restored_omemo,
+                        omemo_identity_restored=restored_omemo,
                     )
                 except Exception as exc:
                     log.debug("Failed to write restore structured event: %s", exc)
@@ -247,6 +273,7 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
                             "safety_backup": safety_message if safety_ok else None,
                             "config_restored": restored_config,
                             "omemo_restored": restored_omemo,
+                            "omemo_identity_restored": restored_omemo,
                         },
                     )
                 except Exception as exc:
@@ -266,14 +293,20 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
             else:
                 lines.append("No config.py companion file was found for this backup.")
             if restored_omemo:
-                lines.append("OMEMO storage was restored from the backup archive.")
-                lines.append("⚠️ Restart the bot before using restored OMEMO sessions.")
-            elif omemo_source is not None:
                 lines.append(
-                    "OMEMO backup companion exists, but no OMEMO_STORAGE_FILE path was available for restore."
+                    "OMEMO storage and identity metadata were restored from the backup archive."
+                )
+                lines.append("⚠️ Restart the bot before using restored OMEMO sessions.")
+            elif omemo_pair_incomplete:
+                lines.append(
+                    "⚠️ Incomplete legacy OMEMO backup pair detected; OMEMO state was not restored."
+                )
+            elif omemo_pair_present:
+                lines.append(
+                    "OMEMO backup pair exists, but no OMEMO_STORAGE_FILE path was available for restore."
                 )
             else:
-                lines.append("No OMEMO companion file was found for this backup.")
+                lines.append("No complete OMEMO backup pair was found for this backup.")
             if safety_ok:
                 lines.append(f"Safety backup before restore: {safety_message}")
             return True, "\n".join(lines)
@@ -298,6 +331,7 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
         companion_paths = [
             self._config_backup_path_for(backup.path),
             self._omemo_backup_path_for(backup.path),
+            self._omemo_identity_backup_path_for(backup.path),
         ]
         removed: list[str] = []
 

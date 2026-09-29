@@ -125,3 +125,13 @@ def test_package_exports_banbot_lazily() -> None:
 
     assert "BanBot" in banbot.__all__
     assert banbot.BanBot.__name__ == "BanBot"
+
+
+def test_omemo_dependency_is_part_of_default_runtime() -> None:
+    config = _pyproject()
+    dependency = "envs-xmpp[omemo]>=1.6.1,<2.0"
+
+    assert dependency in config["project"]["dependencies"]
+    assert config["project"]["optional-dependencies"]["omemo"] == [dependency]
+    assert dependency in (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert dependency in (ROOT / "requirements-omemo.txt").read_text(encoding="utf-8")

@@ -171,8 +171,8 @@ OUTBOX_MAX_PER_CATEGORY = 5000
 # ================= OMEMO ENCRYPTION =================
 
 # Enable OMEMO support for encrypted incoming commands and outgoing replies.
-# Requires optional dependencies from requirements-omemo.txt and a restart when changed.
-# If enabled without the optional dependencies, the bot starts with OMEMO disabled
+# OMEMO runtime dependencies are installed by default; restart after changing this value.
+# If enabled with an incomplete OMEMO runtime, the bot starts with OMEMO disabled
 # and logs a warning. Plaintext bot functionality is unaffected.
 OMEMO_ENABLED = False
 

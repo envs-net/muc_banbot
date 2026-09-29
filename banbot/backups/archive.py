@@ -21,6 +21,7 @@ from .common import (
     _BACKUP_FORMAT,
     _BACKUP_MANIFEST_ENTRY,
     _BACKUP_OMEMO_ENTRY,
+    _BACKUP_OMEMO_IDENTITY_ENTRY,
 )
 
 log = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class BackupArchiveMixin(_BackupArchiveMixinContract):
         database_path: pathlib.Path,
         config_path: pathlib.Path | None,
         omemo_path: pathlib.Path | None,
+        omemo_identity_path: pathlib.Path | None,
         manifest: dict[str, Any],
     ) -> None:
         """Write one self-contained ZIP backup archive atomically."""
@@ -62,6 +64,14 @@ class BackupArchiveMixin(_BackupArchiveMixinContract):
         if omemo_path is not None:
             sources.append(
                 BackupArchiveSource(_BACKUP_OMEMO_ENTRY, omemo_path, source=omemo_path)
+            )
+        if omemo_identity_path is not None:
+            sources.append(
+                BackupArchiveSource(
+                    _BACKUP_OMEMO_IDENTITY_ENTRY,
+                    omemo_identity_path,
+                    source=omemo_identity_path,
+                )
             )
         build_backup_archive(
             archive_path,
@@ -91,6 +101,9 @@ class BackupArchiveMixin(_BackupArchiveMixinContract):
                     ),
                     BackupArchiveEntrySpec("config", _BACKUP_CONFIG_ENTRY),
                     BackupArchiveEntrySpec("omemo", _BACKUP_OMEMO_ENTRY),
+                    BackupArchiveEntrySpec(
+                        "omemo_identity", _BACKUP_OMEMO_IDENTITY_ENTRY
+                    ),
                 ],
                 manifest_name=_BACKUP_MANIFEST_ENTRY,
                 expected_fields={"format": _BACKUP_FORMAT},
@@ -126,4 +139,9 @@ class BackupArchiveMixin(_BackupArchiveMixinContract):
             "database": backup_path,
             "config": self._config_backup_path_for(backup_path) if self._config_backup_path_for(backup_path).is_file() else None,
             "omemo": self._omemo_backup_path_for(backup_path) if self._omemo_backup_path_for(backup_path).is_file() else None,
+            "omemo_identity": (
+                self._omemo_identity_backup_path_for(backup_path)
+                if self._omemo_identity_backup_path_for(backup_path).is_file()
+                else None
+            ),
         }

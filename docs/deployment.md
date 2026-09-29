@@ -169,12 +169,7 @@ The second run validates the config, creates/reuses the virtualenv, and can
 install a new hardened systemd unit after confirmation. An already installed
 unit is kept for manual review.
 
-Optional OMEMO dependencies are intentionally separate, just as in the manual
-installation:
-
-```bash
-sudo -u adminbot /srv/adminbot/muc_banbot/venv/bin/pip install -e "/srv/adminbot/muc_banbot[omemo]"
-```
+The normal BanBot installation includes the Python OMEMO runtime. Encrypted transport remains opt-in through `OMEMO_ENABLED`. The historical `.[omemo]` extra is retained only as a compatibility alias for older deployment instructions.
 
 ## Hardened systemd service
 

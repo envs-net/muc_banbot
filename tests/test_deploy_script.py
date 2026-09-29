@@ -73,10 +73,10 @@ def test_deploy_shell_wrapper_is_executable_and_defaults_to_help():
 
 
 def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
-    dist_info = "envs_xmpp-1.6.0.dist-info"
+    dist_info = "envs_xmpp-1.6.1.dist-info"
     files = {
         "envs_xmpp_ops/__init__.py": (
-            '__version__ = "1.6.0"\n'
+            '__version__ = "1.6.1"\n'
             'from .deploy import DeploymentTarget\n'
             'def inspect_dependency_drift(*args, **kwargs):\n'
             '    return None\n'
@@ -85,7 +85,7 @@ def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
         f"{dist_info}/METADATA": (
             "Metadata-Version: 2.1\n"
             "Name: envs-xmpp\n"
-            "Version: 1.6.0\n"
+            "Version: 1.6.1\n"
         ),
         f"{dist_info}/WHEEL": (
             "Wheel-Version: 1.0\n"
@@ -102,7 +102,7 @@ def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
 
 
 def test_fresh_deploy_wrapper_bootstraps_before_shared_imports(tmp_path):
-    wheel = tmp_path / "envs_xmpp-1.6.0-py3-none-any.whl"
+    wheel = tmp_path / "envs_xmpp-1.6.1-py3-none-any.whl"
     _write_minimal_envs_xmpp_wheel(wheel)
 
     no_site_python = tmp_path / "python-no-site"
@@ -113,6 +113,7 @@ def test_fresh_deploy_wrapper_bootstraps_before_shared_imports(tmp_path):
     no_site_python.chmod(0o755)
 
     env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
     env.update({
         "MUC_BANBOT_DEPLOY_PYTHON": str(no_site_python),
         "XDG_CACHE_HOME": str(tmp_path / "cache"),
@@ -130,7 +131,7 @@ def test_fresh_deploy_wrapper_bootstraps_before_shared_imports(tmp_path):
 
     assert result.returncode == 2
     assert "--to is only valid with update" in result.stderr
-    deploy_python = tmp_path / "cache" / "envs-xmpp" / "deploy" / "1.6.0" / "bin" / "python"
+    deploy_python = tmp_path / "cache" / "envs-xmpp" / "deploy" / "1.6.1" / "bin" / "python"
     assert deploy_python.is_file()
 
 
@@ -151,17 +152,18 @@ def test_deploy_python_environment_disables_bytecode_writes(tmp_path):
     assert deployment.environment["MUC_BANBOT_CONFIG"] == str(deployment.config)
 
 
-def test_constraint_file_matches_virtualenv_python(tmp_path, monkeypatch):
+@pytest.mark.parametrize("minor", [12, 13, 14])
+def test_constraint_file_matches_virtualenv_python(tmp_path, monkeypatch, minor):
     deployment = _deployment(tmp_path)
     deployment.venv_python.parent.mkdir(parents=True)
     deployment.venv_python.write_text("", encoding="utf-8")
     constraints = deployment.root / "constraints"
     constraints.mkdir()
-    expected = constraints / "python313.txt"
+    expected = constraints / f"python3{minor}.txt"
     expected.write_text("slixmpp==1.17.0\n", encoding="utf-8")
 
     class Result:
-        stdout = "3.13\n"
+        stdout = f"3.{minor}\n"
 
     monkeypatch.setattr(deploy, "_run", lambda *_args, **_kwargs: Result())
 
