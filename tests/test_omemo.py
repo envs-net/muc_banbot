@@ -135,6 +135,16 @@ class OmemoProbe(OmemoMixin):
         self.audited.append((event_type, kwargs))
 
 
+class StrictPluginManager:
+    """Mirror Slixmpp PluginManager.get(name, default)."""
+
+    def __init__(self, plugins):
+        self._plugins = dict(plugins)
+
+    def get(self, name, default):
+        return self._plugins.get(name, default)
+
+
 class FakeMessage:
     """Minimal message stanza test double for OMEMO helpers."""
 
@@ -456,6 +466,22 @@ async def test_decrypt_incoming_omemo_message_returns_decrypted_message(omemo_pa
     assert result is decrypted
     assert encrypted is True
     assert plugin.decrypt_calls == 1
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_omemo_accepts_slixmpp_style_plugin_manager_get_signature(omemo_payload_xml):
+    bot = OmemoProbe()
+    decrypted = object()
+    plugin = FakeDecryptPlugin(result=(decrypted, object()))
+    bot.plugin = StrictPluginManager({"xep_0384": plugin})
+    bot.omemo_ready = ReadyFlag(True)
+    msg = make_message(omemo_payload_xml, sender="sender@example.test")
+
+    result, encrypted = await bot._decrypt_incoming_omemo_message(msg)
+
+    assert result is decrypted
+    assert encrypted is True
 
 
 class FailingDecryptPlugin(FakeDecryptPlugin):

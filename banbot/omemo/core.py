@@ -118,7 +118,7 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
     async def _send_omemo_message(self, *, mto: str, mbody: str, mtype: str = "groupchat", **kwargs: Any) -> Any:
         if not await self._wait_for_omemo_ready():
             raise RuntimeError("OMEMO is not initialized")
-        plugin = self.plugin.get("xep_0384")
+        plugin = self.plugin.get("xep_0384", None)
         if plugin is None:
             raise RuntimeError("OMEMO plugin is not registered")
         msg = self.make_message(mto=mto, mbody=mbody, mtype=mtype)
@@ -133,7 +133,7 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
         return await encrypt_and_send(plugin, msg, recipients, mto=mto)
 
     async def _encrypt_and_send_omemo_message(self, msg: Any, recipients: set[JID] | JID, *, mto: str) -> Any:
-        plugin = self.plugin.get("xep_0384")
+        plugin = self.plugin.get("xep_0384", None)
         if plugin is None:
             raise RuntimeError("OMEMO plugin is not registered")
         return await encrypt_and_send(plugin, msg, recipients, mto=mto)
@@ -158,10 +158,11 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
         return message_has_omemo_payload(msg)
 
     async def _decrypt_incoming_omemo_message(self, msg: Any) -> tuple[Any | None, bool]:
+        plugin = self.plugin.get("xep_0384", None)
         decrypted, encrypted, reason = await decrypt_incoming_message(
             msg,
             enabled=bool(getattr(self, "omemo_enabled", False)),
-            plugin_map=self.plugin,
+            plugin_map={"xep_0384": plugin} if plugin is not None else {},
             ready_event=getattr(self, "omemo_ready", asyncio.Event()),
             timeout=getattr(self, "omemo_ready_timeout", 15),
             reset_pending=bool(getattr(self, "omemo_reset_pending_restart", False)),
