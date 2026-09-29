@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import re
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from envs_xmpp_core.xmpp.omemo import collect_storage_device_hints, format_device_ids
 
 log = logging.getLogger(__name__)
 
@@ -24,85 +23,11 @@ else:
 class OmemoDeviceMixin(_OmemoDeviceMixinContract):
 
     def _collect_omemo_storage_device_hints(self) -> dict[str, set[str]]:
-        """Best-effort extract JID/device-id hints from the JSON storage file.
-
-        The local OMEMO storage format is an implementation detail and can also
-        contain pre-key IDs, counters, booleans and session metadata.  This
-        helper therefore only collects values that are clearly associated with a
-        device-like key.  It intentionally does not treat arbitrary integers
-        below a JID context as device IDs.
-        """
-        storage_path = Path(str(getattr(self, "omemo_storage_file", "data/omemo.json"))).expanduser()
-        if not storage_path.exists() or not storage_path.is_file():
-            return {}
-
-        try:
-            data = json.loads(storage_path.read_text(encoding="utf8") or "{}")
-        except Exception:
-            return {}
-
-        devices: dict[str, set[str]] = {}
-        jid_re = re.compile(r"([A-Za-z0-9_.%+\-]+@[A-Za-z0-9.\-]+)")
-        device_key_re = re.compile(r"(?:^|[_\-:./])(?:device[_\-]?id|device|dev)(?:$|[_\-:./])", re.I)
-        device_with_id_re = re.compile(r"(?:device[_\-]?id|device|dev)[^0-9]{0,8}([0-9]{3,12})", re.I)
-
-        def add_device(jid: str | None, value: Any) -> None:
-            if not jid or isinstance(value, bool):
-                return
-            if isinstance(value, int):
-                text = str(value)
-            elif isinstance(value, str):
-                text = value.strip()
-            else:
-                return
-            if text.isdigit() and 0 < int(text) < 10_000_000_000:
-                devices.setdefault(jid, set()).add(text)
-
-        def walk(obj: Any, context_jid: str | None = None) -> None:
-            if isinstance(obj, dict):
-                local_jid = context_jid
-                for key, value in obj.items():
-                    key_text = str(key)
-                    jid_match = jid_re.search(key_text)
-                    if jid_match:
-                        local_jid = jid_match.group(1).lower()
-                        devices.setdefault(local_jid, set())
-
-                    keyed_device = device_with_id_re.search(key_text)
-                    if keyed_device and local_jid:
-                        add_device(local_jid, keyed_device.group(1))
-                    elif device_key_re.search(key_text) and local_jid:
-                        add_device(local_jid, value)
-
-                    walk(value, local_jid)
-            elif isinstance(obj, list):
-                for item in obj:
-                    walk(item, context_jid)
-            elif isinstance(obj, str):
-                jid_match = jid_re.search(obj)
-                if jid_match:
-                    devices.setdefault(jid_match.group(1).lower(), set())
-                dev_match = device_with_id_re.search(obj)
-                if dev_match and context_jid:
-                    add_device(context_jid, dev_match.group(1))
-
-        walk(data)
-        return devices
+        return collect_storage_device_hints(self.omemo_storage_file)
 
     @staticmethod
     def _format_omemo_device_ids(ids: set[str], *, limit: int = 12) -> str:
-        """Return a compact, stable display string for local device-id hints."""
-        if not ids:
-            return "storage entry found, exact device IDs not visible"
-
-        numeric_ids = [int(device_id) for device_id in ids if str(device_id).isdigit()]
-        sorted_ids = [str(device_id) for device_id in sorted(numeric_ids)]
-        if not sorted_ids:
-            return "storage entry found, exact device IDs not visible"
-
-        shown = sorted_ids[:limit]
-        suffix = "" if len(sorted_ids) <= limit else f", … ({len(sorted_ids)} hints)"
-        return f"{', '.join(shown)}{suffix}"
+        return format_device_ids(ids, limit=limit)
 
     async def _cmd_omemo_devices(self, room: str) -> None:
         lines = ["🔐 OMEMO Devices", ""]

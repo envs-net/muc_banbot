@@ -7,4 +7,4 @@ python3 -m pip install -c constraints/python314.txt -e .
 ```
 
 `envs-xmpp` is intentionally pinned exactly while the project dependency
-uses the compatible `>=1.5.1,<2.0` range.
+uses the compatible `>=1.6.0,<2.0` range.

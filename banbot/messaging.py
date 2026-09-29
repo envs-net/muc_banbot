@@ -6,20 +6,15 @@ transport-specific behavior, such as OMEMO encryption, can be added here
 without touching every command/mixin again.
 """
 
-import asyncio
 import logging
-from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp.messaging import ReplyRoute, TaskLocalReplyRoute
+from envs_xmpp_core.xmpp.omemo import TaskLocalEncryptionMode
 
 log = logging.getLogger(__name__)
 
-_EncryptionContext = tuple[object | None, bool | None]
-_REPLY_ENCRYPTED: ContextVar[_EncryptionContext | None] = ContextVar(
-    "banbot_reply_encrypted",
-    default=None,
-)
+_REPLY_ENCRYPTION = TaskLocalEncryptionMode("banbot_reply_encrypted")
 _REPLY_ROUTES = TaskLocalReplyRoute("banbot_reply_target")
 
 if TYPE_CHECKING:
@@ -36,26 +31,20 @@ class MessagingMixin(_MessagingMixinContract):
     def _set_reply_encryption_context(
         self,
         encrypted: bool | None,
-    ) -> Token[_EncryptionContext | None]:
+    ):
         """Set the encryption preference for replies created in the current task."""
-        return _REPLY_ENCRYPTED.set((asyncio.current_task(), encrypted))
+        return _REPLY_ENCRYPTION.set(encrypted)
 
     def _reset_reply_encryption_context(
         self,
-        token: Token[_EncryptionContext | None],
+        token,
     ) -> None:
         """Restore the previous reply encryption context."""
-        _REPLY_ENCRYPTED.reset(token)
+        _REPLY_ENCRYPTION.reset(token)
 
     def _get_reply_encryption_context(self) -> bool | None:
         """Return the current task's reply encryption preference, if any."""
-        value = _REPLY_ENCRYPTED.get()
-        if value is None:
-            return None
-        owner_task, encrypted = value
-        if owner_task is not None and asyncio.current_task() is not owner_task:
-            return None
-        return encrypted
+        return _REPLY_ENCRYPTION.get()
 
     def _set_reply_target_context(
         self,

@@ -1,1 +1,2 @@
-slixmpp-omemo>=2,<3
+# Optional OMEMO transport support via shared envs-xmpp core.
+envs-xmpp[omemo]>=1.6.0,<2.0

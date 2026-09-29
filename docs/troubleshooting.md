@@ -174,7 +174,7 @@ BanBot stores message metadata only, not message bodies. Old messages that were 
 
 ## OMEMO dependency installation fails
 
-`slixmpp-omemo` is optional. Plaintext BanBot operation only needs `requirements.txt`. Install OMEMO support only when encrypted command/reply support is needed.
+OMEMO remains optional. Plaintext BanBot operation only needs `requirements.txt`; encrypted command/reply support is installed through the shared `envs-xmpp[omemo]` extra (via `requirements-omemo.txt`).
 
 If installing OMEMO fails with missing native headers or build errors, install the system libraries first. Raspbian example:
 
