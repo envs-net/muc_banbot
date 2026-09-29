@@ -58,8 +58,8 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
         if not omemo_package.OMEMO_AVAILABLE or omemo_package.XEP_0384Impl is None:
             log.warning(
                 "OMEMO: enabled but the runtime is incomplete; continuing with OMEMO disabled. "
-                "Install libsodium/libxeddsa and reinstall the normal project dependencies; "
-                "requirements-omemo.txt remains a compatibility installer."
+                "Install any required platform libraries such as libsodium/libxeddsa, then "
+                "reinstall the normal project dependencies."
             )
             self.omemo_enabled = False
             return

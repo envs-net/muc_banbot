@@ -26,12 +26,15 @@ pip install -r requirements-dev.txt
 cp config_sample.py config.py
 ```
 
-OMEMO support is optional. Only install it when needed:
+OMEMO encryption is opt-in, but its Python runtime dependencies are part of the normal
+project installation. On platforms that need native build dependencies for the OMEMO
+stack, install them before creating/updating the development environment:
 
 ```bash
 sudo apt install libsodium-dev libxeddsa-dev
-pip install -r requirements-omemo.txt
 ```
+
+`requirements-omemo.txt` is retained only as a compatibility installer for older/manual environments.
 
 ## Running Tests
 

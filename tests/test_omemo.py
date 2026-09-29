@@ -548,7 +548,7 @@ async def test_decrypt_incoming_omemo_unexpected_failures_log_sanitized_warning(
 
 
 @pytest.mark.omemo
-def test_configure_omemo_missing_optional_dependencies_disables_feature(monkeypatch, caplog):
+def test_configure_omemo_missing_runtime_dependencies_disables_feature(monkeypatch, caplog):
     omemo_module = importlib.import_module("banbot.omemo")
     import config
 
@@ -579,7 +579,7 @@ def test_configure_omemo_missing_optional_dependencies_disables_feature(monkeypa
     assert bot.registered == []
     assert bot.handlers == []
     assert "the runtime is incomplete" in caplog.text
-    assert "requirements-omemo.txt" in caplog.text
+    assert "reinstall the normal project dependencies" in caplog.text
 
 
 @pytest.mark.omemo
