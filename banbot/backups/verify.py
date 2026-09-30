@@ -8,7 +8,10 @@ import pathlib
 import tempfile
 from typing import TYPE_CHECKING
 
-from envs_xmpp_core.storage.backup import verify_backup_archive
+from envs_xmpp_core.storage.backup import (
+    inspect_backup_companion_pair,
+    verify_backup_archive,
+)
 from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
 
 from ..locks import database_file_lock
@@ -95,7 +98,14 @@ class BackupVerifyMixin(_BackupVerifyMixinContract):
 
                 omemo_source = sources.get("omemo")
                 omemo_identity_source = sources.get("omemo_identity")
-                if (omemo_source is None) != (omemo_identity_source is None):
+                pair = inspect_backup_companion_pair(
+                    {key for key, value in (
+                        ("omemo", omemo_source), ("omemo_identity", omemo_identity_source)
+                    ) if value is not None},
+                    primary="omemo",
+                    companion="omemo_identity",
+                )
+                if pair.incomplete:
                     lines.append(
                         "⚠️ OMEMO companion pair is incomplete; OMEMO state will not be restored"
                     )
@@ -163,7 +173,14 @@ class BackupVerifyMixin(_BackupVerifyMixinContract):
 
         omemo_backup = self._omemo_backup_path_for(backup.path)
         omemo_identity_backup = self._omemo_identity_backup_path_for(backup.path)
-        if omemo_backup.is_file() != omemo_identity_backup.is_file():
+        pair = inspect_backup_companion_pair(
+            {key for key, value in (
+                ("omemo", omemo_backup), ("omemo_identity", omemo_identity_backup)
+            ) if value.is_file()},
+            primary="omemo",
+            companion="omemo_identity",
+        )
+        if pair.incomplete:
             lines.append(
                 "⚠️ OMEMO companion pair is incomplete; OMEMO state will not be restored"
             )

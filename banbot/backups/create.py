@@ -12,6 +12,8 @@ import tempfile
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from envs_xmpp_core.storage.backup import inspect_backup_companion_pair
+
 from .._version import __version__
 from ..locks import database_file_lock
 from ..managed_files import prune_managed_files
@@ -189,10 +191,17 @@ class BackupCreateMixin(_BackupCreateMixinContract):
                         and omemo_identity_path.exists()
                         and omemo_identity_path.is_file()
                     )
-                    if storage_ok and identity_ok:
+                    pair = inspect_backup_companion_pair(
+                        {name for name, available in (
+                            ("omemo", storage_ok), ("omemo_identity", identity_ok)
+                        ) if available},
+                        primary="omemo",
+                        companion="omemo_identity",
+                    )
+                    if pair.complete:
                         omemo_source = omemo_path
                         omemo_identity_source = omemo_identity_path
-                    elif storage_ok or identity_ok:
+                    elif pair.incomplete:
                         log.warning(
                             "OMEMO backup skipped: storage and identity metadata must both be present"
                         )

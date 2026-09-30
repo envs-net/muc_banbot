@@ -838,3 +838,46 @@ async def test_omemo_backup_skips_incomplete_storage_identity_pair(
     finally:
         if bot.db:
             await bot.db.close()
+
+
+def test_archive_writer_rejects_partial_omemo_pair(tmp_path):
+    """Even a direct archive call must not accept an orphaned OMEMO file."""
+    from envs_xmpp_core.storage.backup import BackupArchiveError
+
+    database = tmp_path / "database.sqlite3"
+    database.write_bytes(b"db")
+    state = tmp_path / "omemo.json"
+    state.write_text("{}", encoding="utf-8")
+    archive = tmp_path / "backup.zip"
+
+    with pytest.raises(BackupArchiveError, match="incomplete OMEMO companion pair"):
+        BackupBot._write_backup_archive_sync(
+            archive,
+            database_path=database,
+            config_path=None,
+            omemo_path=state,
+            omemo_identity_path=None,
+            manifest={"format": "banbot-backup-v1"},
+        )
+    assert not archive.exists()
+
+
+def test_archive_writer_rejects_disappeared_omemo_companion(tmp_path):
+    """The selected OMEMO pair is required at archive publication time."""
+    database = tmp_path / "database.sqlite3"
+    database.write_bytes(b"db")
+    state = tmp_path / "omemo.json"
+    state.write_text("{}", encoding="utf-8")
+    identity = tmp_path / "omemo.identity.json"  # Disappeared before archive write.
+    archive = tmp_path / "backup.zip"
+
+    with pytest.raises(FileNotFoundError):
+        BackupBot._write_backup_archive_sync(
+            archive,
+            database_path=database,
+            config_path=None,
+            omemo_path=state,
+            omemo_identity_path=identity,
+            manifest={"format": "banbot-backup-v1"},
+        )
+    assert not archive.exists()

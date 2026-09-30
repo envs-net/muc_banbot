@@ -11,6 +11,7 @@ from envs_xmpp_core.storage.backup import (
     BackupArchiveError,
     BackupArchiveSource,
     build_backup_archive,
+    inspect_backup_companion_pair,
     stage_backup_archive,
 )
 
@@ -49,6 +50,15 @@ class BackupArchiveMixin(_BackupArchiveMixinContract):
         manifest: dict[str, Any],
     ) -> None:
         """Write one self-contained ZIP backup archive atomically."""
+        pair = inspect_backup_companion_pair(
+            {name for name, value in (
+                ("omemo", omemo_path), ("omemo_identity", omemo_identity_path)
+            ) if value is not None},
+            primary="omemo",
+            companion="omemo_identity",
+        )
+        if pair.incomplete:
+            raise BackupArchiveError("incomplete OMEMO companion pair cannot be archived")
         sources = [
             BackupArchiveSource(
                 _BACKUP_DATABASE_ENTRY,
@@ -63,7 +73,7 @@ class BackupArchiveMixin(_BackupArchiveMixinContract):
             )
         if omemo_path is not None:
             sources.append(
-                BackupArchiveSource(_BACKUP_OMEMO_ENTRY, omemo_path, source=omemo_path)
+                BackupArchiveSource(_BACKUP_OMEMO_ENTRY, omemo_path, source=omemo_path, required=True)
             )
         if omemo_identity_path is not None:
             sources.append(
@@ -71,6 +81,7 @@ class BackupArchiveMixin(_BackupArchiveMixinContract):
                     _BACKUP_OMEMO_IDENTITY_ENTRY,
                     omemo_identity_path,
                     source=omemo_identity_path,
+                    required=True,
                 )
             )
         build_backup_archive(

@@ -7,6 +7,7 @@ import pathlib
 import tempfile
 from typing import TYPE_CHECKING
 
+from envs_xmpp_core.storage.backup import inspect_backup_companion_pair
 from envs_xmpp_core.storage.restore import (
     RestoreFileSpec,
     RestoreTransactionError,
@@ -171,12 +172,16 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
             omemo_identity_source = sources.get("omemo_identity")
             omemo_path = self._omemo_storage_path()
             omemo_identity_path = self._omemo_identity_path()
-            omemo_pair_present = (
-                omemo_source is not None and omemo_identity_source is not None
+            omemo_pair = inspect_backup_companion_pair(
+                {name for name, source in (
+                    ("omemo", omemo_source), ("omemo_identity", omemo_identity_source)
+                ) if source is not None},
+                primary="omemo",
+                companion="omemo_identity",
             )
-            omemo_pair_incomplete = (omemo_source is None) != (omemo_identity_source is None)
+            omemo_pair_incomplete = omemo_pair.incomplete
             omemo_will_restore = (
-                omemo_pair_present
+                omemo_pair.complete
                 and omemo_path is not None
                 and omemo_identity_path is not None
             )
@@ -301,7 +306,7 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
                 lines.append(
                     "⚠️ Incomplete legacy OMEMO backup pair detected; OMEMO state was not restored."
                 )
-            elif omemo_pair_present:
+            elif omemo_pair.complete:
                 lines.append(
                     "OMEMO backup pair exists, but no OMEMO_STORAGE_FILE path was available for restore."
                 )
