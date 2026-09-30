@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime
 
 import pytest
 
@@ -91,8 +92,8 @@ async def test_resilient_service_reports_restart_backoff(monkeypatch):
     info = supervisor.snapshot(include_done=False)[0]
     assert info.status == "restarting"
     assert info.restart_count == 1
-    assert info.restart_at is not None
-    assert info.restart_at >= time.time()
+    assert info.next_restart_at is not None
+    assert datetime.fromisoformat(info.next_restart_at).timestamp() >= time.time()
     assert "RuntimeError: boom" in (info.last_error or "")
     assert supervisor.owns(task) is True
     assert supervisor.stale_services(0) == []

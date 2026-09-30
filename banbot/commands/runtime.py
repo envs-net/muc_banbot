@@ -86,7 +86,7 @@ class CommandRuntimeMixin(_CommandRuntimeMixinContract):
         if not callable(stale_getter):
             return set()
         return {
-            (item.group, item.name)
+            item.identity
             for item in stale_getter(self._task_stale_after())
         }
 

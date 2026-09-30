@@ -276,7 +276,7 @@ class StatusMixin(_StatusMixinContract):
             try:
                 options = getattr(task_supervisor, "options", None)
                 stale_after = float(getattr(options, "stale_after", 3600.0) or 3600.0)
-                stale_ids = {(item.group, item.name) for item in stale_getter(stale_after)}
+                stale_ids = {item.identity for item in stale_getter(stale_after)}
             except Exception:
                 stale_ids = set()
         task_views = normalize_tasks(task_infos, stale_ids=stale_ids)

@@ -2,34 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
+from envs_xmpp_core.runtime import TaskInfo
 from envs_xmpp_core.runtime.tasks import SupervisorOptions
 from envs_xmpp_core.runtime.tasks import TaskSupervisor as CoreTaskSupervisor
 from envs_xmpp_core.runtime.tasks import sleep_with_heartbeat as _core_sleep_with_heartbeat
-
-
-@dataclass(frozen=True)
-class TaskInfo:
-    """Stable operator-facing state for one supervised task."""
-
-    group: str
-    name: str
-    status: str
-    kind: str
-    created_at: float
-    heartbeat_at: float | None
-    restart_count: int
-    last_error: str | None
-    restart_at: float | None
-
-
-def _timestamp(value: str | None) -> float | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value).timestamp()
 
 
 def _stale_after(owner: Any) -> float:
@@ -84,7 +62,6 @@ class TaskSupervisor(CoreTaskSupervisor):
                 terminal_error_style="restart_limit",
             )
         )
-        self._by_group = self._by_scope
 
     def create(
         self,
@@ -94,12 +71,8 @@ class TaskSupervisor(CoreTaskSupervisor):
         name: str | None = None,
         kind: str = "one-shot",
     ) -> asyncio.Task[Any]:
-        """Create a core task while preserving BanBot's private metadata key."""
-        task = super().create(group, coro, name=name, kind=kind)
-        meta = self._tasks.get(task)
-        if meta is not None:
-            meta["group"] = group
-        return task
+        """Create a task for a BanBot group backed by the shared scope model."""
+        return super().create(group, coro, name=name, kind=kind)
 
     def create_resilient(
         self,
@@ -124,36 +97,10 @@ class TaskSupervisor(CoreTaskSupervisor):
     async def cancel_group(self, group: str, *, timeout: float = 5.0) -> int:
         return await super().cancel_scope(group, timeout=timeout)
 
-    def snapshot(self, *, include_done: bool = True) -> list[TaskInfo]:
-        result: list[TaskInfo] = []
-        for item in super().snapshot(include_done=include_done):
-            status = item.status
-            # Preserve BanBot's operator-facing "restarting" status while the
-            # shared core circuit is half-open and waiting for its next attempt.
-            if status == "running" and item.circuit_state == "half-open":
-                status = "restarting"
-            result.append(
-                TaskInfo(
-                    group=item.scope,
-                    name=item.name,
-                    status=status,
-                    kind=item.kind,
-                    created_at=float(_timestamp(item.created_at) or 0.0),
-                    heartbeat_at=_timestamp(item.heartbeat_at),
-                    restart_count=item.restart_count,
-                    last_error=item.last_error,
-                    restart_at=_timestamp(item.next_restart_at),
-                )
-            )
-        return sorted(result, key=lambda info: (info.group, info.name))
-
     def stale_services(self, max_age_seconds: float) -> list[TaskInfo]:
-        stale = {
-            (item.scope, item.name)
-            for item in super().stale_tasks(max_age_seconds=max_age_seconds)
-        }
+        """Return stale service tasks using the canonical shared snapshot model."""
         return [
             info
-            for info in self.snapshot(include_done=False)
-            if info.status == "running" and (info.group, info.name) in stale
+            for info in super().stale_tasks(max_age_seconds=max_age_seconds)
+            if info.kind == "service"
         ]
