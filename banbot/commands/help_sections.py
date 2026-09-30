@@ -120,4 +120,3 @@ ADMIN_HELP_SECTIONS: tuple[CommandHelpSection, ...] = (
         ),
     ),
 )
-
