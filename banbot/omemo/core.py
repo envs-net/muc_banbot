@@ -94,6 +94,11 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
             return False
         if encrypted is True:
             return True
+        # Proactive one-to-one notices have no task-local command context.
+        # Keep them encrypted whenever OMEMO is enabled, just as command
+        # replies and the configured OMEMO admin-room policy are.
+        if mtype in {"chat", "normal"}:
+            return True
         if mtype == "groupchat" and getattr(self, "omemo_auto_encrypt_admin_room", True):
             try:
                 import config

@@ -172,3 +172,23 @@ async def test_outbox_transport_false_is_retryable_not_acked():
             mto="admin@example.org", mbody="alert", mtype="groupchat",
             encrypted=None, origin_id="persisted-123", raise_on_failure=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_omemo_reset_pending_never_sends_queued_notice_as_plaintext():
+    bot = MessagingBot()
+    bot.omemo_reset_pending_restart = True
+    result = await bot.bot_send_message(mto="alice@example.org", mbody="health",
+                                        mtype="chat")
+    assert result is False
+    assert not bot.sent
+    assert not bot.encrypted_sent
+
+
+@pytest.mark.asyncio
+async def test_omemo_reset_pending_explicit_plaintext_control_message_allowed():
+    bot = MessagingBot()
+    bot.omemo_reset_pending_restart = True
+    result = await bot.bot_send_message(mto="room@example.org", mbody="reset done",
+                                        mtype="groupchat", encrypted=False)
+    assert result["plain"]["mbody"] == "reset done"

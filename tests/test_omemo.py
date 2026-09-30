@@ -1055,3 +1055,15 @@ async def test_durable_omemo_output_retains_origin_id_after_encryption():
     assert encrypted_stanza.sent
     assert encrypted_stanza["id"] == "durable-omemo-123"
     assert encrypted_stanza["origin_id"]["id"] == "durable-omemo-123"
+
+
+@pytest.mark.omemo
+def test_proactive_one_to_one_message_requires_omemo_when_enabled():
+    bot = OmemoProbe()
+    for mtype in ("chat", "normal"):
+        assert bot._should_encrypt_message(
+            mto="alice@example.test", mtype=mtype, encrypted=None,
+        ) is True
+    assert bot._should_encrypt_message(
+        mto="alice@example.test", mtype="chat", encrypted=False,
+    ) is False

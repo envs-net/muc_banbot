@@ -83,6 +83,15 @@ class MessagingMixin(_MessagingMixinContract):
         **kwargs: Any,
     ) -> Any:
         """Send one already-routed message without durable requeueing."""
+        if getattr(self, "omemo_reset_pending_restart", False) and encrypted is not False:
+            # The reset command intentionally disables the crypto backend.
+            # Do not use that transition to silently send queued, previously
+            # encrypted notifications as plaintext before the restart.
+            error = RuntimeError("OMEMO reset pending; outbound delivery deferred")
+            if raise_on_failure:
+                raise error
+            log.warning("Deferring outbound message while OMEMO reset is pending")
+            return False
         should_encrypt = False
         if hasattr(self, "_should_encrypt_message"):
             should_encrypt = self._should_encrypt_message(
