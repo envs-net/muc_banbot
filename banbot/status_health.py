@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from envs_xmpp_core.runtime.health import (
     HealthCheck,
@@ -19,6 +19,8 @@ from envs_xmpp_core.runtime.rooms import room_key
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 
 import config
+
+from .occupants import BotOccupantMixin
 
 if TYPE_CHECKING:
     from .contracts import StatusHealthHost
@@ -179,14 +181,34 @@ def _rooms_check(bot: StatusHealthHost) -> HealthCheck:
             warnings.append(f"Room lifecycle needs attention: {preview}")
 
     admin_state = bot.bot_admin_state
-    missing_admin_rooms = sorted(room_name for room_name in managed_rooms if admin_state.get(room_name) is False)
+    # ``bot_admin_state`` is intentionally maintained for protected rooms only.
+    # The admin room is also a managed room, but requiring a cached state entry
+    # for it creates a permanent false "not confirmed" warning after startup.
+    # Check the bot's live self-presence there instead.
+    missing_admin_rooms = [
+        room_name for room_name in protected_rooms if admin_state.get(room_name) is False
+    ]
+    unconfirmed_admin_rooms = [
+        room_name for room_name in protected_rooms if room_name not in admin_state
+    ]
+
+    if admin_room:
+        _bot_nick, admin_bot_info = BotOccupantMixin._bot_occupant_entry(
+            cast(BotOccupantMixin, bot), admin_room
+        )
+        if admin_bot_info is None:
+            unconfirmed_admin_rooms.append(admin_room)
+        elif not occupant_is_admin_or_owner(admin_bot_info):
+            missing_admin_rooms.append(admin_room)
+
+    missing_admin_rooms = sorted(set(missing_admin_rooms), key=str.casefold)
+    unconfirmed_admin_rooms = sorted(set(unconfirmed_admin_rooms), key=str.casefold)
     if missing_admin_rooms:
         preview = ", ".join(missing_admin_rooms[:5])
         if len(missing_admin_rooms) > 5:
             preview += f", … +{len(missing_admin_rooms) - 5} more"
         problems.append(f"Missing admin/owner rights in: {preview}")
 
-    unconfirmed_admin_rooms = sorted(room_name for room_name in managed_rooms if room_name not in admin_state)
     if unconfirmed_admin_rooms:
         warnings.append(
             f"Admin/owner rights not confirmed yet in {len(unconfirmed_admin_rooms)} room(s)\n"

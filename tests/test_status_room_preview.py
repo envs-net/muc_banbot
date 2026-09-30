@@ -296,12 +296,17 @@ def test_status_health_includes_admin_room_in_managed_room_checks(monkeypatch):
         protected_rooms={protected_room},
         bot_admin_state={protected_room: True, admin_room: False},
         room_lifecycle=registry,
+        room_bot_nicks={admin_room: "EffectiveBot"},
         occupants={
             admin_room: {
+                "EffectiveBot": {
+                    "jid": "bot@example.org/resource",
+                    "affiliation": "member",
+                },
                 "HumanAdmin": {
                     "jid": "admin@example.org/resource",
                     "affiliation": "owner",
-                }
+                },
             }
         },
     )
@@ -312,6 +317,38 @@ def test_status_health_includes_admin_room_in_managed_room_checks(monkeypatch):
     assert admin_room in check.data["missing_admin_rooms"]
     assert any(admin_room in item for item in check.data["problems"])
     assert any("Room lifecycle needs attention" in item and admin_room in item for item in check.data["warnings"])
+
+
+def test_status_health_accepts_live_admin_room_rights_without_cached_state(monkeypatch):
+    from banbot import status_health
+
+    admin_room = "admin@conference.example.org"
+    protected_room = "room@conference.example.org"
+    monkeypatch.setattr(status_health.config, "ADMIN_ROOM", admin_room)
+    bot = _health_bot(
+        protected_rooms={protected_room},
+        bot_admin_state={protected_room: True},
+        room_bot_nicks={admin_room: "EffectiveBot"},
+        occupants={
+            admin_room: {
+                "EffectiveBot": {
+                    "jid": "bot@example.org/resource",
+                    "affiliation": "owner",
+                },
+                "HumanAdmin": {
+                    "jid": "admin@example.org/resource",
+                    "affiliation": "owner",
+                },
+            }
+        },
+    )
+
+    check = status_health._rooms_check(bot)
+
+    assert check.data["managed_rooms"] == (admin_room, protected_room)
+    assert check.data["missing_admin_rooms"] == ()
+    assert check.data["unconfirmed_admin_rooms"] == ()
+    assert not any("Admin/owner rights not confirmed" in item for item in check.data["warnings"])
 
 
 def test_status_health_admin_room_lookup_is_case_insensitive_and_requires_valid_jid(monkeypatch):
