@@ -15,6 +15,7 @@ from envs_xmpp_core.presentation import (
     render_room_entry,
     room_list_preamble,
     room_list_title,
+    room_view_with_lifecycle,
 )
 from envs_xmpp_core.xmpp import await_muc_join_compat, iq_error_summary
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
@@ -235,13 +236,18 @@ class ProtectedRoomMixin(_ProtectedRoomMixinContract):
                     details.append(f"nick={bot_nick}")
                 if joined and not is_admin:
                     details.append("no admin rights")
+                lifecycle = getattr(self, "room_lifecycle", None)
+                observation = lifecycle.get(room_jid) if lifecycle is not None else None
                 all_views.append(
-                    RoomView(
-                        jid=room_jid,
-                        joined=joined,
-                        details=tuple(details),
-                        attention=joined and not is_admin,
-                        unavailable=not joined,
+                    room_view_with_lifecycle(
+                        RoomView(
+                            jid=room_jid,
+                            joined=joined,
+                            details=tuple(details),
+                            attention=joined and not is_admin,
+                            unavailable=not joined,
+                        ),
+                        observation,
                     )
                 )
 

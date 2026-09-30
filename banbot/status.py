@@ -9,7 +9,6 @@ from importlib import metadata
 from typing import TYPE_CHECKING, cast
 
 import psutil
-from envs_xmpp_core import __version__ as envs_xmpp_version
 from envs_xmpp_core.formatting import format_bytes, format_relative_time
 from envs_xmpp_core.presentation import (
     RoomListRequest,
@@ -24,11 +23,14 @@ from envs_xmpp_core.presentation import (
     render_status_sections,
     render_task_entry,
     render_task_summary,
+    room_lifecycle_summary,
     room_summary,
+    room_view_with_lifecycle,
 )
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 
 import config
+from envs_xmpp_core import __version__ as envs_xmpp_version
 
 from ._version import __version__
 from .occupants import BotOccupantMixin
@@ -90,13 +92,18 @@ class StatusMixin(_StatusMixinContract):
                 details.append(f"role={role}")
             if joined and not is_admin:
                 details.append("no admin rights")
+            lifecycle = getattr(self, "room_lifecycle", None)
+            observation = lifecycle.get(room_name) if lifecycle is not None else None
             views.append(
-                RoomView(
-                    jid=room_name,
-                    joined=joined,
-                    details=tuple(details),
-                    attention=joined and not is_admin,
-                    unavailable=not joined,
+                room_view_with_lifecycle(
+                    RoomView(
+                        jid=room_name,
+                        joined=joined,
+                        details=tuple(details),
+                        attention=joined and not is_admin,
+                        unavailable=not joined,
+                    ),
+                    observation,
                 )
             )
         return views
@@ -195,6 +202,11 @@ class StatusMixin(_StatusMixinContract):
             f"Admin/owner rights: {sum(view.joined and not view.attention for view in room_views)}/{len(room_views)}",
             f"Pending invites: {len(getattr(self, 'pending_room_invites', {}) or {})}",
         ]
+        lifecycle = getattr(self, "room_lifecycle", None)
+        if lifecycle is not None:
+            tracked_rooms = lifecycle.snapshot()
+            if tracked_rooms:
+                xmpp_lines.append(room_lifecycle_summary(tracked_rooms))
         session_lifecycle = getattr(self, "session_lifecycle", None)
         session_snapshot = getattr(session_lifecycle, "snapshot", None)
         if callable(session_snapshot):

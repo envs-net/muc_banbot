@@ -15,6 +15,7 @@ from envs_xmpp_core.runtime.health import (
     supervisor_task_health_state,
     watchdog_health_state,
 )
+from envs_xmpp_core.runtime.rooms import room_key
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 
 import config
@@ -156,6 +157,21 @@ def _rooms_check(bot: StatusHealthHost) -> HealthCheck:
     protected_rooms = sorted(bot.protected_rooms)
     if not protected_rooms:
         warnings.append("No protected rooms configured\n   The bot is running but has no rooms to protect.")
+
+    registry = getattr(bot, "room_lifecycle", None)
+    if registry is not None:
+        expected = {room_key(room) for room in protected_rooms}
+        issues = [
+            f"{observation.room} ({observation.state})"
+            for observation in registry.snapshot()
+            if observation.room in expected
+            and observation.state in {"degraded", "failed", "deferred"}
+        ]
+        if issues:
+            preview = ", ".join(issues[:5])
+            if len(issues) > 5:
+                preview += f", … +{len(issues) - 5} more"
+            warnings.append(f"Room lifecycle needs attention: {preview}")
 
     admin_state = bot.bot_admin_state
     missing_admin_rooms = sorted(room_name for room_name in protected_rooms if admin_state.get(room_name) is False)
