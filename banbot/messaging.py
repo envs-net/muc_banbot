@@ -91,6 +91,16 @@ class MessagingMixin(_MessagingMixinContract):
                 encrypted=encrypted,
             )
 
+        if encrypted is True and not should_encrypt:
+            # An explicit (or inherited) OMEMO reply must never become
+            # plaintext merely because the encryption backend is disabled.
+            # Preserve the application's explicitly opted-in fallback policy.
+            if not getattr(self, "omemo_plaintext_fallback", False):
+                if raise_on_failure:
+                    raise RuntimeError("Explicit OMEMO encryption requested but unavailable")
+                log.warning("Rejecting encrypted send to %s: OMEMO unavailable", mto)
+                return None
+
         if should_encrypt:
             try:
                 result = await self._send_omemo_message(

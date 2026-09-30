@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp.omemo import (
+    configure_omemo_dependency_logging,
     decrypt_incoming_message,
     encrypt_and_send,
     extract_unusable_recipients,
     normalize_bare_jid,
     recipient_bare_jids,
+    require_omemo_bare_jid,
     wait_for_omemo_ready,
 )
 from envs_xmpp_core.xmpp.outbound import ensure_message_origin_id
@@ -34,10 +36,8 @@ else:
 
 class OmemoCoreMixin(_OmemoCoreMixinContract):
     def _configure_omemo_dependency_logging(self) -> None:
-        if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
-            return
-        for logger_name in ("omemo", "omemo.core", "slixmpp_omemo", "slixmpp_omemo.xep_0384"):
-            logging.getLogger(logger_name).setLevel(logging.ERROR)
+        """Compatibility wrapper for shared dependency logger setup."""
+        configure_omemo_dependency_logging()
 
     def configure_omemo(self) -> None:
         import banbot.omemo as omemo_package
@@ -152,10 +152,8 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
         return normalize_bare_jid(value)
 
     def _bare_jid(self, value: object) -> str:
-        bare = normalize_bare_jid(value)
-        if not bare:
-            raise ValueError("OMEMO recipient does not contain a valid bare JID")
-        return bare
+        """Compatibility wrapper for strict shared OMEMO JID validation."""
+        return require_omemo_bare_jid(value)
 
     @staticmethod
     def _message_has_omemo_payload(msg: Any) -> bool:
