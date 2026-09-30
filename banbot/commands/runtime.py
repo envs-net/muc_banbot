@@ -9,13 +9,12 @@ from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.pagination import format_page
 from envs_xmpp_core.presentation import (
-    TaskListRequest,
     filter_task_views,
     normalize_tasks,
     parse_task_list_request,
     render_task_entry,
-    render_task_summary,
-    render_watchdog_lines,
+    render_task_overview,
+    task_list_title,
 )
 
 from .._version import __version__
@@ -116,15 +115,10 @@ class CommandRuntimeMixin(_CommandRuntimeMixinContract):
         views = normalize_tasks(infos, stale_ids=self._task_stale_ids())
 
         if request.mode == "overview":
-            lines = ["🧵 Background Tasks", "", *render_task_summary(views)]
-            problems = filter_task_views(views, TaskListRequest(mode="problems"))
-            if problems:
-                lines.extend(["", "⚠️ Problems"])
-                lines.extend(render_task_entry(view, full=False) for view in problems[:5])
             watchdog = getattr(self, "runtime_watchdog", None)
             runtime_state = getattr(watchdog, "runtime_state", None)
-            if callable(runtime_state):
-                lines.extend(["", "🐕 Runtime Watchdog", *render_watchdog_lines(runtime_state())])
+            watchdog_state = runtime_state() if callable(runtime_state) else None
+            lines = render_task_overview(views, watchdog_state=watchdog_state)
             await self.bot_send_message(mto=room, mbody="\n".join(lines), mtype=mtype)
             return
 
@@ -145,19 +139,8 @@ class CommandRuntimeMixin(_CommandRuntimeMixinContract):
                 else "No supervised tasks found."
             ]
 
-        title = "🧵 Background Tasks"
-        qualifiers = []
-        if request.scope:
-            qualifiers.append(f"scope={request.scope}")
-        if request.mode not in {"inventory", "overview"}:
-            qualifiers.append(request.mode)
-        if request.full:
-            qualifiers.append("full")
-        if qualifiers:
-            title += " — " + " — ".join(qualifiers)
-
         lines = format_page(
-            title,
+            task_list_title(request),
             entries,
             page_request=request.page,
             page_size=5 if request.full else get_list_page_size(self),

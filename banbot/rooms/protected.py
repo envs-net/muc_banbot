@@ -13,7 +13,8 @@ from envs_xmpp_core.presentation import (
     filter_room_views,
     parse_room_list_request,
     render_room_entry,
-    room_summary,
+    room_list_preamble,
+    room_list_title,
 )
 from envs_xmpp_core.xmpp import await_muc_join_compat, iq_error_summary
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
@@ -246,13 +247,12 @@ class ProtectedRoomMixin(_ProtectedRoomMixinContract):
 
             views = filter_room_views(all_views, request)
             entries = [render_room_entry(view) for view in views]
-            preamble = [
-                room_summary(all_views),
-                "Legend: 🟢 healthy · 🟠 attention · 🔴 unavailable · ⚪ not joined",
-            ]
-            if request.filter != "all":
-                preamble.append(f"View: {request.filter} · {len(views)} match(es)")
-            title = "🔒 Protected Rooms" + (f" — {request.filter}" if request.filter != "all" else "")
+            preamble = room_list_preamble(
+                all_views,
+                request,
+                matching_count=len(views),
+            )
+            title = room_list_title(request, title="🔒 Protected Rooms")
             lines = format_page(
                 title,
                 entries or ["No protected rooms match this view."],
