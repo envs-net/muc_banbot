@@ -8,6 +8,11 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.config.changes import config_value_changes
+from envs_xmpp_core.config.operator import (
+    ConfigReloadReport,
+    format_config_diff_entries,
+    render_config_reload_report,
+)
 
 from .._version import __version__
 from ..config import ConfigMixin
@@ -285,29 +290,20 @@ class ConfigCommandMixin(ConfigMixin, _ConfigCommandMixinContract):
             key: value
             for key, value, _writable in self.get_ordered_config_items()
         }
-        entries: list[str] = []
-
-        for _title, keys in self._config_sample_sections():
-            visible_keys = tuple(
-                key
-                for key in keys
-                if key in defaults and not self.is_secret_config_key(key)
-            )
+        changes = (
+            (change.key, change.after, change.before)
+            for _title, keys in self._config_sample_sections()
             for change in config_value_changes(
                 defaults,
                 current_items,
-                keys=visible_keys,
-            ):
-                entries.extend([
-                    f"• {change.key}",
-                    f"  current: {self._format_config_display_value(change.key, change.after)}",
-                    f"  default: {self._format_config_display_value(change.key, change.before)}",
-                    "",
-                ])
-
-        if entries and entries[-1] == "":
-            entries.pop()
-        return entries
+                keys=tuple(key for key in keys if key in defaults),
+            )
+        )
+        return format_config_diff_entries(
+            changes,
+            format_value=self._format_config_display_value,
+            hidden=self.is_secret_config_key,
+        )
 
     @staticmethod
     def _config_diff_arg_requests_page(args: list[str]) -> bool:
@@ -449,21 +445,17 @@ class ConfigCommandMixin(ConfigMixin, _ConfigCommandMixinContract):
                 log.error("Config reload aborted with %d validation error(s)", len(errors))
                 return
 
-            lines = ["✅ Config reloaded successfully."]
-
-            if warnings:
-                lines.append("\n⚠️ Warnings:")
-                lines.extend(f"- {w}" for w in warnings)
-
-            if changes:
-                lines.append("\nChanged:")
-                lines.extend(changes)
-            else:
-                lines.append("\nNo runtime config changes detected.")
-
+            report = ConfigReloadReport(
+                changes=tuple(changes),
+                warnings=tuple(warnings),
+            )
             await self.bot_send_message(
                 mto=room,
-                mbody="\n".join(lines),
+                mbody=render_config_reload_report(
+                    report,
+                    heading="✅ Config reloaded successfully.",
+                    no_changes="No runtime config changes detected.",
+                ),
                 mtype="groupchat"
             )
             log.info("Config reloaded at runtime. Changed settings: %d", len(changes))

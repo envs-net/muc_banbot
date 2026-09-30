@@ -11,6 +11,7 @@ from envs_xmpp_core.storage.backup import inspect_backup_companion_pair
 from envs_xmpp_core.storage.restore import (
     RestoreFileSpec,
     RestoreTransactionError,
+    restore_recovery_report,
     run_restore_transaction,
 )
 
@@ -106,21 +107,21 @@ class BackupRestoreMixin(_BackupRestoreMixinContract):
     @staticmethod
     def _restore_transaction_failure_message(exc: RestoreTransactionError) -> str:
         """Preserve BanBot's user-facing rollback/recovery diagnostics."""
-        errors = (*exc.rollback_errors, *exc.recovery_errors)
-        if exc.rollback_attempted:
-            if errors:
-                return str(exc.cause) + " Rollback incomplete: " + "; ".join(
-                    str(item) for item in errors
-                )
+        report = restore_recovery_report(exc)
+        if report.outcome == "rollback_incomplete":
+            return str(exc.cause) + " Rollback incomplete: " + "; ".join(
+                str(item) for item in report.errors
+            )
+        if report.outcome == "rollback_complete":
             return (
                 str(exc.cause)
                 + " Previous files were restored. Database connection/runtime state was recovered."
             )
-        if exc.recovery_attempted:
-            if errors:
-                return str(exc.cause) + " Runtime recovery failed: " + "; ".join(
-                    str(item) for item in errors
-                )
+        if report.outcome == "runtime_recovery_failed":
+            return str(exc.cause) + " Runtime recovery failed: " + "; ".join(
+                str(item) for item in report.errors
+            )
+        if report.outcome == "runtime_recovered":
             return str(exc.cause) + " Database connection/runtime state was recovered."
         return str(exc.cause)
 

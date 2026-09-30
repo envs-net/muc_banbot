@@ -210,3 +210,35 @@ def test_output_modes_are_runtime_writable_config_keys():
     assert "HELP_OUTPUT_MODE" in ConfigMixin.CONFIG_KEYS
     assert "CONFIG_OUTPUT_MODE" not in ConfigMixin.CONFIG_NEVER_WRITABLE_KEYS
     assert "HELP_OUTPUT_MODE" not in ConfigMixin.CONFIG_NEVER_WRITABLE_KEYS
+
+
+def test_config_runtime_change_summary_never_echoes_secret_values():
+    bot = ConfigBot()
+    # Exercise the shared renderer even for an explicitly supplied secret key.
+    bot.CONFIG_KEYS = (*bot.CONFIG_KEYS, "API_TOKEN")
+    lines = bot._format_config_changes(
+        {"LOG_LEVEL": "INFO", "API_TOKEN": "old-sensitive"},
+        {"LOG_LEVEL": "DEBUG", "API_TOKEN": "new-sensitive"},
+    )
+    assert "- LOG_LEVEL: 'INFO' → 'DEBUG'" in lines
+    message = "\n".join(lines)
+    assert "old-sensitive" not in message
+    assert "new-sensitive" not in message
+    assert "<redacted>" in message
+
+
+def test_common_restore_failure_classification_preserves_banbot_messages():
+    from envs_xmpp_core.storage.restore import RestoreTransactionError
+
+    from banbot.backups.restore import BackupRestoreMixin
+
+    cause = ValueError("db validation failed")
+    success = RestoreTransactionError("validate", cause, rollback_attempted=True)
+    assert "Previous files were restored" in BackupRestoreMixin._restore_transaction_failure_message(success)
+    failed = RestoreTransactionError(
+        "validate", cause, rollback_attempted=True,
+        rollback_errors=(RuntimeError("disk full"),),
+    )
+    text = BackupRestoreMixin._restore_transaction_failure_message(failed)
+    assert "Rollback incomplete" in text
+    assert "disk full" in text

@@ -7,8 +7,8 @@ import logging
 import pprint
 from typing import TYPE_CHECKING, Any
 
-from envs_xmpp_core.config.changes import config_value_changes
 from envs_xmpp_core.config.literals import parse_literal
+from envs_xmpp_core.config.operator import format_config_change_lines
 from envs_xmpp_core.config.python_file import (
     ConfigFileTransactionError,
     apply_config_edit_transaction,
@@ -38,10 +38,7 @@ class ConfigRuntimeMixin(_ConfigRuntimeMixinContract):
     muc_write_semaphore: asyncio.Semaphore
 
     def _format_config_changes(self, before: dict[str, object], after: dict[str, object]) -> list[str]:
-        return [
-            f"- {change.key}: {change.before!r} → {change.after!r}"
-            for change in config_value_changes(before, after, keys=self.CONFIG_KEYS)
-        ]
+        return format_config_change_lines(before, after, keys=self.CONFIG_KEYS)
 
     def apply_log_level(self, level_name: str | None = None) -> str:
         """
