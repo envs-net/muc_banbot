@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING
 
+from envs_xmpp_core.xmpp.messaging import message_context_from_stanza
+
 from envs_xmpp_core.commands import parse_prefixed_command
 
 from .context import bot_nick
@@ -45,10 +47,11 @@ class CommandEntryPointMixin(_CommandEntryPointMixinContract):
             if msg is None:
                 return
 
-        room = str(getattr(msg["from"], "bare", "") or "").strip()
+        context = message_context_from_stanza(msg, encrypted=encrypted)
+        room = context.room or ""
         if not room:
             return
-        body = str(msg["body"] or "").strip()
+        body = context.body.strip()
 
         if hasattr(self, "_redaction_index_message"):
             await self._redaction_index_message(msg)
@@ -66,7 +69,7 @@ class CommandEntryPointMixin(_CommandEntryPointMixinContract):
             return
         cmd, args = parsed
 
-        token = self._set_reply_encryption_context(encrypted)
+        token = self._set_reply_encryption_context(context.encrypted)
         try:
             handled = await self._handle_user_command(msg, room, nick, cmd, args)
             if handled:

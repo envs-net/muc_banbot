@@ -63,11 +63,13 @@ class FakeIncomingMessage:
         room: str = "room@conference.example.test",
         nick: str = "Alice",
         body: str = "!help",
+        message_type: str = "groupchat",
         full_from: str | None = None,
         xml: ET.Element | None = None,
     ) -> None:
         self._data = {
             "from": FakeFrom(room, full_from or f"{room}/{nick}"),
+            "type": message_type,
             "mucnick": nick,
             "body": body,
         }
@@ -119,8 +121,8 @@ def omemo_payload_xml():
 @pytest.fixture
 def temp_db_path(tmp_path, monkeypatch):
     db_path = tmp_path / "banbot-test.sqlite3"
-    import config
     import banbot.db as db_module
+    import config
 
     monkeypatch.setattr(config, "DB_FILE", str(db_path), raising=False)
     monkeypatch.setattr(db_module, "DB_FILE", str(db_path), raising=False)

@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
-from envs_xmpp_core.xmpp.messaging import is_muc_private_message
+from envs_xmpp_core.xmpp.messaging import is_muc_private_message, message_context_from_stanza
 from envs_xmpp_core.xmpp.occupants import (
     find_occupant_by_jid,
     find_occupant_by_nick,
@@ -473,8 +473,11 @@ class DirectMessageMixin(_DirectMessageMixinContract):
         """
         # Treat stanza sender/type fields as untrusted input at the DM boundary.
         try:
+            context = message_context_from_stanza(msg)
+            # Keep the existing DM trust boundary: require a real JID object
+            # with an explicit bare JID, never authorize a parsed string alone.
             sender_bare = self.bare_jid(getattr(msg["from"], "bare", None))
-            message_type = str(msg["type"] or "").strip().lower()
+            message_type = context.message_type
         except Exception:
             return
 
@@ -499,15 +502,15 @@ class DirectMessageMixin(_DirectMessageMixinContract):
             if msg is None:
                 return
 
+        context = message_context_from_stanza(
+            msg, encrypted=encrypted, joined_rooms=self.protected_rooms | {ADMIN_ROOM}
+        )
         sender_info = self._direct_message_sender_info(msg)
         if sender_info is None:
             return
         is_admin, reply_to, sender_bare = sender_info
 
-        try:
-            body = str(msg["body"] or "").strip()
-        except Exception:
-            body = ""
+        body = context.body.strip()
 
         if is_admin and not getattr(self, "allow_admin_commands_in_dms", False):
             await self._send_direct_message(
@@ -524,7 +527,7 @@ class DirectMessageMixin(_DirectMessageMixinContract):
 
             token = None
             if hasattr(self, "_set_reply_encryption_context"):
-                token = self._set_reply_encryption_context(encrypted)
+                token = self._set_reply_encryption_context(context.encrypted)
             try:
                 handled = await self._handle_admin_dm_readonly_command(
                     reply_to=reply_to,
