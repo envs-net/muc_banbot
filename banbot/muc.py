@@ -6,6 +6,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from envs_xmpp_core.runtime import RoomLifecycleRegistry
 from envs_xmpp_core.runtime.reconnect import run_reconnect_loop
 from envs_xmpp_core.xmpp import muc_join_error_kind, muc_join_error_summary
 from envs_xmpp_core.xmpp.muc_join import join_muc_confirmed
@@ -40,6 +41,14 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
     _startup_task: asyncio.Task | None
     reconnect_success_event: asyncio.Event | None
     reconnect_failure_event: asyncio.Event | None
+
+    def _room_lifecycle_registry(self) -> RoomLifecycleRegistry:
+        """Return the per-bot room lifecycle (lazy for lightweight test clients)."""
+        registry = getattr(self, "room_lifecycle", None)
+        if registry is None:
+            registry = RoomLifecycleRegistry()
+            self.room_lifecycle = registry
+        return registry
 
     def _mark_session_reconnecting(self, reason: str) -> None:
         lifecycle = getattr(self, "session_lifecycle", None)
@@ -97,6 +106,7 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
         self.room_join_time.clear()
         getattr(self, "room_bot_nicks", {}).clear()
         getattr(self, "room_join_events", {}).clear()
+        self._room_lifecycle_registry().new_session()
 
         try:
             abort = getattr(self, "abort", None)
@@ -175,6 +185,8 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
         else:
             retries = int(retries)
 
+        lifecycle = self._room_lifecycle_registry()
+        lifecycle.configure(room)
         join_event = self._get_muc_join_event(room)
 
         def is_joined() -> bool:
@@ -187,6 +199,9 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
 
         def on_cleanup_error(exc: Exception) -> None:
             log.debug("Could not clear previous MUC join state for %s: %s", room, exc)
+
+        if force or not is_joined():
+            lifecycle.begin_join(room)
 
         result = await join_muc_confirmed(
             self.plugin["xep_0045"],
@@ -214,7 +229,9 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
                     room,
                     result.waiter_error,
                 )
-            actual_nick, _info = self._bot_occupant_entry(room)
+            actual_nick, info = self._bot_occupant_entry(room)
+            if info is not None and actual_nick:
+                lifecycle.confirm_self_presence(room, actual_nick)
             log.info("✅ Joined MUC %s as %s", room, actual_nick or nick)
             return True
 
@@ -247,6 +264,7 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
                 detail,
                 exc_info=(type(error), error, error.__traceback__),
             )
+        lifecycle.mark_failed(room, reason=f"{type(error).__name__}: {detail}")
         self.room_join_time.pop(room, None)
         getattr(self, "room_join_events", {}).pop(room, None)
         return False
@@ -376,6 +394,7 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
         self.room_join_time.clear()
         getattr(self, "room_bot_nicks", {}).clear()
         getattr(self, "room_join_events", {}).clear()
+        self._room_lifecycle_registry().new_session()
         log.info("🧹 Cleaned up occupants dictionary and states")
 
         self.reconnect_task = asyncio.create_task(self._delayed_reconnect())
@@ -468,6 +487,7 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
             if not hasattr(self, "room_bot_nicks"):
                 self.room_bot_nicks = {}
             self.room_bot_nicks[room] = nick
+            self._room_lifecycle_registry().confirm_self_presence(room, nick)
             self._get_muc_join_event(room).set()
 
         # --- Skip admins/owners ---
@@ -743,6 +763,9 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
         if getattr(self, "room_bot_nicks", {}).get(room) == nick:
             self.room_bot_nicks.pop(room, None)
             self.bot_admin_state.pop(room, None)
+            self._room_lifecycle_registry().mark_degraded(
+                room, reason="bot self-presence unavailable"
+            )
             join_event = getattr(self, "room_join_events", {}).get(room)
             if join_event is not None:
                 join_event.clear()
@@ -806,6 +829,7 @@ class MucMixin(BotOccupantMixin, _MucMixinContract):
         if not hasattr(self, "room_bot_nicks"):
             self.room_bot_nicks = {}
         self.room_bot_nicks[room] = nick
+        self._room_lifecycle_registry().confirm_self_presence(room, nick)
         affiliation = normalize_affiliation(presence["muc"]["affiliation"], default="none")
         role = normalize_role(presence["muc"]["role"], default="none")
 

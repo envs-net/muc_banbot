@@ -58,6 +58,9 @@ async def test_new_disconnect_replaces_stale_reconnect_waiter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bot = ReconnectFixture()
+    registry = bot._room_lifecycle_registry()
+    registry.confirm_self_presence("room@example.org", "BanBot")
+    assert registry.get("room@example.org").joined
     bot.reconnecting = False
     stale_blocker = asyncio.Event()
     replacement_started = asyncio.Event()
@@ -78,6 +81,7 @@ async def test_new_disconnect_replaces_stale_reconnect_waiter(
     assert replacement_task is not None
     assert replacement_task is not stale_task
     assert bot.reconnecting is True
+    assert registry.get("room@example.org").state == "configured"
 
     await asyncio.sleep(0)
     assert stale_task.cancelled()
@@ -103,7 +107,7 @@ async def test_reconnect_timeout_disconnects_partial_session_before_retry(
             close = getattr(awaitable, "close", None)
             if callable(close):
                 close()
-            raise asyncio.TimeoutError
+            raise TimeoutError
         return await awaitable
 
     def connect_with_config() -> bool:

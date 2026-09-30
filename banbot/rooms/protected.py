@@ -355,6 +355,9 @@ class ProtectedRoomMixin(_ProtectedRoomMixinContract):
                 await db.execute("DELETE FROM rooms WHERE room=?", (target,))
                 await db.commit()
                 self.protected_rooms.discard(target)
+                lifecycle = getattr(self, "room_lifecycle", None)
+                if lifecycle is not None:
+                    lifecycle.begin_leave(target)
                 await self.bot_send_message(mto=room, mbody=f"✅ Room removed: {target}", mtype="groupchat")
 
                 # --- Bot leaves the room immediately ---
@@ -370,3 +373,5 @@ class ProtectedRoomMixin(_ProtectedRoomMixinContract):
                 getattr(self, "room_bot_nicks", {}).pop(target, None)
                 getattr(self, "room_join_events", {}).pop(target, None)
                 getattr(self, "room_join_time", {}).pop(target, None)
+                if lifecycle is not None:
+                    lifecycle.forget(target)

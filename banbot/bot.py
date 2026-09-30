@@ -21,6 +21,7 @@ except Exception as exc:
     raise SystemExit(1) from None
 
 import aiosqlite
+from envs_xmpp_core.runtime import RoomLifecycleRegistry
 from envs_xmpp_core.runtime.lifecycle import LifecyclePhaseResult, LifecyclePhaseRunner
 from envs_xmpp_core.runtime.session import SessionLifecycleState
 from envs_xmpp_core.xmpp.connection import connect_kwargs as _core_connect_kwargs
@@ -273,6 +274,7 @@ class BanBot(
         self._admin_affiliation_cache_entries: dict[str, tuple[float, frozenset[str]]] = {}
         self.occupants: dict[str, dict] = {}
         self.room_bot_nicks: dict[str, str] = {}
+        self.room_lifecycle = RoomLifecycleRegistry()
         self.room_join_events: dict[str, asyncio.Event] = {}
         self.protected_rooms: set[str] = set()
         self.registered_rooms: set[str] = set()
