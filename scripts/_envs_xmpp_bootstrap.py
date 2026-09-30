@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 _REQUIRED_VERSION = "1.6.1"
@@ -16,10 +15,9 @@ def _installed_version() -> str | None:
     try:
         from envs_xmpp_ops import __version__ as package_version
     except ImportError:
-        try:
-            package_version = version("envs-xmpp")
-        except PackageNotFoundError:
-            return None
+        # Installed metadata is insufficient if the entrypoint cannot import
+        # the shared deployment tooling. Repair the deploy venv instead.
+        return None
     return package_version
 
 

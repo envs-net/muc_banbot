@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import importlib.util
 from pathlib import Path
 
@@ -12,6 +13,18 @@ spec = importlib.util.spec_from_file_location("deploy_bootstrap_under_test", BOO
 assert spec is not None and spec.loader is not None
 bootstrap = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bootstrap)
+
+
+def test_metadata_only_cannot_satisfy_shared_tooling_requirement(monkeypatch):
+    original_import = builtins.__import__
+
+    def fail_tool_import(name, *args, **kwargs):
+        if name == "envs_xmpp_ops":
+            raise ImportError("shared deployment tooling not importable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_tool_import)
+    assert bootstrap._installed_version() is None
 
 
 def test_matching_version_needs_no_bootstrap(monkeypatch):
