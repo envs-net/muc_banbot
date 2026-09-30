@@ -17,14 +17,18 @@ class StatusRoomPreviewBot(StatusMixin):
         self.sent: list[dict] = []
         self.command_prefix = "!"
         self.protected_rooms = {f"room{index:02d}@conference.example.test" for index in range(12)}
+        admin_room = str(__import__("config").ADMIN_ROOM)
         self.bot_admin_state = {room: True for room in self.protected_rooms}
+        self.bot_admin_state[admin_room] = True
         self.room_bot_nicks = {
             "room00@conference.example.test": "EffectiveBot",
             "room01@conference.example.test": "EffectiveBot",
+            admin_room: "EffectiveBot",
         }
         self.occupants = {
-            "admin@conference.example.org": {
-                "Admin": {"jid": "admin@example.org/resource", "affiliation": "owner"}
+            admin_room: {
+                "EffectiveBot": {"jid": "bot@example.org/resource", "affiliation": "owner"},
+                "Admin": {"jid": "admin@example.org/resource", "affiliation": "owner"},
             },
             "room00@conference.example.test": {
                 "EffectiveBot": {"jid": "bot@example.org/resource", "affiliation": "owner"}
@@ -47,6 +51,9 @@ class StatusRoomPreviewBot(StatusMixin):
         self.pending_room_invites = {}
         self.protections = {}
         self.redaction_enabled = False
+        self.omemo_enabled = False
+        self.omemo_ready = None
+        self.omemo_plaintext_fallback = False
         self.tasks = None
 
     async def get_db_stats(self) -> dict:
@@ -104,11 +111,27 @@ async def test_status_compact_summarizes_rooms_without_inventory(monkeypatch):
     assert "🗄️ Database:" in body
     assert "Status: disconnected" in body
     assert "Path:" in body
-    assert "Summary: 12 configured · 2 joined · 11 issues" in body
+    assert "Rooms: 13 configured · 3 joined · 11 issues" in body
+    assert "Summary:" not in body
+    assert "OMEMO: disabled" in body
     assert "room00@conference.example.test" not in body
     assert "🛡️ Moderation:" in body
     assert "🩺 Health:" in body
     assert "🛡️ Protections:" not in body
+
+
+@pytest.mark.asyncio
+async def test_status_compact_shows_enabled_omemo_state(monkeypatch):
+    bot = StatusRoomPreviewBot()
+    bot.omemo_enabled = True
+    bot.omemo_ready = SimpleNamespace(is_set=lambda: True)
+    bot.omemo_plaintext_fallback = False
+    _patch_process(monkeypatch)
+
+    await bot._cmd_status("admin@conference.example.org")
+    body = bot.sent[-1]["mbody"]
+
+    assert "OMEMO: enabled · ready · plaintext fallback off" in body
 
 
 @pytest.mark.asyncio
@@ -258,13 +281,49 @@ def test_status_health_does_not_flag_expected_worker_stop_during_reconnect():
     assert _tasks_check(reconnecting).data["problems"] == ()
 
 
+def test_status_health_includes_admin_room_in_managed_room_checks(monkeypatch):
+    from banbot import status_health
+    from envs_xmpp_core.runtime import RoomLifecycleRegistry
+
+    admin_room = "admin@conference.example.org"
+    protected_room = "room@conference.example.org"
+    monkeypatch.setattr(status_health.config, "ADMIN_ROOM", admin_room)
+
+    registry = RoomLifecycleRegistry()
+    registry.mark_failed(admin_room)
+    registry.confirm_self_presence(protected_room, "AdminBot")
+    bot = _health_bot(
+        protected_rooms={protected_room},
+        bot_admin_state={protected_room: True, admin_room: False},
+        room_lifecycle=registry,
+        occupants={
+            admin_room: {
+                "HumanAdmin": {
+                    "jid": "admin@example.org/resource",
+                    "affiliation": "owner",
+                }
+            }
+        },
+    )
+
+    check = status_health._rooms_check(bot)
+
+    assert check.data["managed_rooms"] == (admin_room, protected_room)
+    assert admin_room in check.data["missing_admin_rooms"]
+    assert any(admin_room in item for item in check.data["problems"])
+    assert any("Room lifecycle needs attention" in item and admin_room in item for item in check.data["warnings"])
+
+
 def test_status_health_admin_room_lookup_is_case_insensitive_and_requires_valid_jid(monkeypatch):
     from banbot import status_health
 
     monkeypatch.setattr(status_health.config, "ADMIN_ROOM", "Admin@Conference.Example.Org")
     bot = _health_bot(
         protected_rooms={"room@conference.example.org"},
-        bot_admin_state={"room@conference.example.org": True},
+        bot_admin_state={
+            "room@conference.example.org": True,
+            "Admin@Conference.Example.Org": True,
+        },
         occupants={
             "admin@conference.example.org": {
                 "Valid": {"jid": "Admin@Example.Org/Device", "affiliation": "OWNER"},

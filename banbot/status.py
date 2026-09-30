@@ -73,6 +73,20 @@ class StatusMixin(_StatusMixinContract):
     def human_size(num_bytes: int) -> str:
         return format_bytes(num_bytes, negative_label=None, max_unit="GiB")
 
+    def _compact_omemo_status_line(self) -> str:
+        """Return the same compact OMEMO summary used by envsbot status."""
+        if not bool(getattr(self, "omemo_enabled", False)):
+            return "OMEMO: disabled"
+
+        ready_flag = getattr(self, "omemo_ready", None)
+        try:
+            ready = bool(ready_flag and ready_flag.is_set())
+        except Exception:
+            ready = False
+        readiness = "ready" if ready else "initializing"
+        fallback = "on" if bool(getattr(self, "omemo_plaintext_fallback", False)) else "off"
+        return f"OMEMO: enabled · {readiness} · plaintext fallback {fallback}"
+
     def _status_room_views(self, protected_rooms: list[str]) -> list[RoomView]:
         views: list[RoomView] = []
         for room_name in sorted(protected_rooms, key=str.casefold):
@@ -144,8 +158,9 @@ class StatusMixin(_StatusMixinContract):
         problems, warnings, notes = status_health_messages(health)
         rooms_health = health.check("rooms")
         protected_rooms = list(rooms_health.data.get("protected_rooms", ()))
+        managed_rooms = list(rooms_health.data.get("managed_rooms", protected_rooms))
         admins = list(rooms_health.data.get("admins", ()))
-        room_views = self._status_room_views(protected_rooms)
+        room_views = self._status_room_views(managed_rooms)
         db_stats = dict(health.check("database_stats").data.get("stats", {}))
 
         if problems:
@@ -198,7 +213,7 @@ class StatusMixin(_StatusMixinContract):
         connect_mode = "direct TLS" if getattr(config, "CONNECT_DIRECT_TLS", False) else "STARTTLS"
         xmpp_lines = [
             f"Connection: {connect_host}:{connect_port} ({connect_mode})",
-            room_summary(room_views),
+            "Rooms: " + room_summary(room_views).removeprefix("Summary: "),
             f"Admin/owner rights: {sum(view.joined and not view.attention for view in room_views)}/{len(room_views)}",
             f"Pending invites: {len(getattr(self, 'pending_room_invites', {}) or {})}",
         ]
@@ -207,6 +222,7 @@ class StatusMixin(_StatusMixinContract):
             tracked_rooms = lifecycle.snapshot()
             if tracked_rooms:
                 xmpp_lines.append(room_lifecycle_summary(tracked_rooms))
+        xmpp_lines.append(self._compact_omemo_status_line())
         session_lifecycle = getattr(self, "session_lifecycle", None)
         session_snapshot = getattr(session_lifecycle, "snapshot", None)
         if callable(session_snapshot):

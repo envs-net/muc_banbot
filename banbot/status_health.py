@@ -155,12 +155,17 @@ def _rooms_check(bot: StatusHealthHost) -> HealthCheck:
     warnings: list[str] = []
     notes: list[str] = []
     protected_rooms = sorted(bot.protected_rooms)
+    admin_room = str(config.ADMIN_ROOM).strip()
+    managed_rooms = sorted(
+        set(protected_rooms) | ({admin_room} if admin_room else set()),
+        key=str.casefold,
+    )
     if not protected_rooms:
         warnings.append("No protected rooms configured\n   The bot is running but has no rooms to protect.")
 
     registry = getattr(bot, "room_lifecycle", None)
     if registry is not None:
-        expected = {room_key(room) for room in protected_rooms}
+        expected = {room_key(room) for room in managed_rooms}
         issues = [
             f"{observation.room} ({observation.state})"
             for observation in registry.snapshot()
@@ -174,14 +179,14 @@ def _rooms_check(bot: StatusHealthHost) -> HealthCheck:
             warnings.append(f"Room lifecycle needs attention: {preview}")
 
     admin_state = bot.bot_admin_state
-    missing_admin_rooms = sorted(room_name for room_name in protected_rooms if admin_state.get(room_name) is False)
+    missing_admin_rooms = sorted(room_name for room_name in managed_rooms if admin_state.get(room_name) is False)
     if missing_admin_rooms:
         preview = ", ".join(missing_admin_rooms[:5])
         if len(missing_admin_rooms) > 5:
             preview += f", … +{len(missing_admin_rooms) - 5} more"
         problems.append(f"Missing admin/owner rights in: {preview}")
 
-    unconfirmed_admin_rooms = sorted(room_name for room_name in protected_rooms if room_name not in admin_state)
+    unconfirmed_admin_rooms = sorted(room_name for room_name in managed_rooms if room_name not in admin_state)
     if unconfirmed_admin_rooms:
         warnings.append(
             f"Admin/owner rights not confirmed yet in {len(unconfirmed_admin_rooms)} room(s)\n"
@@ -221,12 +226,13 @@ def _rooms_check(bot: StatusHealthHost) -> HealthCheck:
 
     return _message_check(
         "rooms",
-        f"{len(protected_rooms)} protected room(s)",
+        f"{len(managed_rooms)} managed room(s)",
         problems=problems,
         warnings=warnings,
         notes=notes,
         data={
             "protected_rooms": tuple(protected_rooms),
+            "managed_rooms": tuple(managed_rooms),
             "admins": tuple(admins),
             "missing_admin_rooms": tuple(missing_admin_rooms),
             "unconfirmed_admin_rooms": tuple(unconfirmed_admin_rooms),
