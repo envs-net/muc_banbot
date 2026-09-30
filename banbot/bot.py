@@ -405,6 +405,7 @@ class BanBot(
         self.register_plugin('xep_0153')  # vCard Avatar compatibility
         self.register_plugin("xep_0249")  # Direct MUC invites
         self.register_plugin("xep_0313")  # Message Archive Management
+        self.register_plugin("xep_0359")  # Stable origin IDs on outbox retries
 
         # --- Optional OMEMO support ---
         self.configure_omemo()

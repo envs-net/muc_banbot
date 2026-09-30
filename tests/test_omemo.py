@@ -1014,3 +1014,44 @@ def test_omemo_direct_recipient_keeps_direct_bare_jid():
     recipient = bot._omemo_recipient_for_chat("carol@example.test/phone")
 
     assert recipient.bare == "carol@example.test"
+
+
+@pytest.mark.omemo
+@pytest.mark.asyncio
+async def test_durable_omemo_output_retains_origin_id_after_encryption():
+    """The encrypted wire stanza may not be the cleartext input stanza."""
+    from unittest.mock import AsyncMock
+
+    class WireStanza:
+        def __init__(self):
+            self.fields = {"origin_id": {}}
+            self.sent = False
+
+        def __getitem__(self, key):
+            return self.fields[key]
+
+        def __setitem__(self, key, value):
+            self.fields[key] = value
+
+        def send(self):
+            self.sent = True
+
+    encrypted_stanza = WireStanza()
+
+    class Plugin:
+        async def encrypt_message(self, _msg, _recipients):
+            return encrypted_stanza
+
+    bot = OmemoProbe()
+    bot.plugin = {"xep_0384": Plugin()}
+    bot._wait_for_omemo_ready = AsyncMock(return_value=True)
+    bot._omemo_recipients_for_room = AsyncMock(return_value={slixmpp.JID("alice@example.org")})
+    bot.make_message = lambda **_kwargs: WireStanza()
+
+    await bot._send_omemo_message(
+        mto="admin@conference.example.org", mbody="encrypted alert",
+        mtype="groupchat", origin_id="durable-omemo-123",
+    )
+    assert encrypted_stanza.sent
+    assert encrypted_stanza["id"] == "durable-omemo-123"
+    assert encrypted_stanza["origin_id"]["id"] == "durable-omemo-123"

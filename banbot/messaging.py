@@ -6,11 +6,17 @@ transport-specific behavior, such as OMEMO encryption, can be added here
 without touching every command/mixin again.
 """
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any
 
 from envs_xmpp_core.xmpp.messaging import ReplyRoute, TaskLocalReplyRoute
 from envs_xmpp_core.xmpp.omemo import TaskLocalEncryptionMode
+from envs_xmpp_core.xmpp.outbound import (
+    ensure_message_origin_id,
+    plan_outbound_message,
+    transport_accepted,
+)
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +79,7 @@ class MessagingMixin(_MessagingMixinContract):
         mtype: str,
         encrypted: bool | None,
         raise_on_failure: bool = False,
+        origin_id: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """Send one already-routed message without durable requeueing."""
@@ -86,12 +93,16 @@ class MessagingMixin(_MessagingMixinContract):
 
         if should_encrypt:
             try:
-                return await self._send_omemo_message(
+                result = await self._send_omemo_message(
                     mto=mto,
                     mbody=mbody,
                     mtype=mtype,
+                    **({"origin_id": origin_id} if origin_id is not None else {}),
                     **kwargs,
                 )
+                if raise_on_failure and not transport_accepted(result):
+                    raise RuntimeError("Encrypted transport rejected outbound stanza")
+                return result
             except Exception as exc:
                 log.warning("Encrypted send to %s failed: %s", mto, exc)
                 if not getattr(self, "omemo_plaintext_fallback", False):
@@ -100,12 +111,28 @@ class MessagingMixin(_MessagingMixinContract):
                     return None
                 log.warning("Falling back to plaintext send for %s", mto)
 
-        return self.send_message(
-            mto=mto,
-            mbody=mbody,
-            mtype=mtype,
-            **kwargs,
-        )
+        if origin_id is not None:
+            # A durable retry must reuse its recorded stanza identity. Calling
+            # send_message() here would generate a fresh id for every replay.
+            make_message = getattr(self, "make_message", None)
+            if not callable(make_message):
+                raise RuntimeError("Durable transport cannot create a stanza with a stable id")
+            stanza = make_message(mto=mto, mbody=mbody, mtype=mtype, **kwargs)
+            ensure_message_origin_id(stanza, origin_id, require_stanza_id=True)
+            result = stanza.send()
+            result = await result if inspect.isawaitable(result) else result
+        else:
+            result = self.send_message(
+                mto=mto,
+                mbody=mbody,
+                mtype=mtype,
+                **kwargs,
+            )
+            if inspect.isawaitable(result):
+                result = await result
+        if raise_on_failure and not transport_accepted(result):
+            raise RuntimeError("Transport rejected outbound stanza")
+        return result
 
     async def bot_send_message(
         self,
@@ -128,16 +155,21 @@ class MessagingMixin(_MessagingMixinContract):
         ADMIN_ROOM message from the configured OMEMO policy.
         """
         reply_target = self._get_reply_target_context()
-        if reply_target is not None:
-            mto, mtype = reply_target
-
-        if encrypted is None:
-            encrypted = self._get_reply_encryption_context()
+        route = ReplyRoute(*reply_target) if reply_target is not None else None
+        plan = plan_outbound_message(
+            target=mto,
+            message_type=mtype,
+            reply_route=route,
+            encrypted=encrypted,
+            inherited_encryption=self._get_reply_encryption_context(),
+            durable=durable,
+        )
+        mto, mtype, encrypted = plan.route.target, plan.route.message_type, plan.encrypted
 
         if durable:
             if kwargs:
                 raise ValueError("durable messages cannot persist transport-specific keyword arguments")
-            if encrypted is True:
+            if not plan.can_persist_without_encryption_context:
                 raise ValueError("durable messages cannot persist task-local explicit encryption state")
             enqueue = getattr(self, "enqueue_durable_message", None)
             if not callable(enqueue):

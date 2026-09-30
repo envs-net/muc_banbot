@@ -162,6 +162,7 @@ class OutboxMixin(_OutboxMixinContract):
                     mbody=queued.body,
                     mtype=queued.message_type,
                     encrypted=None,
+                    origin_id=queued.origin_id,
                     raise_on_failure=True,
                 )
             except asyncio.CancelledError:

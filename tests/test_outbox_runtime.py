@@ -245,3 +245,34 @@ async def test_outbox_ack_cancellation_requeues_remaining_claimed_batch_tail(tmp
         "worker cancelled before delivery",
     ]
     await bot.close_outbox_storage()
+
+
+@pytest.mark.asyncio
+async def test_requeued_message_preserves_same_origin_id(tmp_path):
+    bot = OutboxBot()
+    await bot.setup_outbox_storage(str(tmp_path / "outbox.db"))
+    await bot.enqueue_durable_message(
+        destination="admin@example.org", body="alert", message_type="groupchat"
+    )
+    seen: list[str | None] = []
+
+    async def recording_transport(**kwargs):
+        seen.append(kwargs.get("origin_id"))
+        if len(seen) == 1:
+            raise RuntimeError("offline")
+
+    bot._send_message_transport = recording_transport  # type: ignore[method-assign]
+    try:
+        assert await bot.run_outbox_once() == 1
+        assert bot.outbox_store is not None
+        await bot.outbox_store.recover_inflight(older_than_seconds=0)
+        # A deferred row is due after its retry delay, but its persisted ID
+        # must be stable even if the worker is restarted in the meantime.
+        rows = await bot.outbox_store.counts()
+        assert rows["pending"] == 1
+        assert seen[0] is not None and len(seen[0]) > 0
+        await asyncio.sleep(1.05)
+        assert await bot.run_outbox_once() == 1
+        assert seen == [seen[0], seen[0]]
+    finally:
+        await bot.close_outbox_storage()

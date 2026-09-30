@@ -15,6 +15,7 @@ from envs_xmpp_core.xmpp.omemo import (
     recipient_bare_jids,
     wait_for_omemo_ready,
 )
+from envs_xmpp_core.xmpp.outbound import ensure_message_origin_id
 from slixmpp import JID
 
 from .helpers import _current_omemo_identity, _ensure_omemo_identity_metadata, _prepare_omemo_storage_file
@@ -115,13 +116,18 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
             log.warning("OMEMO: initialization is not ready")
         return ready
 
-    async def _send_omemo_message(self, *, mto: str, mbody: str, mtype: str = "groupchat", **kwargs: Any) -> Any:
+    async def _send_omemo_message(
+        self, *, mto: str, mbody: str, mtype: str = "groupchat",
+        origin_id: str | None = None, **kwargs: Any
+    ) -> Any:
         if not await self._wait_for_omemo_ready():
             raise RuntimeError("OMEMO is not initialized")
         plugin = self.plugin.get("xep_0384", None)
         if plugin is None:
             raise RuntimeError("OMEMO plugin is not registered")
         msg = self.make_message(mto=mto, mbody=mbody, mtype=mtype)
+        if origin_id is not None:
+            ensure_message_origin_id(msg, origin_id, require_stanza_id=True)
         self._apply_message_kwargs(msg, kwargs)
         recipients: set[JID] | JID
         if mtype == "groupchat":
@@ -130,7 +136,7 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
             recipients = self._omemo_recipient_for_chat(mto)
         if isinstance(recipients, set) and not recipients:
             raise RuntimeError(f"No OMEMO recipients available for {mto}")
-        return await encrypt_and_send(plugin, msg, recipients, mto=mto)
+        return await encrypt_and_send(plugin, msg, recipients, mto=mto, origin_id=origin_id)
 
     async def _encrypt_and_send_omemo_message(self, msg: Any, recipients: set[JID] | JID, *, mto: str) -> Any:
         plugin = self.plugin.get("xep_0384", None)

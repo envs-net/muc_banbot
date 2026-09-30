@@ -146,7 +146,7 @@ def test_banbot_init_sets_runtime_state_and_registers_plugins(monkeypatch):
     assert bot.command_prefix == "!"
     assert bot.runtime_config_applied is True
     assert bot.omemo_configured is True
-    assert bot.registered_plugins[-9:] == [
+    assert bot.registered_plugins[-10:] == [
         "xep_0030",
         "xep_0045",
         "xep_0054",
@@ -156,6 +156,7 @@ def test_banbot_init_sets_runtime_state_and_registers_plugins(monkeypatch):
         "xep_0153",
         "xep_0249",
         "xep_0313",
+        "xep_0359",
     ]
     assert "session_start" in bot.registered_events
     assert bot.registered_events.count("message") == 2

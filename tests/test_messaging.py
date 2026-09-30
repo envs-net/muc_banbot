@@ -99,3 +99,76 @@ async def test_reply_encryption_context_does_not_leak_to_child_tasks():
     assert background["plain"]["mbody"] == "background"
     assert [item["mbody"] for item in bot.encrypted_sent] == ["reply"]
     assert [item["mbody"] for item in bot.sent] == ["background"]
+
+
+@pytest.mark.asyncio
+async def test_durable_send_refuses_task_local_encrypted_reply():
+    bot = MessagingBot()
+    token = bot._set_reply_encryption_context(True)
+    try:
+        with pytest.raises(ValueError, match="task-local explicit encryption"):
+            await bot.bot_send_message(mto="admin@example.org", mbody="secret", durable=True)
+    finally:
+        bot._reset_reply_encryption_context(token)
+    assert not bot.sent
+    assert not bot.encrypted_sent
+
+
+@pytest.mark.asyncio
+async def test_durable_plaintext_replay_uses_stable_origin_id():
+    class CapturedStanza(dict):
+        def __init__(self, **fields):
+            super().__init__({**fields, "origin_id": {}})
+
+        def send(self):
+            return True
+
+    class StanzaBot(MessagingBot):
+        def make_message(self, **fields):
+            self.stanza = CapturedStanza(**fields)
+            return self.stanza
+
+    bot = StanzaBot()
+    result = await bot._send_message_transport(
+        mto="room@example.org", mbody="notice", mtype="groupchat",
+        encrypted=None, origin_id="persisted-id",
+    )
+    assert result is True
+    assert bot.stanza["id"] == "persisted-id"
+    assert bot.stanza["origin_id"]["id"] == "persisted-id"
+    assert not bot.sent  # low-level send_message would create a different id
+
+
+@pytest.mark.asyncio
+async def test_durable_replay_refuses_to_lose_origin_id():
+    bot = MessagingBot()  # No make_message implementation.
+    with pytest.raises(RuntimeError, match="stable id"):
+        await bot._send_message_transport(
+            mto="room@example.org", mbody="notice", mtype="groupchat",
+            encrypted=None, origin_id="persisted-id",
+        )
+    assert not bot.sent
+
+
+@pytest.mark.asyncio
+async def test_outbox_transport_false_is_retryable_not_acked():
+    class Stanza:
+        def __init__(self):
+            self.fields = {"origin_id": {}}
+
+        def __getitem__(self, key):
+            return self.fields[key]
+
+        def __setitem__(self, key, value):
+            self.fields[key] = value
+
+        def send(self):
+            return False
+
+    bot = MessagingBot()
+    bot.make_message = lambda **_kwargs: Stanza()
+    with pytest.raises(RuntimeError, match="rejected outbound stanza"):
+        await bot._send_message_transport(
+            mto="admin@example.org", mbody="alert", mtype="groupchat",
+            encrypted=None, origin_id="persisted-123", raise_on_failure=True,
+        )
