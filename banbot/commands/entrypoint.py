@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING
 
+from envs_xmpp_core.commands import parse_prefixed_command
+
 from .context import bot_nick
 
 if TYPE_CHECKING:
@@ -59,14 +61,10 @@ class CommandEntryPointMixin(_CommandEntryPointMixinContract):
             if handled_by_protection:
                 return
 
-        if not body.startswith(self.command_prefix):
+        parsed = parse_prefixed_command(body, self.command_prefix)
+        if parsed is None:
             return
-
-        parts = body.split()
-        raw_cmd = parts[0]
-
-        cmd = raw_cmd[len(self.command_prefix):].lower()
-        args = parts[1:]
+        cmd, args = parsed
 
         token = self._set_reply_encryption_context(encrypted)
         try:

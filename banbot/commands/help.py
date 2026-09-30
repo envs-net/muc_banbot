@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 
 from ..utils import get_list_page_size, paginate_lines, resolve_page, wants_all_pages, without_all_pages_arg
+from .help_specs import HELP_TOPIC_METHODS, find_help_command
 
 if TYPE_CHECKING:
     from ..contracts import CommandHelpMixinHost
@@ -17,74 +18,10 @@ else:
 class CommandHelpMixin(_CommandHelpMixinContract):
     def _admin_topic_help_text(self, topic: str | list[str]) -> str:
         """Return focused help for one admin command topic."""
-        if isinstance(topic, str):
-            parts = topic.split()
-        else:
-            parts = [str(part) for part in topic]
-
-        parts = [part.lower().strip() for part in parts if str(part).strip()]
-        raw_topic = " ".join(parts)
-        normalized = raw_topic
-        aliases = {
-            "blacklist": "banlist",
-            "rooms": "room",
-            "rules": "policy",
-            "whitelist": "ignore",
-            "reloadconfig": "reload",
-            "updatecheck": "checkupdate",
-            "del": "delete",
-            "rm": "remove",
-            "room invites": "room invite",
-            "invite": "room invite",
-            "invites": "room invite",
-            "rtbl pub": "rtbl publish",
-        }
-        normalized = aliases.get(normalized, normalized)
-        first = normalized.split()[0] if normalized else ""
-        normalized = aliases.get(first, normalized) if len(normalized.split()) == 1 else normalized
-
-        topic_help = {
-            "help": self._help_usage_text,
-            "room": self._room_usage_text,
-            "room invite": self._room_invite_usage_text,
-            "redact": self._redact_usage_text,
-            "policy": self._policy_usage_text,
-            "backup": self._backup_usage_text,
-            "restore": self._restore_usage_text,
-            "export": self._export_usage_text,
-            "import": self._import_usage_text,
-            "rtbl": self._rtbl_usage_text,
-            "rtbl publish": self._rtbl_publish_usage_text,
-            "ignore": self._ignore_usage_text,
-            "config": self._config_usage_text,
-            "audit": self._audit_usage_text,
-            "ban": self._ban_usage_text,
-            "tempban": self._tempban_usage_text,
-            "unban": self._unban_usage_text,
-            "banlist": self._banlist_usage_text,
-            "bansearch": self._bansearch_usage_text,
-            "baninfo": self._baninfo_usage_text,
-            "history": self._history_usage_text,
-            "banedit": self._banedit_usage_text,
-            "why": self._why_usage_text,
-            "restart": self._restart_usage_text,
-            "reload": self._reload_usage_text,
-            "checkupdate": self._checkupdate_usage_text,
-            "status": self._status_usage_text,
-            "tasks": self._tasks_usage_text,
-            "whoami": self._whoami_usage_text,
-            "sync": self._sync_usage_text,
-            "syncadmins": self._syncadmins_usage_text,
-            "syncbans": self._syncbans_usage_text,
-            "omemo": self._omemo_usage_text,
-            "protection": self._protection_usage_text,
-            "protections": self._protection_usage_text,
-            "report": self._report_usage_text,
-        }
-
-        help_factory = topic_help.get(normalized)
-        if help_factory:
-            return help_factory()
+        raw_topic = " ".join(topic.split()) if isinstance(topic, str) else " ".join(map(str, topic))
+        command = find_help_command(topic)
+        if command is not None:
+            return getattr(self, HELP_TOPIC_METHODS[command.name])()
 
         return (
             f"❌ Unknown help topic: {raw_topic or topic}\n"

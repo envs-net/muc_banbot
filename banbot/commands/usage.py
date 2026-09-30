@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING
 
+from envs_xmpp_core.commands import CommandSpec, SubcommandSpec, render_subcommand_usage
+
 if TYPE_CHECKING:
     from ..contracts import CommandUsageMixinHost
 
@@ -76,14 +78,16 @@ class CommandUsageMixin(_CommandUsageMixinContract):
 
     def _room_invite_usage_text(self) -> str:
         """Return usage text for room invite commands."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}room invite list [all|page|last]\n"
-            f"  {p}room invite accept <id>\n"
-            f"  {p}room invite decline/remove/delete/del/rm <id>\n"
-            f"  {p}room invite cleanup [expired]"
+        spec: CommandSpec[object] = CommandSpec(
+            name="room invite",
+            subcommands=(
+                SubcommandSpec("list", "{prefix}room invite list [all|page|last]", "List invites"),
+                SubcommandSpec("accept", "{prefix}room invite accept <id>", "Accept invite"),
+                SubcommandSpec("decline", "{prefix}room invite decline/remove/delete/del/rm <id>", "Decline invite"),
+                SubcommandSpec("cleanup", "{prefix}room invite cleanup [expired]", "Clean up invites"),
+            ),
         )
+        return render_subcommand_usage(spec, self.command_prefix)
 
     def _redact_usage_text(self) -> str:
         """Return usage text for the admin redact command."""
@@ -313,12 +317,13 @@ class CommandUsageMixin(_CommandUsageMixinContract):
 
     def _omemo_usage_text(self) -> str:
         """Return usage text for OMEMO command."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}omemo status\n"
-            f"  {p}omemo devices\n"
-
-            f"  {p}omemo reset [confirm]\n"
-            f"  {p}omemo help"
+        spec: CommandSpec[object] = CommandSpec(
+            name="omemo",
+            subcommands=(
+                SubcommandSpec("status", "{prefix}omemo status", "Show OMEMO state"),
+                SubcommandSpec("devices", "{prefix}omemo devices", "Show devices"),
+                SubcommandSpec("reset", "{prefix}omemo reset [confirm]", "Rotate storage"),
+                SubcommandSpec("help", "{prefix}omemo help", "Show help"),
+            ),
         )
+        return render_subcommand_usage(spec, self.command_prefix)
