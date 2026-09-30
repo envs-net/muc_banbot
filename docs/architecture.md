@@ -705,4 +705,4 @@ health state after unusual presence ordering.
 The audit also removed the unused cache tuple builder left behind by earlier
 cache consolidation. Those fixes required no shared-core behavior. Phase 42
 subsequently moved shared JID presentation-artifact normalization into
-`envs-xmpp`, so the dependency floor is now 1.6.1.
+`envs-xmpp`, so the dependency floor is now 1.7.0.

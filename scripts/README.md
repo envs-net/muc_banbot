@@ -12,7 +12,7 @@ Run these helpers from the repository root inside the project virtualenv.
 | `update-constraints.sh` | Reproduces or refreshes complete Python 3.12/3.13/3.14 dependency snapshots. | `./scripts/update-constraints.sh 3.14 --refresh` |
 | `check_constraints.py` | Verifies that the snapshot pins the complete installed dependency closure. | `python scripts/check_constraints.py constraints/python314.txt` |
 | `test.sh` | Fast non-integration pytest wrapper with warnings treated as errors. | `./scripts/test.sh`, `./scripts/test.sh --coverage`, `./scripts/test.sh --last-failed` |
-| `check_release_tag.py` | Thin wrapper over `envs_xmpp_ops.release`; declares `banbot/_version.py` as the package version source. | `python scripts/check_release_tag.py v3.4.0` |
+| `check_release_tag.py` | Thin wrapper over `envs_xmpp_ops.release`; declares `banbot/_version.py` as the package version source. | `python scripts/check_release_tag.py v3.5.0` |
 | `check_wheel.py` | Thin wrapper over the shared wheel checker; declares the BanBot entry point, required members and runtime asset. | `rm -rf dist && python -m build && python scripts/check_wheel.py` |
 
 `quality.sh` and `test.sh` intentionally use the same shared runners as the

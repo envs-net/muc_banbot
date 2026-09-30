@@ -1,2 +1,2 @@
 # Compatibility installer: OMEMO is already part of the default bot runtime.
-envs-xmpp[omemo]>=1.6.1,<2.0
+envs-xmpp[omemo]>=1.7.0,<2.0
