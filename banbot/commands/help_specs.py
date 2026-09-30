@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from envs_xmpp_core.commands import CommandSpec, resolve_help_topic
+
+from .usage_specs import USAGE_DOCUMENTS
 
 # Map documented help subjects to existing bot-specific formatting handlers.
 HELP_TOPIC_METHODS: dict[str, str] = {
@@ -61,7 +65,8 @@ HELP_TOPIC_ALIASES: dict[str, str] = {
 }
 
 HELP_COMMAND_SPECS: tuple[CommandSpec[object], ...] = tuple(
-    CommandSpec(
+    replace(
+        USAGE_DOCUMENTS["protection" if name == "protections" else name].command,
         name=name,
         aliases=tuple(alias for alias, target in HELP_TOPIC_ALIASES.items() if target == name),
         context="admin room",

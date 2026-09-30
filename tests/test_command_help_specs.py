@@ -36,3 +36,44 @@ def test_structured_usage_keeps_existing_banbot_help_text() -> None:
         "Usage:\n  !room invite list [all|page|last]\n  !room invite accept <id>\n"
         "  !room invite decline/remove/delete/del/rm <id>\n  !room invite cleanup [expired]"
     )
+
+
+def test_structured_catalog_matches_legacy_help_for_all_commands_and_prefixes() -> None:
+    """Phase 3B: preserve every existing help response byte-for-byte."""
+    import json
+    from pathlib import Path
+
+    from banbot.commands.usage_specs import USAGE_DOCUMENTS
+
+    expected = json.loads((Path(__file__).parent / "fixtures" / "command_usage_legacy.json").read_text("utf-8"))
+    bot = HelpBot()
+    assert len(expected) == len(USAGE_DOCUMENTS) == 35
+    for method, prefixes in expected.items():
+        for prefix, legacy in prefixes.items():
+            bot.command_prefix = prefix
+            assert getattr(bot, method)() == legacy, (method, prefix)
+
+
+def test_help_registry_now_carries_real_command_usage_metadata() -> None:
+    from banbot.commands.usage_specs import USAGE_DOCUMENTS
+
+    assert len(HELP_COMMAND_SPECS) == 36
+    assert find_help_command("room invite").subcommands
+    assert find_help_command("ban").usage == "{prefix}ban <jid|nick|*.domain.tld> [comment]"
+    assert find_help_command("protections").subcommands == USAGE_DOCUMENTS["protection"].command.subcommands
+    assert find_help_command("whitelist").name == "ignore"
+
+
+def test_sectioned_admin_help_matches_legacy_text_and_custom_prefixes() -> None:
+    """Keep the full admin help list stable while converting it to sections."""
+    import json
+    from pathlib import Path
+
+    from banbot.commands.help_sections import ADMIN_HELP_SECTIONS
+
+    expected = json.loads((Path(__file__).parent / "fixtures" / "admin_help_legacy.json").read_text("utf-8"))
+    assert len(ADMIN_HELP_SECTIONS) == 11
+    bot = HelpBot()
+    for prefix, old in expected.items():
+        bot.command_prefix = prefix
+        assert bot._admin_help_text() == old

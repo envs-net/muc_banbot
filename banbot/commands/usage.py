@@ -1,8 +1,10 @@
-"""Focused usage text helpers for BanBot commands."""
+"""Compatibility adapters for structured BanBot command usage help."""
 
 from typing import TYPE_CHECKING
 
-from envs_xmpp_core.commands import CommandSpec, SubcommandSpec, render_subcommand_usage
+from envs_xmpp_core.commands import render_command_help_document
+
+from .usage_specs import USAGE_DOCUMENTS
 
 if TYPE_CHECKING:
     from ..contracts import CommandUsageMixinHost
@@ -15,315 +17,142 @@ else:
 
 
 class CommandUsageMixin(_CommandUsageMixinContract):
-
     def _protection_usage_text(self) -> str:
         """Return usage text for protection commands."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}protections list [all|page|last]\n"
-            f"  {p}protection enable <name>\n"
-            f"  {p}protection disable <name>\n"
-            f"  {p}protections <name> config/show\n"
-            f"  {p}protections <name> set <key> <value>\n"
-            f"  {p}protections <name> reset\n"
-            f"  {p}protections <name> observe <on|off>\n"
-            f"  {p}protections reporters add/remove/list <jid>\n\n"
-            "Examples:\n"
-            f"  {p}protection enable FloodSpamProtection\n"
-            f"  {p}protections MentionLimitProtection set max_mentions 5\n"
-            f"  {p}protections FloodSpamProtection set tempban_seconds 1h\n"
-            f"  {p}protections reporters add alice@example.org"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['protection'], self.command_prefix)
 
     def _report_usage_text(self) -> str:
         """Return usage text for trusted reporter command."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}report <nick|jid> [reason]\n\n"
-            "Reports only count when TrustedReporters is enabled and the sender JID is configured as trusted."
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['report'], self.command_prefix)
 
     def _policy_usage_text(self) -> str:
         """Return usage text for the admin policy command."""
-        p = self.command_prefix
-        return (
-            f"Usage:\n"
-            f"  {p}policy show\n"
-            f"  {p}policy set <text>\n"
-            f"  {p}policy enable\n"
-            f"  {p}policy disable\n"
-            f"  {p}policy clear/delete/remove\n"
-            f"  {p}policy help/usage\n\n"
-            "Supported placeholders:\n"
-            "  {prefix}, {room}, {room_count}, {admin_room}, {bot_name}\n"
-            "Use literal \\n for line breaks."
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['policy'], self.command_prefix)
 
     def _room_usage_text(self) -> str:
         """Return usage text for the admin room command."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}room/rooms list [joined|offline|problems] [all|page|last]\n"
-            f"  {p}room add <room_jid>\n"
-            f"  {p}room rejoin <room_jid|all>\n"
-            f"  {p}room remove/delete/rm/del <room_jid>\n"
-            f"  {p}room invite list [all|page|last]\n"
-            f"  {p}room invite accept <id>\n"
-            f"  {p}room invite decline/remove/delete/del/rm <id>\n"
-            f"  {p}room invite cleanup [expired]"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['room'], self.command_prefix)
 
     def _room_invite_usage_text(self) -> str:
         """Return usage text for room invite commands."""
-        spec: CommandSpec[object] = CommandSpec(
-            name="room invite",
-            subcommands=(
-                SubcommandSpec("list", "{prefix}room invite list [all|page|last]", "List invites"),
-                SubcommandSpec("accept", "{prefix}room invite accept <id>", "Accept invite"),
-                SubcommandSpec("decline", "{prefix}room invite decline/remove/delete/del/rm <id>", "Decline invite"),
-                SubcommandSpec("cleanup", "{prefix}room invite cleanup [expired]", "Clean up invites"),
-            ),
-        )
-        return render_subcommand_usage(spec, self.command_prefix)
+        return render_command_help_document(USAGE_DOCUMENTS['room invite'], self.command_prefix)
 
     def _redact_usage_text(self) -> str:
         """Return usage text for the admin redact command."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}redact <jid> [reason]\n"
-            f"  {p}redact id <room_jid> <stanza_id> [reason]\n"
-            f"  {p}redact cleanup"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['redact'], self.command_prefix)
 
     def _help_usage_text(self) -> str:
         """Return usage text for help itself."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}help [all|page|last]\n"
-            f"  {p}help <command>\n\n"
-            "Examples:\n"
-            f"  {p}help room\n"
-            f"  {p}help redact\n"
-            f"  {p}help backup\n"
-            f"  {p}help room invite\n"
-            f"  {p}help rtbl publish\n\n"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['help'], self.command_prefix)
 
     def _backup_usage_text(self) -> str:
         """Return usage text for backup and restore commands."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}backup\n"
-            f"  {p}backup list [all|page|last]\n"
-            f"  {p}backup show <filename|latest>\n"
-            f"  {p}backup verify <filename|latest>\n"
-            f"  {p}backup delete/remove/del/rm <filename|latest>\n"
-            f"  {p}restore <filename|latest> confirm"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['backup'], self.command_prefix)
 
     def _restore_usage_text(self) -> str:
         """Return usage text for restore command."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}restore <filename|latest> confirm\n\n"
-            "Restores a full backup. The confirm argument is required intentionally."
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['restore'], self.command_prefix)
 
     def _export_usage_text(self) -> str:
         """Return usage text for export and import commands."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}export\n"
-            f"  {p}export list [all|page|last]\n"
-            f"  {p}export show <filename|latest>\n"
-            f"  {p}export delete/remove/del/rm <filename|latest>\n"
-            f"  {p}import <filename> [dryrun]"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['export'], self.command_prefix)
 
     def _import_usage_text(self) -> str:
         """Return usage text for import command."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}import <filename> [dryrun]\n\n"
-            "Use dryrun/dry-run/check to validate an import without changing the database."
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['import'], self.command_prefix)
 
     def _ignore_usage_text(self) -> str:
         """Return usage text for ignore/whitelist commands."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}ignore [list] [all|page|last]\n"
-            f"  {p}ignore add <jid|domain> [reason]\n"
-            f"  {p}ignore remove/delete/del/rm <jid|domain>\n"
-            f"  {p}whitelist ... - alias for {p}ignore"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['ignore'], self.command_prefix)
 
     def _rtbl_usage_text(self) -> str:
         """Return usage text for RTBL commands."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}rtbl list [all|page|last]\n"
-            f"  {p}rtbl add <service_jid> <node>\n"
-            f"  {p}rtbl delete/remove/del/rm <service_jid> [node]\n"
-            f"  {p}rtbl refresh [service_jid] [node]\n"
-            f"  {p}rtbl publish status\n"
-            f"  {p}rtbl publish sync"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['rtbl'], self.command_prefix)
 
     def _rtbl_publish_usage_text(self) -> str:
         """Return usage text for RTBL publish subcommands."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}rtbl publish status\n"
-            f"  {p}rtbl publish sync"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['rtbl publish'], self.command_prefix)
 
     def _config_usage_text(self) -> str:
         """Return usage text for config command."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}config [all|page|last]\n"
-            f"  {p}config show [all|page|last]\n"
-            f"  {p}config search/find <query>\n"
-            f"  {p}config diff [all|page|last]\n"
-            f"  {p}config set <KEY> <value>\n"
-            f"  {p}config unset <KEY>"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['config'], self.command_prefix)
 
     def _audit_usage_text(self) -> str:
         """Return usage text for audit command."""
-        p = self.command_prefix
-        return f"Usage: {p}audit [all|page|last|query]"
+        return render_command_help_document(USAGE_DOCUMENTS['audit'], self.command_prefix)
 
     def _ban_usage_text(self) -> str:
         """Return usage text for ban command."""
-        p = self.command_prefix
-        return f"Usage: {p}ban <jid|nick|*.domain.tld> [comment]"
+        return render_command_help_document(USAGE_DOCUMENTS['ban'], self.command_prefix)
 
     def _baninfo_usage_text(self) -> str:
-        p = self.command_prefix
-        return f"Usage: {p}baninfo <jid|nick|*.domain.tld>"
+        """Render documented command usage."""
+        return render_command_help_document(USAGE_DOCUMENTS['baninfo'], self.command_prefix)
 
     def _history_usage_text(self) -> str:
-        p = self.command_prefix
-        return f"Usage: {p}history <jid|nick|*.domain.tld> [all|page|last]"
+        """Render documented command usage."""
+        return render_command_help_document(USAGE_DOCUMENTS['history'], self.command_prefix)
 
     def _banedit_usage_text(self) -> str:
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}banedit <target> reason <text>\n"
-            f"  {p}banedit <target> duration <10m|2h|1d>\n"
-            f"  {p}banedit <target> extend <duration>\n"
-            f"  {p}banedit <target> reduce <duration>\n"
-            f"  {p}banedit <target> permanent\n"
-            f"  {p}banedit <target> temp <duration>\n"
-            f"  {p}banedit <nick> jid <user@domain.tld>"
-        )
+        """Render documented command usage."""
+        return render_command_help_document(USAGE_DOCUMENTS['banedit'], self.command_prefix)
 
     def _tempban_usage_text(self) -> str:
         """Return usage text for tempban command."""
-        p = self.command_prefix
-        return f"Usage: {p}tempban <jid|nick> <10m|2h|1d> [comment]"
+        return render_command_help_document(USAGE_DOCUMENTS['tempban'], self.command_prefix)
 
     def _unban_usage_text(self) -> str:
         """Return usage text for unban command."""
-        p = self.command_prefix
-        return f"Usage: {p}unban <jid|nick|domain.tld|*.domain.tld>"
+        return render_command_help_document(USAGE_DOCUMENTS['unban'], self.command_prefix)
 
     def _banlist_usage_text(self) -> str:
         """Return usage text for banlist/blacklist command."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}banlist [all|page|last]\n"
-            f"  {p}banlist rtbl [all|page|last]\n"
-            f"  {p}blacklist ... - alias for {p}banlist"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['banlist'], self.command_prefix)
 
     def _bansearch_usage_text(self) -> str:
         """Return usage text for bansearch command."""
-        p = self.command_prefix
-        return f"Usage: {p}bansearch <query> [all|page|last]"
+        return render_command_help_document(USAGE_DOCUMENTS['bansearch'], self.command_prefix)
 
     def _why_usage_text(self) -> str:
         """Return usage text for why command."""
-        p = self.command_prefix
-        return f"Usage: {p}why <nick|jid>"
+        return render_command_help_document(USAGE_DOCUMENTS['why'], self.command_prefix)
 
     def _restart_usage_text(self) -> str:
         """Return usage text for restart command."""
-        p = self.command_prefix
-        return f"Usage: {p}restart confirm"
+        return render_command_help_document(USAGE_DOCUMENTS['restart'], self.command_prefix)
 
     def _reload_usage_text(self) -> str:
         """Return usage text for reload command."""
-        p = self.command_prefix
-        return f"Usage: {p}reload / {p}reloadconfig"
+        return render_command_help_document(USAGE_DOCUMENTS['reload'], self.command_prefix)
 
     def _checkupdate_usage_text(self) -> str:
         """Return usage text for checkupdate command."""
-        p = self.command_prefix
-        return f"Usage: {p}checkupdate / {p}updatecheck"
+        return render_command_help_document(USAGE_DOCUMENTS['checkupdate'], self.command_prefix)
 
     def _status_usage_text(self) -> str:
         """Return usage text for status command."""
-        p = self.command_prefix
-        return f"Usage: {p}status [full]"
+        return render_command_help_document(USAGE_DOCUMENTS['status'], self.command_prefix)
 
     def _tasks_usage_text(self) -> str:
         """Return usage text for background task diagnostics."""
-        p = self.command_prefix
-        return (
-            "Usage:\n"
-            f"  {p}tasks\n"
-            f"  {p}tasks [all|full|failed|stale|restarting|restarted|problems|page|last]\n"
-            f"  {p}tasks scope <name> [all|page|last]\n"
-            f"  {p}tasks show <scope>/<task>"
-        )
+        return render_command_help_document(USAGE_DOCUMENTS['tasks'], self.command_prefix)
 
     def _whoami_usage_text(self) -> str:
         """Return usage text for whoami command."""
-        p = self.command_prefix
-        return f"Usage: {p}whoami"
+        return render_command_help_document(USAGE_DOCUMENTS['whoami'], self.command_prefix)
 
     def _sync_usage_text(self) -> str:
         """Return usage text for sync command."""
-        p = self.command_prefix
-        return f"Usage: {p}sync"
+        return render_command_help_document(USAGE_DOCUMENTS['sync'], self.command_prefix)
 
     def _syncadmins_usage_text(self) -> str:
         """Return usage text for syncadmins command."""
-        p = self.command_prefix
-        return f"Usage: {p}syncadmins"
+        return render_command_help_document(USAGE_DOCUMENTS['syncadmins'], self.command_prefix)
 
     def _syncbans_usage_text(self) -> str:
         """Return usage text for syncbans command."""
-        p = self.command_prefix
-        return f"Usage: {p}syncbans"
+        return render_command_help_document(USAGE_DOCUMENTS['syncbans'], self.command_prefix)
 
     def _omemo_usage_text(self) -> str:
         """Return usage text for OMEMO command."""
-        spec: CommandSpec[object] = CommandSpec(
-            name="omemo",
-            subcommands=(
-                SubcommandSpec("status", "{prefix}omemo status", "Show OMEMO state"),
-                SubcommandSpec("devices", "{prefix}omemo devices", "Show devices"),
-                SubcommandSpec("reset", "{prefix}omemo reset [confirm]", "Rotate storage"),
-                SubcommandSpec("help", "{prefix}omemo help", "Show help"),
-            ),
-        )
-        return render_subcommand_usage(spec, self.command_prefix)
+        return render_command_help_document(USAGE_DOCUMENTS['omemo'], self.command_prefix)
