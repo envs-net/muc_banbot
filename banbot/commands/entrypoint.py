@@ -2,9 +2,8 @@
 
 from typing import TYPE_CHECKING
 
-from envs_xmpp_core.xmpp.messaging import message_context_from_stanza
-
 from envs_xmpp_core.commands import parse_prefixed_command
+from envs_xmpp_core.xmpp.messaging import message_context_from_stanza
 
 from .context import bot_nick
 

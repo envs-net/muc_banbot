@@ -9,6 +9,7 @@ from importlib import metadata
 from typing import TYPE_CHECKING, cast
 
 import psutil
+from envs_xmpp_core import __version__ as envs_xmpp_version
 from envs_xmpp_core.formatting import format_bytes, format_relative_time
 from envs_xmpp_core.presentation import (
     RoomListRequest,
@@ -30,7 +31,6 @@ from envs_xmpp_core.presentation import (
 from envs_xmpp_core.xmpp.occupants import occupant_is_admin_or_owner
 
 import config
-from envs_xmpp_core import __version__ as envs_xmpp_version
 
 from ._version import __version__
 from .occupants import BotOccupantMixin
