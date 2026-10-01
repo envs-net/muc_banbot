@@ -13,7 +13,6 @@ from banbot.commands.entrypoint import CommandEntryPointMixin
 from banbot.config.runtime import ConfigRuntimeMixin
 from banbot.messaging import MessagingMixin
 from banbot.occupants import BotOccupantMixin
-from banbot.omemo.core import OmemoCoreMixin
 from banbot.status import StatusMixin
 
 
@@ -109,12 +108,6 @@ async def test_outbound_adapter_respects_shared_encryption_precedence(case) -> N
         bot._reset_reply_encryption_context(token)
     assert transport_args["encrypted"] is case.effective
 
-
-def test_strict_omemo_jid_uses_core_validation() -> None:
-    adapter = OmemoCoreMixin()
-    assert adapter._bare_jid("Alice@Example.test/Phone") == "alice@example.test"
-    with pytest.raises(ValueError, match="valid bare JID"):
-        adapter._bare_jid(" ")
 
 @pytest.mark.asyncio
 async def test_explicit_omemo_never_downgrades_if_backend_unavailable() -> None:

@@ -227,16 +227,6 @@ def simple_device_hint_storage_payload():
 
 
 @pytest.mark.omemo
-def test_message_has_omemo_payload(omemo_payload_xml):
-    bot = OmemoProbe()
-    msg = make_message(omemo_payload_xml)
-    assert bot._message_has_omemo_payload(msg) is True
-
-    plain = make_message(ET.Element("message"))
-    assert bot._message_has_omemo_payload(plain) is False
-
-
-@pytest.mark.omemo
 @pytest.mark.asyncio
 async def test_omemo_recipients_for_room_uses_visible_occupant_jids_only():
     bot = OmemoProbe()
@@ -265,107 +255,6 @@ async def test_omemo_recipients_for_room_skips_malformed_occupant_jids():
         "bob@example.test",
         "bot@example.test",
     }
-
-
-@pytest.mark.omemo
-def test_extract_unusable_omemo_recipients():
-    bot = OmemoProbe()
-    # Intentionally mixed quoting verifies parser robustness against
-    # inconsistent token styles in exception messages.
-    exc = RuntimeError(
-        "bad recipients: "
-        "frozenset({'envsbot@example.org', \"user@example.org\"})"
-    )
-
-    assert bot._extract_unusable_omemo_recipients(exc) == {
-        "envsbot@example.org",
-        "user@example.org",
-    }
-
-
-@pytest.mark.omemo
-def test_extract_unusable_omemo_recipients_skips_malformed_jid_tokens():
-    bot = OmemoProbe()
-    exc = RuntimeError(
-        "bad recipients: "
-        "frozenset({'bad@ value', 'good@example.org'})"
-    )
-
-    assert bot._extract_unusable_omemo_recipients(exc) == {"good@example.org"}
-
-
-@pytest.mark.omemo
-def test_extract_unusable_omemo_recipients_filters_invalid_tokens():
-    bot = OmemoProbe()
-    exc = RuntimeError(
-        "bad recipients: "
-        "frozenset({'envsbot@example.org', 'No Device', \"user@example.org\"})"
-    )
-
-    assert bot._extract_unusable_omemo_recipients(exc) == {
-        "envsbot@example.org",
-        "user@example.org",
-    }
-
-
-class FakeEncryptedMessage:
-    def __init__(self, label="encrypted"):
-        self.label = label
-        self.sent = False
-
-    def send(self):
-        self.sent = True
-
-
-class FakeEncryptPlugin:
-    def __init__(self):
-        self.calls = []
-
-    async def encrypt_message(self, msg, recipients):
-        if isinstance(recipients, set):
-            bares = sorted(jid.bare for jid in recipients)
-        else:
-            bares = [recipients.bare]
-
-        self.calls.append(bares)
-        if "bad@example.test" in bares:
-            raise RuntimeError("bad recipients: frozenset({'bad@example.test'})")
-        return FakeEncryptedMessage("ok"), None
-
-
-@pytest.mark.omemo
-@pytest.mark.asyncio
-async def test_encrypt_and_send_omemo_retries_without_unusable_recipients():
-    bot = OmemoProbe()
-    plugin = FakeEncryptPlugin()
-    bot.plugin = {"xep_0384": plugin}
-
-    result = await bot._encrypt_and_send_omemo_message(
-        object(),
-        {slixmpp.JID("good@example.test"), slixmpp.JID("bad@example.test")},
-        mto="room@conference.example.test",
-    )
-
-    assert result.sent is True
-    assert plugin.calls == [
-        ["bad@example.test", "good@example.test"],
-        ["good@example.test"],
-    ]
-
-
-@pytest.mark.omemo
-@pytest.mark.asyncio
-async def test_encrypt_and_send_omemo_does_not_plaintext_fallback_when_all_recipients_unusable():
-    bot = OmemoProbe()
-    plugin = FakeEncryptPlugin()
-    bot.plugin = {"xep_0384": plugin}
-
-    with pytest.raises(RuntimeError, match="No usable OMEMO recipients"):
-        await bot._encrypt_and_send_omemo_message(
-            object(),
-            {slixmpp.JID("bad@example.test")},
-            mto="room@conference.example.test",
-        )
 
 
 class FakeDecryptPlugin:

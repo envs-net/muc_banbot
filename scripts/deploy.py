@@ -12,12 +12,10 @@ import re
 import shlex
 import shutil
 import sqlite3
-import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -105,7 +103,6 @@ if __name__ == "__main__":
         raise SystemExit(0)
     ensure_envs_xmpp()
 
-from envs_xmpp_ops import inspect_dependency_drift, require_clean_dependency_drift  # noqa: E402
 from envs_xmpp_ops.deploy import DeploymentTarget  # noqa: E402
 
 _CHECKOUT_ROOT = Path(__file__).resolve().parents[1]
@@ -140,14 +137,33 @@ class Deployment(DeploymentTarget):
         return self.config == (self.root / "config.py").resolve()
 
 
+_FRONTEND = None
+
+
+def _frontend():
+    """Return the shared deployment frontend after bootstrap has installed it."""
+    global _FRONTEND
+    if _FRONTEND is None:
+        from envs_xmpp_ops import DeploymentFrontend
+
+        _FRONTEND = DeploymentFrontend(
+            project_name="muc_banbot",
+            release_remote_environment="MUC_BANBOT_DEPLOY_REMOTE",
+            error_factory=DeployError,
+            cancelled_error_factory=UserCancelled,
+            announce_prefix="$",
+            default_cwd_to_deployment_root=True,
+            service_active_capture=True,
+        )
+    return _FRONTEND
+
+
 def _project_root() -> Path:
     return _CHECKOUT_ROOT
 
 
 def _systemd_property(service: str, prop: str) -> str:
-    from envs_xmpp_ops.systemd import systemd_property
-
-    return systemd_property(service, prop, run_process=subprocess.run)
+    return _frontend().systemd_property(service, prop)
 
 
 def _systemd_environment(service: str, key: str) -> str | None:
@@ -243,53 +259,6 @@ def _deployment(options: argparse.Namespace) -> Deployment:
     )
 
 
-def _account_exists(user: str) -> bool:
-    from envs_xmpp_ops.accounts import account_exists
-
-    return account_exists(user, getpwnam=pwd.getpwnam)
-
-
-def _run(
-    command: Sequence[object],
-    *,
-    deployment: Deployment | None = None,
-    as_service_user: bool = False,
-    cwd: Path | None = None,
-    capture: bool = False,
-    check: bool = True,
-    announce: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    from envs_xmpp_ops.process import run_deploy_command
-
-    return run_deploy_command(
-        command,
-        cwd=cwd or (deployment.root if deployment else Path.cwd()),
-        env=deployment.environment if deployment is not None else os.environ.copy(),
-        service_user=(deployment.service_user if as_service_user and deployment is not None else None),
-        capture=capture,
-        check=check,
-        announce=announce,
-        announce_prefix="$",
-        error_factory=DeployError,
-    )
-
-
-def _confirm(prompt: str) -> bool:
-    from envs_xmpp_ops.interaction import confirm
-
-    return confirm(prompt, input_func=input)
-
-
-def _require_confirmation(prompt: str) -> None:
-    from envs_xmpp_ops.interaction import require_confirmation
-
-    require_confirmation(
-        prompt,
-        confirm_func=_confirm,
-        error_factory=UserCancelled,
-    )
-
-
 def _require_source_tree(deployment: Deployment) -> None:
     from envs_xmpp_ops.paths import require_source_tree
 
@@ -308,7 +277,7 @@ def _ensure_dir(path: Path, deployment: Deployment, *, mode: int = 0o750) -> Non
         return
     path.mkdir(parents=True, mode=mode)
     path.chmod(mode)
-    if os.geteuid() == 0 and _account_exists(deployment.service_user):
+    if os.geteuid() == 0 and _frontend().account_exists(deployment.service_user):
         user = pwd.getpwnam(deployment.service_user)
         try:
             gid = grp.getgrnam(deployment.service_group).gr_gid
@@ -343,7 +312,7 @@ def _write_config_from_sample(deployment: Deployment) -> bool:
         print(f"KEEP existing {deployment.config}")
         return False
     deployment.config.chmod(0o600)
-    if os.geteuid() == 0 and _account_exists(deployment.service_user):
+    if os.geteuid() == 0 and _frontend().account_exists(deployment.service_user):
         user = pwd.getpwnam(deployment.service_user)
         try:
             gid = grp.getgrnam(deployment.service_group).gr_gid
@@ -352,83 +321,6 @@ def _write_config_from_sample(deployment: Deployment) -> bool:
         os.chown(deployment.config, user.pw_uid, gid)
     print(f"CREATE {deployment.config}")
     return True
-
-
-def _create_venv_if_missing(deployment: Deployment) -> None:
-    from envs_xmpp_ops.venv import create_venv_if_missing
-
-    create_venv_if_missing(
-        venv=deployment.venv,
-        venv_python=deployment.venv_python,
-        python=deployment.python,
-        run_command=_run,
-        deployment=deployment,
-    )
-
-
-def _venv_version(deployment: Deployment) -> tuple[int, int]:
-    if not deployment.venv_python.is_file():
-        raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
-    result = _run(
-        [
-            deployment.venv_python,
-            "-c",
-            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
-        ],
-        deployment=deployment,
-        capture=True,
-        announce=False,
-    )
-    try:
-        major, minor = result.stdout.strip().split(".", 1)
-        return int(major), int(minor)
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise DeployError("could not determine virtualenv Python version") from exc
-
-
-def _constraint_file(deployment: Deployment) -> Path:
-    major, minor = _venv_version(deployment)
-    if major != 3 or minor not in {12, 13, 14}:
-        raise DeployError(
-            f"unsupported Python version {major}.{minor}; muc_banbot supports Python 3.12/3.13/3.14"
-        )
-    path = deployment.root / f"constraints/python3{minor}.txt"
-    if not path.is_file():
-        raise DeployError(f"constraint snapshot missing: {path}")
-    return path
-
-
-
-def _dependency_drift(deployment: Deployment):
-    """Compare installed runtime dependencies with the reviewed constraints."""
-    if not deployment.venv_python.is_file():
-        raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
-    try:
-        return inspect_dependency_drift(
-            deployment.root,
-            deployment.venv_python,
-            _constraint_file(deployment),
-        )
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise DeployError(f"could not inspect runtime dependency drift: {exc}") from exc
-
-
-def _check_dependency_drift(deployment: Deployment) -> None:
-    require_clean_dependency_drift(
-        _dependency_drift(deployment),
-        error_factory=DeployError,
-    )
-
-def _install_dependencies(deployment: Deployment) -> None:
-    from envs_xmpp_ops.venv import install_editable_checkout
-
-    install_editable_checkout(
-        pip=deployment.pip,
-        root=deployment.root,
-        constraints=_constraint_file(deployment),
-        run_command=_run,
-        deployment=deployment,
-    )
 
 
 def _runtime_paths(deployment: Deployment) -> dict[str, Path | None]:
@@ -458,7 +350,7 @@ print(json.dumps({
     "avatar": path("AVATAR_PATH", "avatar.png"),
 }))
 """
-    result = _run(
+    result = _frontend().run(
         [deployment.venv_python, "-c", code],
         deployment=deployment,
         as_service_user=True,
@@ -723,7 +615,7 @@ if placeholders:
     raise SystemExit("sample placeholders still configured: " + ", ".join(placeholders))
 print("config import and required settings: OK")
 """
-    result = _run(
+    result = _frontend().run(
         [deployment.venv_python, "-c", code],
         deployment=deployment,
         as_service_user=True,
@@ -784,51 +676,6 @@ WantedBy=multi-user.target
 """
 
 
-def _systemctl_exists(deployment: Deployment) -> bool:
-    from envs_xmpp_ops.systemd import systemctl_exists
-
-    return systemctl_exists(
-        deployment.service,
-        run_command=_run,
-        which=shutil.which,
-    )
-
-
-def _service_active(deployment: Deployment) -> bool:
-    from envs_xmpp_ops.systemd import service_active
-
-    return service_active(
-        deployment.service,
-        run_command=_run,
-        which=shutil.which,
-        capture=True,
-    )
-
-
-def _stop_active_service(deployment: Deployment, *, reason: str) -> bool:
-    from envs_xmpp_ops.service import stop_active_service
-
-    return stop_active_service(
-        deployment.service,
-        reason=reason,
-        is_active=partial(_service_active, deployment),
-        require_confirmation=_require_confirmation,
-        run_systemctl=lambda action, service: _run(["systemctl", action, service]),
-    )
-
-
-def _ask_start(deployment: Deployment) -> None:
-    from envs_xmpp_ops.service import ask_start
-
-    ask_start(
-        deployment.service,
-        exists=partial(_systemctl_exists, deployment),
-        is_active=partial(_service_active, deployment),
-        confirm=_confirm,
-        run_systemctl=lambda action, service: _run(["systemctl", action, service]),
-    )
-
-
 def _install_unit_if_missing(deployment: Deployment) -> None:
     from envs_xmpp_ops.systemd import install_unit_if_missing
 
@@ -836,9 +683,9 @@ def _install_unit_if_missing(deployment: Deployment) -> None:
         unit=deployment.unit,
         service=deployment.service,
         render_unit=lambda: _render_systemd_unit(deployment),
-        service_exists=lambda: _systemctl_exists(deployment),
-        confirm=_confirm,
-        run_command=_run,
+        service_exists=lambda: _frontend().systemctl_exists(deployment),
+        confirm=_frontend().confirm,
+        run_command=_frontend().run,
     )
 
 
@@ -885,8 +732,8 @@ def _finish_install(deployment: Deployment, *, stopped: bool) -> InstallApplyRes
 
     if not deployment.legacy_layout:
         _ensure_dir(deployment.data_dir, deployment, mode=0o700)
-    _create_venv_if_missing(deployment)
-    _install_dependencies(deployment)
+    _frontend().create_venv_if_missing(deployment)
+    _frontend().install_dependencies(deployment)
     created_config = _write_config_from_sample(deployment)
     if created_config:
         print(
@@ -918,86 +765,29 @@ def install(deployment: Deployment) -> int:
         return 0
 
     def validate_preconditions() -> None:
-        if not _account_exists(deployment.service_user):
+        if not _frontend().account_exists(deployment.service_user):
             raise DeployError(
                 f"service user {deployment.service_user!r} does not exist; create it manually or use --user"
             )
 
     run_install_transaction(
-        confirm_install=lambda: _require_confirmation("Proceed with the muc_banbot installation shown above?"),
+        confirm_install=lambda: _frontend().require_confirmation("Proceed with the muc_banbot installation shown above?"),
         validate_preconditions=validate_preconditions,
-        stop_service=lambda: _stop_active_service(
+        stop_service=lambda: _frontend().stop_active_service(
             deployment, reason="before installing dependencies and deployment files"
         ),
         apply_install=lambda stopped: _finish_install(deployment, stopped=stopped),
-        ask_start=lambda: _ask_start(deployment),
+        ask_start=lambda: _frontend().ask_start(deployment),
         failure_message=(f"INSTALL FAILED: {deployment.service} was stopped and will remain stopped."),
     )
     return 0
 
 
-def _git(
-    deployment: Deployment,
-    *args: str,
-    capture: bool = False,
-    check: bool = True,
-    announce: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    return _run(
-        ["git", *args],
-        deployment=deployment,
-        as_service_user=True,
-        cwd=deployment.root,
-        capture=capture,
-        check=check,
-        announce=announce,
-    )
-
-
-def _require_clean_tracked_tree(deployment: Deployment) -> None:
-    from envs_xmpp_ops.git import require_clean_tracked_tree
-
-    require_clean_tracked_tree(partial(_git, deployment), error_factory=DeployError)
-
-
-def _current_revision(deployment: Deployment) -> str:
-    from envs_xmpp_ops.git import describe_revision
-
-    return describe_revision(partial(_git, deployment))
-
-
 def _stable_tags(deployment: Deployment) -> list[str]:
     from envs_xmpp_ops.git import stable_release_tags
 
-    result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
+    result = _frontend().git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
     return stable_release_tags([line.strip() for line in result.stdout.splitlines()])
-
-
-def _prepare_release_target(deployment: Deployment, requested: str | None) -> tuple[str, str]:
-    from envs_xmpp_ops.git import prepare_release_target
-
-    return prepare_release_target(
-        partial(_git, deployment),
-        requested,
-        configured_remote=os.environ.get("MUC_BANBOT_DEPLOY_REMOTE"),
-        error_factory=DeployError,
-    )
-
-
-def _target_relation(deployment: Deployment, target: str) -> str:
-    from envs_xmpp_ops.git import release_target_relation
-
-    return release_target_relation(
-        partial(_git, deployment),
-        target,
-        error_factory=DeployError,
-    )
-
-
-def _head_is_detached(deployment: Deployment) -> bool:
-    from envs_xmpp_ops.git import head_is_detached
-
-    return head_is_detached(partial(_git, deployment), error_factory=DeployError)
 
 
 def _approve_target(
@@ -1009,16 +799,16 @@ def _approve_target(
 ) -> bool:
     from envs_xmpp_ops.git import approve_release_target
 
-    current = _current_revision(deployment)
-    relation = _target_relation(deployment, target)
+    current = _frontend().current_revision(deployment)
+    relation = _frontend().target_relation(deployment, target)
     return approve_release_target(
         current=current,
         target=target,
         relation=relation,
         requested_tag=requested,
         allow_downgrade=allow_downgrade,
-        head_is_detached=_head_is_detached(deployment) if relation == "same" else False,
-        require_confirmation=_require_confirmation,
+        head_is_detached=_frontend().head_is_detached(deployment) if relation == "same" else False,
+        require_confirmation=_frontend().require_confirmation,
         error_factory=DeployError,
     )
 
@@ -1034,7 +824,7 @@ def _git_path_is_tracked(deployment: Deployment, path: Path) -> bool:
     if not _relative_to_root(path, deployment.root):
         return False
     relative = path.resolve().relative_to(deployment.root.resolve())
-    result = _run(
+    result = _frontend().run(
         ["git", "ls-files", "--error-unmatch", "--", str(relative)],
         deployment=deployment,
         cwd=deployment.root,
@@ -1084,7 +874,7 @@ def _backup_database_before_update(deployment: Deployment) -> Path | None:
     finally:
         source_conn.close()
     target.chmod(0o600)
-    if os.geteuid() == 0 and _account_exists(deployment.service_user):
+    if os.geteuid() == 0 and _frontend().account_exists(deployment.service_user):
         user = pwd.getpwnam(deployment.service_user)
         try:
             gid = grp.getgrnam(deployment.service_group).gr_gid
@@ -1105,7 +895,7 @@ def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
             runtime = None
     _print_paths(deployment, runtime=runtime)
     print("\nUpdate plan:")
-    print(f"  current: {_current_revision(deployment)}")
+    print(f"  current: {_frontend().current_revision(deployment)}")
     print(f"  target:  {requested_tag or 'newest stable vX.Y.Z release'}")
     print("  - require a clean tracked Git worktree")
     print("  - preserve config, data directory and existing systemd unit")
@@ -1129,7 +919,7 @@ def update(
         raise DeployError(f"update requires a Git checkout: {deployment.root}")
     if not deployment.venv_python.is_file() or not deployment.config.is_file():
         raise DeployError("existing virtualenv and runtime config are required for update")
-    _require_clean_tracked_tree(deployment)
+    _frontend().require_clean_tracked_tree(deployment)
     _validate_config(deployment)
     runtime = _runtime_paths(deployment)
     _validate_hardened_runtime_paths(deployment, runtime)
@@ -1139,10 +929,10 @@ def update(
     if deployment.dry_run:
         print("\nDRY RUN: no Git refs, files, packages, database or services were changed.")
         return 0
-    _require_confirmation("Proceed with the muc_banbot update plan shown above?")
+    _frontend().require_confirmation("Proceed with the muc_banbot update plan shown above?")
 
     def apply_target(_target: str) -> None:
-        _install_dependencies(deployment)
+        _frontend().install_dependencies(deployment)
         _validate_config(deployment)
         updated_runtime = _runtime_paths(deployment)
         _validate_hardened_runtime_paths(deployment, updated_runtime)
@@ -1151,7 +941,7 @@ def update(
 
     run_release_update_transaction(
         root=deployment.root,
-        prepare_target=lambda: _prepare_release_target(deployment, requested_tag),
+        prepare_target=lambda: _frontend().prepare_release_target(deployment, requested_tag),
         approve_target=lambda target: _approve_target(
             deployment,
             target,
@@ -1159,11 +949,11 @@ def update(
             allow_downgrade=allow_downgrade,
         ),
         protected_paths=lambda: _protected_paths(deployment),
-        stop_service=lambda: _stop_active_service(deployment, reason="before changing code and dependencies"),
+        stop_service=lambda: _frontend().stop_active_service(deployment, reason="before changing code and dependencies"),
         before_checkout=lambda: _backup_database_before_update(deployment),
-        checkout_target=lambda target: _git(deployment, "checkout", target),
+        checkout_target=lambda target: _frontend().git(deployment, "checkout", target),
         apply_target=apply_target,
-        ask_start=lambda: _ask_start(deployment),
+        ask_start=lambda: _frontend().ask_start(deployment),
         temp_prefix="muc-banbot-deploy-",
         failure_message=(f"UPDATE FAILED: {deployment.service} was stopped and will remain stopped."),
     )
@@ -1187,7 +977,7 @@ def _expected_systemd_values(deployment: Deployment) -> dict[str, str]:
 
 
 def _check_installed_systemd(deployment: Deployment) -> bool:
-    if not _systemctl_exists(deployment):
+    if not _frontend().systemctl_exists(deployment):
         print(f"SKIP installed systemd check: {deployment.service} not found")
         return True
     if deployment.legacy_layout:
@@ -1255,16 +1045,16 @@ def status(deployment: Deployment) -> int:
     rows: list[tuple[str, str]] = []
     if (deployment.root / ".git").exists():
         try:
-            rows.append(("revision", _current_revision(deployment)))
+            rows.append(("revision", _frontend().current_revision(deployment)))
             tags = _stable_tags(deployment)
             rows.append(("latest local stable tag", tags[0] if tags else "none"))
         except DeployError as exc:
             rows.append(("Git status", f"unavailable ({exc})"))
     if shutil.which("systemctl"):
-        rows.append(("service state", "active" if _service_active(deployment) else "inactive/not found"))
+        rows.append(("service state", "active" if _frontend().service_active(deployment) else "inactive/not found"))
     if deployment.venv_python.is_file():
         try:
-            rows.append(("dependency drift", _dependency_drift(deployment).summary()))
+            rows.append(("dependency drift", _frontend().dependency_drift(deployment).summary()))
         except DeployError as exc:
             rows.append(("dependency drift", f"unavailable ({exc})"))
     width = max((len(label) for label, _ in rows), default=1)
@@ -1296,7 +1086,7 @@ def check(deployment: Deployment) -> int:
             "installed systemd service differs from the hardened deployment; review FAIL entries above. "
             "Existing units are intentionally not replaced automatically."
         )
-    _check_dependency_drift(deployment)
+    _frontend().require_clean_dependency_drift(deployment)
     return 0
 
 

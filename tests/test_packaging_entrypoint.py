@@ -129,7 +129,7 @@ def test_package_exports_banbot_lazily() -> None:
 
 def test_omemo_dependency_is_part_of_default_runtime() -> None:
     config = _pyproject()
-    dependency = "envs-xmpp[omemo]>=1.7.1,<2.0"
+    dependency = "envs-xmpp[omemo]>=1.7.2,<2.0"
 
     assert dependency in config["project"]["dependencies"]
     assert "omemo" not in config["project"]["optional-dependencies"]

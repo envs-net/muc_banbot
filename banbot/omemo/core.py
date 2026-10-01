@@ -11,10 +11,8 @@ from envs_xmpp_core.xmpp.omemo import (
     configure_omemo_dependency_logging,
     decrypt_incoming_message,
     encrypt_and_send,
-    extract_unusable_recipients,
     normalize_bare_jid,
     recipient_bare_jids,
-    require_omemo_bare_jid,
     wait_for_omemo_ready,
 )
 from envs_xmpp_core.xmpp.outbound import ensure_message_origin_id
@@ -35,10 +33,6 @@ else:
 
 
 class OmemoCoreMixin(_OmemoCoreMixinContract):
-    def _configure_omemo_dependency_logging(self) -> None:
-        """Compatibility wrapper for shared dependency logger setup."""
-        configure_omemo_dependency_logging()
-
     def configure_omemo(self) -> None:
         import banbot.omemo as omemo_package
         import config
@@ -55,7 +49,7 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
         if not self.omemo_enabled:
             log.info("OMEMO: disabled")
             return
-        self._configure_omemo_dependency_logging()
+        configure_omemo_dependency_logging()
         if not omemo_package.OMEMO_AVAILABLE or omemo_package.XEP_0384Impl is None:
             log.warning(
                 "OMEMO: enabled but the runtime is incomplete; continuing with OMEMO disabled. "
@@ -143,29 +137,6 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
             raise RuntimeError(f"No OMEMO recipients available for {mto}")
         return await encrypt_and_send(plugin, msg, recipients, mto=mto, origin_id=origin_id)
 
-    async def _encrypt_and_send_omemo_message(self, msg: Any, recipients: set[JID] | JID, *, mto: str) -> Any:
-        plugin = self.plugin.get("xep_0384", None)
-        if plugin is None:
-            raise RuntimeError("OMEMO plugin is not registered")
-        return await encrypt_and_send(plugin, msg, recipients, mto=mto)
-
-    def _extract_unusable_omemo_recipients(self, exc: Exception) -> set[str]:
-        return extract_unusable_recipients(exc)
-
-    @staticmethod
-    def _normalize_omemo_bare_jid(value: object) -> str | None:
-        return normalize_bare_jid(value)
-
-    def _bare_jid(self, value: object) -> str:
-        """Compatibility wrapper for strict shared OMEMO JID validation."""
-        return require_omemo_bare_jid(value)
-
-    @staticmethod
-    def _message_has_omemo_payload(msg: Any) -> bool:
-        from envs_xmpp_core.xmpp.omemo import message_has_omemo_payload
-
-        return message_has_omemo_payload(msg)
-
     async def _decrypt_incoming_omemo_message(self, msg: Any) -> tuple[Any | None, bool]:
         plugin = self.plugin.get("xep_0384", None)
         decrypted, encrypted, reason = await decrypt_incoming_message(
@@ -187,12 +158,6 @@ class OmemoCoreMixin(_OmemoCoreMixinContract):
         elif reason:
             log.warning("OMEMO: encrypted message ignored: %s", reason)
         return decrypted, encrypted
-
-    @staticmethod
-    def _is_expected_omemo_device_info_error(exc: Exception) -> bool:
-        from envs_xmpp_core.xmpp.omemo import expected_device_info_error
-
-        return expected_device_info_error(exc)
 
     def _apply_message_kwargs(self, msg: Any, kwargs: dict[str, Any]) -> None:
         for key, value in kwargs.items():

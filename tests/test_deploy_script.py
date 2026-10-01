@@ -73,21 +73,19 @@ def test_deploy_shell_wrapper_is_executable_and_defaults_to_help():
 
 
 def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
-    dist_info = "envs_xmpp-1.7.1.dist-info"
+    dist_info = "envs_xmpp-1.7.2.dist-info"
     files = {
         "envs_xmpp_ops/__init__.py": (
-            '__version__ = "1.7.1"\n'
+            '__version__ = "1.7.2"\n'
             'from .deploy import DeploymentTarget\n'
-            'def inspect_dependency_drift(*args, **kwargs):\n'
-            '    return None\n'
-            'def require_clean_dependency_drift(*args, **kwargs):\n'
-            '    return None\n'
+            'class DeploymentFrontend:\n'
+            '    def __init__(self, **kwargs): pass\n'
         ),
         "envs_xmpp_ops/deploy.py": "class DeploymentTarget:\n    pass\n",
         f"{dist_info}/METADATA": (
             "Metadata-Version: 2.1\n"
             "Name: envs-xmpp\n"
-            "Version: 1.7.1\n"
+            "Version: 1.7.2\n"
         ),
         f"{dist_info}/WHEEL": (
             "Wheel-Version: 1.0\n"
@@ -104,7 +102,7 @@ def _write_minimal_envs_xmpp_wheel(path: Path) -> None:
 
 
 def test_fresh_deploy_wrapper_bootstraps_before_shared_imports(tmp_path):
-    wheel = tmp_path / "envs_xmpp-1.7.1-py3-none-any.whl"
+    wheel = tmp_path / "envs_xmpp-1.7.2-py3-none-any.whl"
     _write_minimal_envs_xmpp_wheel(wheel)
 
     no_site_python = tmp_path / "python-no-site"
@@ -133,7 +131,7 @@ def test_fresh_deploy_wrapper_bootstraps_before_shared_imports(tmp_path):
 
     assert result.returncode == 2
     assert "--to is only valid with update" in result.stderr
-    deploy_python = tmp_path / "cache" / "envs-xmpp" / "deploy" / "1.7.1" / "bin" / "python"
+    deploy_python = tmp_path / "cache" / "envs-xmpp" / "deploy" / "1.7.2" / "bin" / "python"
     assert deploy_python.is_file()
 
 
@@ -162,39 +160,18 @@ def test_constraint_file_matches_virtualenv_python(tmp_path, monkeypatch, minor)
     constraints = deployment.root / "constraints"
     constraints.mkdir()
     expected = constraints / f"python3{minor}.txt"
-    expected.write_text("slixmpp==1.17.0\n", encoding="utf-8")
+    expected.write_text("envs-xmpp==1.7.2\n", encoding="utf-8")
 
     class Result:
         stdout = f"3.{minor}\n"
 
-    monkeypatch.setattr(deploy, "_run", lambda *_args, **_kwargs: Result())
+    monkeypatch.setattr(
+        type(deploy._frontend()),
+        "run",
+        lambda _self, *_args, **_kwargs: Result(),
+    )
 
-    assert deploy._constraint_file(deployment) == expected
-
-
-def test_install_dependencies_uses_python_constraint_snapshot(tmp_path, monkeypatch):
-    deployment = _deployment(tmp_path)
-    constraint = deployment.root / "constraints" / "python313.txt"
-    constraint.parent.mkdir()
-    constraint.write_text("slixmpp==1.17.0\n", encoding="utf-8")
-    captured = {}
-
-    monkeypatch.setattr(deploy, "_constraint_file", lambda _deployment: constraint)
-
-    import envs_xmpp_ops.venv as venv_ops
-
-    def fake_install_editable_checkout(**kwargs):
-        captured.update(kwargs)
-
-    monkeypatch.setattr(venv_ops, "install_editable_checkout", fake_install_editable_checkout)
-
-    deploy._install_dependencies(deployment)
-
-    assert captured["pip"] == deployment.pip
-    assert captured["root"] == deployment.root
-    assert captured["constraints"] == constraint
-    assert captured["deployment"] is deployment
-    assert captured["run_command"] is deploy._run
+    assert deploy._frontend().constraint_file(deployment) == expected
 
 
 def test_systemd_exec_path_parser_returns_clean_executable_path():
@@ -243,7 +220,7 @@ def test_installed_systemd_check_prints_clean_execstart_and_rejects_extra_writab
         ),
         "WatchdogUSec": "1min",
     }
-    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "systemctl_exists", lambda _self, _deployment: True)
     monkeypatch.setattr(
         deploy,
         "_systemd_property",
@@ -278,7 +255,7 @@ def test_installed_systemd_check_accepts_expected_hardened_unit(
         "ReadWritePaths": f"{deployment.config.parent} {deployment.data_dir}",
         "WatchdogUSec": "1min",
     }
-    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "systemctl_exists", lambda _self, _deployment: True)
     monkeypatch.setattr(
         deploy,
         "_systemd_property",
@@ -308,7 +285,7 @@ def test_installed_systemd_check_requires_bytecode_guard_and_expected_watchdog(
         "ReadWritePaths": f"{deployment.config.parent} {deployment.data_dir}",
         "WatchdogUSec": "5min",
     }
-    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "systemctl_exists", lambda _self, _deployment: True)
     monkeypatch.setattr(
         deploy,
         "_systemd_property",
@@ -325,7 +302,7 @@ def test_installed_systemd_check_requires_bytecode_guard_and_expected_watchdog(
 def test_new_hardened_config_uses_absolute_data_paths(tmp_path, monkeypatch):
     deployment = _deployment(tmp_path)
     _source_markers(deployment)
-    monkeypatch.setattr(deploy, "_account_exists", lambda _user: False)
+    monkeypatch.setattr(type(deploy._frontend()), "account_exists", lambda _self, _user: False)
 
     assert deploy._write_config_from_sample(deployment) is True
     text = deployment.config.read_text(encoding="utf-8")
@@ -342,7 +319,7 @@ def test_new_hardened_config_uses_absolute_data_paths(tmp_path, monkeypatch):
 def test_install_dry_run_does_not_prompt_or_change_files(tmp_path, monkeypatch, capsys):
     deployment = _deployment(tmp_path, dry_run=True)
     _source_markers(deployment)
-    monkeypatch.setattr(deploy, "_confirm", lambda _prompt: pytest.fail("dry-run must not prompt"))
+    monkeypatch.setattr(type(deploy._frontend()), "confirm", lambda _self, _prompt: pytest.fail("dry-run must not prompt"))
 
     assert deploy.install(deployment) == 0
     assert not deployment.config.exists()
@@ -373,7 +350,7 @@ def test_ensure_dir_never_reowns_existing_operator_directory(tmp_path, monkeypat
     existing.mkdir(mode=0o711)
     before_mode = existing.stat().st_mode & 0o777
     monkeypatch.setattr(deploy.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(deploy, "_account_exists", lambda _user: True)
+    monkeypatch.setattr(type(deploy._frontend()), "account_exists", lambda _self, _user: True)
     monkeypatch.setattr(
         deploy.os,
         "chown",
@@ -675,9 +652,13 @@ class _FakeDependencyReport:
 
 def test_dependency_drift_check_accepts_matching_runtime(monkeypatch, tmp_path, capsys):
     deployment = _deployment(tmp_path)
-    monkeypatch.setattr(deploy, "_dependency_drift", lambda _deployment: _FakeDependencyReport(True))
+    monkeypatch.setattr(
+        type(deploy._frontend()),
+        "dependency_drift",
+        lambda _self, _deployment: _FakeDependencyReport(True),
+    )
 
-    deploy._check_dependency_drift(deployment)
+    deploy._frontend().require_clean_dependency_drift(deployment)
 
     assert "OK  dependency drift: clean" in capsys.readouterr().out
 
@@ -685,13 +666,13 @@ def test_dependency_drift_check_accepts_matching_runtime(monkeypatch, tmp_path, 
 def test_dependency_drift_check_rejects_version_drift(monkeypatch, tmp_path):
     deployment = _deployment(tmp_path)
     monkeypatch.setattr(
-        deploy,
-        "_dependency_drift",
-        lambda _deployment: _FakeDependencyReport(
+        type(deploy._frontend()),
+        "dependency_drift",
+        lambda _self, _deployment: _FakeDependencyReport(
             False,
             ("slixmpp: installed 1.14.1, expected 1.17.0",),
         ),
     )
 
     with pytest.raises(deploy.DeployError, match=r"slixmpp: installed 1\.14\.1, expected 1\.17\.0"):
-        deploy._check_dependency_drift(deployment)
+        deploy._frontend().require_clean_dependency_drift(deployment)

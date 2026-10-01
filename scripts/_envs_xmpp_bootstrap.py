@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REQUIRED_VERSION = "1.7.1"
+_REQUIRED_VERSION = "1.7.2"
 _REQUIRED_SPEC = f"envs-xmpp=={_REQUIRED_VERSION}"
 
 
