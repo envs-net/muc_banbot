@@ -52,7 +52,7 @@ Verify the installed application and shared core without connecting to XMPP:
 
 ```bash
 muc_banbot --version
-# muc_banbot 3.4.0 (envs-xmpp 1.6.1)
+# muc_banbot 3.5.0 (envs-xmpp 1.7.2)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -219,7 +219,6 @@ LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
 git checkout "$LATEST_TAG"
 source venv/bin/activate
 pip install -e .
-# The historical .[omemo] extra remains accepted as a compatibility alias.
 
 sudo systemctl restart muc_banbot
 ```
