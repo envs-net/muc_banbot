@@ -137,6 +137,10 @@ def test_omemo_dependency_is_part_of_default_runtime() -> None:
     assert not (ROOT / "requirements-omemo.txt").exists()
 
 
+def test_repository_does_not_vendor_shared_core() -> None:
+    assert not (ROOT / "src" / "envs_xmpp_core").exists()
+
+
 def test_drone_ci_covers_supported_python_versions() -> None:
     drone = (ROOT / ".drone.yml").read_text(encoding="utf-8")
 
