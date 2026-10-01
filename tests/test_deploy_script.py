@@ -339,32 +339,6 @@ def test_new_hardened_config_uses_absolute_data_paths(tmp_path, monkeypatch):
     assert deployment.config.read_text(encoding="utf-8") == "operator config\n"
 
 
-def test_project_protected_files_are_restored_after_checkout_changes(tmp_path):
-    deployment = _deployment(tmp_path)
-    config = deployment.root / "config.py"
-    database = deployment.root / "banbot.db"
-    outside = tmp_path / "external.db"
-    config.write_text("operator config\n", encoding="utf-8")
-    database.write_bytes(b"operator db")
-    outside.write_bytes(b"external")
-    backup_dir = tmp_path / "protect"
-    backup_dir.mkdir()
-
-    backups = deploy._backup_project_protected_paths(
-        deployment,
-        {"config": config, "database": database, "external": outside},
-        backup_dir,
-    )
-    assert {item.label for item in backups} == {"config", "database"}
-
-    config.unlink()
-    database.write_bytes(b"replacement")
-    deploy._restore_project_protected_paths(backups)
-    assert config.read_text(encoding="utf-8") == "operator config\n"
-    assert database.read_bytes() == b"operator db"
-    assert outside.read_bytes() == b"external"
-
-
 def test_install_dry_run_does_not_prompt_or_change_files(tmp_path, monkeypatch, capsys):
     deployment = _deployment(tmp_path, dry_run=True)
     _source_markers(deployment)

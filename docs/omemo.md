@@ -30,11 +30,6 @@ Install system libraries required by the OMEMO stack. On Raspbian systems this i
 sudo apt install libsodium-dev libxeddsa-dev
 ```
 
-For an older/manual environment that predates the default dependency, the compatibility installer is:
-
-```bash
-pip install -r requirements.txt
-```
 
 If the OMEMO runtime is unexpectedly incomplete while `OMEMO_ENABLED=True`, BanBot starts with OMEMO disabled and logs a warning instead of failing open to encrypted traffic.
 
