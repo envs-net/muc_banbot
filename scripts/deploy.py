@@ -158,10 +158,6 @@ def _frontend():
     return _FRONTEND
 
 
-def _project_root() -> Path:
-    return _CHECKOUT_ROOT
-
-
 def _systemd_property(service: str, prop: str) -> str:
     return _frontend().systemd_property(service, prop)
 
@@ -222,7 +218,7 @@ def _default_account(service: str, prop: str, fallback: str) -> str:
 def _deployment(options: argparse.Namespace) -> Deployment:
     from deploy_profile import PROFILE
 
-    root = (options.root or _project_root()).expanduser().resolve()
+    root = (options.root or _CHECKOUT_ROOT).expanduser().resolve()
     service = options.service
     discovered_venv = _systemd_venv(service)
     venv = Path(options.venv or os.environ.get("MUC_BANBOT_VENV") or discovered_venv or root / PROFILE.venv_name)
@@ -764,15 +760,9 @@ def install(deployment: Deployment) -> int:
         print("\nDRY RUN: no files, packages or services were changed.")
         return 0
 
-    def validate_preconditions() -> None:
-        if not _frontend().account_exists(deployment.service_user):
-            raise DeployError(
-                f"service user {deployment.service_user!r} does not exist; create it manually or use --user"
-            )
-
     run_install_transaction(
         confirm_install=lambda: _frontend().require_confirmation("Proceed with the muc_banbot installation shown above?"),
-        validate_preconditions=validate_preconditions,
+        validate_preconditions=lambda: _frontend().require_service_account(deployment),
         stop_service=lambda: _frontend().stop_active_service(
             deployment, reason="before installing dependencies and deployment files"
         ),
