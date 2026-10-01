@@ -105,7 +105,7 @@ if __name__ == "__main__":
         raise SystemExit(0)
     ensure_envs_xmpp()
 
-from envs_xmpp_ops import inspect_dependency_drift  # noqa: E402
+from envs_xmpp_ops import inspect_dependency_drift, require_clean_dependency_drift  # noqa: E402
 from envs_xmpp_ops.deploy import DeploymentTarget  # noqa: E402
 
 _CHECKOUT_ROOT = Path(__file__).resolve().parents[1]
@@ -414,12 +414,10 @@ def _dependency_drift(deployment: Deployment):
 
 
 def _check_dependency_drift(deployment: Deployment) -> None:
-    report = _dependency_drift(deployment)
-    if report.ok:
-        print(f"OK  dependency drift: {report.summary()}")
-        return
-    details = "; ".join(report.details())
-    raise DeployError(f"runtime dependency drift detected: {details}")
+    require_clean_dependency_drift(
+        _dependency_drift(deployment),
+        error_factory=DeployError,
+    )
 
 def _install_dependencies(deployment: Deployment) -> None:
     from envs_xmpp_ops.venv import install_editable_checkout

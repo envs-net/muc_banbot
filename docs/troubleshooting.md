@@ -174,16 +174,16 @@ BanBot stores message metadata only, not message bodies. Old messages that were 
 
 ## OMEMO dependency installation fails
 
-OMEMO runtime dependencies are part of the normal BanBot installation. The `requirements-omemo.txt` file is retained as a compatibility installer for older/manual environments.
+OMEMO runtime dependencies are part of the normal BanBot installation.
 
 If installing OMEMO fails with missing native headers or build errors, install the system libraries first. Raspbian example:
 
 ```bash
 sudo apt install libsodium-dev libxeddsa-dev
-pip install -r requirements-omemo.txt
+pip install -r requirements.txt
 ```
 
-If `OMEMO_ENABLED=True` but the OMEMO runtime is incomplete, BanBot starts with OMEMO disabled and logs a warning. Reinstall the normal project dependencies (or use the compatibility `requirements-omemo.txt`) before enabling OMEMO again.
+If `OMEMO_ENABLED=True` but the OMEMO runtime is incomplete, BanBot starts with OMEMO disabled and logs a warning. Reinstall the normal project dependencies before enabling OMEMO again.
 
 ## OMEMO bundle warnings
 

@@ -169,7 +169,7 @@ The second run validates the config, creates/reuses the virtualenv, and can
 install a new hardened systemd unit after confirmation. An already installed
 unit is kept for manual review.
 
-The normal BanBot installation includes the Python OMEMO runtime. Encrypted transport remains opt-in through `OMEMO_ENABLED`. The historical `.[omemo]` extra is retained only as a compatibility alias for older deployment instructions.
+The normal BanBot installation includes the Python OMEMO runtime. Encrypted transport remains opt-in through `OMEMO_ENABLED`.
 
 ## Hardened systemd service
 

@@ -129,9 +129,21 @@ def test_package_exports_banbot_lazily() -> None:
 
 def test_omemo_dependency_is_part_of_default_runtime() -> None:
     config = _pyproject()
-    dependency = "envs-xmpp[omemo]>=1.7.0,<2.0"
+    dependency = "envs-xmpp[omemo]>=1.7.1,<2.0"
 
     assert dependency in config["project"]["dependencies"]
-    assert config["project"]["optional-dependencies"]["omemo"] == [dependency]
+    assert "omemo" not in config["project"]["optional-dependencies"]
     assert dependency in (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    assert dependency in (ROOT / "requirements-omemo.txt").read_text(encoding="utf-8")
+    assert not (ROOT / "requirements-omemo.txt").exists()
+
+
+def test_drone_ci_covers_supported_python_versions() -> None:
+    drone = (ROOT / ".drone.yml").read_text(encoding="utf-8")
+
+    assert "name: pytest-3.12" in drone
+    assert "name: pytest-3.13" in drone
+    assert "name: pytest-3.14" in drone
+    assert "image: python:3.12" in drone
+    assert "image: python:3.13" in drone
+    assert "image: python:3.14" in drone
+    assert "constraints/python314.txt" in drone

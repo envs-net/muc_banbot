@@ -34,7 +34,7 @@ stack, install them before creating/updating the development environment:
 sudo apt install libsodium-dev libxeddsa-dev
 ```
 
-`requirements-omemo.txt` is retained only as a compatibility installer for older/manual environments.
+OMEMO runtime dependencies are installed as part of the normal project dependencies.
 
 ## Running Tests
 

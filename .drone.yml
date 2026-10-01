@@ -62,6 +62,26 @@ trigger:
 ---
 kind: pipeline
 type: docker
+name: pytest-3.14
+
+steps:
+- name: test
+  image: python:3.14
+  commands:
+    - python -m pip install -c constraints/python314.txt -r requirements.txt -r requirements-dev.txt
+    - python -m pip check
+    - cp config_sample.py config.py
+    - sh scripts/test.sh
+
+trigger:
+  event:
+    - push
+    - pull_request
+    - tag
+
+---
+kind: pipeline
+type: docker
 name: mutmut
 
 steps:

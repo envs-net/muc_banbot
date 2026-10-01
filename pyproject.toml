@@ -13,7 +13,7 @@ authors = [
     { name = "~creme", email = "creme@envs.net" },
 ]
 dependencies = [
-    "envs-xmpp[omemo]>=1.7.0,<2.0",
+    "envs-xmpp[omemo]>=1.7.1,<2.0",
     "slixmpp>=1.8,<2",
     "aiosqlite>=0.20,<1",
     "psutil>=5.9,<8",
@@ -40,7 +40,6 @@ Issues = "https://github.com/envs-net/muc_banbot/issues"
 muc_banbot = "banbot.cli:main"
 
 [project.optional-dependencies]
-omemo = ["envs-xmpp[omemo]>=1.7.0,<2.0"]
 dev = [
     "hypothesis>=6",
     "mutmut==3.6.0",
