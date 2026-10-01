@@ -121,6 +121,38 @@ async def test_status_compact_summarizes_rooms_without_inventory(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_status_places_room_lifecycle_directly_after_rooms(monkeypatch):
+    bot = StatusRoomPreviewBot()
+    bot.room_lifecycle = SimpleNamespace(snapshot=lambda: {"room": object()})
+    status_module = importlib.import_module("banbot.status")
+    monkeypatch.setattr(
+        status_module,
+        "room_lifecycle_summary",
+        lambda _snapshot: "Room lifecycle: test",
+    )
+    _patch_process(monkeypatch)
+
+    await bot._cmd_status("admin@conference.example.org")
+    lines = bot.sent[-1]["mbody"].splitlines()
+    rooms_index = next(index for index, line in enumerate(lines) if "Rooms:" in line)
+
+    assert "Room lifecycle: test" in lines[rooms_index + 1]
+    assert "Admin/owner rights:" in lines[rooms_index + 2]
+
+
+def test_status_room_views_distinguish_admin_room_from_protected_rooms():
+    bot = StatusRoomPreviewBot()
+    admin_room = str(__import__("config").ADMIN_ROOM)
+
+    views = bot._status_room_views([admin_room, "room00@conference.example.test"])
+    by_jid = {view.jid: view for view in views}
+
+    assert "admin-room" in by_jid[admin_room].details
+    assert "protected" not in by_jid[admin_room].details
+    assert "protected" in by_jid["room00@conference.example.test"].details
+
+
+@pytest.mark.asyncio
 async def test_status_compact_shows_enabled_omemo_state(monkeypatch):
     bot = StatusRoomPreviewBot()
     bot.omemo_enabled = True

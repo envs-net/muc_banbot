@@ -87,17 +87,23 @@ class StatusMixin(_StatusMixinContract):
         fallback = "on" if bool(getattr(self, "omemo_plaintext_fallback", False)) else "off"
         return f"OMEMO: enabled · {readiness} · plaintext fallback {fallback}"
 
-    def _status_room_views(self, protected_rooms: list[str]) -> list[RoomView]:
+    def _status_room_views(self, managed_rooms: list[str]) -> list[RoomView]:
         views: list[RoomView] = []
-        for room_name in sorted(protected_rooms, key=str.casefold):
+        protected_rooms = {str(room).casefold() for room in (getattr(self, "protected_rooms", set()) or set())}
+        admin_room = str(getattr(config, "ADMIN_ROOM", "") or "").casefold()
+        for room_name in sorted(managed_rooms, key=str.casefold):
             bot_nick, info = BotOccupantMixin._bot_occupant_entry(cast(BotOccupantMixin, self), room_name)
             affiliation = str((info or {}).get("affiliation") or "unknown").lower()
             role = str((info or {}).get("role") or "") or None
             joined = info is not None
             is_admin = bool(info and occupant_is_admin_or_owner(info))
+            room_key = str(room_name).casefold()
+            room_kind = "protected" if room_key in protected_rooms else (
+                "admin-room" if room_key == admin_room else "managed"
+            )
             details = [
                 "joined" if joined else "not joined",
-                "protected",
+                room_kind,
                 f"affiliation={affiliation}",
             ]
             if bot_nick:
@@ -214,14 +220,18 @@ class StatusMixin(_StatusMixinContract):
         xmpp_lines = [
             f"Connection: {connect_host}:{connect_port} ({connect_mode})",
             "Rooms: " + room_summary(room_views).removeprefix("Summary: "),
-            f"Admin/owner rights: {sum(view.joined and not view.attention for view in room_views)}/{len(room_views)}",
-            f"Pending invites: {len(getattr(self, 'pending_room_invites', {}) or {})}",
         ]
         lifecycle = getattr(self, "room_lifecycle", None)
         if lifecycle is not None:
             tracked_rooms = lifecycle.snapshot()
             if tracked_rooms:
                 xmpp_lines.append(room_lifecycle_summary(tracked_rooms))
+        xmpp_lines.extend(
+            [
+                f"Admin/owner rights: {sum(view.joined and not view.attention for view in room_views)}/{len(room_views)}",
+                f"Pending invites: {len(getattr(self, 'pending_room_invites', {}) or {})}",
+            ]
+        )
         xmpp_lines.append(self._compact_omemo_status_line())
         session_lifecycle = getattr(self, "session_lifecycle", None)
         session_snapshot = getattr(session_lifecycle, "snapshot", None)
