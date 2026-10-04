@@ -340,7 +340,7 @@ class RtblApplyMixin(_RtblApplyMixinContract):
             comment += f" — {reason}"
         log.info("RTBL: Applying domain ban *.%s (reason: %s)", domain, reason)
 
-        matched: dict[str, tuple[str | None, set[str]]] = {}
+        matched: dict[str, str | None] = {}
         skipped_protected: list[tuple[str, str | None, str | None]] = []
 
         for room in self.protected_rooms:
@@ -378,7 +378,7 @@ class RtblApplyMixin(_RtblApplyMixinContract):
                     )
                     continue
 
-                matched.setdefault(bare, (occ_nick, set()))[1].add(room)
+                matched.setdefault(bare, occ_nick)
 
         if not matched:
             if skipped_protected and self.rtbl_announce:
@@ -408,7 +408,7 @@ class RtblApplyMixin(_RtblApplyMixinContract):
         if hasattr(self, "_remove_domain_bans_from_cache"):
             self._remove_domain_bans_from_cache(domain)
 
-        for bare, (matched_nick, _rooms) in matched.items():
+        for bare, matched_nick in matched.items():
             await self.upsert_ban_db(
                 jid=bare, nick=matched_nick, until=0, issuer="rtbl", comment=comment
             )
@@ -419,7 +419,7 @@ class RtblApplyMixin(_RtblApplyMixinContract):
         )
 
         if self.rtbl_announce:
-            first_bare, (first_nick, _rooms) = next(iter(matched.items()))
+            first_bare, first_nick = next(iter(matched.items()))
             affected = f"\n   Matched: {first_nick} ({first_bare})" if first_nick else f"\n   Matched: {first_bare}"
             if len(matched) > 1:
                 affected += f"\n   Also matched: {len(matched) - 1} more occupant(s)"
@@ -434,7 +434,7 @@ class RtblApplyMixin(_RtblApplyMixinContract):
                 mtype="groupchat",
             )
 
-        for bare, (matched_nick, _rooms) in matched.items():
+        for bare, matched_nick in matched.items():
             self.log_event(
                 logging.INFO, "rtbl_ban_applied",
                 actor="rtbl", identifier=wildcard, target_type="jid",

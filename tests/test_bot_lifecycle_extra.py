@@ -693,7 +693,7 @@ def test_main_exits_when_connect_fails(monkeypatch):
     assert excinfo.value.code == 1
 
 
-def test_main_arms_systemd_startup_timeout_extension_before_event_loop(monkeypatch):
+def test_main_arms_systemd_startup_timeout_extension_before_event_loop(monkeypatch, caplog):
     events = []
 
     class FakeRuntimeWatchdog:
@@ -733,8 +733,11 @@ def test_main_arms_systemd_startup_timeout_extension_before_event_loop(monkeypat
     monkeypatch.setattr(bot_module, "BanBot", FakeBanBot)
     monkeypatch.setattr(bot_module, "get_config_resource", lambda: "tests")
 
-    assert bot_module.main() is None
+    with caplog.at_level(logging.INFO, logger="banbot.bot"):
+        assert bot_module.main() is None
 
+    assert "Connection initiated. Starting event loop..." in caplog.messages
+    assert "Connected successfully. Starting event loop..." not in caplog.messages
     assert events[0][0] == "arm-startup-timeout"
     assert events[1][0] == "run_forever"
     assert events[0][1] is events[1][1]
