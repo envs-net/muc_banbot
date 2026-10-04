@@ -1170,7 +1170,7 @@ def main() -> None:
             # Embedders/tests may run the entry point outside the main thread.
             pass
 
-    log.info("Connected successfully. Starting event loop...")
+    log.info("Connection initiated. Starting event loop...")
     unexpected_loop_stop = False
     try:
         xmpp.loop.run_forever()
